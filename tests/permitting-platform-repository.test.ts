@@ -11,14 +11,18 @@ import {
   getAuditVerificationKey,
   getPermitCase,
   getPermitCaseForRole,
+  getPermitCustodyTimeline,
   getPermittingPlatform,
-  verifyAuditPackage,
   listApprovalQueues,
   listMiddlewareComponents,
+  listQueueAnalytics,
   listReminderQueue,
+  listSigningKeys,
+  listSupervisorDigests,
   listSupervisorExceptionAnalytics,
   overridePermitAssignment,
-  listQueueAnalytics,
+  revokeSigningKey,
+  verifyAuditPackage,
   listServiceTopology,
   setActiveAgencyUser,
   updatePermitCaseStage,
@@ -125,11 +129,27 @@ describe("permitting platform repository", () => {
     expect(csv.packageMetadata?.publicKeyId).toBeTruthy();
   });
 
-  it("publishes the verification key used for externally shared audit packages", () => {
+  it("publishes the verification key and registry used for externally shared audit packages", () => {
     const key = getAuditVerificationKey();
     expect(key.algorithm).toBe("RSA-SHA256");
     expect(key.keyId).toBeTruthy();
     expect(key.publicKeyPem).toContain("BEGIN PUBLIC KEY");
+    expect(key.registry.length).toBeGreaterThan(0);
+    expect(key.registry.some((item) => item.active)).toBe(true);
+  });
+
+  it("tracks signing-key registry entries and revocation history", () => {
+    const keysBefore = listSigningKeys();
+    expect(keysBefore.some((item) => item.active)).toBe(true);
+    const activeKey = keysBefore.find((item) => item.active);
+    expect(activeKey).toBeTruthy();
+    const revoked = revokeSigningKey({
+      keyId: activeKey!.keyId,
+      reason: "Compromised workstation certificate",
+      actorName: "Supervisor Integrity Desk",
+    });
+    expect(revoked.active).toBe(false);
+    expect(revoked.revocationReason).toContain("Compromised workstation");
   });
 
   it("verifies signed audit packages against exported content", () => {
@@ -160,13 +180,31 @@ describe("permitting platform repository", () => {
     expect(getPermitCase("permit-oilgas-014")?.auditHistory?.some((event) => event.summary.includes("Supervisor reassigned case"))).toBe(true);
   });
 
-  it("lists scheduled reminders and supervisor exception analytics for escalated workflows", () => {
+  it("lists scheduled reminders, supervisor digests, and supervisor exception analytics for escalated workflows", () => {
     const reminders = listReminderQueue();
+    const digests = listSupervisorDigests();
     const supervisorMetrics = listSupervisorExceptionAnalytics();
     expect(reminders.length).toBeGreaterThan(0);
     expect(reminders.some((item) => item.severity === "critical" || item.severity === "warning")).toBe(true);
+    expect(digests.length).toBeGreaterThan(0);
+    expect(digests.some((item) => item.channel === "email" || item.channel === "in_app")).toBe(true);
     expect(supervisorMetrics.length).toBeGreaterThan(0);
     expect(supervisorMetrics.some((item) => item.escalatedCount >= 0 && item.reassignmentCount >= 0)).toBe(true);
+  });
+
+  it("records a chain-of-custody timeline for signed audit package generation and verification", () => {
+    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+    verifyAuditPackage({
+      caseId: "permit-mining-001",
+      fileName: exported.fileName,
+      content: exported.content,
+      sha256: exported.packageMetadata!.sha256,
+      signature: exported.packageMetadata!.signature,
+    });
+    const custody = getPermitCustodyTimeline("permit-mining-001");
+    expect(custody.length).toBeGreaterThan(0);
+    expect(custody.some((item) => item.action === "generated")).toBe(true);
+    expect(custody.some((item) => item.action === "verified")).toBe(true);
   });
 
   it("advances multi-step approval handoffs through accept and escalate actions", () => {

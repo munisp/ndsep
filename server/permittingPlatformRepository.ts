@@ -10,9 +10,11 @@ import { storagePut } from "./storage";
 import {
   clonePermittingPlatform,
   type AgencyRole,
+  type AuditSigningKeyRecord,
   type PermitApprovalHandoffRecord,
   type PermitAuditEventRecord,
   type PermitCaseRecord,
+  type PermitCustodyEventRecord,
   type PermitFormFieldRecord,
   type PermitFormSectionRecord,
   type PermitReminderRecord,
@@ -20,6 +22,7 @@ import {
   type PermitStage,
   type PermittingPlatformSnapshot,
   type QueueAnalyticsRecord,
+  type SupervisorDigestRecord,
   type SupervisorExceptionAnalyticsRecord,
 } from "../lib/permitting-domain";
 
@@ -97,6 +100,16 @@ function appendAuditEvent(record: PermitCaseRecord, event: Omit<PermitAuditEvent
   return nextEvent;
 }
 
+function appendCustodyEvent(record: PermitCaseRecord, event: Omit<PermitCustodyEventRecord, "id">) {
+  const nextEvent: PermitCustodyEventRecord = {
+    id: `custody-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ...event,
+  };
+  record.custodyTimeline = record.custodyTimeline ?? [];
+  record.custodyTimeline.unshift(nextEvent);
+  return nextEvent;
+}
+
 function ensureSeedAuditHistory(record: PermitCaseRecord) {
   if (record.auditHistory?.length) return;
   record.auditHistory = [
@@ -156,6 +169,7 @@ function ensureRecordStructure(record: PermitCaseRecord) {
   record.activeAssignment = record.activeAssignment ?? null;
   record.approvalHandoffs = record.approvalHandoffs ?? [];
   record.latestAuditPackage = record.latestAuditPackage ?? null;
+  record.custodyTimeline = record.custodyTimeline ?? [];
   ensureSeedAuditHistory(record);
   return record;
 }
@@ -261,10 +275,44 @@ function computeSupervisorExceptionAnalytics(store: PermittingPlatformSnapshot):
   return analytics;
 }
 
+function computeSupervisorDigests(store: PermittingPlatformSnapshot): SupervisorDigestRecord[] {
+  const digests = store.agencies.flatMap((agency) => {
+    const relatedQueues = store.approvalQueues.filter((queue) => queue.agencyId === agency.id);
+    const backlogCount = relatedQueues.reduce((sum, queue) => sum + queue.pendingCount, 0);
+    const overdueHandoffs = (store.reminderQueue ?? []).filter((item) => item.status === "triggered" && store.permitCases.some((record) => record.id === item.caseId && (record.leadAgencyId === agency.id || record.participatingAgencyIds.includes(agency.id)))).length;
+    if (backlogCount === 0 && overdueHandoffs === 0) return [];
+    return [
+      {
+        id: `digest-email-${agency.id}`,
+        agencyId: agency.id,
+        generatedAt: new Date().toISOString(),
+        channel: "email",
+        subject: `${agency.name} queue digest`,
+        summary: `${backlogCount} queued reviews and ${overdueHandoffs} overdue handoffs require supervisor attention.`,
+        backlogCount,
+        overdueHandoffs,
+      },
+      {
+        id: `digest-inapp-${agency.id}`,
+        agencyId: agency.id,
+        generatedAt: new Date().toISOString(),
+        channel: "in_app",
+        subject: `${agency.name} supervisor digest`,
+        summary: `${backlogCount} queued reviews and ${overdueHandoffs} overdue handoffs require supervisor attention.`,
+        backlogCount,
+        overdueHandoffs,
+      },
+    ] satisfies SupervisorDigestRecord[];
+  });
+  store.supervisorDigests = digests;
+  return digests;
+}
+
 function computeQueueAnalytics(store: PermittingPlatformSnapshot): QueueAnalyticsRecord[] {
   autoAssignEscalations(store);
   computeReminderQueue(store);
   computeSupervisorExceptionAnalytics(store);
+  computeSupervisorDigests(store);
   const analytics = store.approvalQueues.map((queue) => {
     const queueCases = store.permitCases.filter((record) => queue.caseIds.includes(record.id));
     const pendingCount = queueCases.length;
@@ -486,6 +534,26 @@ function getAuditPublicKeyId() {
   return process.env.AUDIT_PUBLIC_KEY_ID || "portable-audit-rsa-key";
 }
 
+function buildSigningKeyRegistry(): AuditSigningKeyRecord[] {
+  const activeKey: AuditSigningKeyRecord = {
+    keyId: getAuditPublicKeyId(),
+    algorithm: "RSA-SHA256",
+    publicKeyPem: getAuditPublicKey(),
+    createdAt: "2026-07-20T00:00:00Z",
+    active: true,
+  };
+  const revokedKey: AuditSigningKeyRecord = {
+    keyId: `${getAuditPublicKeyId()}-revoked-2026q1`,
+    algorithm: "RSA-SHA256",
+    publicKeyPem: getAuditPublicKey(),
+    createdAt: "2026-01-10T00:00:00Z",
+    active: false,
+    revokedAt: "2026-05-01T00:00:00Z",
+    revocationReason: "Quarterly rotation after regulator certificate rollover.",
+  };
+  return [activeKey, revokedKey];
+}
+
 function signAuditContent(content: string) {
   const sha256 = crypto.createHash("sha256").update(content).digest("hex");
   const signature = crypto.sign("RSA-SHA256", Buffer.from(sha256, "utf8"), getAuditPrivateKey()).toString("base64");
@@ -505,6 +573,7 @@ function verifySignedAuditContent(input: { content: string; sha256: string; sign
 export function getPermittingPlatform() {
   const store = readStore();
   store.permitCases = store.permitCases.map((record) => ensureRecordStructure(record));
+  store.signingKeys = buildSigningKeyRegistry();
   computeQueueAnalytics(store);
   writeStore(store);
   return store;
@@ -536,8 +605,9 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
   const content = input.format === "csv" ? serializeAuditAsCsv(record) : serializeAuditAsMarkdown(record);
   const { sha256, signature, algorithm, publicKeyId } = signAuditContent(content);
   const fileName = `${record.id}-audit-history.${input.format === "csv" ? "csv" : "md"}`;
+  const generatedAt = new Date().toISOString();
   record.latestAuditPackage = {
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     format: input.format,
     fileName,
     sha256,
@@ -547,6 +617,15 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
     publicKeyId,
     verifierHint: "Verify by recomputing the SHA-256 hash of the exported file and validating the RSA-SHA256 signature with the published audit verification key.",
   };
+  appendCustodyEvent(record, {
+    packageType: "audit",
+    packageRef: fileName,
+    occurredAt: generatedAt,
+    actor: "portable-audit-signer",
+    role: "system",
+    action: "generated",
+    summary: `Audit package ${fileName} generated with signing key ${publicKeyId}.`,
+  });
   writeStore(store);
     return {
       fileName,
@@ -561,6 +640,7 @@ export function getAuditVerificationKey() {
     keyId: getAuditPublicKeyId(),
     algorithm: "RSA-SHA256",
     publicKeyPem: getAuditPublicKey(),
+    registry: buildSigningKeyRegistry(),
   };
 }
 
@@ -572,8 +652,21 @@ export function verifyAuditPackage(input: {
   signature: string;
 }) {
   const verification = verifySignedAuditContent(input);
-  const linkedCase = input.caseId ? getPermitCase(input.caseId) : null;
+  const platform = getPermittingPlatform();
+  const linkedCase = input.caseId ? platform.permitCases.find((item) => item.id === input.caseId) ?? null : null;
   const matchesLatestPackage = !!linkedCase?.latestAuditPackage && linkedCase.latestAuditPackage.sha256 === input.sha256 && linkedCase.latestAuditPackage.signature === input.signature;
+  if (linkedCase) {
+    appendCustodyEvent(linkedCase, {
+      packageType: "audit",
+      packageRef: input.fileName,
+      occurredAt: new Date().toISOString(),
+      actor: "external verifier",
+      role: "system",
+      action: "verified",
+      summary: `Audit package ${input.fileName} verified with key ${getAuditPublicKeyId()} and result ${verification.hashMatches && verification.signatureMatches ? "valid" : "invalid"}.`,
+    });
+    writeStore(platform);
+  }
   return {
     fileName: input.fileName,
     valid: verification.hashMatches && verification.signatureMatches,
@@ -583,6 +676,7 @@ export function verifyAuditPackage(input: {
     matchesLatestPackage,
     linkedCaseId: linkedCase?.id ?? null,
     verificationKey: getAuditVerificationKey(),
+    keyRegistry: platform.signingKeys ?? buildSigningKeyRegistry(),
   };
 }
 
@@ -668,6 +762,44 @@ export function listReminderQueue(role?: AgencyRole) {
 export function listSupervisorExceptionAnalytics() {
   const platform = getPermittingPlatform();
   return platform.supervisorExceptionAnalytics ?? computeSupervisorExceptionAnalytics(platform);
+}
+
+export function listSupervisorDigests() {
+  const platform = getPermittingPlatform();
+  return platform.supervisorDigests ?? computeSupervisorDigests(platform);
+}
+
+export function listSigningKeys() {
+  return getPermittingPlatform().signingKeys ?? buildSigningKeyRegistry();
+}
+
+export function revokeSigningKey(input: { keyId: string; reason: string; actorName: string }) {
+  const platform = getPermittingPlatform();
+  const key = (platform.signingKeys ?? buildSigningKeyRegistry()).find((item) => item.keyId === input.keyId);
+  if (!key) throw new Error("Signing key not found");
+  key.active = false;
+  key.revokedAt = new Date().toISOString();
+  key.revocationReason = input.reason;
+  platform.signingKeys = (platform.signingKeys ?? buildSigningKeyRegistry()).map((item) => (item.keyId === key.keyId ? key : item));
+  platform.permitCases.forEach((record) => {
+    if (record.latestAuditPackage?.publicKeyId === key.keyId) {
+      appendCustodyEvent(record, {
+        packageType: "audit",
+        packageRef: record.latestAuditPackage.fileName,
+        occurredAt: key.revokedAt!,
+        actor: input.actorName,
+        role: "system",
+        action: "revoked",
+        summary: `Signing key ${key.keyId} revoked for audit package ${record.latestAuditPackage.fileName}: ${input.reason}`,
+      });
+    }
+  });
+  writeStore(platform);
+  return key;
+}
+
+export function getPermitCustodyTimeline(caseId: string) {
+  return getPermitCase(caseId)?.custodyTimeline ?? [];
 }
 
 export function listAgencies() {

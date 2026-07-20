@@ -235,6 +235,7 @@ export default function NotificationsScreen() {
   const { bundle, refresh, isRefetching, approveIdentityDocument, approveLegalWorkflow, analyzeActivities } = useMobilePlatformBundle();
   const platformQuery = trpc.permitting.getPlatform.useQuery();
   const activeAgencyUserQuery = trpc.permitting.getActiveAgencyUser.useQuery();
+  const supervisorDigestsQuery = trpc.permitting.listSupervisorDigests.useQuery();
   const [items, setItems] = useState<ActivityRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActivityFilter>("all");
@@ -297,6 +298,11 @@ export default function NotificationsScreen() {
   }
 
   const visibleItems = useMemo(() => filterActivities(items, activeFilter, searchTerm), [items, activeFilter, searchTerm]);
+  const supervisorDigests = useMemo(() => {
+    const activeAgencyId = activeAgencyUserQuery.data?.agencyId;
+    return (supervisorDigestsQuery.data ?? []).filter((item) => !activeAgencyId || item.agencyId === activeAgencyId);
+  }, [activeAgencyUserQuery.data?.agencyId, supervisorDigestsQuery.data]);
+
   const handoffAlerts = useMemo(() => {
     const role = activeAgencyUserQuery.data?.role;
     if (!role) return [];
@@ -372,6 +378,29 @@ export default function NotificationsScreen() {
               );
             })}
           </ScrollView>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-4">
+          <Text className="text-sm font-semibold text-foreground">Supervisor digests</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">Scheduled in-app and email digest summaries surface queue backlogs and overdue handoffs for agency supervisors.</Text>
+          <View className="mt-4 gap-3">
+            {supervisorDigests.length === 0 ? (
+              <View className="rounded-2xl border border-border bg-background p-4">
+                <Text className="text-sm text-muted">No digest summaries are currently queued for the active agency context.</Text>
+              </View>
+            ) : (
+              supervisorDigests.map((digest) => (
+                <View key={digest.id} className="rounded-2xl border border-border bg-background p-4">
+                  <View className="flex-row items-center justify-between gap-3">
+                    <Text className="flex-1 text-sm font-semibold text-foreground">{digest.subject}</Text>
+                    <Text className={`text-xs font-semibold ${digest.channel === "email" ? "text-primary" : "text-success"}`}>{digest.channel.replace("_", " ")}</Text>
+                  </View>
+                  <Text className="mt-2 text-xs text-muted">{digest.summary}</Text>
+                  <Text className="mt-1 text-xs text-muted">Backlog: {digest.backlogCount} · Overdue handoffs: {digest.overdueHandoffs}</Text>
+                </View>
+              ))
+            )}
+          </View>
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-4">

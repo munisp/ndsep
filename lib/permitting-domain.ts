@@ -114,6 +114,27 @@ export type PermitAuditPackageRecord = {
   verifierHint: string;
 };
 
+export type AuditSigningKeyRecord = {
+  keyId: string;
+  algorithm: "RSA-SHA256";
+  publicKeyPem: string;
+  createdAt: string;
+  active: boolean;
+  revokedAt?: string;
+  revocationReason?: string;
+};
+
+export type PermitCustodyEventRecord = {
+  id: string;
+  packageType: "audit" | "evidence";
+  packageRef: string;
+  occurredAt: string;
+  actor: string;
+  role: AgencyRole | "system";
+  action: "generated" | "downloaded" | "uploaded" | "verified" | "reassigned" | "revoked";
+  summary: string;
+};
+
 export type PermitReminderRecord = {
   id: string;
   caseId: string;
@@ -178,6 +199,17 @@ export type SupervisorExceptionAnalyticsRecord = {
   atRiskCaseIds: string[];
 };
 
+export type SupervisorDigestRecord = {
+  id: string;
+  agencyId: string;
+  generatedAt: string;
+  channel: "email" | "in_app";
+  subject: string;
+  summary: string;
+  backlogCount: number;
+  overdueHandoffs: number;
+};
+
 export type PermitCaseRecord = {
   id: string;
   sector: PermitSector;
@@ -200,6 +232,7 @@ export type PermitCaseRecord = {
   activeAssignment?: PermitAssignmentRecord | null;
   approvalHandoffs?: PermitApprovalHandoffRecord[];
   latestAuditPackage?: PermitAuditPackageRecord | null;
+  custodyTimeline?: PermitCustodyEventRecord[];
   lastAiExtraction: AIExtractionResultRecord | null;
   uploadedDocuments?: PermitUploadedDocumentRecord[];
 };
@@ -239,6 +272,8 @@ export type PermittingPlatformSnapshot = {
   queueAnalytics?: QueueAnalyticsRecord[];
   reminderQueue?: PermitReminderRecord[];
   supervisorExceptionAnalytics?: SupervisorExceptionAnalyticsRecord[];
+  signingKeys?: AuditSigningKeyRecord[];
+  supervisorDigests?: SupervisorDigestRecord[];
   middleware: MiddlewareComponentRecord[];
   services: ServiceTopologyRecord[];
   parity: ProductParityRecord[];

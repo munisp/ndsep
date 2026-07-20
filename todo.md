@@ -102,3 +102,6 @@
 - [x] Dashboard urgency indicators for permits approaching escalation deadlines
 - [x] Public-key verification for externally shared audit packages
 - [x] Supervisor exception dashboard with interactive escalation trend and reassignment pattern analytics
+- [x] Signing-key rotation with revocation tracking for audit-package verification
+- [x] Visual chain-of-custody timeline for audit and evidence packages
+- [x] Scheduled email and in-app digest notifications for supervisor backlog and overdue handoff summaries

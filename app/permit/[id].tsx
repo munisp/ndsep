@@ -21,6 +21,8 @@ type ExportPreview = {
     sha256: string;
     signature: string;
     signedBy: string;
+    algorithm?: string;
+    publicKeyId?: string;
     verifierHint: string;
   } | null;
 };
@@ -83,6 +85,9 @@ export default function PermitDetailScreen() {
   const viewerRole = activeAgencyUserQuery.data?.role ?? "applicant";
   const recordQuery = trpc.permitting.getCaseForRole.useQuery({ caseId, role: viewerRole });
   const platformQuery = trpc.permitting.getPlatform.useQuery();
+  const custodyTimelineQuery = trpc.permitting.getCustodyTimeline.useQuery({ caseId });
+  const signingKeysQuery = trpc.permitting.listSigningKeys.useQuery();
+  const supervisorDigestsQuery = trpc.permitting.listSupervisorDigests.useQuery();
 
   const record = recordQuery.data;
   const agencies = platformQuery.data?.agencies ?? [];
@@ -170,6 +175,17 @@ export default function PermitDetailScreen() {
     },
   });
 
+  const revokeSigningKeyMutation = trpc.permitting.revokeSigningKey.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.permitting.getPlatform.invalidate(),
+        utils.permitting.listSigningKeys.invalidate(),
+        utils.permitting.getCustodyTimeline.invalidate({ caseId }),
+        utils.permitting.getCaseForRole.invalidate({ caseId, role: viewerRole }),
+      ]);
+    },
+  });
+
   const overrideAssignmentMutation = trpc.permitting.overrideAssignment.useMutation({
     onSuccess: async () => {
       await Promise.all([
@@ -198,6 +214,9 @@ export default function PermitDetailScreen() {
   const canOverride = viewerRole === "planning_supervisor";
   const assignableUsers = useMemo(() => agencyUsers.filter((item) => item.role !== "applicant"), [agencyUsers]);
   const currentPackageMetadata = exportPreview?.packageMetadata ?? record?.latestAuditPackage ?? null;
+  const custodyTimeline = custodyTimelineQuery.data ?? record?.custodyTimeline ?? [];
+  const signingKeys = signingKeysQuery.data ?? [];
+  const supervisorDigests = (supervisorDigestsQuery.data ?? []).filter((item) => !activeAgencyUser?.agencyId || item.agencyId === activeAgencyUser.agencyId);
 
   if (!record) {
     return (
@@ -340,6 +359,15 @@ export default function PermitDetailScreen() {
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(targetPath, { mimeType: cached.mimeType });
     }
+  };
+
+  const handleRevokeCurrentKey = () => {
+    if (!activeAgencyUser || !currentPackageMetadata?.publicKeyId) return;
+    revokeSigningKeyMutation.mutate({
+      keyId: currentPackageMetadata.publicKeyId,
+      reason: `Supervisor initiated revocation for ${currentPackageMetadata.fileName}`,
+      actorName: activeAgencyUser.displayName,
+    });
   };
 
   const handleOverrideAssignment = () => {
@@ -508,6 +536,29 @@ export default function PermitDetailScreen() {
           </SectionCard>
         ) : null}
 
+        <SectionCard title="Supervisor digests and signing keys">
+          {supervisorDigests.length ? supervisorDigests.map((digest) => (
+            <View key={digest.id} className="rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">{digest.subject}</Text>
+              <Text className="mt-2 text-xs text-muted">{digest.summary}</Text>
+              <Text className="mt-1 text-xs text-muted">Channel: {digest.channel.replace("_", " ")} · Backlog: {digest.backlogCount} · Overdue handoffs: {digest.overdueHandoffs}</Text>
+            </View>
+          )) : <Text className="text-sm text-muted">No supervisor digests available for the active agency.</Text>}
+          <View className="gap-3">
+            {signingKeys.map((key) => (
+              <View key={key.keyId} className={`rounded-2xl border p-4 ${key.active ? "border-success bg-success/5" : "border-warning bg-warning/5"}`}>
+                <Text className="text-sm font-semibold text-foreground">{key.keyId}</Text>
+                <Text className="mt-2 text-xs text-muted">{key.algorithm} · Created {new Date(key.createdAt).toLocaleString()}</Text>
+                <Text className="mt-1 text-xs text-muted">Status: {key.active ? "Active" : `Revoked ${key.revokedAt ? new Date(key.revokedAt).toLocaleString() : ""}`}</Text>
+                {key.revocationReason ? <Text className="mt-1 text-xs text-muted">Reason: {key.revocationReason}</Text> : null}
+              </View>
+            ))}
+          </View>
+          {canOverride && currentPackageMetadata?.publicKeyId ? (
+            <ActionButton label={revokeSigningKeyMutation.isPending ? "Revoking key…" : `Revoke ${currentPackageMetadata.publicKeyId}`} onPress={handleRevokeCurrentKey} tone="warning" />
+          ) : null}
+        </SectionCard>
+
         <SectionCard title="Signed audit package and offline cache">
           <View className="gap-3 md:flex-row">
             <View className="flex-1"><ActionButton label="Preview signed Markdown" onPress={() => void handlePrepareExport("markdown")} tone="dark" /></View>
@@ -530,6 +581,7 @@ export default function PermitDetailScreen() {
               <Text className="mt-2 text-xs text-muted">Signed by {currentPackageMetadata.signedBy} · Generated {new Date(currentPackageMetadata.generatedAt).toLocaleString()}</Text>
               <Text className="mt-2 text-xs text-muted">SHA-256: {currentPackageMetadata.sha256}</Text>
               <Text className="mt-1 text-xs text-muted">Signature: {currentPackageMetadata.signature}</Text>
+              <Text className="mt-1 text-xs text-muted">Algorithm: {currentPackageMetadata.algorithm ?? "RSA-SHA256"} · Key: {currentPackageMetadata.publicKeyId ?? "n/a"}</Text>
               <Text className="mt-1 text-xs text-muted">{currentPackageMetadata.verifierHint}</Text>
             </View>
           ) : null}
@@ -552,6 +604,20 @@ export default function PermitDetailScreen() {
               </View>
             </View>
           ) : null}
+        </SectionCard>
+
+        <SectionCard title="Chain of custody">
+          {(custodyTimeline.length ? custodyTimeline : []).map((event) => (
+            <View key={event.id} className="rounded-2xl border border-border bg-background p-4">
+              <View className="flex-row items-center justify-between gap-3">
+                <Text className="flex-1 text-sm font-semibold text-foreground">{event.summary}</Text>
+                <Text className="text-xs font-semibold text-primary">{event.action}</Text>
+              </View>
+              <Text className="mt-2 text-xs text-muted">{event.packageType} · {event.packageRef}</Text>
+              <Text className="mt-1 text-xs text-muted">{event.actor} · {event.role.replace(/_/g, " ")} · {new Date(event.occurredAt).toLocaleString()}</Text>
+            </View>
+          ))}
+          {custodyTimeline.length === 0 ? <Text className="text-sm text-muted">No custody transfers or validations have been recorded yet.</Text> : null}
         </SectionCard>
 
         <SectionCard title="Lifecycle timeline">

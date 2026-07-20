@@ -31,12 +31,11 @@ import {
   exportPermitAuditHistory,
   extractPermitDocumentToForm,
   getActiveAgencyUser,
-  getPermittingPlatform,
   getAuditVerificationKey,
   getPermitCase,
   getPermitCaseForRole,
-  verifyAuditPackage,
-  advancePermitHandoff,
+  getPermitCustodyTimeline,
+  getPermittingPlatform,
   listAgencies,
   listAgencyUsers,
   listApprovalQueues,
@@ -45,13 +44,18 @@ import {
   listPermitCases,
   listQueueAnalytics,
   listReminderQueue,
+  listSigningKeys,
+  listSupervisorDigests,
   listSupervisorExceptionAnalytics,
-  overridePermitAssignment,
   listServiceTopology,
+  overridePermitAssignment,
+  revokeSigningKey,
   setActiveAgencyUser,
   updatePermitCaseStage,
   updatePermitFormSections,
   uploadPermitDocumentAndExtract,
+  verifyAuditPackage,
+  advancePermitHandoff,
 } from "./permittingPlatformRepository";
 
 const businessProfileSchema = z.object({
@@ -387,9 +391,23 @@ export const appRouter = router({
       )
       .mutation(({ input }) => verifyAuditPackage(input)),
     getAuditVerificationKey: publicProcedure.query(() => getAuditVerificationKey()),
+    listSigningKeys: publicProcedure.query(() => listSigningKeys()),
+    revokeSigningKey: publicProcedure
+      .input(
+        z.object({
+          keyId: z.string(),
+          reason: z.string().min(3),
+          actorName: z.string(),
+        }),
+      )
+      .mutation(({ input }) => revokeSigningKey(input)),
+    getCustodyTimeline: publicProcedure
+      .input(z.object({ caseId: z.string() }))
+      .query(({ input }) => getPermitCustodyTimeline(input.caseId)),
     listReminderQueue: publicProcedure
       .input(z.object({ role: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]).optional() }).optional())
       .query(({ input }) => listReminderQueue(input?.role)),
+    listSupervisorDigests: publicProcedure.query(() => listSupervisorDigests()),
     listSupervisorExceptionAnalytics: publicProcedure.query(() => listSupervisorExceptionAnalytics()),
   }),
   onboarding: router({
