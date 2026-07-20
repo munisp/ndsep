@@ -8,12 +8,15 @@ import {
   exportPermitAuditHistory,
   extractPermitDocumentToForm,
   getActiveAgencyUser,
+  getAuditVerificationKey,
   getPermitCase,
   getPermitCaseForRole,
   getPermittingPlatform,
   verifyAuditPackage,
   listApprovalQueues,
   listMiddlewareComponents,
+  listReminderQueue,
+  listSupervisorExceptionAnalytics,
   overridePermitAssignment,
   listQueueAnalytics,
   listServiceTopology,
@@ -118,6 +121,15 @@ describe("permitting platform repository", () => {
     expect(csv.content).toContain("createdAt,type,actor,role,summary");
     expect(csv.packageMetadata?.sha256).toBeTruthy();
     expect(csv.packageMetadata?.signature).toBeTruthy();
+    expect(csv.packageMetadata?.algorithm).toBe("RSA-SHA256");
+    expect(csv.packageMetadata?.publicKeyId).toBeTruthy();
+  });
+
+  it("publishes the verification key used for externally shared audit packages", () => {
+    const key = getAuditVerificationKey();
+    expect(key.algorithm).toBe("RSA-SHA256");
+    expect(key.keyId).toBeTruthy();
+    expect(key.publicKeyPem).toContain("BEGIN PUBLIC KEY");
   });
 
   it("verifies signed audit packages against exported content", () => {
@@ -146,6 +158,15 @@ describe("permitting platform repository", () => {
     expect(reassigned.assignedUserId).toBe("user-env-1");
     expect(reassigned.reason).toContain("Environmental dependency");
     expect(getPermitCase("permit-oilgas-014")?.auditHistory?.some((event) => event.summary.includes("Supervisor reassigned case"))).toBe(true);
+  });
+
+  it("lists scheduled reminders and supervisor exception analytics for escalated workflows", () => {
+    const reminders = listReminderQueue();
+    const supervisorMetrics = listSupervisorExceptionAnalytics();
+    expect(reminders.length).toBeGreaterThan(0);
+    expect(reminders.some((item) => item.severity === "critical" || item.severity === "warning")).toBe(true);
+    expect(supervisorMetrics.length).toBeGreaterThan(0);
+    expect(supervisorMetrics.some((item) => item.escalatedCount >= 0 && item.reassignmentCount >= 0)).toBe(true);
   });
 
   it("advances multi-step approval handoffs through accept and escalate actions", () => {

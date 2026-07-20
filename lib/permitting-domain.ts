@@ -109,7 +109,21 @@ export type PermitAuditPackageRecord = {
   sha256: string;
   signature: string;
   signedBy: string;
+  algorithm?: string;
+  publicKeyId?: string;
   verifierHint: string;
+};
+
+export type PermitReminderRecord = {
+  id: string;
+  caseId: string;
+  handoffId: string;
+  role: AgencyRole;
+  reminderAt: string;
+  dueAt: string;
+  severity: "info" | "warning" | "critical";
+  status: "scheduled" | "triggered" | "dismissed";
+  summary: string;
 };
 
 export type AIExtractionResultRecord = {
@@ -154,6 +168,14 @@ export type QueueAnalyticsRecord = {
   avgSlaHours: number;
   breachedCaseIds: string[];
   criticalCaseIds: string[];
+};
+
+export type SupervisorExceptionAnalyticsRecord = {
+  agencyId: string;
+  escalatedCount: number;
+  reassignmentCount: number;
+  avgHoursToAssignment: number;
+  atRiskCaseIds: string[];
 };
 
 export type PermitCaseRecord = {
@@ -215,6 +237,8 @@ export type PermittingPlatformSnapshot = {
   permitCases: PermitCaseRecord[];
   approvalQueues: ApprovalQueueRecord[];
   queueAnalytics?: QueueAnalyticsRecord[];
+  reminderQueue?: PermitReminderRecord[];
+  supervisorExceptionAnalytics?: SupervisorExceptionAnalyticsRecord[];
   middleware: MiddlewareComponentRecord[];
   services: ServiceTopologyRecord[];
   parity: ProductParityRecord[];

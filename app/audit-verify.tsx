@@ -18,6 +18,7 @@ function ActionButton({ label, onPress, disabled = false }: { label: string; onP
 
 export default function AuditVerifyScreen() {
   const verifyMutation = trpc.permitting.verifyAuditPackage.useMutation();
+  const verificationKeyQuery = trpc.permitting.getAuditVerificationKey.useQuery();
   const [caseId, setCaseId] = useState("");
   const [fileName, setFileName] = useState("audit-history-export.csv");
   const [fileContent, setFileContent] = useState("");
@@ -76,6 +77,13 @@ export default function AuditVerifyScreen() {
           </View>
         </View>
 
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Published verification key</Text>
+          <Text className="mt-3 text-sm text-muted">Key ID: {verificationKeyQuery.data?.keyId ?? "loading"}</Text>
+          <Text className="mt-1 text-sm text-muted">Algorithm: {verificationKeyQuery.data?.algorithm ?? "loading"}</Text>
+          <Text className="mt-3 text-xs text-foreground">{verificationKeyQuery.data?.publicKeyPem ?? "Public key unavailable."}</Text>
+        </View>
+
         {verification ? (
           <View className="rounded-3xl border border-border bg-surface p-5">
             <Text className="text-lg font-semibold text-foreground">Verification result</Text>
@@ -86,8 +94,8 @@ export default function AuditVerifyScreen() {
             <Text className="mt-1 text-sm text-muted">Linked permit case: {verification.linkedCaseId ?? "Not provided"}</Text>
             <Text className="mt-4 text-xs text-muted">Recalculated SHA-256</Text>
             <Text className="mt-1 text-xs text-foreground">{verification.recalculatedHash}</Text>
-            <Text className="mt-4 text-xs text-muted">Recalculated signature</Text>
-            <Text className="mt-1 text-xs text-foreground">{verification.recalculatedSignature}</Text>
+            <Text className="mt-4 text-xs text-muted">Verification key</Text>
+            <Text className="mt-1 text-xs text-foreground">{verification.verificationKey.keyId} · {verification.verificationKey.algorithm}</Text>
           </View>
         ) : null}
       </ScrollView>

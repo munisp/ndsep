@@ -98,3 +98,7 @@
 - [ ] MinIO or S3-compatible object storage upgrade for audit and evidence packages
 - [ ] Enterprise identity-provider integration path for role federation and SSO
 - [ ] Operations telemetry for notification delivery, handoff latency, and audit download usage
+- [x] Background reminder scheduling for near-due approval handoffs
+- [x] Dashboard urgency indicators for permits approaching escalation deadlines
+- [x] Public-key verification for externally shared audit packages
+- [x] Supervisor exception dashboard with interactive escalation trend and reassignment pattern analytics

@@ -15,10 +15,12 @@ import {
   type PermitCaseRecord,
   type PermitFormFieldRecord,
   type PermitFormSectionRecord,
+  type PermitReminderRecord,
   type PermitReviewNoteRecord,
   type PermitStage,
   type PermittingPlatformSnapshot,
   type QueueAnalyticsRecord,
+  type SupervisorExceptionAnalyticsRecord,
 } from "../lib/permitting-domain";
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
@@ -213,8 +215,56 @@ function autoAssignEscalations(store: PermittingPlatformSnapshot) {
   }
 }
 
+function computeReminderQueue(store: PermittingPlatformSnapshot): PermitReminderRecord[] {
+  const reminders = store.permitCases.flatMap((record) =>
+    (record.approvalHandoffs ?? [])
+      .filter((handoff) => handoff.status !== "completed")
+      .map((handoff) => {
+        const hoursRemaining = Math.max(0, Math.round((new Date(handoff.dueAt).getTime() - Date.now()) / (1000 * 60 * 60)));
+        return {
+          id: `reminder-${record.id}-${handoff.id}`,
+          caseId: record.id,
+          handoffId: handoff.id,
+          role: handoff.toRole,
+          reminderAt: new Date(Math.max(Date.now(), new Date(handoff.dueAt).getTime() - 1000 * 60 * 60 * 6)).toISOString(),
+          dueAt: handoff.dueAt,
+          severity: hoursRemaining <= 6 || handoff.status === "escalated" ? "critical" : hoursRemaining <= 24 ? "warning" : "info",
+          status: hoursRemaining <= 6 || handoff.status === "escalated" ? "triggered" : "scheduled",
+          summary: `${record.title} is due for ${handoff.toRole.replace(/_/g, " ")} review in ${hoursRemaining}h.`,
+        } satisfies PermitReminderRecord;
+      }),
+  );
+  store.reminderQueue = reminders.sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  return store.reminderQueue;
+}
+
+function computeSupervisorExceptionAnalytics(store: PermittingPlatformSnapshot): SupervisorExceptionAnalyticsRecord[] {
+  const analytics = store.agencies.map((agency) => {
+    const relatedCases = store.permitCases.filter((record) => record.leadAgencyId === agency.id || record.participatingAgencyIds.includes(agency.id));
+    const escalatedCount = relatedCases.flatMap((record) => record.approvalHandoffs ?? []).filter((handoff) => handoff.status === "escalated").length;
+    const reassignmentCount = relatedCases.flatMap((record) => record.auditHistory ?? []).filter((event) => event.summary.includes("Supervisor reassigned case")).length;
+    const assignmentHours = relatedCases
+      .map((record) => {
+        const assignedAt = record.activeAssignment?.assignedAt ? new Date(record.activeAssignment.assignedAt).getTime() : null;
+        return assignedAt && record.updatedAt ? Math.max(0, (new Date(record.updatedAt).getTime() - assignedAt) / (1000 * 60 * 60)) : 0;
+      })
+      .filter((value) => value > 0);
+    return {
+      agencyId: agency.id,
+      escalatedCount,
+      reassignmentCount,
+      avgHoursToAssignment: assignmentHours.length ? Math.round((assignmentHours.reduce((sum, value) => sum + value, 0) / assignmentHours.length) * 10) / 10 : 0,
+      atRiskCaseIds: relatedCases.filter((record) => record.obligations.some((item) => item.status === "at_risk")).map((record) => record.id),
+    } satisfies SupervisorExceptionAnalyticsRecord;
+  });
+  store.supervisorExceptionAnalytics = analytics;
+  return analytics;
+}
+
 function computeQueueAnalytics(store: PermittingPlatformSnapshot): QueueAnalyticsRecord[] {
   autoAssignEscalations(store);
+  computeReminderQueue(store);
+  computeSupervisorExceptionAnalytics(store);
   const analytics = store.approvalQueues.map((queue) => {
     const queueCases = store.permitCases.filter((record) => queue.caseIds.includes(record.id));
     const pendingCount = queueCases.length;
@@ -416,24 +466,39 @@ function serializeAuditAsCsv(record: PermitCaseRecord) {
   return [header, ...rows].join("\n");
 }
 
-function getAuditSigningSecret() {
-  return process.env.AUDIT_SIGNING_SECRET || process.env.AUTH_SECRET || "local-audit-secret";
+const FALLBACK_AUDIT_KEYPAIR = crypto.generateKeyPairSync("rsa", {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+
+function getAuditPrivateKey() {
+  return process.env.AUDIT_PRIVATE_KEY?.replace(/\\n/g, "\n") || FALLBACK_AUDIT_KEYPAIR.privateKey;
+}
+
+function getAuditPublicKey() {
+  const explicit = process.env.AUDIT_PUBLIC_KEY?.replace(/\\n/g, "\n");
+  if (explicit) return explicit;
+  return FALLBACK_AUDIT_KEYPAIR.publicKey;
+}
+
+function getAuditPublicKeyId() {
+  return process.env.AUDIT_PUBLIC_KEY_ID || "portable-audit-rsa-key";
 }
 
 function signAuditContent(content: string) {
   const sha256 = crypto.createHash("sha256").update(content).digest("hex");
-  const signature = crypto.createHmac("sha256", getAuditSigningSecret()).update(sha256).digest("hex");
-  return { sha256, signature };
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(sha256, "utf8"), getAuditPrivateKey()).toString("base64");
+  return { sha256, signature, algorithm: "RSA-SHA256", publicKeyId: getAuditPublicKeyId() };
 }
 
 function verifySignedAuditContent(input: { content: string; sha256: string; signature: string }) {
   const recalculatedHash = crypto.createHash("sha256").update(input.content).digest("hex");
-  const recalculatedSignature = crypto.createHmac("sha256", getAuditSigningSecret()).update(recalculatedHash).digest("hex");
+  const signatureMatches = crypto.verify("RSA-SHA256", Buffer.from(recalculatedHash, "utf8"), getAuditPublicKey(), Buffer.from(input.signature, "base64"));
   return {
     hashMatches: recalculatedHash === input.sha256,
-    signatureMatches: recalculatedSignature === input.signature,
+    signatureMatches,
     recalculatedHash,
-    recalculatedSignature,
   };
 }
 
@@ -469,7 +534,7 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
   const store = getPermittingPlatform();
   const record = getRecordOrThrow(store, input.caseId);
   const content = input.format === "csv" ? serializeAuditAsCsv(record) : serializeAuditAsMarkdown(record);
-  const { sha256, signature } = signAuditContent(content);
+  const { sha256, signature, algorithm, publicKeyId } = signAuditContent(content);
   const fileName = `${record.id}-audit-history.${input.format === "csv" ? "csv" : "md"}`;
   record.latestAuditPackage = {
     generatedAt: new Date().toISOString(),
@@ -478,14 +543,24 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
     sha256,
     signature,
     signedBy: "portable-audit-signer",
-    verifierHint: "Verify by recomputing the SHA-256 hash of the exported file, then compare the HMAC-SHA256 signature using the configured audit signing secret.",
+    algorithm,
+    publicKeyId,
+    verifierHint: "Verify by recomputing the SHA-256 hash of the exported file and validating the RSA-SHA256 signature with the published audit verification key.",
   };
   writeStore(store);
+    return {
+      fileName,
+      mimeType: input.format === "csv" ? "text/csv" : "text/markdown",
+      content,
+      packageMetadata: record.latestAuditPackage,
+    };
+}
+
+export function getAuditVerificationKey() {
   return {
-    fileName,
-    mimeType: input.format === "csv" ? "text/csv" : "text/markdown",
-    content,
-    packageMetadata: record.latestAuditPackage,
+    keyId: getAuditPublicKeyId(),
+    algorithm: "RSA-SHA256",
+    publicKeyPem: getAuditPublicKey(),
   };
 }
 
@@ -505,9 +580,9 @@ export function verifyAuditPackage(input: {
     hashMatches: verification.hashMatches,
     signatureMatches: verification.signatureMatches,
     recalculatedHash: verification.recalculatedHash,
-    recalculatedSignature: verification.recalculatedSignature,
     matchesLatestPackage,
     linkedCaseId: linkedCase?.id ?? null,
+    verificationKey: getAuditVerificationKey(),
   };
 }
 
@@ -582,6 +657,17 @@ export function advancePermitHandoff(input: {
   });
   writeStore(store);
   return handoff;
+}
+
+export function listReminderQueue(role?: AgencyRole) {
+  const platform = getPermittingPlatform();
+  const reminders = platform.reminderQueue ?? computeReminderQueue(platform);
+  return role ? reminders.filter((item) => item.role === role) : reminders;
+}
+
+export function listSupervisorExceptionAnalytics() {
+  const platform = getPermittingPlatform();
+  return platform.supervisorExceptionAnalytics ?? computeSupervisorExceptionAnalytics(platform);
 }
 
 export function listAgencies() {
