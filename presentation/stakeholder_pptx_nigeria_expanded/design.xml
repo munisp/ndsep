@@ -1,0 +1,18 @@
+<design>
+  <size width="1280" height="720"></size>
+  
+  <color name="brand" value="#0A4D3C"/>
+  <color name="accent" value="#D97706"/>
+  <color name="ink" value="#0F172A"/>
+  <color name="muted" value="#64748B"/>
+  <color name="paper" value="#FFFFFF"/>
+  <color name="surface" value="#F8FAFC"/>
+  <color name="border" value="#E2E8F0"/>
+  <color name="success" value="#10B981"/>
+  
+  <font name="display" family="Public Sans" size="48"/>
+  <font name="heading" family="Public Sans" size="32"/>
+  <font name="body" family="Public Sans" size="18"/>
+  <font name="table" family="Public Sans" size="14"/>
+  <font name="caption" family="Public Sans" size="12"/>
+</design>

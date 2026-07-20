@@ -1,0 +1,30 @@
+Screenshot validation findings as of 2026-07-20:
+- permits_seeded.png is a real captured product screenshot from the live seeded web app. It shows the updated permits dashboard with stakeholder view pills and dashboard sections, but many metrics still render as zero and several lower sections appear empty.
+- permit_detail_seeded.png is not suitable for presentation. It renders a real app page, but the page state shows 'Permit case not found', so it must not be used in the stakeholder deck.
+- Real screenshots must therefore be re-captured after fixing route/state issues and after ensuring seeded analytics populate visible cards and charts.
+
+Additional screenshot findings after dashboard rewrites and server restart:
+- home_seeded_v2.png is a real screenshot of the updated seeded home dashboard. The UI is structurally usable for presentation, but the main permit-related cards still show zero values, which means the seeded permitting analytics are not yet reaching the visible dashboard state.
+- permits_seeded_v2.png is a real screenshot of the updated permits dashboard. It has no 404 error, but the filtered permit lists, queue analytics, reminders, and agency-derived cards remain empty or zero, so it is not yet presentation-ready.
+- The remaining blocker is no longer layout; it is seeded permitting data availability in the live dashboard queries.
+
+Validated after API-base fix and recapture:
+- home_seeded_v3.png is a real screenshot of the live seeded app and is suitable for the presentation. It shows non-zero federal metrics, live sync status, realistic quick actions, and legal workflow information.
+- permits_seeded_v3.png is a real screenshot of the live seeded app and is suitable for the presentation. It shows non-zero queue counts, reminder warnings, populated queue analytics, urgency indicators, SLA status blocks, supervisor analytics, and filtered permit cases.
+
+Additional page validation findings:
+- permit_detail_seeded_v3.png is a real screenshot of a live seeded permit-detail page and is suitable for presentation. It shows reviewer assignment, approval handoff timers, editable intake sections, document ingestion, and side-by-side extracted field verification.
+- audit_verify_seeded_v2.png is a real screenshot of the audit verification page, but it is not yet ideal for the deck because the published verification key section still shows loading and unavailable states. That page should be recaptured after confirming key metadata loads in the live web client.
+
+Diagram validation finding:
+- platform_value_flow.png is legible and suitable for the presentation. It provides a non-technical visual showing how unified intake, agency review, field validation, and trusted audit controls translate into faster housing delivery, better revenue, and safer investment.
+
+Additional screenshot audit findings for deck diversification:
+- parcels_seeded_v1.png is a real captured web screenshot and is suitable for presentation. It clearly shows searchable parcel records, parcel risk, title and workflow status, GeoLibre readiness, and links into parcel detail, field workflow, and legal workflow.
+- geo_seeded_v1.png is a real captured web screenshot and is suitable for presentation as a parcel-intelligence and geospatial-readiness view. However, it does not show a true rendered live map. It explicitly states that the real mobile map surface is available on native device builds, while the web preview shows parcel intelligence and GeoLibre readiness instead.
+- field_seeded_v1.png is a real captured web screenshot and is suitable for presentation. It clearly shows mission control, queued versus active field work, evidence counts, sync risk, workflow stage, and sync-safe parcel operations.
+- notifications_seeded_v2.png is a real captured web screenshot and is suitable for presentation. It shows the in-app notification center, alert filtering, approval handoff alert sections, parcel-linked activity cards, and inline approval actions. It is a broader and more useful asset than the earlier repeated dashboard views.
+- profile_seeded_v2.png is a real captured web screenshot and is suitable for presentation. It shows role-based agency login context, approval queues, stakeholder onboarding readiness, and land-rights workflow continuity.
+- audit_verify_seeded_v3.png is a real captured web screenshot and is suitable for presentation. It shows the dedicated audit verification flow, signed-package verification inputs, and the published public verification key. It is visually clean, though the published key block should be cropped or placed carefully on slides to avoid small unreadable text.
+- legal_workflow_seeded_v1.png is a real captured web screenshot and is suitable for presentation. It clearly shows Certificate of Occupancy workflow progression, review and signing stages, registration status, assigned desk context, and related land-rights continuity records such as Right of Occupancy and Governor Consent.
+- geo_web_map_seeded_v3.png is a real usable web screenshot with a true browser-rendered OpenStreetMap view centered on seeded parcel LG-EPE-2026-006 in Epe, Lagos. It can replace the previous geospatial slide image because it visibly shows a live map, parcel marker, and on-page parcel context without 404 or loading issues.

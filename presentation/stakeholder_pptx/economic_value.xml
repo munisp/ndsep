@@ -1,0 +1,49 @@
+<slide id="economic_value">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="40" width="4" height="620" fill="hairline"/>
+  <text id="title" x="86" y="52" width="760" height="46" font="heading" size="30" color="ink" wrap="false">Economic value unlocked</text>
+  <text id="subtitle" x="86" y="102" width="1060" height="48" font="body" size="20" color="muted" line-height="1.3"><p>This platform matters because administrative efficiency becomes economic value when it affects housing supply, extractive investment, public revenue, and trust in formal transactions.</p></text>
+
+  <shape id="callout-1" type="rect" x="86" y="176" width="338" height="144" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="callout-1-number" x="110" y="200" width="220" height="42" font="display" size="34" color="primary" wrap="false">Faster approvals</text>
+  <text id="callout-1-body" x="110" y="250" width="286" height="48" font="body" size="17" color="muted" line-height="1.35"><p>Shorter waits help housing, infrastructure, and investment projects move faster from application to execution.</p></text>
+
+  <shape id="callout-2" type="rect" x="471" y="176" width="338" height="144" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="callout-2-number" x="495" y="200" width="220" height="42" font="display" size="34" color="accent" wrap="false">Stronger trust</text>
+  <text id="callout-2-body" x="495" y="250" width="286" height="48" font="body" size="17" color="muted" line-height="1.35"><p>Verification, custody history, and secure evidence handling make transactions safer for regulators and investors.</p></text>
+
+  <shape id="callout-3" type="rect" x="856" y="176" width="338" height="144" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="callout-3-number" x="880" y="200" width="220" height="42" font="display" size="34" color="#B45309" wrap="false">Better revenue</text>
+  <text id="callout-3-body" x="880" y="250" width="286" height="48" font="body" size="17" color="muted" line-height="1.35"><p>Formalised records and traceable fees improve capture, reduce leakage, and support better long-term planning.</p></text>
+
+  <table id="economic-table" x="86" y="364" width="1108" height="248" columns="2.5,4.1,3.4" rows="48,50,50,50,50" font="body" size="17" color="ink" padding="11 13" header-fill="ink" header-border="2 solid hairline" border-h="1 solid hairline" border-v="1 solid hairline" border-outer="1 solid hairline">
+    <tr color="paper">
+      <td><strong>Value channel</strong></td>
+      <td><strong>What improves</strong></td>
+      <td><strong>Who benefits</strong></td>
+    </tr>
+    <tr>
+      <td><strong>Housing delivery</strong></td>
+      <td>Less approval drag on site readiness, title progression, and affordable housing programmes [1]</td>
+      <td>Federal and state governments, builders, households</td>
+    </tr>
+    <tr fill="surface">
+      <td><strong>Land formalisation</strong></td>
+      <td>Better documentation, traceability, and progress toward wider land formalisation [1]</td>
+      <td>States, land agencies, lenders, citizens</td>
+    </tr>
+    <tr>
+      <td><strong>Extractives governance</strong></td>
+      <td>Clearer licensing administration for a sector with large long-term revenue potential [2]</td>
+      <td>Federal regulators, investors, host communities</td>
+    </tr>
+    <tr fill="surface">
+      <td><strong>Investment climate</strong></td>
+      <td>More transparent approvals reduce perceived execution risk in a reforming economy [3]</td>
+      <td>Private investors, development partners, government</td>
+    </tr>
+  </table>
+
+  <text id="footer" x="70" y="684" width="520" height="18" font="caption" size="14" color="muted" wrap="false">IDLR-PTS Platform | Stakeholder PowerPoint deck</text>
+  <text id="page-number" x="1210" y="684" width="24" height="18" font="caption" size="14" color="muted" align="right" wrap="false">11</text>
+</slide>

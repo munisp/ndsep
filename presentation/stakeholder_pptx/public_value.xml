@@ -1,0 +1,34 @@
+<slide id="public_value">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="40" width="4" height="620" fill="hairline"/>
+  <text id="title" x="86" y="52" width="760" height="46" font="heading" size="30" color="ink" wrap="false">Federal and state value</text>
+  <text id="subtitle" x="86" y="102" width="1060" height="48" font="body" size="20" color="muted" line-height="1.3"><p>The platform helps national institutions govern at scale while enabling states to deliver faster, more accountable land and permit services.</p></text>
+
+  <shape id="federal-card" type="rect" x="86" y="176" width="520" height="386" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="federal-title" x="116" y="202" width="280" height="30" font="body" size="24" color="ink" wrap="false"><strong>Federal priorities</strong></text>
+  <icon id="fed-1-icon" name="landmark" x="118" y="250" width="24" height="24" color="primary"/>
+  <text id="fed-1" x="156" y="244" width="420" height="48" font="body" size="18" color="ink"><p><strong>National oversight:</strong> watch critical approvals, escalations, and sector risk from one command view.</p></text>
+  <icon id="fed-2-icon" name="wallet" x="118" y="316" width="24" height="24" color="primary"/>
+  <text id="fed-2" x="156" y="310" width="420" height="48" font="body" size="18" color="ink"><p><strong>Revenue assurance:</strong> formal records and traceable workflows improve fee, renewal, and title visibility.</p></text>
+  <icon id="fed-3-icon" name="shield-check" x="118" y="382" width="24" height="24" color="primary"/>
+  <text id="fed-3" x="156" y="376" width="420" height="48" font="body" size="18" color="ink"><p><strong>Investor confidence:</strong> signed audit packages and verification controls improve credibility.</p></text>
+  <icon id="fed-4-icon" name="pickaxe" x="118" y="448" width="24" height="24" color="primary"/>
+  <text id="fed-4" x="156" y="442" width="420" height="56" font="body" size="18" color="ink"><p><strong>Extractives governance:</strong> cadastre, petroleum, environment, and planning workflows can stay coordinated.</p></text>
+
+  <shape id="state-card" type="rect" x="640" y="176" width="554" height="386" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="state-title" x="670" y="202" width="280" height="30" font="body" size="24" color="ink" wrap="false"><strong>State priorities</strong></text>
+  <icon id="state-1-icon" name="map" x="672" y="250" width="24" height="24" color="accent"/>
+  <text id="state-1" x="710" y="244" width="444" height="48" font="body" size="18" color="ink"><p><strong>Land delivery:</strong> faster C of O, planning, and land-use workflows with clearer status visibility.</p></text>
+  <icon id="state-2-icon" name="users" x="672" y="316" width="24" height="24" color="accent"/>
+  <text id="state-2" x="710" y="310" width="444" height="48" font="body" size="18" color="ink"><p><strong>Agency coordination:</strong> land, planning, infrastructure, and environment teams work from one case record.</p></text>
+  <icon id="state-3-icon" name="badge-dollar-sign" x="672" y="382" width="24" height="24" color="accent"/>
+  <text id="state-3" x="710" y="376" width="444" height="48" font="body" size="18" color="ink"><p><strong>Internally generated revenue:</strong> stronger traceability helps states manage fees and approvals more effectively.</p></text>
+  <icon id="state-4-icon" name="eye" x="672" y="448" width="24" height="24" color="accent"/>
+  <text id="state-4" x="710" y="442" width="444" height="56" font="body" size="18" color="ink"><p><strong>Public accountability:</strong> supervisors can see exceptions, overdue handoffs, and backlog pressure in real time.</p></text>
+
+  <shape id="closing-strip" type="rect" x="86" y="590" width="1108" height="42" fill="#F1F5F9" stroke="hairline" stroke-width="1"/>
+  <text id="closing-strip-text" x="108" y="601" width="1060" height="20" font="body" size="18" color="muted" wrap="false">Administrative speed improves service delivery, but administrative trust is what unlocks durable revenue and investment.</text>
+
+  <text id="footer" x="70" y="684" width="520" height="18" font="caption" size="14" color="muted" wrap="false">IDLR-PTS Platform | Stakeholder PowerPoint deck</text>
+  <text id="page-number" x="1210" y="684" width="24" height="18" font="caption" size="14" color="muted" align="right" wrap="false">5</text>
+</slide>

@@ -5,6 +5,8 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
 
+type StakeholderView = "federal" | "state" | "builder";
+
 function Pill({ label, active = false, onPress }: { label: string; active?: boolean; onPress?: () => void }) {
   const body = (
     <View className={`rounded-full border px-3 py-1.5 ${active ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
@@ -12,7 +14,11 @@ function Pill({ label, active = false, onPress }: { label: string; active?: bool
     </View>
   );
   if (!onPress) return body;
-  return <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>{body}</Pressable>;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+      {body}
+    </Pressable>
+  );
 }
 
 function daysUntil(dateString: string) {
@@ -23,6 +29,34 @@ function daysUntil(dateString: string) {
 function hoursUntil(dateString: string) {
   const diff = new Date(dateString).getTime() - Date.now();
   return Math.max(0, Math.round(diff / (1000 * 60 * 60)));
+}
+
+function AnalyticsBar({ label, value, max, tone }: { label: string; value: number; max: number; tone: "primary" | "warning" | "error" | "success" }) {
+  const width = Math.max(10, max > 0 ? (value / max) * 100 : 10);
+  const toneClass = tone === "error" ? "bg-error" : tone === "warning" ? "bg-warning" : tone === "success" ? "bg-success" : "bg-primary";
+  return (
+    <View className="gap-2">
+      <View className="flex-row items-center justify-between">
+        <Text className="text-sm text-foreground">{label}</Text>
+        <Text className="text-xs font-semibold text-muted">{value}</Text>
+      </View>
+      <View className="h-3 rounded-full bg-border/50">
+        <View className={`h-3 rounded-full ${toneClass}`} style={{ width: `${width}%` as unknown as number }} />
+      </View>
+    </View>
+  );
+}
+
+function StatCard({ label, value, detail, tone = "primary" }: { label: string; value: string; detail: string; tone?: "primary" | "warning" | "error" | "success" }) {
+  const toneClass = tone === "error" ? "text-error" : tone === "warning" ? "text-warning" : tone === "success" ? "text-success" : "text-primary";
+  const borderClass = tone === "error" ? "border-error bg-error/5" : tone === "warning" ? "border-warning bg-warning/5" : "border-border bg-surface";
+  return (
+    <View className={`min-w-[160px] flex-1 rounded-3xl border p-5 ${borderClass}`}>
+      <Text className="text-sm text-muted">{label}</Text>
+      <Text className={`mt-3 text-3xl font-bold ${toneClass}`}>{value}</Text>
+      <Text className="mt-2 text-xs leading-5 text-muted">{detail}</Text>
+    </View>
+  );
 }
 
 function PermitCard({
@@ -74,22 +108,6 @@ function PermitCard({
   );
 }
 
-function AnalyticsBar({ label, value, max, tone }: { label: string; value: number; max: number; tone: "primary" | "warning" | "error" | "success" }) {
-  const width = (max > 0 ? `${Math.max(10, (value / max) * 100)}%` : "10%") as unknown as `${number}%`;
-  const toneClass = tone === "error" ? "bg-error" : tone === "warning" ? "bg-warning" : tone === "success" ? "bg-success" : "bg-primary";
-  return (
-    <View className="gap-2">
-      <View className="flex-row items-center justify-between">
-        <Text className="text-sm text-foreground">{label}</Text>
-        <Text className="text-xs font-semibold text-muted">{value}</Text>
-      </View>
-      <View className="h-3 rounded-full bg-border/50">
-        <View className={`h-3 rounded-full ${toneClass}`} style={{ width }} />
-      </View>
-    </View>
-  );
-}
-
 export default function PermitsScreen() {
   const platformQuery = trpc.permitting.getPlatform.useQuery();
   const activeAgencyUserQuery = trpc.permitting.getActiveAgencyUser.useQuery();
@@ -106,6 +124,7 @@ export default function PermitsScreen() {
   const [selectedAgencyId, setSelectedAgencyId] = useState<string>("all");
   const [chartMetric, setChartMetric] = useState<"pending" | "overdue" | "critical">("pending");
   const [exceptionMetric, setExceptionMetric] = useState<"escalatedCount" | "reassignmentCount" | "avgHoursToAssignment">("escalatedCount");
+  const [stakeholderView, setStakeholderView] = useState<StakeholderView>("federal");
 
   const filteredQueues = useMemo(() => {
     const queues = platform?.approvalQueues ?? [];
@@ -114,9 +133,14 @@ export default function PermitsScreen() {
 
   const filteredCases = useMemo(() => {
     const cases = platform?.permitCases ?? [];
-    if (selectedAgencyId === "all") return cases;
-    return cases.filter((item) => item.leadAgencyId === selectedAgencyId || item.participatingAgencyIds.includes(selectedAgencyId));
-  }, [platform?.permitCases, selectedAgencyId]);
+    const audienceCases = cases.filter((item) => {
+      if (stakeholderView === "federal") return ["mining", "oil_gas"].includes(item.sector);
+      if (stakeholderView === "state") return ["multi_agency"].includes(item.sector) || item.title.toLowerCase().includes("housing");
+      return item.title.toLowerCase().includes("housing") || item.title.toLowerCase().includes("corridor") || item.sector === "multi_agency";
+    });
+    if (selectedAgencyId === "all") return audienceCases;
+    return audienceCases.filter((item) => item.leadAgencyId === selectedAgencyId || item.participatingAgencyIds.includes(selectedAgencyId));
+  }, [platform?.permitCases, selectedAgencyId, stakeholderView]);
 
   const chartData = filteredQueues.map((queue) => {
     const metric = analytics.find((item) => item.agencyId === queue.agencyId && item.role === queue.role);
@@ -142,12 +166,28 @@ export default function PermitsScreen() {
 
   const chartMax = Math.max(1, ...chartData.map((item) => item[chartMetric]));
   const exceptionMax = Math.max(1, ...supervisorChartData.map((item) => item[exceptionMetric]));
-  const totalPending = analytics.reduce((sum, item) => sum + item.pendingCount, 0);
-  const totalOverdue = analytics.reduce((sum, item) => sum + item.overdueCount, 0);
-  const totalCritical = analytics.reduce((sum, item) => sum + item.criticalCaseIds.length, 0);
-  const activeAgencies = platform?.agencies.filter((item) => item.active).length ?? 0;
+  const totalPending = filteredQueues.reduce((sum, item) => sum + item.pendingCount, 0);
+  const totalOverdue = filteredQueues.reduce((sum, item) => sum + item.overdueCount, 0);
+  const totalCritical = filteredCases.filter((item) => item.priority === "critical").length;
+  const activeAgencies = (platform?.agencies ?? []).filter((item) => item.active).length;
   const triggeredReminders = reminders.filter((item) => item.status === "triggered").length;
   const warningReminders = reminders.filter((item) => item.severity === "warning").length;
+  const imminentCases = filteredCases.filter((item) => item.obligations.some((obligation) => daysUntil(obligation.dueAt) <= 3)).length;
+
+  const scenarioCopy = stakeholderView === "federal"
+    ? {
+        title: "Federal regulator dashboard",
+        description: "Track extractive-sector throughput, critical approvals, and cross-agency escalations that affect national revenue, investor confidence, and regulatory credibility.",
+      }
+    : stakeholderView === "state"
+      ? {
+          title: "State land and planning dashboard",
+          description: "Track land administration, title regularization, planning approvals, and corridor coordination needed to unlock service delivery and orderly urban growth.",
+        }
+      : {
+          title: "Builder and investor dashboard",
+          description: "Track project certainty, approval risk, and the operational blockers that influence delivery schedules, financing confidence, and housing or infrastructure rollout.",
+        };
 
   return (
     <ScreenContainer className="bg-background">
@@ -155,32 +195,52 @@ export default function PermitsScreen() {
         <View className="rounded-[28px] bg-primary p-6">
           <Text className="text-sm font-medium text-white/80">Expanded permitting platform</Text>
           <Text className="mt-3 text-3xl font-bold text-white">Permits and licensing</Text>
-          <Text className="mt-3 text-base leading-6 text-white/85">Track mining permits, oil and gas licensing, and multi-agency approvals from one shared product surface with parity across mobile and web.</Text>
+          <Text className="mt-3 text-base leading-6 text-white/85">{scenarioCopy.description}</Text>
           <Text className="mt-4 text-sm text-white/80">Active role: {activeAgencyUser?.role.replace(/_/g, " ") ?? "unassigned"} · Triggered reminders: {triggeredReminders} · Warning reminders: {warningReminders}</Text>
         </View>
 
-        <View className="flex-row gap-3">
-          <View className="flex-1 rounded-3xl border border-border bg-surface p-5">
-            <Text className="text-sm text-muted">Queued reviews</Text>
-            <Text className="mt-3 text-3xl font-bold text-foreground">{totalPending}</Text>
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Stakeholder view</Text>
+          <Text className="mt-2 text-sm text-muted">Switch the dashboard emphasis to highlight the value most relevant to federal regulators, state land agencies, or builders and delivery partners.</Text>
+          <View className="mt-4 flex-row flex-wrap gap-2">
+            <Pill label="Federal" active={stakeholderView === "federal"} onPress={() => setStakeholderView("federal")} />
+            <Pill label="State" active={stakeholderView === "state"} onPress={() => setStakeholderView("state")} />
+            <Pill label="Builders" active={stakeholderView === "builder"} onPress={() => setStakeholderView("builder")} />
           </View>
-          <View className="flex-1 rounded-3xl border border-warning bg-warning/5 p-5">
-            <Text className="text-sm text-muted">Reminder warnings</Text>
-            <Text className="mt-3 text-3xl font-bold text-warning">{warningReminders}</Text>
-          </View>
-          <View className="flex-1 rounded-3xl border border-error bg-error/5 p-5">
-            <Text className="text-sm text-muted">Escalation due soon</Text>
-            <Text className="mt-3 text-3xl font-bold text-error">{triggeredReminders}</Text>
-          </View>
-          <View className="flex-1 rounded-3xl border border-border bg-surface p-5">
-            <Text className="text-sm text-muted">Active agencies</Text>
-            <Text className="mt-3 text-3xl font-bold text-success">{activeAgencies}</Text>
+        </View>
+
+        <View className="flex-row flex-wrap gap-3">
+          <StatCard label="Queued reviews" value={String(totalPending)} detail="Live count from agency approval queues filtered by the current stakeholder view." tone="primary" />
+          <StatCard label="Permits near deadline" value={String(imminentCases)} detail="Cases with obligations approaching deadline within 72 hours." tone="warning" />
+          <StatCard label="Critical cases" value={String(totalCritical)} detail="High-priority permits needing immediate coordination or executive attention." tone="error" />
+          <StatCard label="Active agencies" value={String(activeAgencies)} detail="Federal and state institutions actively contributing to coordinated approvals." tone="success" />
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">{scenarioCopy.title}</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">{scenarioCopy.description}</Text>
+          <View className="mt-4 flex-row flex-wrap gap-3">
+            <View className="min-w-[180px] flex-1 rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">Overdue queue items</Text>
+              <Text className="mt-2 text-2xl font-bold text-warning">{totalOverdue}</Text>
+              <Text className="mt-2 text-xs text-muted">Backlog already beyond queue SLA and likely to affect approvals or investor timelines.</Text>
+            </View>
+            <View className="min-w-[180px] flex-1 rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">Reminder warnings</Text>
+              <Text className="mt-2 text-2xl font-bold text-primary">{warningReminders}</Text>
+              <Text className="mt-2 text-xs text-muted">Scheduled warnings currently helping reviewers and supervisors act before escalation.</Text>
+            </View>
+            <View className="min-w-[180px] flex-1 rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">Escalation due soon</Text>
+              <Text className="mt-2 text-2xl font-bold text-error">{triggeredReminders}</Text>
+              <Text className="mt-2 text-xs text-muted">Critical handoffs requiring immediate review action or reassignment.</Text>
+            </View>
           </View>
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Queue filters</Text>
-          <Text className="mt-2 text-sm text-muted">Filter queues and permit cases by lead or participating agency to focus reviewer workload, reminder load, and SLA exposure.</Text>
+          <Text className="mt-2 text-sm text-muted">Filter queues and permit cases by lead or participating agency to focus workload, reminder exposure, and approval risk.</Text>
           <View className="mt-4 flex-row flex-wrap gap-2">
             <Pill label="All agencies" active={selectedAgencyId === "all"} onPress={() => setSelectedAgencyId("all")} />
             {platform?.agencies.map((agency) => (
@@ -202,7 +262,7 @@ export default function PermitsScreen() {
             ) : (
               reminders.slice(0, 5).map((reminder) => (
                 <Link key={reminder.id} href={{ pathname: "/permit/[id]", params: { id: reminder.caseId } } as never} asChild>
-                  <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
+                  <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
                     <View className={`rounded-2xl border p-4 ${reminder.severity === "critical" ? "border-error bg-error/5" : reminder.severity === "warning" ? "border-warning bg-warning/5" : "border-border bg-background"}`}>
                       <View className="flex-row items-center justify-between gap-3">
                         <Text className="flex-1 text-sm font-semibold text-foreground">{reminder.summary}</Text>
@@ -281,9 +341,7 @@ export default function PermitsScreen() {
           <View className="mt-3 gap-3">
             {filteredCases.map((item) => {
               const dueDays = item.obligations.length ? Math.min(...item.obligations.map((obligation) => daysUntil(obligation.dueAt))) : null;
-              const reminderHours = reminders
-                .filter((reminder) => reminder.caseId === item.id)
-                .map((reminder) => hoursUntil(reminder.dueAt));
+              const reminderHours = reminders.filter((reminder) => reminder.caseId === item.id).map((reminder) => hoursUntil(reminder.dueAt));
               const nearestReminderHours = reminderHours.length ? Math.min(...reminderHours) : null;
               return (
                 <PermitCard

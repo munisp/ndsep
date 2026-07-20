@@ -125,13 +125,13 @@
   ],
   "onboarding": {
     "stakeholder": "Crest Meridian Housing Cooperative",
-    "readiness": 84,
+    "readiness": 100,
     "ninStatus": "verified",
     "bvnStatus": "verified",
     "livenessStatus": "verified",
     "kybStatus": "in_review",
-    "nextAction": "Upload final cooperative board approval and beneficiary allocation schedule.",
-    "onboardingStatus": "in_review",
+    "nextAction": "Onboarding verified and ready for downstream land-rights processing.",
+    "onboardingStatus": "verified",
     "checklist": [
       {
         "key": "nin",
@@ -166,7 +166,7 @@
       {
         "key": "kyb_documents",
         "label": "KYB documents",
-        "completed": false
+        "completed": true
       }
     ],
     "identityDocuments": [
@@ -465,7 +465,7 @@
   },
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-07-20T19:40:00Z",
+    "lastSyncedAt": "2026-07-20T21:29:32.786Z",
     "pendingMutations": 1,
     "offlineReady": true
   },

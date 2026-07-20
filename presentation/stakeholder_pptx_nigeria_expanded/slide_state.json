@@ -1,0 +1,144 @@
+{
+  "project_info": {
+    "title": "IDLR-PTS Platform",
+    "created": 1784580021.281,
+    "last_updated": 1784581304.218,
+    "total_slides": 12
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "nigeria_need",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "platform_scope",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "geospatial",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "field_ops",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "ai_documents",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "governance",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "notifications",
+      "state": "edited",
+      "pageNum": 8
+    },
+    {
+      "id": "trust",
+      "state": "edited",
+      "pageNum": 9
+    },
+    {
+      "id": "sectors",
+      "state": "edited",
+      "pageNum": 10
+    },
+    {
+      "id": "stakeholder_value",
+      "state": "edited",
+      "pageNum": 11
+    },
+    {
+      "id": "economic_value",
+      "state": "edited",
+      "pageNum": 12
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "IDLR-PTS Platform",
+      "summary": "Introduce the platform as Nigeria’s integrated operating environment for land, permits, geospatial intelligence, field operations, evidence trust, and economic delivery.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "nigeria_need",
+      "title": "Why Nigeria Needs This Now",
+      "summary": "Frame the housing, land administration, extractives governance, and workflow-fragmentation pressures that make an integrated platform economically valuable.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "platform_scope",
+      "title": "What the Platform Actually Is",
+      "summary": "Show that the platform is broader than a permit app by covering land and parcel intelligence, multi-agency workflows, AI, field operations, audit integrity, and leadership dashboards.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "geospatial",
+      "title": "Geospatial and Parcel Intelligence",
+      "summary": "Highlight parcel-linked records, geospatial readiness, geofence workflows, GeoLibre integration, and the distinction between web parcel-intelligence views and native map surfaces.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "field_ops",
+      "title": "Field Operations in Low-Connectivity Conditions",
+      "summary": "Explain how offline continuity, mission control, secure cache, replay, and field evidence workflows support real operations across Nigeria.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "ai_documents",
+      "title": "AI-Assisted Document Extraction and Review",
+      "summary": "Demonstrate how uploaded PDFs and images are parsed, verified side by side, and used to accelerate permit intake and review without removing human control.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "governance",
+      "title": "Multi-Agency Governance and Role-Based Queues",
+      "summary": "Show explicit queues, handoffs, escalations, overrides, and role-based agency views for public-sector execution discipline.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "notifications",
+      "title": "Notifications, Handoffs, and Supervisor Follow-Through",
+      "summary": "Present the operational inbox, reminder scheduling, digest summaries, and handoff alerts that keep work moving before deadlines are missed.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "trust",
+      "title": "Audit Integrity, Verification, and Chain of Custody",
+      "summary": "Show signed audit packages, public verification, custody history, key rotation, revocation tracking, and secure offline audit access.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "sectors",
+      "title": "Sector Workflows for Nigeria",
+      "summary": "Connect the platform to housing delivery, land administration, mining cadastre, oil and gas licensing, and multi-agency public approvals.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "stakeholder_value",
+      "title": "Value by Stakeholder Group",
+      "summary": "Compare the practical value delivered to federal regulators, state land agencies, builders, with supporting relevance for NGOs and end buyers.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "economic_value",
+      "title": "Economic Value for Nigeria and Africa",
+      "summary": "Close with how the platform can unlock faster approvals, stronger land certainty, better revenue assurance, stronger investment confidence, and more trusted public delivery.",
+      "image_plan": "Use a suitable image if needed"
+    }
+  ]
+}

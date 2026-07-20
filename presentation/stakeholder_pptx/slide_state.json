@@ -1,0 +1,144 @@
+{
+  "project_info": {
+    "title": "Cover",
+    "created": 1784577511.364,
+    "last_updated": 1784578085.05,
+    "total_slides": 12
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "why_now",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "value_flow",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "why_premier",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "public_value",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "market_value",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "leadership_dashboard",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "operations_dashboard",
+      "state": "edited",
+      "pageNum": 8
+    },
+    {
+      "id": "casework_detail",
+      "state": "edited",
+      "pageNum": 9
+    },
+    {
+      "id": "trust_controls",
+      "state": "edited",
+      "pageNum": 10
+    },
+    {
+      "id": "economic_value",
+      "state": "edited",
+      "pageNum": 11
+    },
+    {
+      "id": "scale_close",
+      "state": "edited",
+      "pageNum": 12
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "Cover",
+      "summary": "Title slide introducing the platform and its stakeholder audience across federal and state agencies, builders, NGOs, and end buyers.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "why_now",
+      "title": "Why this matters now",
+      "summary": "Show the scale of housing, land formalisation, and permit-volume pressure that makes fragmented workflows costly for Nigeria.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "value_flow",
+      "title": "How the platform turns process into value",
+      "summary": "Use a clear non-technical diagram to show how unified intake, review, field validation, and trusted audit convert into faster delivery and safer investment.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "why_premier",
+      "title": "Why this platform is premier",
+      "summary": "Explain the distinctive strengths that make the platform especially suited to Nigeria and African markets.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "public_value",
+      "title": "Federal and state value",
+      "summary": "Show what the platform unlocks for national oversight, state service delivery, land administration, and public accountability.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "market_value",
+      "title": "Builder, NGO, and end-buyer value",
+      "summary": "Show how the platform reduces friction for developers while improving trust, inclusion, and evidence quality for civil society and households.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "leadership_dashboard",
+      "title": "A command view for leadership",
+      "summary": "Show the real seeded home dashboard screenshot with live counts and explain the executive view it provides.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "operations_dashboard",
+      "title": "Operational depth, not just a dashboard",
+      "summary": "Show the real seeded permits dashboard screenshot with queue analytics, urgency indicators, and supervisor analytics.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "casework_detail",
+      "title": "Casework built for real approvals",
+      "summary": "Show the real seeded permit-detail workflow and notification evidence to demonstrate how approvals, evidence, and extraction work in practice.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "trust_controls",
+      "title": "Trust and integrity by design",
+      "summary": "Explain the audit, verification, chain-of-custody, offline security, and supervisory controls that make the platform credible.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "economic_value",
+      "title": "Economic value unlocked",
+      "summary": "Connect faster approvals and stronger records to housing delivery, revenue, private investment, and extractives governance.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "scale_close",
+      "title": "Built to scale across Africa",
+      "summary": "Close with an adoption path and why a platform designed for Nigeria’s complexity can scale across African jurisdictions.",
+      "image_plan": "Use a suitable image if needed"
+    }
+  ]
+}

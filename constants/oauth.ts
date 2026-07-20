@@ -12,13 +12,31 @@ export const AUTH_PORTAL_URL = env.authPortalUrl;
 export const API_BASE_URL = env.apiBaseUrl;
 export const APP_ID = env.appId;
 
+function inferWebApiBaseUrl(): string {
+  if (typeof window === "undefined" || !window.location) {
+    return "http://localhost:3000";
+  }
+
+  const { protocol, hostname, origin } = window.location;
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${protocol}//${hostname}:3000`;
+  }
+
+  if (/^\d+-/.test(hostname)) {
+    return origin.replace(/^https?:\/\/\d+-/, `${protocol}//3000-`).replace(/\/$/, "");
+  }
+
+  return origin.replace(/\/$/, "");
+}
+
 export function getApiBaseUrl(): string {
   if (API_BASE_URL) {
     return API_BASE_URL.replace(/\/$/, "");
   }
 
-  if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
-    return window.location.origin.replace(/\/$/, "");
+  if (ReactNative.Platform.OS === "web") {
+    return inferWebApiBaseUrl();
   }
 
   return "http://localhost:3000";

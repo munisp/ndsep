@@ -1,0 +1,32 @@
+<slide id="rollout">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="940" height="46" font="heading" size="30" color="ink" wrap="false">Procurement and rollout case</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="30" font="body" size="16" color="muted">The platform can be procured and deployed in phases, beginning with high-friction land and approval workflows and expanding into wider public-delivery and market-trust use cases.</text>
+  <shape id="phase1" type="rect" x="58" y="144" width="700" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="phase1n" x="82" y="164" width="126" height="24" font="body" size="20" color="brand"><p><strong>Phase 1</strong></p></text>
+  <text id="phase1t" x="220" y="162" width="514" height="24" font="body" size="19" color="ink"><p><strong>State land-administration and C of O pilot</strong></p></text>
+  <text id="phase1c" x="220" y="194" width="514" height="24" font="body" size="15" color="muted">Start with Certificate of Occupancy, land-rights continuity, queues, field evidence, and supervisory reporting.</text>
+  <shape id="phase2" type="rect" x="58" y="252" width="700" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="phase2n" x="82" y="272" width="126" height="24" font="body" size="20" color="brand"><p><strong>Phase 2</strong></p></text>
+  <text id="phase2t" x="220" y="270" width="514" height="24" font="body" size="19" color="ink"><p><strong>Multi-agency approval expansion</strong></p></text>
+  <text id="phase2c" x="220" y="302" width="514" height="24" font="body" size="15" color="muted">Add planning, environment, infrastructure, and sector-specific approvals on the same accountable workflow backbone.</text>
+  <shape id="phase3" type="rect" x="58" y="360" width="700" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="phase3n" x="82" y="380" width="126" height="24" font="body" size="20" color="brand"><p><strong>Phase 3</strong></p></text>
+  <text id="phase3t" x="220" y="378" width="514" height="24" font="body" size="19" color="ink"><p><strong>Revenue assurance and external trust layer</strong></p></text>
+  <text id="phase3c" x="220" y="410" width="514" height="24" font="body" size="15" color="muted">Expand audit verification, public-key trust, external validation, and revenue-oriented reporting for state and federal leadership.</text>
+  <shape id="phase4" type="rect" x="58" y="468" width="700" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="phase4n" x="82" y="488" width="126" height="24" font="body" size="20" color="brand"><p><strong>Phase 4</strong></p></text>
+  <text id="phase4t" x="220" y="486" width="514" height="24" font="body" size="19" color="ink"><p><strong>Sector and regional scale-out</strong></p></text>
+  <text id="phase4c" x="220" y="518" width="514" height="24" font="body" size="15" color="muted">Extend into mining, oil and gas, wider public approvals, and cross-jurisdiction scaling once the core state model is proven.</text>
+  <shape id="readiness-panel" type="rect" x="796" y="144" width="426" height="432" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="readiness-title" x="824" y="172" width="370" height="28" font="body" size="22" color="ink"><p><strong>Why this is procurement-ready</strong></p></text>
+  <text id="readiness-copy" x="824" y="216" width="370" height="292" font="body" size="17" color="ink" line-height="1.35">
+    <p>The platform already demonstrates portable deployment, real workflow screens, role-based governance, low-connectivity field continuity, signed audit controls, and cross-surface delivery across web and native mobile.</p>
+    <p space-before="14">That means procurement can focus on rollout choice, hosting model, agency adoption, and service-level expectations instead of starting from a blank technical concept.</p>
+    <p space-before="14"><strong color="brand">The strongest first procurement case is state land administration and Certificate of Occupancy modernization with revenue-assurance visibility built in from day one.</strong></p>
+  </text>
+  <text id="close-line" x="58" y="618" width="1164" height="24" font="body" size="18" color="ink" align="center" wrap="false">Nigeria-first rollout creates the strongest proof point for wider federal, sector, and African scale.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">12</text>
+</slide>

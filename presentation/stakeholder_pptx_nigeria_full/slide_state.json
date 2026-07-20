@@ -1,0 +1,232 @@
+{
+  "project_info": {
+    "title": "Cover",
+    "created": 1784578940.002,
+    "last_updated": 1784579233.366,
+    "total_slides": 20
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "why_now",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "platform_definition",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "value_flow",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "geospatial_core",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "leadership_dashboard",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "operations_dashboard",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "casework_detail",
+      "state": "edited",
+      "pageNum": 8
+    },
+    {
+      "id": "ai_layer",
+      "state": "edited",
+      "pageNum": 9
+    },
+    {
+      "id": "field_ops",
+      "state": "edit_pending",
+      "pageNum": 10
+    },
+    {
+      "id": "trust_controls",
+      "state": "edit_pending",
+      "pageNum": 11
+    },
+    {
+      "id": "sector_workflows",
+      "state": "edit_pending",
+      "pageNum": 12
+    },
+    {
+      "id": "federal_value",
+      "state": "edit_pending",
+      "pageNum": 13
+    },
+    {
+      "id": "state_value",
+      "state": "edit_pending",
+      "pageNum": 14
+    },
+    {
+      "id": "market_value",
+      "state": "edit_pending",
+      "pageNum": 15
+    },
+    {
+      "id": "notification_layer",
+      "state": "edit_pending",
+      "pageNum": 16
+    },
+    {
+      "id": "economic_value",
+      "state": "edit_pending",
+      "pageNum": 17
+    },
+    {
+      "id": "africa_scale",
+      "state": "edit_pending",
+      "pageNum": 18
+    },
+    {
+      "id": "adoption_path",
+      "state": "edit_pending",
+      "pageNum": 19
+    },
+    {
+      "id": "closing",
+      "state": "edit_pending",
+      "pageNum": 20
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "Cover",
+      "summary": "Introduce the Nigeria-focused platform and audience across federal institutions, state agencies, builders, NGOs, and end buyers.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "why_now",
+      "title": "Why Nigeria needs this now",
+      "summary": "Frame the housing, land formalisation, and permit-volume pressures that make fragmented approvals costly in Nigeria.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "platform_definition",
+      "title": "What the platform really is",
+      "summary": "Explain that the platform is broader than a permit dashboard and unifies land, approvals, evidence, field operations, AI, and trust controls.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "value_flow",
+      "title": "How the platform turns process into value",
+      "summary": "Use a non-technical diagram to show how intake, review, field validation, and audit trust convert into economic and public value.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "geospatial_core",
+      "title": "Geospatial and parcel intelligence are core",
+      "summary": "Show the importance of parcel-linked workflows, spatial clearance, geofence alerts, and location-based decision support.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "leadership_dashboard",
+      "title": "A command view for leadership",
+      "summary": "Show the real seeded home dashboard screenshot and explain the executive view it provides for Nigerian public leadership.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "operations_dashboard",
+      "title": "Operational depth for agencies and supervisors",
+      "summary": "Show the real seeded permits dashboard screenshot with queue analytics, urgency indicators, and supervisor exception signals.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "casework_detail",
+      "title": "Casework is structured for real approvals",
+      "summary": "Show the real seeded permit-detail workflow with assignment, document ingestion, extracted-field verification, and audit controls.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "ai_layer",
+      "title": "AI reduces friction, not accountability",
+      "summary": "Explain document extraction, AI prefill, side-by-side verification, summarization, and priority ranking in stakeholder language.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "field_ops",
+      "title": "Low-connectivity field operations are a strategic strength",
+      "summary": "Explain offline audit caching, encrypted local storage, biometric unlock, geofence replay, and field continuity.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "trust_controls",
+      "title": "Trust and integrity are built in",
+      "summary": "Show signed audit packages, public-key verification, key rotation, chain of custody, and supervisor auditability.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "sector_workflows",
+      "title": "Mining and oil-and-gas workflows are explicit",
+      "summary": "Show how mining, petroleum, land, and multi-agency public approvals are handled in one platform.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "federal_value",
+      "title": "Federal value in Nigeria",
+      "summary": "Show what the platform unlocks for national oversight, revenue assurance, extractives governance, and institutional credibility.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "state_value",
+      "title": "State value in Nigeria",
+      "summary": "Show what the platform unlocks for state land administration, C of O cycles, planning workflows, and internally generated revenue.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "market_value",
+      "title": "Builder, NGO, and end-buyer value",
+      "summary": "Show how the platform reduces friction for builders while improving trust for civil society and households.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "notification_layer",
+      "title": "The notification and supervisor layer keeps work moving",
+      "summary": "Show reminder scheduling, notification center logic, digest summaries, and supervisor exception controls.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "economic_value",
+      "title": "Economic value unlocked in Nigeria",
+      "summary": "Connect the platform to housing delivery, land formalisation, state revenue, extractives investment, and public trust.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "africa_scale",
+      "title": "Why this can scale across Africa",
+      "summary": "Explain why a system designed for Nigeria’s complexity can serve similar African jurisdictions.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "adoption_path",
+      "title": "What adoption can look like",
+      "summary": "Show a phased adoption path for federal and state pilots, builder rollout, public trust layers, and regional expansion.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "closing",
+      "title": "Closing",
+      "summary": "Position the platform as public infrastructure for land, approvals, field validation, evidence trust, and economic delivery.",
+      "image_plan": "Use a suitable image if needed"
+    }
+  ]
+}

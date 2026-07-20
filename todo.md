@@ -111,3 +111,40 @@
 - [x] Realistic Nigerian seed data for agencies, applicants, permits, parcels, and public-sector workflows
 - [x] Realistic audit trails, notifications, handoffs, and dashboard analytics for presentation-quality screens
 - [x] Presentation-ready seeded screenshots across core product surfaces
+- [ ] Live dashboard cards and charts wired to seeded analytics
+- [ ] Tailored federal regulator dashboard scenario
+- [ ] Tailored state land agency dashboard scenario
+- [ ] Tailored builder dashboard scenario
+- [ ] Real screenshots captured across updated seeded product pages
+- [ ] Corrected stakeholder slide deck with verified real screenshots and stakeholder-specific value framing
+- [ ] Rebuild stakeholder presentation deck with corrected layouts and visible page numbers
+- [ ] Validate and use only real app screenshots with no 404 or loading states in the presentation
+- [ ] Fix table rendering, footer visibility, and screenshot formatting in the stakeholder deck
+- [ ] PowerPoint stakeholder slide deck exported with real screenshots, corrected tables, visible page numbers, and non-cutoff layouts
+- [ ] Full categorized inventory of platform features, including geospatial, AI, workflow, field, audit, and stakeholder capabilities
+- [ ] Gap analysis of the current deck against the complete platform feature set
+- [ ] Nigeria-tailored feature inventory mapped to federal institutions, state agencies, builders, NGOs, and end buyers
+- [ ] Nigeria-focused presentation gap analysis covering land administration, housing, extractives, revenue, and citizen trust
+- [ ] Revised Nigeria-focused stakeholder slide deck covering the full feature inventory
+- [ ] Expanded deck coverage for geospatial and parcel intelligence
+- [ ] Expanded deck coverage for AI-assisted document extraction and prioritization
+- [ ] Expanded deck coverage for low-connectivity field operations and offline continuity
+- [ ] Full Nigeria-focused PowerPoint deck covering geospatial intelligence, AI extraction, field operations, and stakeholder value
+- [ ] Dedicated presentation coverage for parcel intelligence, spatial clearance, geofence alerts, and offline geofence replay
+- [ ] Dedicated presentation coverage for AI document parsing, side-by-side verification, and notification prioritization
+- [ ] Dedicated presentation coverage for offline field operations, secure cache, biometric unlock, and audit continuity
+- [ ] Audit current real screenshot coverage and remove repeated presentation imagery
+- [ ] Verify whether live map-based or parcel-map screens exist in the current product
+- [ ] Capture additional distinct real screenshots across geospatial, AI, field, audit, and notification flows for the stakeholder deck
+- [ ] Revised deck slide coverage for real geospatial screenshots and explicit web-versus-native map explanation
+- [ ] Revised deck slide coverage for Certificate of Occupancy workflow continuity and state land administration value
+- [ ] Revised deck slide coverage for government, builder, NGO, and buyer monetization pathways in Nigeria
+- [ ] Explicit screenshot-authenticity note and geospatial limitation note in final presentation delivery
+- [x] Procurement-grade stakeholder deck with stronger state land administration emphasis
+- [x] Expanded Certificate of Occupancy workflow coverage across the procurement-facing deck
+- [x] Revenue assurance and state monetization narrative for land administration and approvals
+- [x] Tailored presentation script for federal regulators, state land agencies, and builders
+- [x] Verify and include a true geospatial map screenshot in the procurement deck, or clearly state if the current product only exposes web parcel-intelligence plus native-map-dependent geospatial views
+- [x] Build a true browser-rendered geospatial web map view for the Geo experience
+- [x] Capture and validate a real web geospatial map screenshot from the updated product
+- [x] Revise the procurement-grade deck and script to include the true web map screenshot and updated geospatial narrative

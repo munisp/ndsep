@@ -1,0 +1,24 @@
+<slide id="ai_documents">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">AI-assisted intake and document review</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="30" font="body" size="16" color="muted">The AI layer is designed to reduce manual bottlenecks in permit intake and review while preserving human judgement, field provenance, and verification control.</text>
+  <shape id="shot-frame" type="rect" x="58" y="136" width="650" height="404" fill="paper" stroke="hairline" stroke-width="1" shadow="true"/>
+  <image id="permit-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784582099852_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL3Blcm1pdF9kZXRhaWxfc2VlZGVkX3Yz.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODIwOTk4NTJfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwzQmxjbTFwZEY5a1pYUmhhV3hmYzJWbFpHVmtYM1l6LnBuZz94LW9zcy1wcm9jZXNzPWltYWdlL3Jlc2l6ZSx3XzE1NjAsaF8xNTYwL2Zvcm1hdCx3ZWJwIiwiQ29uZGl0aW9uIjp7IkRhdGVMZXNzVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNzg2NzUyMDAwfX19XX0_&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEUCIApG6XIaUAvod-2Bx4krwnRs-WNQtfz9~pcG8kFUArtWAiEAgD0EaqH453gEF1fP7S56cG465~7wNrkj9IXulg~x15U_" x="70" y="160" width="626" height="356" fit="cover"/>
+  <text id="shot-label" x="70" y="144" width="626" height="14" font="micro" size="11" color="muted" align="center" wrap="false">Real web screenshot • permit detail with extracted fields, review context, and audit-linked case controls</text>
+  <shape id="right-card" type="rect" x="740" y="136" width="482" height="404" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="right-title" x="766" y="164" width="430" height="26" font="body" size="20" color="ink"><p><strong>How the AI layer works</strong></p></text>
+  <text id="right-copy" x="766" y="202" width="430" height="306" font="body" size="17" color="ink" line-height="1.34">
+    <p>Uploaded PDFs and images can be parsed to prefill structured form fields, reducing manual rekeying and helping agencies process larger volumes of submissions more consistently.</p>
+    <p space-before="14">The platform does not hide the source of data. Reviewers can compare extracted content against the original document, see whether a value came from AI or a person, and correct anything that requires human judgement.</p>
+    <p space-before="14"><strong>Procurement relevance:</strong></p>
+    <p space-before="10">• Shorter intake cycles.</p>
+    <p>• Fewer repetitive data-entry errors.</p>
+    <p>• Lower resubmission friction for applicants and builders.</p>
+    <p>• Better throughput without weakening accountability.</p>
+  </text>
+  <shape id="bottom-band" type="rect" x="58" y="566" width="1164" height="56" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="bottom-copy" x="82" y="584" width="1116" height="18" font="body" size="17" color="ink" align="center" wrap="false">The AI layer is most valuable when it speeds work, exposes provenance, and leaves the final decision with accountable officials.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">7</text>
+</slide>

@@ -1,0 +1,28 @@
+<slide id="procurement_scope">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">What government is actually procuring</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="30" font="body" size="16" color="muted">The platform should be understood as public-delivery infrastructure for land, approvals, field execution, evidence integrity, and revenue assurance.</text>
+  <shape id="card1" type="rect" x="58" y="146" width="360" height="160" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card1t" x="82" y="170" width="312" height="26" font="body" size="20" color="ink"><p><strong>Parcel and land intelligence</strong></p></text>
+  <text id="card1c" x="82" y="206" width="312" height="72" font="body" size="16" color="muted" line-height="1.35">Links permits, parcels, title signals, legal workflow continuity, geospatial readiness, and land-risk context in one record.</text>
+  <shape id="card2" type="rect" x="460" y="146" width="360" height="160" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card2t" x="484" y="170" width="312" height="26" font="body" size="20" color="ink"><p><strong>C of O and approvals engine</strong></p></text>
+  <text id="card2c" x="484" y="206" width="312" height="72" font="body" size="16" color="muted" line-height="1.35">Runs Certificate of Occupancy, Right of Occupancy, Governor Consent, planning, and sector approvals with deadlines and traceability.</text>
+  <shape id="card3" type="rect" x="862" y="146" width="360" height="160" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card3t" x="886" y="170" width="312" height="26" font="body" size="20" color="ink"><p><strong>Field and inspection continuity</strong></p></text>
+  <text id="card3c" x="886" y="206" width="312" height="72" font="body" size="16" color="muted" line-height="1.35">Supports low-connectivity missions, secure offline cache, replay, reconciliation, and field-linked evidence handling.</text>
+  <shape id="card4" type="rect" x="58" y="334" width="360" height="160" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card4t" x="82" y="358" width="312" height="26" font="body" size="20" color="ink"><p><strong>AI-assisted intake</strong></p></text>
+  <text id="card4c" x="82" y="394" width="312" height="72" font="body" size="16" color="muted" line-height="1.35">Parses uploaded PDFs and images, prefills forms, supports side-by-side verification, and preserves reviewer control.</text>
+  <shape id="card5" type="rect" x="460" y="334" width="360" height="160" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card5t" x="484" y="358" width="312" height="26" font="body" size="20" color="ink"><p><strong>Governance and queues</strong></p></text>
+  <text id="card5c" x="484" y="394" width="312" height="72" font="body" size="16" color="muted" line-height="1.35">Provides role-based queues, timed handoffs, reminders, digests, overrides, and reassignment for multi-agency execution.</text>
+  <shape id="card6" type="rect" x="862" y="334" width="360" height="160" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card6t" x="886" y="358" width="312" height="26" font="body" size="20" color="ink"><p><strong>Audit and revenue assurance</strong></p></text>
+  <text id="card6c" x="886" y="394" width="312" height="72" font="body" size="16" color="muted" line-height="1.35">Creates signed audit packages, verification controls, custody records, and clearer visibility into traceable approval value.</text>
+  <shape id="closing-band" type="rect" x="58" y="536" width="1164" height="84" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="closing" x="82" y="560" width="1116" height="36" font="body" size="18" color="ink" align="center" line-height="1.3">Procurement value comes from integrating these layers into one defensible operating model, instead of buying disconnected approval, inspection, and document systems that cannot share accountability.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">3</text>
+</slide>
