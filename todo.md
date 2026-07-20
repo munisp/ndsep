@@ -38,3 +38,15 @@
 - [x] AI-generated notification summaries and priority ranking based on interaction history
 - [x] Offline geofence event replay for parcel alerts after connectivity returns
 - [x] Conflict reconciliation for delayed or duplicate parcel geofence transitions
+- [x] Production roadmap for mining permit domain expansion
+- [x] Production roadmap for oil and gas licensing domain expansion
+- [x] Production roadmap for multi-agency permitting domain expansion
+- [x] Shared permitting domain model for mining, oil and gas, and multi-agency workflows
+- [x] Multi-language service topology across TypeScript, Python, Go, and Rust
+- [x] Middleware integration contracts for workflow, events, authz, gateway, cache, ledger, and analytics
+- [x] Mining permit workflow module with domain-specific entities, rules, and UI flows
+- [x] Oil and gas licensing workflow module with domain-specific entities, rules, and UI flows
+- [x] Multi-agency permitting orchestration with unified intake and cross-agency routing
+- [x] PWA parity upgrades for expanded permitting workflows and dashboards
+- [x] Native mobile parity upgrades for expanded permitting workflows and dashboards
+- [x] Validation, regression coverage, and checkpoint for the expanded permitting platform

@@ -26,6 +26,16 @@ import {
   updateParcelGeofencePreference,
   reconcileParcelGeofenceReplay,
 } from "./mobilePlatformRepository";
+import {
+  getPermittingPlatform,
+  getPermitCase,
+  listAgencies,
+  listMiddlewareComponents,
+  listParityState,
+  listPermitCases,
+  listServiceTopology,
+  updatePermitCaseStage,
+} from "./permittingPlatformRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -208,6 +218,33 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => reconcileParcelGeofenceReplay(input)),
+  }),
+  permitting: router({
+    getPlatform: publicProcedure.query(() => getPermittingPlatform()),
+    listCases: publicProcedure.query(() => listPermitCases()),
+    getCase: publicProcedure.input(z.object({ caseId: z.string() })).query(({ input }) => getPermitCase(input.caseId)),
+    listAgencies: publicProcedure.query(() => listAgencies()),
+    listMiddleware: publicProcedure.query(() => listMiddlewareComponents()),
+    listServices: publicProcedure.query(() => listServiceTopology()),
+    listParity: publicProcedure.query(() => listParityState()),
+    updateCaseStage: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          stage: z.enum([
+            "intake",
+            "spatial_clearance",
+            "technical_review",
+            "environmental_review",
+            "agency_coordination",
+            "payment_pending",
+            "approval",
+            "issued",
+            "active_monitoring",
+          ]),
+        }),
+      )
+      .mutation(({ input }) => updatePermitCaseStage(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

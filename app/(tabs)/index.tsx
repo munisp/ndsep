@@ -4,6 +4,7 @@ import { ScrollView, Text, View } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
+import { trpc } from "@/lib/trpc";
 
 function StatCard({ label, value, tone = "primary" }: { label: string; value: string; tone?: "primary" | "success" | "warning" }) {
   const colors = useColors();
@@ -30,6 +31,7 @@ function ActionCard({
     | "/(tabs)/parcels"
     | "/(tabs)/field"
     | "/(tabs)/geo"
+    | "/(tabs)/permits"
     | "/(tabs)/profile"
     | "/onboarding"
     | "/legal-workflow"
@@ -47,18 +49,22 @@ function ActionCard({
 
 export default function HomeScreen() {
   const { bundle, isRefetching, hasLiveConnection } = useMobilePlatformBundle();
+  const permittingQuery = trpc.permitting.getPlatform.useQuery();
   const activeMission = bundle.missions[0];
   const activeParcel = bundle.parcels[0];
   const activeWorkflow = bundle.legalWorkflows[0];
+  const platform = permittingQuery.data;
+  const criticalPermitCount = platform?.permitCases.filter((item) => item.priority === "critical").length ?? 0;
+  const activeAgencyCount = platform?.agencies.filter((item) => item.active).length ?? 0;
 
   return (
     <ScreenContainer className="bg-background">
       <ScrollView contentContainerStyle={{ padding: 20, gap: 20 }}>
         <View className="rounded-[28px] bg-primary p-6">
-          <Text className="text-sm font-medium text-white/80">IDLR-PTS Mobile</Text>
-          <Text className="mt-3 text-3xl font-bold text-white">Mission Hub</Text>
+          <Text className="text-sm font-medium text-white/80">IDLR-PTS Platform</Text>
+          <Text className="mt-3 text-3xl font-bold text-white">Permitting operations hub</Text>
           <Text className="mt-3 text-base leading-6 text-white/85">
-            Continue field work, parcel intelligence, onboarding, and land-rights operations from one native mobile shell.
+            Coordinate field work, mining permits, oil and gas licensing, and multi-agency approvals from one product surface across native mobile and PWA.
           </Text>
           <View className="mt-4 rounded-2xl bg-white/10 px-4 py-3">
             <Text className="text-sm text-white/85">
@@ -69,13 +75,29 @@ export default function HomeScreen() {
         </View>
 
         <View className="flex-row flex-wrap gap-4">
-          <StatCard label="Parcels in focus" value={String(bundle.parcels.length)} />
-          <StatCard label="Active missions" value={String(bundle.missions.filter((mission) => mission.status !== "synced").length)} tone="success" />
-          <StatCard label="Onboarding readiness" value={`${bundle.onboarding.readiness}%`} tone="warning" />
+          <StatCard label="Permit queues" value={String(platform?.permitCases.length ?? 0)} />
+          <StatCard label="Critical reviews" value={String(criticalPermitCount)} tone="warning" />
+          <StatCard label="Active agencies" value={String(activeAgencyCount)} tone="success" />
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">
-          <Text className="text-lg font-semibold text-foreground">Resume current work</Text>
+          <Text className="text-lg font-semibold text-foreground">Expanded platform scope</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">
+            The platform now scaffolds three coordinated product lanes: mineral-title administration, petroleum licensing and compliance, and one-stop multi-agency permitting with shared workflow and middleware topology.
+          </Text>
+          <View className="mt-4 flex-row flex-wrap gap-3">
+            {platform?.parity.map((item) => (
+              <View key={item.surface} className="min-w-[150px] flex-1 rounded-2xl border border-border bg-background p-4">
+                <Text className="text-sm font-semibold capitalize text-foreground">{item.surface.replace("_", " ")}</Text>
+                <Text className="mt-2 text-2xl font-bold text-primary">{item.score}</Text>
+                <Text className="mt-2 text-xs text-muted">Next focus: {item.nextFocus}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Resume current field work</Text>
           <Text className="mt-2 text-sm text-muted">{activeMission.title}</Text>
           <Text className="mt-3 text-sm text-muted">
             Parcel {activeParcel.parcelNumber} · {activeMission.evidenceCount} evidence items · Sync risk {activeMission.syncRisk}
@@ -90,11 +112,11 @@ export default function HomeScreen() {
         <View>
           <Text className="text-lg font-semibold text-foreground">Quick actions</Text>
           <View className="mt-3 gap-3">
+            <ActionCard title="Permits dashboard" description="Review mining, oil and gas, and multi-agency cases with service topology and parity visibility." href="/(tabs)/permits" />
             <ActionCard title="Parcel lookup" description="Search recent parcels and open the detail context for field, geo, and legal work." href="/(tabs)/parcels" />
-            <ActionCard title="Geospatial review" description="Inspect parcel intelligence, location context, and GeoLibre readiness on mobile." href="/(tabs)/geo" />
+            <ActionCard title="Geospatial review" description="Inspect parcel intelligence, location context, and GeoLibre readiness on mobile and web." href="/(tabs)/geo" />
             <ActionCard title="Stakeholder onboarding" description="Run step-by-step KYC, KYB, document analysis, and liveness checks." href="/onboarding" />
-            <ActionCard title="C of O workflow" description="Advance Certificate of Occupancy and related legal records through review, signing, and registration." href="/legal-workflow" />
-            <ActionCard title="Notifications inbox" description="Review synchronized, queued, and replayed field plus workflow events in one mobile activity feed." href="/notifications" />
+            <ActionCard title="Notifications inbox" description="Review synchronized, queued, replayed, and AI-prioritized field plus workflow events in one activity feed." href="/notifications" />
           </View>
         </View>
 
