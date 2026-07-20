@@ -3,69 +3,21 @@ import { ScrollView, StyleSheet, Text, View, Platform, Pressable } from "react-n
 import { useMemo, useState } from "react";
 
 import { ScreenContainer } from "@/components/screen-container";
-import { useMobilePlatformBundle } from "@/lib/mobile-sync";
+import {
+  countTitleMix,
+  filterParcelsForState,
+  filterSupportedStateParcels,
+  overlayDefinitions,
+  stateDefinitions,
+  stateKeyFromParcel,
+  toggleLayer,
+  toggleOverlay,
+  type LayerKey,
+  type OverlayKey,
+  type StateKey,
+} from "@/lib/fullscreen-map-data";
 import type { ParcelRecord } from "@/lib/mobile-data";
-
-type OverlayKey = "housing" | "row" | "mining" | "infrastructure";
-
-type OverlayDefinition = {
-  key: OverlayKey;
-  label: string;
-  color: string;
-  description: string;
-  points: Array<[number, number]>;
-};
-
-const overlayDefinitions: OverlayDefinition[] = [
-  {
-    key: "housing",
-    label: "Housing growth corridor",
-    color: "#2563EB",
-    description: "Priority housing expansion and C of O regularisation belt.",
-    points: [
-      [6.62, 3.84],
-      [6.59, 3.91],
-      [6.56, 4.02],
-      [6.54, 4.08],
-    ],
-  },
-  {
-    key: "row",
-    label: "Right-of-way review",
-    color: "#D97706",
-    description: "Transport and utility right-of-way conflict review corridor.",
-    points: [
-      [9.11, 7.30],
-      [9.09, 7.36],
-      [9.07, 7.41],
-      [9.04, 7.47],
-    ],
-  },
-  {
-    key: "mining",
-    label: "Mining oversight corridor",
-    color: "#7C3AED",
-    description: "Illustrative extractives oversight corridor for license monitoring.",
-    points: [
-      [11.95, 8.44],
-      [11.98, 8.49],
-      [12.01, 8.55],
-      [12.03, 8.61],
-    ],
-  },
-  {
-    key: "infrastructure",
-    label: "Infrastructure delivery corridor",
-    color: "#0F766E",
-    description: "Capital works and resettlement coordination corridor.",
-    points: [
-      [6.83, 3.08],
-      [6.82, 3.13],
-      [6.81, 3.18],
-      [6.80, 3.23],
-    ],
-  },
-];
+import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
 let leafletCssLoaded = false;
 
@@ -76,20 +28,32 @@ function ensureLeafletCss() {
   }
 }
 
-function toggleOverlay(current: OverlayKey[], key: OverlayKey) {
-  return current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
-}
-
 function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
   const [activeOverlays, setActiveOverlays] = useState<OverlayKey[]>(["housing", "row", "mining", "infrastructure"]);
-  const [selectedParcelId, setSelectedParcelId] = useState<number>(parcels[0]?.id ?? 0);
+  const [activeLayers, setActiveLayers] = useState<LayerKey[]>(["parcels", "boundaries", "districts"]);
+  const [selectedState, setSelectedState] = useState<StateKey>("lagos");
+  const [selectedParcelId, setSelectedParcelId] = useState<number>(0);
+
+  const supportedParcels = useMemo(() => filterSupportedStateParcels(parcels), [parcels]);
+
+  const stateDataset = useMemo(
+    () => stateDefinitions.find((state) => state.key === selectedState) ?? stateDefinitions[0],
+    [selectedState],
+  );
+
+  const stateParcels = useMemo(() => filterParcelsForState(supportedParcels, selectedState), [selectedState, supportedParcels]);
+
+  const selectedParcel = useMemo(() => {
+    const fromSelection = stateParcels.find((parcel) => parcel.id === selectedParcelId);
+    return fromSelection ?? stateParcels[0] ?? null;
+  }, [selectedParcelId, stateParcels]);
 
   if (Platform.OS !== "web") {
     return (
       <View className="rounded-[28px] border border-border bg-surface p-6">
         <Text className="text-xl font-semibold text-foreground">Full-screen geospatial map is available on web</Text>
         <Text className="mt-3 text-sm leading-6 text-muted">
-          Use the web surface for presentation-grade map review with multiple parcel markers, legends, and corridor overlays. Native builds continue to support in-field map workflows.
+          Use the web surface for presentation-grade map review with state parcel layers, administrative boundaries, legends, and corridor overlays. Native builds continue to support in-field map workflows.
         </Text>
       </View>
     );
@@ -97,63 +61,100 @@ function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
 
   ensureLeafletCss();
 
-  const { MapContainer, TileLayer, CircleMarker, Popup, Polyline } = require("react-leaflet");
+  const { MapContainer, TileLayer, CircleMarker, Popup, Polyline, Polygon } = require("react-leaflet");
 
   const center = useMemo<[number, number]>(() => {
-    const selected = parcels.find((parcel) => parcel.id === selectedParcelId) ?? parcels[0];
-    return selected ? [selected.latitude, selected.longitude] : [9.082, 8.6753];
-  }, [parcels, selectedParcelId]);
+    if (selectedParcel) {
+      return [selectedParcel.latitude, selectedParcel.longitude];
+    }
+    return stateDataset.center;
+  }, [selectedParcel, stateDataset.center]);
 
   const overlaysToRender = overlayDefinitions.filter((overlay) => activeOverlays.includes(overlay.key));
-  const selectedParcel = parcels.find((parcel) => parcel.id === selectedParcelId) ?? parcels[0] ?? null;
+  const titleMix = useMemo(() => countTitleMix(stateParcels), [stateParcels]);
 
   return (
     <View className="gap-5">
       <View className="rounded-[28px] border border-border bg-surface p-5">
         <View className="flex-row items-start justify-between gap-4">
           <View className="flex-1">
-            <Text className="text-2xl font-semibold text-foreground">National parcel map workspace</Text>
+            <Text className="text-2xl font-semibold text-foreground">State parcel map workspace</Text>
             <Text className="mt-2 text-sm leading-6 text-muted">
-              Review parcel concentration, overlay corridors, and location-sensitive approval context from a true browser-rendered map surface. Each marker opens parcel intelligence for land administration, right-of-way, mining, and infrastructure decisions.
+              Switch between Lagos, FCT, and Kano to review parcel markers, administrative boundaries, district lines, and corridor overlays from a true browser-rendered map surface.
             </Text>
           </View>
-          <Link href="/geo" asChild>
+          <Link href="/(tabs)/geo" asChild>
             <Pressable style={({ pressed }) => [styles.actionButton, pressed && styles.actionButtonPressed]}>
               <Text className="text-sm font-semibold text-background">Return to Geo</Text>
             </Pressable>
           </Link>
         </View>
 
+        <View className="mt-4 flex-row flex-wrap gap-3">
+          {stateDefinitions.map((state) => {
+            const active = state.key === selectedState;
+            return (
+              <Pressable
+                key={state.key}
+                onPress={() => {
+                  setSelectedState(state.key);
+                  setSelectedParcelId(0);
+                }}
+                style={({ pressed }) => [styles.stateChip, active && styles.stateChipActive, pressed && styles.stateChipPressed]}
+              >
+                <Text style={[styles.stateChipLabel, active && styles.stateChipLabelActive]}>{state.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <View style={styles.mapShell}>
-          <MapContainer center={center} zoom={6} scrollWheelZoom style={styles.mapCanvas}>
+          <MapContainer center={center} zoom={stateDataset.zoom} scrollWheelZoom style={styles.mapCanvas} key={selectedState}>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            {parcels.map((parcel) => (
-              <CircleMarker
-                key={parcel.id}
-                center={[parcel.latitude, parcel.longitude]}
-                radius={selectedParcelId === parcel.id ? 12 : 9}
-                pathOptions={{
-                  color: selectedParcelId === parcel.id ? "#0A5C36" : "#1D4ED8",
-                  fillColor: selectedParcelId === parcel.id ? "#22C55E" : "#3B82F6",
-                  fillOpacity: 0.86,
-                  weight: 3,
-                }}
-                eventHandlers={{ click: () => setSelectedParcelId(parcel.id) }}
-              >
-                <Popup>
-                  <strong>{parcel.parcelNumber}</strong>
-                  <br />
-                  {parcel.owner}
-                  <br />
-                  {parcel.lga}, {parcel.state}
-                  <br />
-                  Title: {parcel.titleStatus}
-                </Popup>
-              </CircleMarker>
-            ))}
+            {activeLayers.includes("boundaries") ? (
+              <Polygon
+                positions={stateDataset.boundary}
+                pathOptions={{ color: "#0A5C36", weight: 3, fillColor: "#22C55E", fillOpacity: 0.08 }}
+              />
+            ) : null}
+            {activeLayers.includes("districts")
+              ? stateDataset.districtLines.map((line, index) => (
+                  <Polyline
+                    key={`${stateDataset.key}-district-${index}`}
+                    positions={line}
+                    pathOptions={{ color: "#1D4ED8", weight: 2, opacity: 0.7, dashArray: "8 8" }}
+                  />
+                ))
+              : null}
+            {activeLayers.includes("parcels")
+              ? stateParcels.map((parcel) => (
+                  <CircleMarker
+                    key={parcel.id}
+                    center={[parcel.latitude, parcel.longitude]}
+                    radius={selectedParcel?.id === parcel.id ? 12 : 9}
+                    pathOptions={{
+                      color: selectedParcel?.id === parcel.id ? "#0A5C36" : "#1D4ED8",
+                      fillColor: selectedParcel?.id === parcel.id ? "#22C55E" : "#3B82F6",
+                      fillOpacity: 0.86,
+                      weight: 3,
+                    }}
+                    eventHandlers={{ click: () => setSelectedParcelId(parcel.id) }}
+                  >
+                    <Popup>
+                      <strong>{parcel.parcelNumber}</strong>
+                      <br />
+                      {parcel.owner}
+                      <br />
+                      {parcel.lga}, {parcel.state}
+                      <br />
+                      Title: {parcel.titleStatus}
+                    </Popup>
+                  </CircleMarker>
+                ))
+              : null}
             {overlaysToRender.map((overlay) => (
               <Polyline
                 key={overlay.key}
@@ -167,11 +168,51 @@ function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
 
       <View className="flex-row gap-4">
         <View className="flex-1 rounded-[28px] border border-border bg-surface p-5">
-          <Text className="text-lg font-semibold text-foreground">Layer legend</Text>
-          <Text className="mt-2 text-sm leading-6 text-muted">
-            Toggle layers to compare housing delivery, corridor conflict, extractives oversight, and infrastructure review context on the same parcel map.
-          </Text>
-          <View className="mt-4 gap-3">
+          <Text className="text-lg font-semibold text-foreground">State dataset and layer controls</Text>
+          <Text className="mt-2 text-sm leading-6 text-muted">{stateDataset.summary}</Text>
+
+          <View className="mt-4 flex-row gap-3">
+            <View className="flex-1 rounded-2xl bg-background p-4">
+              <Text className="text-xs uppercase tracking-wide text-muted">Parcels in view</Text>
+              <Text className="mt-2 text-2xl font-semibold text-foreground">{stateParcels.length}</Text>
+            </View>
+            <View className="flex-1 rounded-2xl bg-background p-4">
+              <Text className="text-xs uppercase tracking-wide text-muted">LGAs represented</Text>
+              <Text className="mt-2 text-2xl font-semibold text-foreground">{new Set(stateParcels.map((parcel) => parcel.lga)).size}</Text>
+            </View>
+            <View className="flex-1 rounded-2xl bg-background p-4">
+              <Text className="text-xs uppercase tracking-wide text-muted">Registered titles</Text>
+              <Text className="mt-2 text-2xl font-semibold text-foreground">{titleMix.registered}</Text>
+            </View>
+          </View>
+
+          <Text className="mt-5 text-sm font-semibold text-foreground">Base layers</Text>
+          <View className="mt-3 gap-3">
+            {[
+              { key: "parcels" as const, label: "Parcel markers", description: "Interactive state-specific parcel records for the active jurisdiction." },
+              { key: "boundaries" as const, label: "State boundary", description: "Administrative boundary layer for the active state view." },
+              { key: "districts" as const, label: "District lines", description: "Illustrative internal review lines for desk-to-field coordination." },
+            ].map((layer) => {
+              const active = activeLayers.includes(layer.key);
+              return (
+                <Pressable
+                  key={layer.key}
+                  onPress={() => setActiveLayers((current) => toggleLayer(current, layer.key))}
+                  style={({ pressed }) => [styles.legendRow, active && styles.legendRowActive, pressed && styles.legendRowPressed]}
+                >
+                  <View style={[styles.legendSwatch, { backgroundColor: active ? "#0A5C36" : "#9CA3AF" }]} />
+                  <View style={styles.legendTextWrap}>
+                    <Text className="text-sm font-semibold text-foreground">{layer.label}</Text>
+                    <Text className="mt-1 text-xs leading-5 text-muted">{layer.description}</Text>
+                  </View>
+                  <Text className="text-xs font-semibold text-foreground">{active ? "ON" : "OFF"}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text className="mt-5 text-sm font-semibold text-foreground">Corridor overlays</Text>
+          <View className="mt-3 gap-3">
             {overlayDefinitions.map((overlay) => {
               const active = activeOverlays.includes(overlay.key);
               return (
@@ -210,14 +251,12 @@ function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
               </View>
               <View className="rounded-2xl bg-background p-4">
                 <Text className="text-xs uppercase tracking-wide text-muted">Coordinates</Text>
-                <Text className="mt-2 text-sm leading-6 text-foreground">
-                  {selectedParcel.latitude.toFixed(4)}, {selectedParcel.longitude.toFixed(4)}
-                </Text>
+                <Text className="mt-2 text-sm leading-6 text-foreground">{selectedParcel.latitude.toFixed(4)}, {selectedParcel.longitude.toFixed(4)}</Text>
                 <Text className="mt-2 text-sm leading-6 text-muted">Last action: {selectedParcel.lastAction}</Text>
               </View>
             </View>
           ) : (
-            <Text className="mt-4 text-sm leading-6 text-muted">No parcel selected.</Text>
+            <Text className="mt-4 text-sm leading-6 text-muted">No parcel records are available for this state view.</Text>
           )}
         </View>
       </View>
@@ -234,7 +273,7 @@ export default function FullscreenMapScreen() {
         <View>
           <Text className="text-3xl font-bold text-foreground">Full-screen parcel map</Text>
           <Text className="mt-2 text-sm leading-6 text-muted">
-            A browser-rendered geospatial workspace for parcel review, corridor comparison, and stakeholder presentation across land, housing, right-of-way, mining, and infrastructure workflows.
+            A browser-rendered geospatial workspace for Lagos, FCT, and Kano parcel review, administrative boundaries, corridor comparison, and stakeholder presentation across land, housing, right-of-way, mining, and infrastructure workflows.
           </Text>
         </View>
 
@@ -258,6 +297,29 @@ const styles = StyleSheet.create({
   actionButtonPressed: {
     opacity: 0.85,
     transform: [{ scale: 0.98 }],
+  },
+  stateChip: {
+    borderWidth: 1,
+    borderColor: "#D5D7DA",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  stateChipActive: {
+    borderColor: "#0A5C36",
+    backgroundColor: "#F0FDF4",
+  },
+  stateChipPressed: {
+    opacity: 0.9,
+  },
+  stateChipLabel: {
+    color: "#111827",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  stateChipLabelActive: {
+    color: "#0A5C36",
   },
   mapShell: {
     width: "100%",

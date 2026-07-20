@@ -1132,14 +1132,14 @@
     {
       "keyId": "portable-audit-rsa-key",
       "algorithm": "RSA-SHA256",
-      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxZ0JNeCKbRnxkJZLCdEH\nQGzhYaxbZuDjt4daZ0Qckax3ZO6oMP/SJihyy3SoNyLX81n/uYcH/k/MgvI2XspO\nav5qH90LoB0KHYWRwB0+d0o83khfB3vwuJniK/pf1bWaxPU6kiQMgTH+C68M8/Sv\nzfg7/VXczV61E61yL5q37+E7DFkFwinR68gfxz7l5fuHTzZHUmhJpmaQ550704VI\nbMO8SslYnJ7oONUpkQLhxTP0UPu2v4HliF2YgvDu73kkHRTlpGdWJSmRNts547/k\naaLlfv8zaxBmFtT8PL2V431PnsIfAuL5eI4N3weDPk93+pp6B0cxdvFXFZfLTLVp\nrQIDAQAB\n-----END PUBLIC KEY-----\n",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyys0vLRkUi//M2OD9URh\ntBA/PumTANimIz/6aPCCDjuTcMQMDaiFgFai+CcDRG8sl+tcoIjPhkaAEl01mh2G\nPP7rx3NsTTKf3M2mFAWccTJIl6KvfwOcx60vDxeasLqJD6Xr8Tummt0JmxCCX3sG\nXKGKMwjSW+IeLTsmcnNR50Eu2yYNHmfrMriveBLUAWxtn7eq6dnLlg9rMPCdqiYf\nFBPxqx0Nqs0Tay/05oPB3hB2II8xIt7Abhmr44PcbZppgdcK4QXmrRQzQYIJx6ah\n3/ZJeAsHcsmlGGXIHiHZEi/2UdjydlOCUIodYsI7ScJFhA1SnWRuEUGyVEngc76C\nGwIDAQAB\n-----END PUBLIC KEY-----\n",
       "createdAt": "2026-07-20T00:00:00Z",
       "active": true
     },
     {
       "keyId": "portable-audit-rsa-key-revoked-2026q1",
       "algorithm": "RSA-SHA256",
-      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxZ0JNeCKbRnxkJZLCdEH\nQGzhYaxbZuDjt4daZ0Qckax3ZO6oMP/SJihyy3SoNyLX81n/uYcH/k/MgvI2XspO\nav5qH90LoB0KHYWRwB0+d0o83khfB3vwuJniK/pf1bWaxPU6kiQMgTH+C68M8/Sv\nzfg7/VXczV61E61yL5q37+E7DFkFwinR68gfxz7l5fuHTzZHUmhJpmaQ550704VI\nbMO8SslYnJ7oONUpkQLhxTP0UPu2v4HliF2YgvDu73kkHRTlpGdWJSmRNts547/k\naaLlfv8zaxBmFtT8PL2V431PnsIfAuL5eI4N3weDPk93+pp6B0cxdvFXFZfLTLVp\nrQIDAQAB\n-----END PUBLIC KEY-----\n",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyys0vLRkUi//M2OD9URh\ntBA/PumTANimIz/6aPCCDjuTcMQMDaiFgFai+CcDRG8sl+tcoIjPhkaAEl01mh2G\nPP7rx3NsTTKf3M2mFAWccTJIl6KvfwOcx60vDxeasLqJD6Xr8Tummt0JmxCCX3sG\nXKGKMwjSW+IeLTsmcnNR50Eu2yYNHmfrMriveBLUAWxtn7eq6dnLlg9rMPCdqiYf\nFBPxqx0Nqs0Tay/05oPB3hB2II8xIt7Abhmr44PcbZppgdcK4QXmrRQzQYIJx6ah\n3/ZJeAsHcsmlGGXIHiHZEi/2UdjydlOCUIodYsI7ScJFhA1SnWRuEUGyVEngc76C\nGwIDAQAB\n-----END PUBLIC KEY-----\n",
       "createdAt": "2026-01-10T00:00:00Z",
       "active": false,
       "revokedAt": "2026-05-01T00:00:00Z",
@@ -1156,7 +1156,7 @@
       "dueAt": "2026-07-21T19:31:11.080Z",
       "severity": "warning",
       "status": "scheduled",
-      "summary": "North Plateau Lithium Exploration Licence is due for mining reviewer review in 22h."
+      "summary": "North Plateau Lithium Exploration Licence is due for mining reviewer review in 21h."
     },
     {
       "id": "reminder-permit-oilgas-014-handoff-permit-oilgas-014-petroleum_reviewer",
@@ -1167,7 +1167,7 @@
       "dueAt": "2026-07-21T19:31:11.080Z",
       "severity": "critical",
       "status": "triggered",
-      "summary": "Offshore Delta Appraisal Well Package is due for petroleum reviewer review in 22h."
+      "summary": "Offshore Delta Appraisal Well Package is due for petroleum reviewer review in 21h."
     },
     {
       "id": "reminder-permit-multi-023-handoff-permit-multi-023-environment_reviewer",
@@ -1178,7 +1178,7 @@
       "dueAt": "2026-07-21T19:31:11.080Z",
       "severity": "warning",
       "status": "scheduled",
-      "summary": "Eastern Corridor Logistics Hub Approval is due for environment reviewer review in 22h."
+      "summary": "Eastern Corridor Logistics Hub Approval is due for environment reviewer review in 21h."
     }
   ],
   "supervisorExceptionAnalytics": [
@@ -1225,7 +1225,7 @@
     {
       "id": "digest-email-mining-cadastre",
       "agencyId": "mining-cadastre",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "email",
       "subject": "Mining Cadastre Office queue digest",
       "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
@@ -1235,7 +1235,7 @@
     {
       "id": "digest-inapp-mining-cadastre",
       "agencyId": "mining-cadastre",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "in_app",
       "subject": "Mining Cadastre Office supervisor digest",
       "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
@@ -1245,7 +1245,7 @@
     {
       "id": "digest-email-petroleum-regulator",
       "agencyId": "petroleum-regulator",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "email",
       "subject": "Petroleum Licensing Authority queue digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1255,7 +1255,7 @@
     {
       "id": "digest-inapp-petroleum-regulator",
       "agencyId": "petroleum-regulator",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "in_app",
       "subject": "Petroleum Licensing Authority supervisor digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1265,7 +1265,7 @@
     {
       "id": "digest-email-environment-agency",
       "agencyId": "environment-agency",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "email",
       "subject": "Environmental Compliance Agency queue digest",
       "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1275,7 +1275,7 @@
     {
       "id": "digest-inapp-environment-agency",
       "agencyId": "environment-agency",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "in_app",
       "subject": "Environmental Compliance Agency supervisor digest",
       "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1285,7 +1285,7 @@
     {
       "id": "digest-email-planning-authority",
       "agencyId": "planning-authority",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "email",
       "subject": "Regional Planning and Infrastructure Authority queue digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1295,7 +1295,7 @@
     {
       "id": "digest-inapp-planning-authority",
       "agencyId": "planning-authority",
-      "generatedAt": "2026-07-20T21:38:22.289Z",
+      "generatedAt": "2026-07-20T22:05:49.055Z",
       "channel": "in_app",
       "subject": "Regional Planning and Infrastructure Authority supervisor digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",

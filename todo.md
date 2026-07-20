@@ -148,9 +148,13 @@
 - [x] Build a true browser-rendered geospatial web map view for the Geo experience
 - [x] Capture and validate a real web geospatial map screenshot from the updated product
 - [x] Revise the procurement-grade deck and script to include the true web map screenshot and updated geospatial narrative
-- [ ] Full-screen parcel map page with multiple interactive markers in the web application
-- [ ] Map legends for housing, right-of-way, mining, and infrastructure review layers
-- [ ] Corridor overlays for housing, right-of-way, mining, and infrastructure review on the geospatial map
+- [x] Full-screen parcel map page with multiple interactive markers in the web application
+- [x] Map legends for housing, right-of-way, mining, and infrastructure review layers
+- [x] Corridor overlays for housing, right-of-way, mining, and infrastructure review on the geospatial map
 - [ ] Lagos-specific procurement presentation deck for land administration and revenue assurance
 - [ ] FCT-specific procurement presentation deck for land administration and revenue assurance
 - [ ] Kano-specific procurement presentation deck for land administration and revenue assurance
+- [x] Lagos-specific parcel dataset and administrative boundary layers in the interactive web map
+- [x] FCT-specific parcel dataset and administrative boundary layers in the interactive web map
+- [x] Kano-specific parcel dataset and administrative boundary layers in the interactive web map
+- [x] State switcher and layer controls for Lagos, FCT, and Kano map views
