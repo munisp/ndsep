@@ -27,14 +27,21 @@ import {
   reconcileParcelGeofenceReplay,
 } from "./mobilePlatformRepository";
 import {
+  appendPermitReviewNote,
+  extractPermitDocumentToForm,
+  getActiveAgencyUser,
   getPermittingPlatform,
   getPermitCase,
   listAgencies,
+  listAgencyUsers,
+  listApprovalQueues,
   listMiddlewareComponents,
   listParityState,
   listPermitCases,
   listServiceTopology,
+  setActiveAgencyUser,
   updatePermitCaseStage,
+  updatePermitFormSections,
 } from "./permittingPlatformRepository";
 
 const businessProfileSchema = z.object({
@@ -224,6 +231,12 @@ export const appRouter = router({
     listCases: publicProcedure.query(() => listPermitCases()),
     getCase: publicProcedure.input(z.object({ caseId: z.string() })).query(({ input }) => getPermitCase(input.caseId)),
     listAgencies: publicProcedure.query(() => listAgencies()),
+    listAgencyUsers: publicProcedure.query(() => listAgencyUsers()),
+    getActiveAgencyUser: publicProcedure.query(() => getActiveAgencyUser()),
+    setActiveAgencyUser: publicProcedure
+      .input(z.object({ userId: z.string() }))
+      .mutation(({ input }) => setActiveAgencyUser(input)),
+    listApprovalQueues: publicProcedure.query(() => listApprovalQueues()),
     listMiddleware: publicProcedure.query(() => listMiddlewareComponents()),
     listServices: publicProcedure.query(() => listServiceTopology()),
     listParity: publicProcedure.query(() => listParityState()),
@@ -245,6 +258,52 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => updatePermitCaseStage(input)),
+    updateFormSections: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          summary: z.string().nullable().optional(),
+          formSections: z.array(
+            z.object({
+              id: z.string(),
+              title: z.string(),
+              description: z.string(),
+              fields: z.array(
+                z.object({
+                  key: z.string(),
+                  label: z.string(),
+                  value: z.string(),
+                  required: z.boolean(),
+                  fieldType: z.enum(["text", "textarea", "number", "date"]),
+                  source: z.enum(["manual", "ai"]),
+                }),
+              ),
+            }),
+          ),
+        }),
+      )
+      .mutation(({ input }) => updatePermitFormSections(input)),
+    addReviewNote: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          author: z.string(),
+          role: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]),
+          agencyId: z.string().nullable(),
+          decision: z.enum(["comment", "needs_changes", "approved"]),
+          note: z.string().min(3),
+        }),
+      )
+      .mutation(({ input }) => appendPermitReviewNote(input)),
+    extractDocumentToForm: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          documentName: z.string(),
+          documentText: z.string().min(20),
+        }),
+      )
+      .mutation(({ input }) => extractPermitDocumentToForm(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

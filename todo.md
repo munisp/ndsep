@@ -50,3 +50,7 @@
 - [x] PWA parity upgrades for expanded permitting workflows and dashboards
 - [x] Native mobile parity upgrades for expanded permitting workflows and dashboards
 - [x] Validation, regression coverage, and checkpoint for the expanded permitting platform
+- [x] Editable mining permit intake and review forms
+- [x] Editable oil and gas permit intake and review forms
+- [x] Role-based agency login and approval queues for multi-agency permitting
+- [x] AI document extraction to prefill permit intake forms

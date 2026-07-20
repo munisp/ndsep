@@ -1,22 +1,85 @@
 import { Link } from "expo-router";
-import { ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
+import { trpc } from "@/lib/trpc";
+
+function ActionTile({ label, onPress, active = false }: { label: string; onPress: () => void; active?: boolean }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.82 : 1 }]}> 
+      <View className={`rounded-2xl border px-4 py-4 ${active ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
+        <Text className={`text-sm font-semibold ${active ? "text-primary" : "text-foreground"}`}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+}
 
 export default function ProfileScreen() {
   const { bundle, hasLiveConnection } = useMobilePlatformBundle();
+  const utils = trpc.useUtils();
+  const platformQuery = trpc.permitting.getPlatform.useQuery();
+  const activeAgencyUserQuery = trpc.permitting.getActiveAgencyUser.useQuery();
+  const setActiveAgencyUserMutation = trpc.permitting.setActiveAgencyUser.useMutation({
+    onSuccess: async () => {
+      await utils.permitting.getPlatform.invalidate();
+      await utils.permitting.getActiveAgencyUser.invalidate();
+    },
+  });
+
   const registeredCount = bundle.legalWorkflows.filter((workflow) => workflow.status === "registered").length;
+  const platform = platformQuery.data;
+  const activeAgencyUser = activeAgencyUserQuery.data;
+  const queueIds = new Set(activeAgencyUser?.queueIds ?? []);
+  const visibleQueues = (platform?.approvalQueues ?? []).filter((queue) => queueIds.has(queue.id));
 
   return (
     <ScreenContainer className="bg-background">
       <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
         <View className="rounded-[28px] bg-surface p-5">
           <Text className="text-sm text-muted">Operator profile</Text>
-          <Text className="mt-2 text-3xl font-bold text-foreground">Registry Operations</Text>
+          <Text className="mt-2 text-3xl font-bold text-foreground">{activeAgencyUser?.displayName ?? "Registry Operations"}</Text>
           <Text className="mt-2 text-sm leading-5 text-muted">
-            This mobile shell is tuned for field continuity, parcel intelligence, onboarding, and land-rights progression.
+            Manage role-based approval queues, intake review context, and cross-agency permitting workflows from the same mobile and web shell.
           </Text>
+          <Text className="mt-3 text-xs text-muted">Active role: {activeAgencyUser?.role.replace(/_/g, " ") ?? "Unavailable"}</Text>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Agency login context</Text>
+          <Text className="mt-2 text-sm text-muted">Switch among seeded agency reviewer roles to inspect approval queues and sector-specific review work.</Text>
+          <View className="mt-4 gap-3">
+            {platform?.agencyUsers.map((user) => (
+              <ActionTile
+                key={user.id}
+                label={`${user.displayName} · ${user.role.replace(/_/g, " ")}`}
+                active={user.id === activeAgencyUser?.id}
+                onPress={() => setActiveAgencyUserMutation.mutate({ userId: user.id })}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Approval queues</Text>
+          <Text className="mt-2 text-sm text-muted">These queues are filtered by the currently active agency role and stay aligned with multi-agency routing.</Text>
+          <View className="mt-4 gap-3">
+            {visibleQueues.map((queue) => (
+              <View key={queue.id} className="rounded-2xl border border-border bg-background p-4">
+                <View className="flex-row items-center justify-between gap-4">
+                  <Text className="flex-1 text-base font-semibold text-foreground">{queue.title}</Text>
+                  <Text className="text-sm font-semibold text-primary">{queue.pendingCount} pending</Text>
+                </View>
+                <Text className="mt-2 text-sm leading-5 text-muted">{queue.description}</Text>
+                <Text className="mt-2 text-xs text-muted">Overdue: {queue.overdueCount} · Cases: {queue.caseIds.join(", ")}</Text>
+              </View>
+            ))}
+          </View>
+          <Link href={"/(tabs)/permits" as never} asChild>
+            <View className="mt-4 rounded-2xl bg-foreground px-4 py-4">
+              <Text className="text-center font-semibold text-background">Open permits dashboard</Text>
+            </View>
+          </Link>
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">
@@ -43,8 +106,8 @@ export default function ProfileScreen() {
           </View>
 
           <Link href={"/onboarding" as never} asChild>
-            <View className="mt-4 rounded-2xl bg-foreground px-4 py-4">
-              <Text className="text-center font-semibold text-background">Open onboarding workflow</Text>
+            <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-4">
+              <Text className="text-center font-semibold text-foreground">Open onboarding workflow</Text>
             </View>
           </Link>
         </View>
@@ -68,16 +131,6 @@ export default function ProfileScreen() {
               <Text className="text-center font-semibold text-foreground">Open legal workflow</Text>
             </View>
           </Link>
-        </View>
-
-        <View className="rounded-3xl border border-border bg-surface p-5">
-          <Text className="text-lg font-semibold text-foreground">App readiness</Text>
-          <Text className="mt-2 text-sm text-muted">
-            The native shell is now connected to live mobile APIs for parcel, onboarding, mission, and legal workflow continuity while preserving offline cache recovery.
-          </Text>
-          <Text className="mt-3 text-sm text-muted">
-            Store-ready credentials, external compliance integrations, and production infrastructure still remain environment-level concerns beyond this in-repository implementation.
-          </Text>
         </View>
       </ScrollView>
     </ScreenContainer>

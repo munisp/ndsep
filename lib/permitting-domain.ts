@@ -12,6 +12,7 @@ export type PermitStage =
 export type PermitPriority = "routine" | "elevated" | "critical";
 export type MiddlewareStatus = "planned" | "connected" | "degraded";
 export type ServiceLanguage = "typescript" | "python" | "go" | "rust";
+export type AgencyRole = "applicant" | "mining_reviewer" | "petroleum_reviewer" | "environment_reviewer" | "planning_supervisor";
 
 export type AgencyRecord = {
   id: string;
@@ -21,6 +22,15 @@ export type AgencyRecord = {
   reviewSlaHours: number;
   queueDepth: number;
   active: boolean;
+};
+
+export type AgencyUserRecord = {
+  id: string;
+  displayName: string;
+  role: AgencyRole;
+  agencyId: string | null;
+  email: string;
+  queueIds: string[];
 };
 
 export type PermitTimelineEntry = {
@@ -36,6 +46,50 @@ export type PermitObligation = {
   dueAt: string;
   status: "pending" | "satisfied" | "at_risk";
   owner: string;
+};
+
+export type PermitFormFieldRecord = {
+  key: string;
+  label: string;
+  value: string;
+  required: boolean;
+  fieldType: "text" | "textarea" | "number" | "date";
+  source: "manual" | "ai";
+};
+
+export type PermitFormSectionRecord = {
+  id: string;
+  title: string;
+  description: string;
+  fields: PermitFormFieldRecord[];
+};
+
+export type PermitReviewNoteRecord = {
+  id: string;
+  author: string;
+  role: AgencyRole;
+  agencyId: string | null;
+  decision: "comment" | "needs_changes" | "approved";
+  note: string;
+  createdAt: string;
+};
+
+export type AIExtractionResultRecord = {
+  documentName: string;
+  extractedAt: string;
+  model: string;
+  populatedKeys: string[];
+};
+
+export type ApprovalQueueRecord = {
+  id: string;
+  agencyId: string;
+  role: AgencyRole;
+  title: string;
+  description: string;
+  caseIds: string[];
+  pendingCount: number;
+  overdueCount: number;
 };
 
 export type PermitCaseRecord = {
@@ -54,6 +108,9 @@ export type PermitCaseRecord = {
   summary: string;
   timeline: PermitTimelineEntry[];
   obligations: PermitObligation[];
+  formSections: PermitFormSectionRecord[];
+  reviewNotes: PermitReviewNoteRecord[];
+  lastAiExtraction: AIExtractionResultRecord | null;
 };
 
 export type MiddlewareComponentRecord = {
@@ -84,7 +141,10 @@ export type ProductParityRecord = {
 
 export type PermittingPlatformSnapshot = {
   agencies: AgencyRecord[];
+  agencyUsers: AgencyUserRecord[];
+  activeAgencyUserId: string;
   permitCases: PermitCaseRecord[];
+  approvalQueues: ApprovalQueueRecord[];
   middleware: MiddlewareComponentRecord[];
   services: ServiceTopologyRecord[];
   parity: ProductParityRecord[];
@@ -110,6 +170,58 @@ function buildTimeline(stage: PermitStage, updatedAt: string) {
     completed: index <= rank,
     timestamp: index <= rank ? updatedAt : undefined,
   } satisfies PermitTimelineEntry));
+}
+
+function miningFormSections(): PermitFormSectionRecord[] {
+  return [
+    {
+      id: "mining-applicant",
+      title: "Applicant profile",
+      description: "Corporate identity, licence references, and applicant contacts.",
+      fields: [
+        { key: "company_name", label: "Company name", value: "Plateau Critical Minerals Ltd", required: true, fieldType: "text", source: "manual" },
+        { key: "mineral_type", label: "Mineral commodity", value: "Lithium", required: true, fieldType: "text", source: "manual" },
+        { key: "cadastre_units", label: "Cadastre units", value: "144", required: true, fieldType: "number", source: "manual" },
+        { key: "contact_email", label: "Contact email", value: "permits@plateauminerals.ng", required: true, fieldType: "text", source: "manual" },
+      ],
+    },
+    {
+      id: "mining-work-programme",
+      title: "Work programme and compliance",
+      description: "Operational programme, landowner consent, and capability evidence.",
+      fields: [
+        { key: "work_programme_summary", label: "Work programme summary", value: "Phase 1 mapping and trenching across the northern concession boundary.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "financial_capability", label: "Financial capability evidence", value: "Bank guarantee and audited reserves available.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "landowner_consent", label: "Landowner consent status", value: "Attached with sworn affidavit", required: true, fieldType: "text", source: "manual" },
+      ],
+    },
+  ];
+}
+
+function oilGasFormSections(): PermitFormSectionRecord[] {
+  return [
+    {
+      id: "petroleum-asset",
+      title: "Asset and operator profile",
+      description: "Operator details, block reference, and well or facility identifiers.",
+      fields: [
+        { key: "operator_name", label: "Operator name", value: "Delta Frontier Energy", required: true, fieldType: "text", source: "manual" },
+        { key: "block_reference", label: "Block reference", value: "OML-118", required: true, fieldType: "text", source: "manual" },
+        { key: "well_identifier", label: "Well identifier", value: "WELL-DFE-A7", required: true, fieldType: "text", source: "manual" },
+        { key: "operation_type", label: "Operation type", value: "Appraisal well workover and drilling approval", required: true, fieldType: "textarea", source: "manual" },
+      ],
+    },
+    {
+      id: "petroleum-hse",
+      title: "HSE and environmental controls",
+      description: "Mitigation measures, abandonment security, and spill response readiness.",
+      fields: [
+        { key: "spill_response_plan", label: "Spill response plan", value: "Revision pending environmental review.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "abandonment_security", label: "Abandonment security", value: "Bond draft submitted to regulator.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "local_approvals", label: "Local approvals", value: "Marine infrastructure dependency cleared.", required: true, fieldType: "textarea", source: "manual" },
+      ],
+    },
+  ];
 }
 
 export const seedPermittingPlatform: PermittingPlatformSnapshot = {
@@ -151,6 +263,49 @@ export const seedPermittingPlatform: PermittingPlatformSnapshot = {
       active: true,
     },
   ],
+  agencyUsers: [
+    {
+      id: "user-applicant-1",
+      displayName: "Binta Abdul",
+      role: "applicant",
+      agencyId: null,
+      email: "binta@plateauminerals.ng",
+      queueIds: [],
+    },
+    {
+      id: "user-mining-1",
+      displayName: "Haruna Bello",
+      role: "mining_reviewer",
+      agencyId: "mining-cadastre",
+      email: "haruna.bello@cadastre.gov",
+      queueIds: ["queue-mining-review"],
+    },
+    {
+      id: "user-petroleum-1",
+      displayName: "Ijeoma Peters",
+      role: "petroleum_reviewer",
+      agencyId: "petroleum-regulator",
+      email: "ijeoma.peters@petroleum.gov",
+      queueIds: ["queue-petroleum-review"],
+    },
+    {
+      id: "user-env-1",
+      displayName: "Grace Ogbodo",
+      role: "environment_reviewer",
+      agencyId: "environment-agency",
+      email: "grace.ogbodo@environment.gov",
+      queueIds: ["queue-env-review"],
+    },
+    {
+      id: "user-planning-1",
+      displayName: "Tunde Solarin",
+      role: "planning_supervisor",
+      agencyId: "planning-authority",
+      email: "tunde.solarin@planning.gov",
+      queueIds: ["queue-multi-agency"],
+    },
+  ],
+  activeAgencyUserId: "user-mining-1",
   permitCases: [
     {
       id: "permit-mining-001",
@@ -183,6 +338,19 @@ export const seedPermittingPlatform: PermittingPlatformSnapshot = {
           owner: "Environmental Compliance Agency",
         },
       ],
+      formSections: miningFormSections(),
+      reviewNotes: [
+        {
+          id: "note-mining-001",
+          author: "Haruna Bello",
+          role: "mining_reviewer",
+          agencyId: "mining-cadastre",
+          decision: "needs_changes",
+          note: "Applicant should attach a more explicit signed minimum work programme and cadastre-unit coverage note.",
+          createdAt: "2026-07-20T11:35:00Z",
+        },
+      ],
+      lastAiExtraction: null,
     },
     {
       id: "permit-oilgas-014",
@@ -215,6 +383,19 @@ export const seedPermittingPlatform: PermittingPlatformSnapshot = {
           owner: "Petroleum Licensing Authority",
         },
       ],
+      formSections: oilGasFormSections(),
+      reviewNotes: [
+        {
+          id: "note-oil-001",
+          author: "Ijeoma Peters",
+          role: "petroleum_reviewer",
+          agencyId: "petroleum-regulator",
+          decision: "comment",
+          note: "Operational sequence is acceptable, but abandonment security wording must match the latest regulator template.",
+          createdAt: "2026-07-20T10:05:00Z",
+        },
+      ],
+      lastAiExtraction: null,
     },
     {
       id: "permit-multi-023",
@@ -240,6 +421,71 @@ export const seedPermittingPlatform: PermittingPlatformSnapshot = {
           owner: "Applicant",
         },
       ],
+      formSections: [
+        {
+          id: "multi-intake",
+          title: "Unified intake summary",
+          description: "Shared project overview for coordinated agency review.",
+          fields: [
+            { key: "project_name", label: "Project name", value: "Eastern Corridor Logistics Hub", required: true, fieldType: "text", source: "manual" },
+            { key: "corridor_scope", label: "Corridor scope", value: "Interstate logistics hub, right-of-way, and environmental coordination package.", required: true, fieldType: "textarea", source: "manual" },
+          ],
+        },
+      ],
+      reviewNotes: [
+        {
+          id: "note-multi-001",
+          author: "Tunde Solarin",
+          role: "planning_supervisor",
+          agencyId: "planning-authority",
+          decision: "comment",
+          note: "Parallel agency queues are active. Environmental deficiency response is the current blocker.",
+          createdAt: "2026-07-20T08:30:00Z",
+        },
+      ],
+      lastAiExtraction: null,
+    },
+  ],
+  approvalQueues: [
+    {
+      id: "queue-mining-review",
+      agencyId: "mining-cadastre",
+      role: "mining_reviewer",
+      title: "Mining cadastre review queue",
+      description: "Exploration, quarry, and mining lease cases awaiting cadastre and technical review.",
+      caseIds: ["permit-mining-001"],
+      pendingCount: 1,
+      overdueCount: 0,
+    },
+    {
+      id: "queue-petroleum-review",
+      agencyId: "petroleum-regulator",
+      role: "petroleum_reviewer",
+      title: "Petroleum licensing queue",
+      description: "Drilling, workover, abandonment, and field development packages awaiting review.",
+      caseIds: ["permit-oilgas-014"],
+      pendingCount: 1,
+      overdueCount: 1,
+    },
+    {
+      id: "queue-env-review",
+      agencyId: "environment-agency",
+      role: "environment_reviewer",
+      title: "Environmental compliance queue",
+      description: "EIA, mitigation, and deficiency review across all permit sectors.",
+      caseIds: ["permit-mining-001", "permit-oilgas-014", "permit-multi-023"],
+      pendingCount: 3,
+      overdueCount: 1,
+    },
+    {
+      id: "queue-multi-agency",
+      agencyId: "planning-authority",
+      role: "planning_supervisor",
+      title: "Multi-agency coordination queue",
+      description: "Unified intake, routing, and cross-agency decision queues for shared permits.",
+      caseIds: ["permit-multi-023"],
+      pendingCount: 1,
+      overdueCount: 0,
     },
   ],
   middleware: [
@@ -345,13 +591,13 @@ export const seedPermittingPlatform: PermittingPlatformSnapshot = {
   parity: [
     {
       surface: "native_mobile",
-      score: 84,
+      score: 86,
       strengths: ["offline review continuity", "field-first notifications", "parcel and permit detail sheets"],
       nextFocus: "deeper reviewer handoff and evidence upload flows for sector-specific permits",
     },
     {
       surface: "pwa",
-      score: 82,
+      score: 85,
       strengths: ["wider workflow overview layout", "agency and middleware dashboards", "shared permit timelines"],
       nextFocus: "install experience, background sync visibility, and richer admin data tables",
     },
