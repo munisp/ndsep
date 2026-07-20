@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
 import { Link } from "expo-router";
+import { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
-import { findMissionByParcel, findWorkflowByParcel, parcels } from "@/lib/mobile-data";
+import { findMissionByParcel, findWorkflowByParcel } from "@/lib/mobile-data";
+import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
 function Pill({ label }: { label: string }) {
   return (
@@ -14,15 +15,16 @@ function Pill({ label }: { label: string }) {
 }
 
 export default function ParcelsScreen() {
+  const { bundle } = useMobilePlatformBundle();
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return parcels;
-    return parcels.filter((parcel) =>
+    if (!normalized) return bundle.parcels;
+    return bundle.parcels.filter((parcel) =>
       [parcel.parcelNumber, parcel.owner, parcel.lga, parcel.state].some((value) => value.toLowerCase().includes(normalized)),
     );
-  }, [query]);
+  }, [bundle.parcels, query]);
 
   return (
     <ScreenContainer className="bg-background">
@@ -45,8 +47,8 @@ export default function ParcelsScreen() {
 
         <View className="gap-4">
           {filtered.map((parcel) => {
-            const mission = findMissionByParcel(parcel.id);
-            const workflow = findWorkflowByParcel(parcel.id);
+            const mission = findMissionByParcel(parcel.id, bundle.missions);
+            const workflow = findWorkflowByParcel(parcel.id, bundle.legalWorkflows);
             return (
               <View key={parcel.id} className="rounded-3xl border border-border bg-surface p-5">
                 <View className="flex-row items-start justify-between gap-3">
@@ -68,14 +70,19 @@ export default function ParcelsScreen() {
                 {workflow ? <Text className="mt-2 text-sm text-muted">Legal: {workflow.type} · {workflow.status}</Text> : null}
 
                 <View className="mt-4 gap-3">
-                  <Link href={"/(tabs)/field" as any} asChild>
+                  <Link href={"/(tabs)/field" as never} asChild>
                     <View className="rounded-2xl bg-foreground px-4 py-3">
                       <Text className="text-center font-semibold text-background">Open field workflow</Text>
                     </View>
                   </Link>
-                  <Link href={"/(tabs)/geo" as any} asChild>
+                  <Link href={"/(tabs)/geo" as never} asChild>
                     <View className="rounded-2xl border border-border bg-background px-4 py-3">
                       <Text className="text-center font-semibold text-foreground">Open geospatial review</Text>
+                    </View>
+                  </Link>
+                  <Link href={"/legal-workflow" as never} asChild>
+                    <View className="rounded-2xl border border-border bg-background px-4 py-3">
+                      <Text className="text-center font-semibold text-foreground">Open legal workflow</Text>
                     </View>
                   </Link>
                 </View>

@@ -87,6 +87,15 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     [
+      "expo-camera",
+      {
+        cameraPermission: "Allow $(PRODUCT_NAME) to capture identity and liveness evidence.",
+        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone when recording onboarding evidence.",
+        recordAudioAndroid: false,
+      },
+    ],
+    "expo-document-picker",
+    [
       "expo-audio",
       {
         microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",

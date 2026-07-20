@@ -1,10 +1,11 @@
 import { ScrollView, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
-import { parcels } from "@/lib/mobile-data";
+import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
 export default function GeoScreen() {
-  const primaryParcel = parcels[0];
+  const { bundle } = useMobilePlatformBundle();
+  const primaryParcel = bundle.parcels[0];
 
   return (
     <ScreenContainer className="bg-background">
@@ -23,11 +24,12 @@ export default function GeoScreen() {
             <Text className="text-sm text-muted">Primary parcel</Text>
             <Text className="mt-2 text-lg font-semibold text-foreground">{primaryParcel.parcelNumber}</Text>
             <Text className="mt-1 text-sm text-muted">{primaryParcel.owner} · {primaryParcel.lga}, {primaryParcel.state}</Text>
+            <Text className="mt-1 text-sm text-muted">Sync source: {bundle.syncMeta.source}</Text>
           </View>
         </View>
 
         <View className="gap-4">
-          {parcels.map((parcel) => (
+          {bundle.parcels.map((parcel) => (
             <View key={parcel.id} className="rounded-3xl border border-border bg-surface p-5">
               <View className="flex-row items-start justify-between gap-4">
                 <View className="flex-1">

@@ -1,19 +1,29 @@
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View, Pressable } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
-import { findParcel, missions } from "@/lib/mobile-data";
+import { findParcel } from "@/lib/mobile-data";
+import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
 function RiskTone({ label, value }: { label: string; value: string }) {
   const accent = value === "high" ? "#DC2626" : value === "moderate" ? "#D97706" : "#059669";
   return (
     <View className="rounded-2xl border border-border bg-background px-4 py-3" style={{ borderColor: accent }}>
       <Text className="text-xs uppercase tracking-wide text-muted">{label}</Text>
-      <Text className="mt-2 text-sm font-semibold" style={{ color: accent }}>{value}</Text>
+      <Text className="mt-2 text-sm font-semibold" style={{ color: accent }}>
+        {value}
+      </Text>
     </View>
   );
 }
 
 export default function FieldScreen() {
+  const { bundle, updateMissionStatus } = useMobilePlatformBundle();
+
+  async function advanceMission(missionId: string, currentStatus: "queued" | "active" | "synced") {
+    const nextStatus = currentStatus === "queued" ? "active" : "synced";
+    await updateMissionStatus.mutateAsync({ missionId, status: nextStatus });
+  }
+
   return (
     <ScreenContainer className="bg-background">
       <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
@@ -24,17 +34,17 @@ export default function FieldScreen() {
 
         <View className="rounded-3xl bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Mission control</Text>
-          <Text className="mt-2 text-sm text-muted">{missions.filter((mission) => mission.status !== "synced").length} missions need attention. Prioritize high-risk sync packages first.</Text>
+          <Text className="mt-2 text-sm text-muted">{bundle.missions.filter((mission) => mission.status !== "synced").length} missions need attention. Prioritize high-risk sync packages first.</Text>
           <View className="mt-4 flex-row flex-wrap gap-3">
-            <RiskTone label="Queued" value={String(missions.filter((mission) => mission.status === "queued").length)} />
-            <RiskTone label="Active" value={String(missions.filter((mission) => mission.status === "active").length)} />
-            <RiskTone label="High-risk sync" value={String(missions.filter((mission) => mission.syncRisk === "high").length)} />
+            <RiskTone label="Queued" value={String(bundle.missions.filter((mission) => mission.status === "queued").length)} />
+            <RiskTone label="Active" value={String(bundle.missions.filter((mission) => mission.status === "active").length)} />
+            <RiskTone label="High-risk sync" value={String(bundle.missions.filter((mission) => mission.syncRisk === "high").length)} />
           </View>
         </View>
 
         <View className="gap-4">
-          {missions.map((mission) => {
-            const parcel = findParcel(mission.parcelId);
+          {bundle.missions.map((mission) => {
+            const parcel = findParcel(mission.parcelId, bundle.parcels);
             return (
               <View key={mission.id} className="rounded-3xl border border-border bg-surface p-5">
                 <View className="flex-row items-start justify-between gap-4">
@@ -60,9 +70,11 @@ export default function FieldScreen() {
                   </View>
                 </View>
 
-                <View className="mt-4 rounded-2xl bg-foreground px-4 py-3">
-                  <Text className="text-center font-semibold text-background">Prepare capture package</Text>
-                </View>
+                <Pressable onPress={() => void advanceMission(mission.id, mission.status)}>
+                  <View className="mt-4 rounded-2xl bg-foreground px-4 py-3">
+                    <Text className="text-center font-semibold text-background">{mission.status === "queued" ? "Start mission" : mission.status === "active" ? "Mark as synced" : "Synced"}</Text>
+                  </View>
+                </Pressable>
               </View>
             );
           })}
