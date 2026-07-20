@@ -10,14 +10,18 @@ import {
   appendBusinessDocument,
   appendIdentityDocument,
   approveIdentityDocument,
+  clearParcelMutePreference,
   completeLivenessSession,
   getMobilePlatformBundle,
   listLegalWorkflows,
+  setParcelMutePreference,
   startLivenessSession,
   submitBusinessProfile,
   syncBundleMutation,
+  toggleParcelSubscriptionPreference,
   updateLegalWorkflowStatus,
   updateMissionStatus,
+  updateNotificationPreferences,
 } from "./mobilePlatformRepository";
 
 const businessProfileSchema = z.object({
@@ -71,6 +75,7 @@ export const appRouter = router({
             missions: z.array(z.any()),
             onboarding: z.any(),
             legalWorkflows: z.array(z.any()),
+            notificationPreferences: z.any(),
             syncMeta: z.any(),
           }),
         }),
@@ -85,11 +90,58 @@ export const appRouter = router({
       )
       .mutation(({ input }) => updateMissionStatus(input)),
   }),
+  notifications: router({
+    getPreferences: publicProcedure.query(() => getMobilePlatformBundle().notificationPreferences),
+    updatePreferences: publicProcedure
+      .input(
+        z.object({
+          pushEnabled: z.boolean().optional(),
+          fieldAlerts: z.boolean().optional(),
+          onboardingAlerts: z.boolean().optional(),
+          legalAlerts: z.boolean().optional(),
+          geospatialAlerts: z.boolean().optional(),
+          onlyAssignedParcels: z.boolean().optional(),
+          followedParcelIds: z.array(z.number()).optional(),
+          parcelMutes: z
+            .array(
+              z.object({
+                parcelId: z.number(),
+                duration: z.enum(["1h", "1d", "until_workflow_completion"]),
+                mutedAt: z.string(),
+                mutedUntil: z.string().nullable(),
+                workflowId: z.string().nullable().optional(),
+              }),
+            )
+            .optional(),
+        }),
+      )
+      .mutation(({ input }) => updateNotificationPreferences(input)),
+    toggleParcelSubscription: publicProcedure
+      .input(
+        z.object({
+          parcelId: z.number(),
+        }),
+      )
+      .mutation(({ input }) => toggleParcelSubscriptionPreference(input)),
+    setParcelMute: publicProcedure
+      .input(
+        z.object({
+          parcelId: z.number(),
+          duration: z.enum(["1h", "1d", "until_workflow_completion"]),
+        }),
+      )
+      .mutation(({ input }) => setParcelMutePreference(input)),
+    clearParcelMute: publicProcedure
+      .input(
+        z.object({
+          parcelId: z.number(),
+        }),
+      )
+      .mutation(({ input }) => clearParcelMutePreference(input)),
+  }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),
-    submitBusinessProfile: publicProcedure
-      .input(businessProfileSchema)
-      .mutation(({ input }) => submitBusinessProfile(input)),
+    submitBusinessProfile: publicProcedure.input(businessProfileSchema).mutation(({ input }) => submitBusinessProfile(input)),
     analyzeIdentityDocument: publicProcedure
       .input(
         z.object({
@@ -181,13 +233,7 @@ export const appRouter = router({
           onboarding: getMobilePlatformBundle().onboarding,
         };
       }),
-    approveIdentityDocument: publicProcedure
-      .input(
-        z.object({
-          documentId: z.string(),
-        }),
-      )
-      .mutation(({ input }) => approveIdentityDocument(input)),
+    approveIdentityDocument: publicProcedure.input(z.object({ documentId: z.string() })).mutation(({ input }) => approveIdentityDocument(input)),
   }),
   legal: router({
     list: publicProcedure.query(() => listLegalWorkflows()),

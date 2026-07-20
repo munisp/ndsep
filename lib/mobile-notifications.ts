@@ -35,6 +35,7 @@ export async function scheduleFieldUpdateNotification(input: {
   body: string;
   category?: "field" | "onboarding" | "legal" | "geospatial";
   parcelId?: number | null;
+  workflowStatus?: "draft" | "pending_review" | "approved" | "signed" | "registered" | "rejected" | null;
   data?: Record<string, unknown>;
 }) {
   const preferences = await getNotificationPreferences();
@@ -45,7 +46,7 @@ export async function scheduleFieldUpdateNotification(input: {
   if (category === "onboarding" && !preferences.onboardingAlerts) return null;
   if (category === "legal" && !preferences.legalAlerts) return null;
   if (category === "geospatial" && !preferences.geospatialAlerts) return null;
-  if (!(await shouldNotifyForParcel(input.parcelId))) return null;
+  if (!(await shouldNotifyForParcel({ parcelId: input.parcelId, workflowStatus: input.workflowStatus }))) return null;
 
   return Notifications.scheduleNotificationAsync({
     content: {

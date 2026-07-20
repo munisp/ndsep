@@ -129,6 +129,28 @@ export type LegalWorkflowRecord = {
   timeline: LegalWorkflowTimelineEntry[];
 };
 
+export type ParcelMuteDuration = "1h" | "1d" | "until_workflow_completion";
+
+export type ParcelMuteRule = {
+  parcelId: number;
+  duration: ParcelMuteDuration;
+  mutedAt: string;
+  mutedUntil: string | null;
+  workflowId?: string | null;
+};
+
+export type NotificationPreferences = {
+  pushEnabled: boolean;
+  fieldAlerts: boolean;
+  onboardingAlerts: boolean;
+  legalAlerts: boolean;
+  geospatialAlerts: boolean;
+  onlyAssignedParcels: boolean;
+  followedParcelIds: number[];
+  parcelMutes: ParcelMuteRule[];
+  updatedAt: string;
+};
+
 export type SyncMeta = {
   source: "seed" | "live" | "offline_cache";
   lastSyncedAt: string | null;
@@ -141,6 +163,7 @@ export type MobilePlatformBundle = {
   missions: MissionRecord[];
   onboarding: OnboardingRecord;
   legalWorkflows: LegalWorkflowRecord[];
+  notificationPreferences: NotificationPreferences;
   syncMeta: SyncMeta;
 };
 
@@ -169,6 +192,18 @@ function timeline(status: LegalWorkflowStatus, updatedAt: string): LegalWorkflow
     timestamp: index <= statusRank[status] ? updatedAt : undefined,
   }));
 }
+
+export const defaultNotificationPreferences: NotificationPreferences = {
+  pushEnabled: true,
+  fieldAlerts: true,
+  onboardingAlerts: true,
+  legalAlerts: true,
+  geospatialAlerts: true,
+  onlyAssignedParcels: false,
+  followedParcelIds: [6, 11],
+  parcelMutes: [],
+  updatedAt: "2026-07-20T00:00:00Z",
+};
 
 export const seedPlatformBundle: MobilePlatformBundle = {
   parcels: [
@@ -262,67 +297,67 @@ export const seedPlatformBundle: MobilePlatformBundle = {
       { key: "liveness", label: "Liveness verification", completed: false },
       { key: "kyc_documents", label: "KYC documents", completed: true },
       { key: "cac", label: "CAC verification", completed: true },
-      { key: "tin", label: "TIN verification", completed: false },
-      { key: "kyb_documents", label: "KYB documents", completed: true },
+      { key: "tin", label: "TIN verification", completed: true },
+      { key: "kyb_documents", label: "KYB documents", completed: false },
     ],
     identityDocuments: [
       {
-        id: "nin-slip-1",
-        type: "National Identification Slip",
-        fileName: "amina-nin-slip.jpg",
-        status: "verified",
-        confidence: 94,
+        id: "kyc-seed-11",
+        type: "Corporate ID Verification",
+        fileName: "crest-holdings-director-id.png",
+        status: "pending",
+        extractedSummary: "Director identity document uploaded for review.",
+        confidence: 84,
         engine: "vlm",
-        extractedSummary: "NIN slip verified for Amina Yusuf.",
-        uploadedAt: "2026-07-19T15:30:00Z",
+        uploadedAt: "2026-07-20T01:15:00Z",
       },
       {
-        id: "utility-1",
+        id: "kyc-seed-12",
         type: "Proof of Address",
-        fileName: "amina-utility-bill.jpg",
+        fileName: "crest-holdings-proof-address.pdf",
         status: "verified",
-        confidence: 88,
-        engine: "paddleocr",
-        extractedSummary: "Address evidence aligned to parcel region.",
-        uploadedAt: "2026-07-19T15:42:00Z",
+        extractedSummary: "Registered office address confirmed.",
+        confidence: 92,
+        engine: "docling",
+        uploadedAt: "2026-07-19T23:40:00Z",
       },
     ],
     businessProfile: {
       stakeholderType: "business",
-      companyName: "Crest Holdings Limited",
-      cacNumber: "RC1234567",
-      tinNumber: "12345678-0001",
-      businessEmail: "compliance@crestholdings.example",
-      businessPhone: "+234 803 555 0199",
-      businessAddress: "12 Admiralty Way, Lekki Phase 1, Lagos",
-      contactPerson: "Amina Bello",
+      companyName: "Crest Holdings Ltd",
+      cacNumber: "RC-449921",
+      tinNumber: "TIN-9982711",
+      businessEmail: "ops@crestholdings.ng",
+      businessPhone: "+2348011111111",
+      businessAddress: "Plot 22, Central Business District, Abuja",
+      contactPerson: "Binta Abdul",
       onboardingStatus: "in_review",
       cacStatus: "verified",
-      tinStatus: "failed",
-      submittedAt: "2026-07-18T10:00:00.000Z",
+      tinStatus: "verified",
+      submittedAt: "2026-07-19T21:00:00Z",
       verifiedAt: null,
       documents: [
         {
-          id: 1,
+          id: 991,
           type: "Certificate of Incorporation",
-          fileName: "crest-holdings-cac.pdf",
-          documentUrl: "https://storage.idlr.local/onboarding/crest-holdings-cac.pdf",
+          fileName: "crest-cac-certificate.pdf",
+          documentUrl: null,
           status: "verified",
           engine: "docling",
-          confidence: 94,
-          extractedSummary: "Certificate of Incorporation for Crest Holdings Limited with RC1234567.",
-          uploadedAt: "2026-07-18T10:05:00.000Z",
+          confidence: 93,
+          extractedSummary: "Company incorporation certificate matched CAC reference.",
+          uploadedAt: "2026-07-19T21:10:00Z",
         },
         {
-          id: 2,
-          type: "Tax Identification Letter",
-          fileName: "crest-holdings-tin.pdf",
-          documentUrl: "https://storage.idlr.local/onboarding/crest-holdings-tin.pdf",
-          status: "requires_review",
-          engine: "paddleocr",
-          confidence: 79,
-          extractedSummary: "TIN letter uploaded, awaiting compliance confirmation.",
-          uploadedAt: "2026-07-18T10:08:00.000Z",
+          id: 992,
+          type: "Board Resolution",
+          fileName: "crest-board-resolution.pdf",
+          documentUrl: null,
+          status: "pending",
+          engine: "docling",
+          confidence: 74,
+          extractedSummary: "Board resolution needs reviewer confirmation.",
+          uploadedAt: "2026-07-20T00:45:00Z",
         },
       ],
     },
@@ -332,41 +367,42 @@ export const seedPlatformBundle: MobilePlatformBundle = {
     {
       id: "cofo-epe-6",
       parcelId: 6,
-      transactionId: "TXN-LG-EPE-006",
+      transactionId: "TX-EPE-2026-006",
       type: "Certificate of Occupancy",
       status: "registered",
       registrationNumber: "COFO-LA-EPE-2026-0006",
-      assignedDesk: "Issuance Desk",
-      preparedBy: "Registry Legal Unit",
+      assignedDesk: "Registry Archive",
+      preparedBy: "Registry Operations",
       reviewedBy: "Senior Registrar",
-      updatedAt: "2026-07-20T02:10:00Z",
-      timeline: timeline("registered", "2026-07-20T02:10:00Z"),
+      updatedAt: "2026-07-20T02:55:00Z",
+      timeline: timeline("registered", "2026-07-20T02:55:00Z"),
     },
     {
       id: "roo-amac-11",
       parcelId: 11,
-      transactionId: "TXN-FC-AMAC-011",
+      transactionId: "TX-AMAC-2026-011",
       type: "Right of Occupancy",
-      status: "approved",
-      assignedDesk: "Legal Review",
-      preparedBy: "AMAC Land Desk",
-      reviewedBy: "Registry Counsel",
-      updatedAt: "2026-07-20T01:20:00Z",
-      timeline: timeline("approved", "2026-07-20T01:20:00Z"),
-    },
-    {
-      id: "gc-kano-15",
-      parcelId: 15,
-      transactionId: "TXN-KN-NASS-015",
-      type: "Governor Consent",
       status: "pending_review",
       assignedDesk: "Verification Desk",
-      preparedBy: "Kano State Title Office",
+      preparedBy: "Corporate Desk",
       reviewedBy: null,
-      updatedAt: "2026-07-19T19:00:00Z",
-      timeline: timeline("pending_review", "2026-07-19T19:00:00Z"),
+      updatedAt: "2026-07-20T01:20:00Z",
+      timeline: timeline("pending_review", "2026-07-20T01:20:00Z"),
+    },
+    {
+      id: "legal-gc-15",
+      parcelId: 15,
+      transactionId: "TX-KN-2026-015",
+      type: "Governor Consent",
+      status: "approved",
+      assignedDesk: "Legal Review",
+      preparedBy: "Regional Desk",
+      reviewedBy: "Senior Counsel",
+      updatedAt: "2026-07-19T18:35:00Z",
+      timeline: timeline("approved", "2026-07-19T18:35:00Z"),
     },
   ],
+  notificationPreferences: defaultNotificationPreferences,
   syncMeta: {
     source: "seed",
     lastSyncedAt: null,
@@ -380,18 +416,18 @@ export const missions = seedPlatformBundle.missions;
 export const onboarding = seedPlatformBundle.onboarding;
 export const legalWorkflows = seedPlatformBundle.legalWorkflows;
 
-export function cloneSeedBundle(): MobilePlatformBundle {
+export function cloneSeedBundle() {
   return JSON.parse(JSON.stringify(seedPlatformBundle)) as MobilePlatformBundle;
 }
 
 export function findParcel(parcelId: number, source: ParcelRecord[] = parcels) {
-  return source.find((parcel) => parcel.id === parcelId) ?? source[0];
+  return source.find((parcel) => parcel.id === parcelId) ?? null;
 }
 
 export function findMissionByParcel(parcelId: number, source: MissionRecord[] = missions) {
-  return source.find((mission) => mission.parcelId === parcelId);
+  return source.find((mission) => mission.parcelId === parcelId) ?? null;
 }
 
 export function findWorkflowByParcel(parcelId: number, source: LegalWorkflowRecord[] = legalWorkflows) {
-  return source.find((workflow) => workflow.parcelId === parcelId);
+  return source.find((workflow) => workflow.parcelId === parcelId) ?? null;
 }

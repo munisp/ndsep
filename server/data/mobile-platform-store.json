@@ -113,72 +113,72 @@
       {
         "key": "tin",
         "label": "TIN verification",
-        "completed": false
+        "completed": true
       },
       {
         "key": "kyb_documents",
         "label": "KYB documents",
-        "completed": true
+        "completed": false
       }
     ],
     "identityDocuments": [
       {
-        "id": "nin-slip-1",
-        "type": "National Identification Slip",
-        "fileName": "amina-nin-slip.jpg",
-        "status": "verified",
-        "confidence": 94,
+        "id": "kyc-seed-11",
+        "type": "Corporate ID Verification",
+        "fileName": "crest-holdings-director-id.png",
+        "status": "pending",
+        "extractedSummary": "Director identity document uploaded for review.",
+        "confidence": 84,
         "engine": "vlm",
-        "extractedSummary": "NIN slip verified for Amina Yusuf.",
-        "uploadedAt": "2026-07-19T15:30:00Z"
+        "uploadedAt": "2026-07-20T01:15:00Z"
       },
       {
-        "id": "utility-1",
+        "id": "kyc-seed-12",
         "type": "Proof of Address",
-        "fileName": "amina-utility-bill.jpg",
+        "fileName": "crest-holdings-proof-address.pdf",
         "status": "verified",
-        "confidence": 88,
-        "engine": "paddleocr",
-        "extractedSummary": "Address evidence aligned to parcel region.",
-        "uploadedAt": "2026-07-19T15:42:00Z"
+        "extractedSummary": "Registered office address confirmed.",
+        "confidence": 92,
+        "engine": "docling",
+        "uploadedAt": "2026-07-19T23:40:00Z"
       }
     ],
     "businessProfile": {
       "stakeholderType": "business",
-      "companyName": "Crest Holdings Limited",
-      "cacNumber": "RC1234567",
-      "tinNumber": "12345678-0001",
-      "businessEmail": "compliance@crestholdings.example",
-      "businessPhone": "+234 803 555 0199",
-      "businessAddress": "12 Admiralty Way, Lekki Phase 1, Lagos",
-      "contactPerson": "Amina Bello",
+      "companyName": "Crest Holdings Ltd",
+      "cacNumber": "RC-449921",
+      "tinNumber": "TIN-9982711",
+      "businessEmail": "ops@crestholdings.ng",
+      "businessPhone": "+2348011111111",
+      "businessAddress": "Plot 22, Central Business District, Abuja",
+      "contactPerson": "Binta Abdul",
       "onboardingStatus": "in_review",
       "cacStatus": "verified",
-      "tinStatus": "failed",
-      "submittedAt": "2026-07-18T10:00:00.000Z",
+      "tinStatus": "verified",
+      "submittedAt": "2026-07-19T21:00:00Z",
       "verifiedAt": null,
       "documents": [
         {
-          "id": 1,
+          "id": 991,
           "type": "Certificate of Incorporation",
-          "fileName": "crest-holdings-cac.pdf",
-          "documentUrl": "https://storage.idlr.local/onboarding/crest-holdings-cac.pdf",
+          "fileName": "crest-cac-certificate.pdf",
+          "documentUrl": null,
           "status": "verified",
           "engine": "docling",
-          "confidence": 94,
-          "extractedSummary": "Certificate of Incorporation for Crest Holdings Limited with RC1234567.",
-          "uploadedAt": "2026-07-18T10:05:00.000Z"
+          "confidence": 93,
+          "extractedSummary": "Company incorporation certificate matched CAC reference.",
+          "uploadedAt": "2026-07-19T21:10:00Z"
         },
         {
-          "id": 2,
-          "type": "Tax Identification Letter",
-          "fileName": "crest-holdings-tin.pdf",
-          "documentUrl": "https://storage.idlr.local/onboarding/crest-holdings-tin.pdf",
-          "status": "requires_review",
-          "engine": "paddleocr",
-          "confidence": 79,
-          "extractedSummary": "TIN letter uploaded, awaiting compliance confirmation.",
-          "uploadedAt": "2026-07-18T10:08:00.000Z"
+          "id": 992,
+          "type": "Board Resolution",
+          "fileName": "crest-board-resolution.pdf",
+          "documentUrl": null,
+          "status": "pending",
+          "engine": "docling",
+          "confidence": 74,
+          "extractedSummary": "Board resolution needs reviewer confirmation.",
+          "uploadedAt": "2026-07-20T00:45:00Z"
         }
       ]
     },
@@ -188,118 +188,119 @@
     {
       "id": "cofo-epe-6",
       "parcelId": 6,
-      "transactionId": "TXN-LG-EPE-006",
+      "transactionId": "TX-EPE-2026-006",
       "type": "Certificate of Occupancy",
       "status": "registered",
       "registrationNumber": "COFO-LA-EPE-2026-0006",
-      "assignedDesk": "Issuance Desk",
-      "preparedBy": "Registry Legal Unit",
+      "assignedDesk": "Registry Archive",
+      "preparedBy": "Registry Operations",
       "reviewedBy": "Senior Registrar",
-      "updatedAt": "2026-07-20T02:10:00Z",
+      "updatedAt": "2026-07-20T02:55:00Z",
       "timeline": [
         {
           "key": "draft",
           "label": "Draft prepared",
           "completed": true,
-          "timestamp": "2026-07-20T02:10:00Z"
+          "timestamp": "2026-07-20T02:55:00Z"
         },
         {
           "key": "pending_review",
           "label": "Review in progress",
           "completed": true,
-          "timestamp": "2026-07-20T02:10:00Z"
+          "timestamp": "2026-07-20T02:55:00Z"
         },
         {
           "key": "approved",
           "label": "Approved",
           "completed": true,
-          "timestamp": "2026-07-20T02:10:00Z"
+          "timestamp": "2026-07-20T02:55:00Z"
         },
         {
           "key": "signed",
           "label": "Signed",
           "completed": true,
-          "timestamp": "2026-07-20T02:10:00Z"
+          "timestamp": "2026-07-20T02:55:00Z"
         },
         {
           "key": "registered",
           "label": "Registered",
           "completed": true,
-          "timestamp": "2026-07-20T02:10:00Z"
+          "timestamp": "2026-07-20T02:55:00Z"
         }
       ]
     },
     {
       "id": "roo-amac-11",
       "parcelId": 11,
-      "transactionId": "TXN-FC-AMAC-011",
+      "transactionId": "TX-AMAC-2026-011",
       "type": "Right of Occupancy",
       "status": "registered",
       "assignedDesk": "Registry Archive",
-      "preparedBy": "AMAC Land Desk",
+      "preparedBy": "Corporate Desk",
       "reviewedBy": "Mobile Registry Supervisor",
-      "updatedAt": "2026-07-20T12:40:51.970Z",
+      "updatedAt": "2026-07-20T12:57:03.045Z",
       "timeline": [
         {
           "key": "draft",
           "label": "Draft prepared",
           "completed": true,
-          "timestamp": "2026-07-20T12:40:51.970Z"
+          "timestamp": "2026-07-20T12:57:03.045Z"
         },
         {
           "key": "pending_review",
           "label": "Review in progress",
           "completed": true,
-          "timestamp": "2026-07-20T12:40:51.970Z"
+          "timestamp": "2026-07-20T12:57:03.045Z"
         },
         {
           "key": "approved",
           "label": "Approved",
           "completed": true,
-          "timestamp": "2026-07-20T12:40:51.970Z"
+          "timestamp": "2026-07-20T12:57:03.045Z"
         },
         {
           "key": "signed",
           "label": "Signed",
           "completed": true,
-          "timestamp": "2026-07-20T12:40:51.970Z"
+          "timestamp": "2026-07-20T12:57:03.045Z"
         },
         {
           "key": "registered",
           "label": "Registered",
           "completed": true,
-          "timestamp": "2026-07-20T12:40:51.970Z"
+          "timestamp": "2026-07-20T12:57:03.045Z"
         }
       ],
       "registrationNumber": "ROO-0011-2026-1011"
     },
     {
-      "id": "gc-kano-15",
+      "id": "legal-gc-15",
       "parcelId": 15,
-      "transactionId": "TXN-KN-NASS-015",
+      "transactionId": "TX-KN-2026-015",
       "type": "Governor Consent",
-      "status": "pending_review",
-      "assignedDesk": "Verification Desk",
-      "preparedBy": "Kano State Title Office",
-      "reviewedBy": null,
-      "updatedAt": "2026-07-19T19:00:00Z",
+      "status": "approved",
+      "assignedDesk": "Legal Review",
+      "preparedBy": "Regional Desk",
+      "reviewedBy": "Senior Counsel",
+      "updatedAt": "2026-07-19T18:35:00Z",
       "timeline": [
         {
           "key": "draft",
           "label": "Draft prepared",
           "completed": true,
-          "timestamp": "2026-07-19T19:00:00Z"
+          "timestamp": "2026-07-19T18:35:00Z"
         },
         {
           "key": "pending_review",
           "label": "Review in progress",
           "completed": true,
-          "timestamp": "2026-07-19T19:00:00Z"
+          "timestamp": "2026-07-19T18:35:00Z"
         },
         {
           "key": "approved",
           "label": "Approved",
-          "completed": false
+          "completed": true,
+          "timestamp": "2026-07-19T18:35:00Z"
         },
         {
           "key": "signed",
@@ -314,9 +315,23 @@
       ]
     }
   ],
+  "notificationPreferences": {
+    "pushEnabled": true,
+    "fieldAlerts": true,
+    "onboardingAlerts": true,
+    "legalAlerts": true,
+    "geospatialAlerts": true,
+    "onlyAssignedParcels": false,
+    "followedParcelIds": [
+      6,
+      11
+    ],
+    "parcelMutes": [],
+    "updatedAt": "2026-07-20T00:00:00Z"
+  },
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-07-20T12:40:51.970Z",
+    "lastSyncedAt": "2026-07-20T12:57:03.045Z",
     "pendingMutations": 1,
     "offlineReady": true
   },
@@ -324,7 +339,7 @@
     {
       "type": "legal_status",
       "recordId": "roo-amac-11",
-      "queuedAt": "2026-07-20T12:40:51.970Z"
+      "queuedAt": "2026-07-20T12:57:03.045Z"
     }
   ]
 }

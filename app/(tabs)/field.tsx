@@ -50,7 +50,7 @@ export default function FieldScreen() {
                 <View className="flex-row items-start justify-between gap-4">
                   <View className="flex-1">
                     <Text className="text-lg font-semibold text-foreground">{mission.title}</Text>
-                    <Text className="mt-1 text-sm text-muted">Parcel {parcel.parcelNumber} · {parcel.lga}, {parcel.state}</Text>
+                    <Text className="mt-1 text-sm text-muted">Parcel {parcel?.parcelNumber ?? "Unknown"} · {parcel?.lga ?? "Unknown LGA"}, {parcel?.state ?? "Unknown state"}</Text>
                   </View>
                   <View className="rounded-full bg-background px-3 py-1">
                     <Text className="text-xs font-semibold text-foreground">{mission.status}</Text>
@@ -66,7 +66,7 @@ export default function FieldScreen() {
                   </View>
                   <View className="flex-1 rounded-2xl border border-border bg-background p-4">
                     <Text className="text-xs uppercase tracking-wide text-muted">Workflow stage</Text>
-                    <Text className="mt-2 text-base font-semibold text-foreground">{parcel.workflowStage}</Text>
+                    <Text className="mt-2 text-base font-semibold text-foreground">{parcel?.workflowStage ?? "Workflow stage unavailable"}</Text>
                   </View>
                 </View>
 

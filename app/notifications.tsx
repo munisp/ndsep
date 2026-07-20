@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
 import { Link } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import { PanResponder, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import Animated, {
+  Easing,
+  interpolateColor,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
 import { ScreenContainer } from "@/components/screen-container";
 import type { ActivityFilter, ActivityRecord } from "@/lib/mobile-activity";
@@ -30,6 +38,12 @@ const filters: Array<{ key: ActivityFilter; label: string }> = [
   { key: "geospatial", label: "Geo" },
 ];
 
+const animatedCardBaseStyle = {
+  borderWidth: 1,
+  borderRadius: 24,
+  padding: 20,
+} as const;
+
 function SwipeActivityCard({
   item,
   busy,
@@ -45,22 +59,102 @@ function SwipeActivityCard({
   onDismiss: (id: string) => void;
   onMarkRead: (id: string) => void;
 }) {
+  const translateX = useSharedValue(0);
+  const opacity = useSharedValue(1);
+  const unreadProgress = useSharedValue(item.unread ? 0 : 1);
+
+  useEffect(() => {
+    unreadProgress.value = withTiming(item.unread ? 0 : 1, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [item.unread, unreadProgress]);
+
+  const resetPosition = () => {
+    translateX.value = withTiming(0, {
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+    });
+    opacity.value = withTiming(1, {
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+    });
+  };
+
+  const animateDismiss = () => {
+    translateX.value = withTiming(-220, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    });
+    opacity.value = withTiming(0, {
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        runOnJS(onDismiss)(item.id);
+      }
+    });
+  };
+
+  const animateMarkRead = () => {
+    translateX.value = withTiming(28, {
+      duration: 120,
+      easing: Easing.out(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        runOnJS(onMarkRead)(item.id);
+      }
+    });
+    opacity.value = withTiming(0.96, {
+      duration: 120,
+      easing: Easing.out(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        translateX.value = withTiming(0, {
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+        });
+        opacity.value = withTiming(1, {
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+        });
+      }
+    });
+  };
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 24 && Math.abs(gestureState.dy) < 16,
+        onPanResponderMove: (_, gestureState) => {
+          const limited = Math.max(-140, Math.min(70, gestureState.dx));
+          translateX.value = limited;
+          opacity.value = limited < 0 ? Math.max(0.72, 1 - Math.abs(limited) / 240) : 1;
+        },
         onPanResponderRelease: (_, gestureState) => {
           if (gestureState.dx < -80) {
-            onDismiss(item.id);
+            animateDismiss();
             return;
           }
           if (gestureState.dx > 80 && item.unread) {
-            onMarkRead(item.id);
+            animateMarkRead();
+            return;
           }
+          resetPosition();
+        },
+        onPanResponderTerminate: () => {
+          resetPosition();
         },
       }),
     [item.id, item.unread, onDismiss, onMarkRead],
   );
+
+  const animatedCardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+    opacity: opacity.value,
+    backgroundColor: interpolateColor(unreadProgress.value, [0, 1], ["rgba(29,78,216,0.08)", "rgba(255,255,255,1)"]),
+    borderColor: interpolateColor(unreadProgress.value, [0, 1], ["rgba(29,78,216,0.28)", "rgba(208,213,221,1)"]),
+  }));
 
   const relatedHref = item.route
     ? item.routeParams
@@ -69,7 +163,7 @@ function SwipeActivityCard({
     : null;
 
   return (
-    <View {...panResponder.panHandlers} className={`rounded-3xl border bg-surface p-5 ${item.unread ? "border-primary/30" : "border-border"}`}>
+    <Animated.View {...panResponder.panHandlers} style={[animatedCardBaseStyle, animatedCardStyle]}>
       <View className="mb-3 flex-row items-center justify-between">
         <Text className="text-[11px] font-medium uppercase tracking-wide text-muted">Swipe right to mark read · left to dismiss</Text>
         {item.unread ? <Text className="text-xs font-semibold text-primary">Unread</Text> : <Text className="text-xs text-muted">Read</Text>}
@@ -93,7 +187,7 @@ function SwipeActivityCard({
 
       {relatedHref ? (
         <Link href={relatedHref} asChild>
-          <Pressable onPress={() => onOpen(item)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
+          <Pressable onPress={() => onOpen(item)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
             <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
               <Text className="text-center font-semibold text-foreground">Open related task</Text>
             </View>
@@ -102,13 +196,13 @@ function SwipeActivityCard({
       ) : null}
 
       {item.action ? (
-        <Pressable onPress={() => onInlineAction(item)} disabled={busy} style={({ pressed }) => [{ opacity: pressed || busy ? 0.7 : 1 }]}>
+        <Pressable onPress={() => onInlineAction(item)} disabled={busy} style={({ pressed }) => [{ opacity: pressed || busy ? 0.7 : 1 }]}> 
           <View className="mt-3 rounded-2xl bg-foreground px-4 py-3">
             <Text className="text-center text-sm font-semibold text-background">{busy ? "Processing…" : item.action.label}</Text>
           </View>
         </Pressable>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -183,13 +277,13 @@ export default function NotificationsScreen() {
             {unreadCount} unread · Sync source: {bundle.syncMeta.source} · Pending mutations: {bundle.syncMeta.pendingMutations}
           </Text>
           <Link href={"/notifications-preferences" as never} asChild>
-            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
               <View className="mt-4 rounded-2xl bg-white/10 px-4 py-3">
                 <Text className="text-center font-semibold text-white">Open notification preferences</Text>
               </View>
             </Pressable>
           </Link>
-          <Pressable onPress={() => void markAllActivitiesRead()} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}>
+          <Pressable onPress={() => void markAllActivitiesRead()} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}> 
             <View className="mt-3 rounded-2xl border border-white/20 bg-white/5 px-4 py-3">
               <Text className="text-center font-semibold text-white">Mark all as read</Text>
             </View>
@@ -210,7 +304,7 @@ export default function NotificationsScreen() {
             {filters.map((filter) => {
               const selected = activeFilter === filter.key;
               return (
-                <Pressable key={filter.key} onPress={() => setActiveFilter(filter.key)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
+                <Pressable key={filter.key} onPress={() => setActiveFilter(filter.key)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
                   <View className={`rounded-full border px-4 py-2 ${selected ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
                     <Text className={`text-sm font-semibold ${selected ? "text-primary" : "text-foreground"}`}>{filter.label}</Text>
                   </View>

@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -11,12 +10,14 @@ import {
   type LegalWorkflowStatus,
   type LivenessSessionRecord,
   type MobilePlatformBundle,
+  type NotificationPreferences,
+  type ParcelMuteDuration,
   cloneSeedBundle,
 } from "../lib/mobile-data";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 
 type SyncMutation = {
-  type: "mission_status" | "onboarding_document" | "liveness" | "legal_status";
+  type: "mission_status" | "onboarding_document" | "liveness" | "legal_status" | "notification_preference";
   recordId: string;
   queuedAt: string;
 };
@@ -48,6 +49,24 @@ function defaultStore(): StoredBundle {
   };
 }
 
+function purgeResolvedMutes(store: StoredBundle) {
+  const now = Date.now();
+  store.notificationPreferences.parcelMutes = store.notificationPreferences.parcelMutes.filter((mute) => {
+    if (mute.duration !== "until_workflow_completion" && mute.mutedUntil && new Date(mute.mutedUntil).getTime() <= now) {
+      return false;
+    }
+
+    if (mute.duration === "until_workflow_completion") {
+      const workflow = store.legalWorkflows.find((item) => item.parcelId === mute.parcelId && (!mute.workflowId || item.id === mute.workflowId));
+      if (workflow && (workflow.status === "registered" || workflow.status === "rejected")) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
 function readStore(): StoredBundle {
   ensureDataDir();
 
@@ -64,6 +83,13 @@ function readStore(): StoredBundle {
       fs.writeFileSync(STORE_PATH, JSON.stringify(store, null, 2));
       return store;
     }
+    parsed.notificationPreferences = {
+      ...defaultStore().notificationPreferences,
+      ...parsed.notificationPreferences,
+      parcelMutes: parsed.notificationPreferences?.parcelMutes ?? [],
+      followedParcelIds: parsed.notificationPreferences?.followedParcelIds ?? [],
+    };
+    purgeResolvedMutes(parsed);
     return parsed;
   } catch {
     const store = defaultStore();
@@ -113,8 +139,7 @@ function refreshReadiness(store: StoredBundle) {
     checklist.find((item) => !item.completed)?.label
       ? `Complete ${checklist.find((item) => !item.completed)?.label?.toLowerCase()} to finish stakeholder onboarding.`
       : "Onboarding verified and ready for downstream land-rights processing.";
-  store.onboarding.onboardingStatus =
-    percentage === 100 ? "verified" : percentage >= 57 ? "in_review" : "draft";
+  store.onboarding.onboardingStatus = percentage === 100 ? "verified" : percentage >= 57 ? "in_review" : "draft";
 }
 
 function timeline(status: LegalWorkflowStatus, updatedAt: string) {
@@ -151,12 +176,7 @@ function queueMutation(store: StoredBundle, mutation: SyncMutation) {
 async function pickVisionModel() {
   try {
     const { data } = await listLLMModels();
-    return (
-      data.find((model) => model.id === "gpt-5-mini")?.id ??
-      data.find((model) => model.id === "gemini-3-flash-preview")?.id ??
-      data[0]?.id ??
-      "gpt-5-mini"
-    );
+    return data.find((model) => model.id === "gpt-5-mini")?.id ?? data.find((model) => model.id === "gemini-3-flash-preview")?.id ?? data[0]?.id ?? "gpt-5-mini";
   } catch {
     return "gpt-5-mini";
   }
@@ -306,6 +326,7 @@ export async function analyzeLivenessSelfie(input: { base64Data: string; mimeTyp
 export function getMobilePlatformBundle() {
   const store = readStore();
   refreshReadiness(store);
+  purgeResolvedMutes(store);
   store.syncMeta = buildSyncMeta(store, store.syncMeta.source);
   writeStore(store);
   return store;
@@ -318,10 +339,68 @@ export function syncBundleMutation(input: Partial<MobilePlatformBundle>) {
   if (input.missions) store.missions = input.missions;
   if (input.legalWorkflows) store.legalWorkflows = input.legalWorkflows;
   if (input.onboarding) store.onboarding = input.onboarding;
+  if (input.notificationPreferences) store.notificationPreferences = input.notificationPreferences;
 
+  purgeResolvedMutes(store);
   store.syncMeta = buildSyncMeta(store, "live");
   writeStore(store);
   return store;
+}
+
+export function updateNotificationPreferences(input: Partial<NotificationPreferences>) {
+  const store = readStore();
+  store.notificationPreferences = {
+    ...store.notificationPreferences,
+    ...input,
+    updatedAt: new Date().toISOString(),
+    followedParcelIds: input.followedParcelIds ?? store.notificationPreferences.followedParcelIds,
+    parcelMutes: input.parcelMutes ?? store.notificationPreferences.parcelMutes,
+  };
+  purgeResolvedMutes(store);
+  queueMutation(store, { type: "notification_preference", recordId: "notification_preferences", queuedAt: store.notificationPreferences.updatedAt });
+  store.syncMeta = buildSyncMeta(store, "live");
+  writeStore(store);
+  return store.notificationPreferences;
+}
+
+export function toggleParcelSubscriptionPreference(input: { parcelId: number }) {
+  const store = readStore();
+  const followed = store.notificationPreferences.followedParcelIds.includes(input.parcelId);
+  const followedParcelIds = followed
+    ? store.notificationPreferences.followedParcelIds.filter((id) => id !== input.parcelId)
+    : [...store.notificationPreferences.followedParcelIds, input.parcelId].sort((a, b) => a - b);
+
+  return updateNotificationPreferences({ followedParcelIds });
+}
+
+export function setParcelMutePreference(input: { parcelId: number; duration: ParcelMuteDuration }) {
+  const store = readStore();
+  const workflow = store.legalWorkflows.find((item) => item.parcelId === input.parcelId && item.status !== "registered" && item.status !== "rejected") ?? null;
+  const mutedUntil =
+    input.duration === "1h"
+      ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      : input.duration === "1d"
+        ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        : null;
+
+  const parcelMutes = [
+    ...store.notificationPreferences.parcelMutes.filter((item) => item.parcelId !== input.parcelId),
+    {
+      parcelId: input.parcelId,
+      duration: input.duration,
+      mutedAt: new Date().toISOString(),
+      mutedUntil,
+      workflowId: workflow?.id ?? null,
+    },
+  ];
+
+  return updateNotificationPreferences({ parcelMutes });
+}
+
+export function clearParcelMutePreference(input: { parcelId: number }) {
+  const store = readStore();
+  const parcelMutes = store.notificationPreferences.parcelMutes.filter((item) => item.parcelId !== input.parcelId);
+  return updateNotificationPreferences({ parcelMutes });
 }
 
 export function updateMissionStatus(input: { missionId: string; status: StoredBundle["missions"][number]["status"] }) {
@@ -371,7 +450,7 @@ export function appendBusinessDocument(document: BusinessDocumentRecord) {
 export function startLivenessSession() {
   const store = readStore();
   const session: LivenessSessionRecord = {
-    sessionId: `LIV-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`,
+    sessionId: `LIV-${Date.now()}-${Math.random().toString(16).slice(2, 8).toUpperCase()}`,
     challengeType: "blink_turn_smile",
     status: "pending",
     framesAnalyzed: 0,
@@ -480,6 +559,7 @@ export function updateLegalWorkflowStatus(input: {
     workflow.registrationNumber = `${stateCode}-${String(workflow.parcelId).padStart(4, "0")}-${new Date().getFullYear()}-${Math.floor(1000 + workflow.parcelId)}`;
   }
 
+  purgeResolvedMutes(store);
   queueMutation(store, { type: "legal_status", recordId: workflow.id, queuedAt: workflow.updatedAt });
   store.syncMeta = buildSyncMeta(store, "live");
   writeStore(store);

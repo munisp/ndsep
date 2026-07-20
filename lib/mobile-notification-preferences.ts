@@ -1,26 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export type NotificationPreferences = {
-  pushEnabled: boolean;
-  fieldAlerts: boolean;
-  onboardingAlerts: boolean;
-  legalAlerts: boolean;
-  geospatialAlerts: boolean;
-  onlyAssignedParcels: boolean;
-  followedParcelIds: number[];
-};
+import type { NotificationPreferences, ParcelMuteDuration } from "@/lib/mobile-data";
+import { defaultNotificationPreferences } from "@/lib/mobile-data";
 
-const STORAGE_KEY = "idlr_pts_mobile.notification_preferences.v1";
-
-export const defaultNotificationPreferences: NotificationPreferences = {
-  pushEnabled: true,
-  fieldAlerts: true,
-  onboardingAlerts: true,
-  legalAlerts: true,
-  geospatialAlerts: true,
-  onlyAssignedParcels: false,
-  followedParcelIds: [6, 11],
-};
+const STORAGE_KEY = "idlr_pts_mobile.notification_preferences.v2";
 
 export async function getNotificationPreferences() {
   try {
@@ -29,7 +12,7 @@ export async function getNotificationPreferences() {
     return {
       ...defaultNotificationPreferences,
       ...(JSON.parse(raw) as Partial<NotificationPreferences>),
-    };
+    } satisfies NotificationPreferences;
   } catch {
     return defaultNotificationPreferences;
   }
@@ -40,14 +23,37 @@ export async function saveNotificationPreferences(preferences: NotificationPrefe
   return preferences;
 }
 
-export async function updateNotificationPreferences(partial: Partial<NotificationPreferences>) {
+export async function setParcelMute(input: {
+  parcelId: number;
+  duration: ParcelMuteDuration;
+  mutedUntil: string | null;
+  workflowId?: string | null;
+}) {
   const current = await getNotificationPreferences();
-  const next = {
+  const parcelMutes = [
+    ...current.parcelMutes.filter((item) => item.parcelId !== input.parcelId),
+    {
+      parcelId: input.parcelId,
+      duration: input.duration,
+      mutedAt: new Date().toISOString(),
+      mutedUntil: input.mutedUntil,
+      workflowId: input.workflowId ?? null,
+    },
+  ];
+  return saveNotificationPreferences({
     ...current,
-    ...partial,
-  } satisfies NotificationPreferences;
-  await saveNotificationPreferences(next);
-  return next;
+    parcelMutes,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function clearParcelMute(parcelId: number) {
+  const current = await getNotificationPreferences();
+  return saveNotificationPreferences({
+    ...current,
+    parcelMutes: current.parcelMutes.filter((item) => item.parcelId !== parcelId),
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export async function toggleParcelSubscription(parcelId: number) {
@@ -57,13 +63,33 @@ export async function toggleParcelSubscription(parcelId: number) {
     ? current.followedParcelIds.filter((id) => id !== parcelId)
     : [...current.followedParcelIds, parcelId].sort((a, b) => a - b);
 
-  return updateNotificationPreferences({ followedParcelIds });
+  return saveNotificationPreferences({
+    ...current,
+    followedParcelIds,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
-export async function shouldNotifyForParcel(parcelId?: number | null) {
+export async function shouldNotifyForParcel(input: {
+  parcelId?: number | null;
+  workflowStatus?: "draft" | "pending_review" | "approved" | "signed" | "registered" | "rejected" | null;
+}) {
   const preferences = await getNotificationPreferences();
   if (!preferences.pushEnabled) return false;
-  if (!preferences.onlyAssignedParcels) return true;
-  if (parcelId == null) return true;
-  return preferences.followedParcelIds.includes(parcelId);
+  if (preferences.onlyAssignedParcels && input.parcelId != null && !preferences.followedParcelIds.includes(input.parcelId)) {
+    return false;
+  }
+
+  const mute = preferences.parcelMutes.find((item) => item.parcelId === input.parcelId);
+  if (!mute) return true;
+
+  if (mute.duration === "until_workflow_completion") {
+    return input.workflowStatus === "registered" || input.workflowStatus === "rejected";
+  }
+
+  if (mute.mutedUntil && new Date(mute.mutedUntil).getTime() > Date.now()) {
+    return false;
+  }
+
+  return true;
 }

@@ -30,3 +30,6 @@
 - [x] Verify parcel-level notification subscriptions are fully implemented in the mobile app
 - [x] Verify notifications preference screen is fully implemented in the mobile app
 - [x] Verify swipe-to-dismiss and mark-as-read inbox gestures are fully implemented in the mobile app
+- [x] Parcel-level notification mute durations for 1 hour, 1 day, and until workflow completion
+- [x] Server-synced notification preferences across active devices
+- [x] Smooth transition animations and visual swipe feedback in the notifications inbox
