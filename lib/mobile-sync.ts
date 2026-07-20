@@ -1,10 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useMemo, useState } from "react";
 
-import type { BusinessProfileRecord, MobilePlatformBundle, NotificationPreferences, ParcelMuteDuration } from "@/lib/mobile-data";
+import type { BusinessProfileRecord, GeofenceTransition, MobilePlatformBundle, NotificationPreferences, ParcelMuteDuration } from "@/lib/mobile-data";
 import { cloneSeedBundle } from "@/lib/mobile-data";
 import { registerFieldSyncBackgroundTask } from "@/lib/background-sync";
-import { prependActivity } from "@/lib/mobile-activity";
+import { syncParcelGeofences } from "@/lib/mobile-geofencing";
+import { buildActivityInteractionProfile, prependActivity, updateActivityInsight, type ActivityRecord } from "@/lib/mobile-activity";
 import { ensureNotificationPermissions, scheduleFieldUpdateNotification } from "@/lib/mobile-notifications";
 import { getQueuedFieldMutations, queueMissionStatusMutation, replayQueuedFieldMutations } from "@/lib/mobile-sync-replay";
 import { trpc } from "@/lib/trpc";
@@ -94,6 +95,10 @@ export function useMobilePlatformBundle() {
     };
   }, [cachedBundle, liveQuery.data, queuedMutations]);
 
+  useEffect(() => {
+    syncParcelGeofences(bundle).catch(() => undefined);
+  }, [bundle]);
+
   const rawMissionStatusMutation = trpc.sync.updateMissionStatus.useMutation({
     onSuccess: async () => {
       await utils.sync.getBundle.invalidate();
@@ -123,6 +128,14 @@ export function useMobilePlatformBundle() {
       await utils.sync.getBundle.invalidate();
     },
   });
+
+  const updateParcelGeofenceMutation = trpc.notifications.updateParcelGeofence.useMutation({
+    onSuccess: async () => {
+      await utils.sync.getBundle.invalidate();
+    },
+  });
+
+  const analyzeActivitiesMutation = trpc.notifications.analyzeActivities.useMutation();
 
   const submitBusinessProfile = trpc.onboarding.submitBusinessProfile.useMutation({ onSuccess: async () => void (await utils.sync.getBundle.invalidate()) });
   const analyzeIdentityDocument = trpc.onboarding.analyzeIdentityDocument.useMutation({ onSuccess: async () => void (await utils.sync.getBundle.invalidate()) });
@@ -224,6 +237,63 @@ export function useMobilePlatformBundle() {
     return result;
   }
 
+  async function updateParcelGeofence(input: { parcelId: number; enabled?: boolean; radiusMeters?: number; transition?: GeofenceTransition }) {
+    const result = await updateParcelGeofenceMutation.mutateAsync(input);
+    const parcel = bundle.parcels.find((item) => item.id === input.parcelId);
+    const geofence = result.geofenceSubscriptions.find((item) => item.parcelId === input.parcelId);
+    await prependActivity({
+      title: geofence?.enabled ? "Parcel geofence updated" : "Parcel geofence paused",
+      description: `${parcel?.parcelNumber ?? `Parcel ${input.parcelId}`} geofence alerts now use ${geofence?.radiusMeters ?? input.radiusMeters ?? 150}m monitoring with ${geofence?.transition ?? input.transition ?? "both"} transitions.`,
+      category: "geospatial",
+      tone: geofence?.enabled ? "info" : "warning",
+      route: "/parcel/[id]",
+      routeParams: { id: String(input.parcelId) },
+      parcelId: input.parcelId,
+      parcelNumber: parcel?.parcelNumber,
+    });
+    return result;
+  }
+
+  async function analyzeActivities(items: ActivityRecord[]) {
+    const candidates = items.filter((item) => !item.dismissedAt).slice(0, 12);
+    if (candidates.length === 0) return [];
+
+    const interactionProfile = buildActivityInteractionProfile(items);
+    const result = await analyzeActivitiesMutation.mutateAsync({
+      activities: candidates.map((item) => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        category: item.category,
+        tone: item.tone,
+        unread: item.unread,
+        parcelNumber: item.parcelNumber ?? null,
+        actionLabel: item.action?.label ?? null,
+        auditTrailSummary: item.auditHistory
+          .slice(0, 3)
+          .map((entry) => `${entry.label}: ${entry.detail}`)
+          .join(" | ") || null,
+      })),
+      interactionProfile,
+    });
+
+    await Promise.all(
+      result.map((analysis) =>
+        updateActivityInsight(analysis.id, {
+          summary: analysis.summary,
+          priorityLevel: analysis.priorityLevel,
+          priorityScore: analysis.priorityScore,
+          rationale: analysis.rationale,
+          analyzedAt: new Date().toISOString(),
+          model: analysis.model,
+          interactionWeight: analysis.interactionWeight,
+        }),
+      ),
+    );
+
+    return result;
+  }
+
   return {
     bundle,
     cacheLoaded,
@@ -236,6 +306,8 @@ export function useMobilePlatformBundle() {
     toggleParcelSubscription,
     setParcelMute,
     clearParcelMute,
+    updateParcelGeofence,
+    analyzeActivities,
     submitBusinessProfile: async (profile: BusinessProfileRecord) => {
       const result = await submitBusinessProfile.mutateAsync(profile);
       await prependActivity({ title: "Business onboarding submitted", description: `${profile.companyName ?? "Business profile"} was submitted for KYB review and onboarding readiness recalculation.`, category: "onboarding", tone: "info", route: "/onboarding" });

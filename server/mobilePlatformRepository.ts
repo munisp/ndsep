@@ -7,6 +7,7 @@ import {
   type IdentityDocumentRecord,
   type KybDocumentStatus,
   type LegalWorkflowRecord,
+  type GeofenceTransition,
   type LegalWorkflowStatus,
   type LivenessSessionRecord,
   type MobilePlatformBundle,
@@ -33,6 +34,40 @@ type DocumentAnalysisResult = {
   status: KybDocumentStatus;
   extractedFields: Record<string, string>;
   needsAttention: boolean;
+};
+
+type NotificationInteractionProfileInput = {
+  openedByCategory: Record<string, number>;
+  dismissedByCategory: Record<string, number>;
+  actionedByCategory: Record<string, number>;
+  unreadResolvedByCategory: Record<string, number>;
+  totalOpened: number;
+  totalDismissed: number;
+  totalActioned: number;
+  totalUnreadResolved: number;
+  preferredCategories: string[];
+};
+
+type NotificationAnalysisInput = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  tone: string;
+  unread: boolean;
+  parcelNumber?: string | null;
+  actionLabel?: string | null;
+  auditTrailSummary?: string | null;
+};
+
+type NotificationAnalysisResult = {
+  id: string;
+  summary: string;
+  priorityLevel: "low" | "medium" | "high";
+  priorityScore: number;
+  rationale: string;
+  interactionWeight: number;
+  model: string;
 };
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
@@ -88,6 +123,7 @@ function readStore(): StoredBundle {
       ...parsed.notificationPreferences,
       parcelMutes: parsed.notificationPreferences?.parcelMutes ?? [],
       followedParcelIds: parsed.notificationPreferences?.followedParcelIds ?? [],
+      geofenceSubscriptions: parsed.notificationPreferences?.geofenceSubscriptions ?? defaultStore().notificationPreferences.geofenceSubscriptions,
     };
     purgeResolvedMutes(parsed);
     return parsed;
@@ -180,6 +216,110 @@ async function pickVisionModel() {
   } catch {
     return "gpt-5-mini";
   }
+}
+
+async function pickNotificationAnalysisModel() {
+  try {
+    const { data } = await listLLMModels();
+    return data.find((model) => model.id === "gpt-5-mini")?.id ?? data.find((model) => model.id === "claude-haiku-4-5")?.id ?? data[0]?.id ?? "gpt-5-mini";
+  } catch {
+    return "gpt-5-mini";
+  }
+}
+
+function fallbackNotificationAnalysis(item: NotificationAnalysisInput, profile: NotificationInteractionProfileInput): NotificationAnalysisResult {
+  const opens = profile.openedByCategory[item.category] ?? 0;
+  const actions = profile.actionedByCategory[item.category] ?? 0;
+  const dismisses = profile.dismissedByCategory[item.category] ?? 0;
+  const interactionWeight = Math.max(0, Math.min(1, 0.45 + opens * 0.06 + actions * 0.08 - dismisses * 0.05));
+  const priorityScore = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(28 + (item.unread ? 18 : 0) + (item.actionLabel ? 14 : 0) + (item.tone === "warning" ? 18 : item.tone === "success" ? 4 : 10) + interactionWeight * 24),
+    ),
+  );
+  const priorityLevel = priorityScore >= 80 ? "high" : priorityScore >= 55 ? "medium" : "low";
+  const summary = `${item.title}: ${item.description}`.slice(0, 180);
+  const rationale = `${item.category} alerts receive ${opens > dismisses ? "strong" : "moderate"} attention from recent user behavior, so this item is ranked ${priorityLevel}.`;
+  return {
+    id: item.id,
+    summary,
+    priorityLevel,
+    priorityScore,
+    rationale,
+    interactionWeight: Number(interactionWeight.toFixed(2)),
+    model: "deterministic-fallback",
+  };
+}
+
+export async function analyzeNotificationActivities(input: {
+  activities: NotificationAnalysisInput[];
+  interactionProfile: NotificationInteractionProfileInput;
+}) {
+  if (input.activities.length === 0) return [] as NotificationAnalysisResult[];
+  const model = await pickNotificationAnalysisModel();
+
+  return Promise.all(
+    input.activities.map(async (item) => {
+      try {
+        const response = await invokeLLM({
+          model,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You prioritize land-registry mobile alerts for field officers. Produce concise summaries, score urgency from 0 to 100, and consider recent user interaction history when ranking what should appear first in the inbox.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                interactionProfile: input.interactionProfile,
+                alert: item,
+                instructions: {
+                  summary: "Summarize the alert in at most two sentences for a mobile notification detail sheet.",
+                  priority: "Return a priority level and numeric score that reflects urgency, unread status, user habits, and whether the alert has an action.",
+                },
+              }),
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "notification_analysis",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
+                  summary: { type: "string" },
+                  priorityLevel: { type: "string", enum: ["low", "medium", "high"] },
+                  priorityScore: { type: "number" },
+                  rationale: { type: "string" },
+                  interactionWeight: { type: "number" },
+                },
+                required: ["summary", "priorityLevel", "priorityScore", "rationale", "interactionWeight"],
+                additionalProperties: false,
+              },
+            },
+          },
+          maxTokens: 500,
+        });
+        const content = response.choices[0]?.message.content;
+        const parsed = typeof content === "string" ? JSON.parse(content) : JSON.parse((content?.[0] as { text?: string })?.text ?? "{}");
+        return {
+          id: item.id,
+          summary: String(parsed.summary ?? item.description).slice(0, 220),
+          priorityLevel: parsed.priorityLevel === "high" || parsed.priorityLevel === "medium" ? parsed.priorityLevel : "low",
+          priorityScore: Math.max(0, Math.min(100, Math.round(Number(parsed.priorityScore) || 0))),
+          rationale: String(parsed.rationale ?? "AI analysis completed for this alert."),
+          interactionWeight: Math.max(0, Math.min(1, Number(parsed.interactionWeight) || 0)),
+          model,
+        } satisfies NotificationAnalysisResult;
+      } catch {
+        return fallbackNotificationAnalysis(item, input.interactionProfile);
+      }
+    }),
+  );
 }
 
 function inferEngineFromMime(mimeType: string, documentType: string): BusinessDocumentRecord["engine"] {
@@ -355,6 +495,7 @@ export function updateNotificationPreferences(input: Partial<NotificationPrefere
     updatedAt: new Date().toISOString(),
     followedParcelIds: input.followedParcelIds ?? store.notificationPreferences.followedParcelIds,
     parcelMutes: input.parcelMutes ?? store.notificationPreferences.parcelMutes,
+    geofenceSubscriptions: input.geofenceSubscriptions ?? store.notificationPreferences.geofenceSubscriptions,
   };
   purgeResolvedMutes(store);
   queueMutation(store, { type: "notification_preference", recordId: "notification_preferences", queuedAt: store.notificationPreferences.updatedAt });
@@ -370,7 +511,48 @@ export function toggleParcelSubscriptionPreference(input: { parcelId: number }) 
     ? store.notificationPreferences.followedParcelIds.filter((id) => id !== input.parcelId)
     : [...store.notificationPreferences.followedParcelIds, input.parcelId].sort((a, b) => a - b);
 
-  return updateNotificationPreferences({ followedParcelIds });
+  const geofenceSubscriptions = followed
+    ? store.notificationPreferences.geofenceSubscriptions.filter((item) => item.parcelId !== input.parcelId)
+    : store.notificationPreferences.geofenceSubscriptions.some((item) => item.parcelId === input.parcelId)
+      ? store.notificationPreferences.geofenceSubscriptions
+      : [
+          ...store.notificationPreferences.geofenceSubscriptions,
+          {
+            parcelId: input.parcelId,
+            radiusMeters: 150,
+            transition: "both" as const,
+            enabled: true,
+            lastTriggeredAt: null,
+            lastTransition: null,
+          },
+        ];
+
+  return updateNotificationPreferences({ followedParcelIds, geofenceSubscriptions });
+}
+
+export function updateParcelGeofencePreference(input: {
+  parcelId: number;
+  enabled?: boolean;
+  radiusMeters?: number;
+  transition?: GeofenceTransition;
+  lastTriggeredAt?: string | null;
+  lastTransition?: "enter" | "exit" | null;
+}) {
+  const store = readStore();
+  const existing = store.notificationPreferences.geofenceSubscriptions.find((item) => item.parcelId === input.parcelId);
+  const geofenceSubscriptions = [
+    ...store.notificationPreferences.geofenceSubscriptions.filter((item) => item.parcelId !== input.parcelId),
+    {
+      parcelId: input.parcelId,
+      radiusMeters: input.radiusMeters ?? existing?.radiusMeters ?? 150,
+      transition: input.transition ?? existing?.transition ?? "both",
+      enabled: input.enabled ?? existing?.enabled ?? true,
+      lastTriggeredAt: input.lastTriggeredAt ?? existing?.lastTriggeredAt ?? null,
+      lastTransition: input.lastTransition ?? existing?.lastTransition ?? null,
+    },
+  ].sort((a, b) => a.parcelId - b.parcelId);
+
+  return updateNotificationPreferences({ geofenceSubscriptions });
 }
 
 export function setParcelMutePreference(input: { parcelId: number; duration: ParcelMuteDuration }) {

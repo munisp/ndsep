@@ -234,44 +234,40 @@
       "parcelId": 11,
       "transactionId": "TX-AMAC-2026-011",
       "type": "Right of Occupancy",
-      "status": "registered",
-      "assignedDesk": "Registry Archive",
+      "status": "pending_review",
+      "assignedDesk": "Verification Desk",
       "preparedBy": "Corporate Desk",
-      "reviewedBy": "Mobile Registry Supervisor",
-      "updatedAt": "2026-07-20T12:57:03.045Z",
+      "reviewedBy": null,
+      "updatedAt": "2026-07-20T01:20:00Z",
       "timeline": [
         {
           "key": "draft",
           "label": "Draft prepared",
           "completed": true,
-          "timestamp": "2026-07-20T12:57:03.045Z"
+          "timestamp": "2026-07-20T01:20:00Z"
         },
         {
           "key": "pending_review",
           "label": "Review in progress",
           "completed": true,
-          "timestamp": "2026-07-20T12:57:03.045Z"
+          "timestamp": "2026-07-20T01:20:00Z"
         },
         {
           "key": "approved",
           "label": "Approved",
-          "completed": true,
-          "timestamp": "2026-07-20T12:57:03.045Z"
+          "completed": false
         },
         {
           "key": "signed",
           "label": "Signed",
-          "completed": true,
-          "timestamp": "2026-07-20T12:57:03.045Z"
+          "completed": false
         },
         {
           "key": "registered",
           "label": "Registered",
-          "completed": true,
-          "timestamp": "2026-07-20T12:57:03.045Z"
+          "completed": false
         }
-      ],
-      "registrationNumber": "ROO-0011-2026-1011"
+      ]
     },
     {
       "id": "legal-gc-15",
@@ -321,25 +317,44 @@
     "onboardingAlerts": true,
     "legalAlerts": true,
     "geospatialAlerts": true,
+    "geofenceAlerts": true,
     "onlyAssignedParcels": false,
     "followedParcelIds": [
       6,
       11
     ],
     "parcelMutes": [],
-    "updatedAt": "2026-07-20T00:00:00Z"
+    "geofenceSubscriptions": [
+      {
+        "parcelId": 6,
+        "radiusMeters": 150,
+        "transition": "both",
+        "enabled": true,
+        "lastTriggeredAt": null,
+        "lastTransition": null
+      },
+      {
+        "parcelId": 11,
+        "radiusMeters": 250,
+        "transition": "exit",
+        "enabled": true,
+        "lastTriggeredAt": null,
+        "lastTransition": null
+      }
+    ],
+    "updatedAt": "2026-07-20T13:18:22.834Z"
   },
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-07-20T12:57:03.045Z",
+    "lastSyncedAt": "2026-07-20T13:18:22.834Z",
     "pendingMutations": 1,
     "offlineReady": true
   },
   "syncQueue": [
     {
-      "type": "legal_status",
-      "recordId": "roo-amac-11",
-      "queuedAt": "2026-07-20T12:57:03.045Z"
+      "type": "notification_preference",
+      "recordId": "notification_preferences",
+      "queuedAt": "2026-07-20T13:18:22.834Z"
     }
   ]
 }

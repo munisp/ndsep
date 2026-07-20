@@ -130,6 +130,7 @@ export type LegalWorkflowRecord = {
 };
 
 export type ParcelMuteDuration = "1h" | "1d" | "until_workflow_completion";
+export type GeofenceTransition = "enter" | "exit" | "both";
 
 export type ParcelMuteRule = {
   parcelId: number;
@@ -139,15 +140,26 @@ export type ParcelMuteRule = {
   workflowId?: string | null;
 };
 
+export type ParcelGeofenceSubscription = {
+  parcelId: number;
+  radiusMeters: number;
+  transition: GeofenceTransition;
+  enabled: boolean;
+  lastTriggeredAt: string | null;
+  lastTransition: "enter" | "exit" | null;
+};
+
 export type NotificationPreferences = {
   pushEnabled: boolean;
   fieldAlerts: boolean;
   onboardingAlerts: boolean;
   legalAlerts: boolean;
   geospatialAlerts: boolean;
+  geofenceAlerts: boolean;
   onlyAssignedParcels: boolean;
   followedParcelIds: number[];
   parcelMutes: ParcelMuteRule[];
+  geofenceSubscriptions: ParcelGeofenceSubscription[];
   updatedAt: string;
 };
 
@@ -199,9 +211,28 @@ export const defaultNotificationPreferences: NotificationPreferences = {
   onboardingAlerts: true,
   legalAlerts: true,
   geospatialAlerts: true,
+  geofenceAlerts: true,
   onlyAssignedParcels: false,
   followedParcelIds: [6, 11],
   parcelMutes: [],
+  geofenceSubscriptions: [
+    {
+      parcelId: 6,
+      radiusMeters: 150,
+      transition: "both",
+      enabled: true,
+      lastTriggeredAt: null,
+      lastTransition: null,
+    },
+    {
+      parcelId: 11,
+      radiusMeters: 150,
+      transition: "enter",
+      enabled: true,
+      lastTriggeredAt: null,
+      lastTransition: null,
+    },
+  ],
   updatedAt: "2026-07-20T00:00:00Z",
 };
 

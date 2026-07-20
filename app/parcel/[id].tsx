@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
 import { Link, useLocalSearchParams } from "expo-router";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
-import { findMissionByParcel, findWorkflowByParcel } from "@/lib/mobile-data";
-import { getNotificationPreferences, toggleParcelSubscription } from "@/lib/mobile-notification-preferences";
+import { findMissionByParcel, findWorkflowByParcel, type GeofenceTransition } from "@/lib/mobile-data";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
 function DetailCard({ label, value }: { label: string; value: string }) {
@@ -16,31 +14,43 @@ function DetailCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SelectionChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
+      <View className={`rounded-full border px-4 py-2 ${active ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
+        <Text className={`text-sm font-semibold ${active ? "text-primary" : "text-foreground"}`}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 export default function ParcelDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { bundle } = useMobilePlatformBundle();
-  const [followedParcelIds, setFollowedParcelIds] = useState<number[]>([]);
-  const [onlyAssignedParcels, setOnlyAssignedParcels] = useState(false);
+  const { bundle, toggleParcelSubscription, updateParcelGeofence } = useMobilePlatformBundle();
 
   const parcelId = Number(id ?? bundle.parcels[0]?.id ?? 0);
   const parcel = bundle.parcels.find((item) => item.id === parcelId) ?? bundle.parcels[0];
   const mission = findMissionByParcel(parcel.id, bundle.missions);
   const workflow = findWorkflowByParcel(parcel.id, bundle.legalWorkflows);
-  const isFollowed = followedParcelIds.includes(parcel.id);
-
-  useEffect(() => {
-    getNotificationPreferences()
-      .then((preferences) => {
-        setFollowedParcelIds(preferences.followedParcelIds);
-        setOnlyAssignedParcels(preferences.onlyAssignedParcels);
-      })
-      .catch(() => undefined);
-  }, []);
+  const preferences = bundle.notificationPreferences;
+  const isFollowed = preferences.followedParcelIds.includes(parcel.id);
+  const geofence = preferences.geofenceSubscriptions.find((item) => item.parcelId === parcel.id);
+  const geofenceEnabled = Boolean(geofence?.enabled);
 
   async function handleToggleFollow() {
-    const next = await toggleParcelSubscription(parcel.id);
-    setFollowedParcelIds(next.followedParcelIds);
-    setOnlyAssignedParcels(next.onlyAssignedParcels);
+    await toggleParcelSubscription(parcel.id);
+  }
+
+  async function handleToggleGeofence() {
+    await updateParcelGeofence({ parcelId: parcel.id, enabled: !geofenceEnabled });
+  }
+
+  async function handleRadius(radiusMeters: number) {
+    await updateParcelGeofence({ parcelId: parcel.id, enabled: true, radiusMeters });
+  }
+
+  async function handleTransition(transition: GeofenceTransition) {
+    await updateParcelGeofence({ parcelId: parcel.id, enabled: true, transition });
   }
 
   return (
@@ -69,9 +79,9 @@ export default function ParcelDetailScreen() {
               : "This parcel is not currently followed for parcel-tagged alerts."}
           </Text>
           <Text className="mt-2 text-sm text-muted">
-            Delivery mode: {onlyAssignedParcels ? "Assigned/followed parcels only" : "All parcel-tagged events"}
+            Delivery mode: {preferences.onlyAssignedParcels ? "Assigned/followed parcels only" : "All parcel-tagged events"}
           </Text>
-          <Pressable onPress={() => void handleToggleFollow()} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
+          <Pressable onPress={() => void handleToggleFollow()} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
             <View className={`mt-4 rounded-2xl px-4 py-4 ${isFollowed ? "bg-foreground" : "border border-border bg-background"}`}>
               <Text className={`text-center font-semibold ${isFollowed ? "text-background" : "text-foreground"}`}>
                 {isFollowed ? "Unfollow parcel alerts" : "Follow parcel alerts"}
@@ -79,12 +89,47 @@ export default function ParcelDetailScreen() {
             </View>
           </Pressable>
           <Link href={"/notifications-preferences" as never} asChild>
-            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
+            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
               <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4">
                 <Text className="text-center font-semibold text-foreground">Open notification preferences</Text>
               </View>
             </Pressable>
           </Link>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Geofence parcel alerts</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">
+            Enable location-aware parcel alerts so the mobile client can detect when a field officer enters or exits this parcel’s operating radius.
+          </Text>
+          <Text className="mt-3 text-sm text-muted">
+            {geofenceEnabled
+              ? `Geofence active · ${geofence?.radiusMeters ?? 150}m radius · ${geofence?.transition ?? "both"} transitions`
+              : "Geofence paused for this parcel"}
+          </Text>
+          <Text className="mt-2 text-xs text-muted">
+            {geofence?.lastTriggeredAt
+              ? `Last trigger: ${new Date(geofence.lastTriggeredAt).toLocaleString()} · ${geofence.lastTransition ?? "unknown transition"}`
+              : "No geofence transition has been recorded on this device yet."}
+          </Text>
+          <Pressable onPress={() => void handleToggleGeofence()} disabled={!isFollowed} style={({ pressed }) => [{ opacity: pressed || !isFollowed ? 0.7 : 1 }]}> 
+            <View className={`mt-4 rounded-2xl px-4 py-4 ${geofenceEnabled ? "bg-foreground" : "border border-border bg-background"}`}>
+              <Text className={`text-center font-semibold ${geofenceEnabled ? "text-background" : "text-foreground"}`}>
+                {geofenceEnabled ? "Pause geofence alerts" : "Enable geofence alerts"}
+              </Text>
+            </View>
+          </Pressable>
+          {!isFollowed ? <Text className="mt-2 text-xs text-muted">Follow the parcel first to activate geofence tracking.</Text> : null}
+          <View className="mt-4 flex-row flex-wrap gap-2">
+            <SelectionChip label="100m" active={geofence?.radiusMeters === 100} onPress={() => void handleRadius(100)} />
+            <SelectionChip label="150m" active={(geofence?.radiusMeters ?? 150) === 150} onPress={() => void handleRadius(150)} />
+            <SelectionChip label="250m" active={geofence?.radiusMeters === 250} onPress={() => void handleRadius(250)} />
+          </View>
+          <View className="mt-3 flex-row flex-wrap gap-2">
+            <SelectionChip label="Enter" active={geofence?.transition === "enter"} onPress={() => void handleTransition("enter")} />
+            <SelectionChip label="Exit" active={geofence?.transition === "exit"} onPress={() => void handleTransition("exit")} />
+            <SelectionChip label="Both" active={(geofence?.transition ?? "both") === "both"} onPress={() => void handleTransition("both")} />
+          </View>
         </View>
 
         <View className="flex-row gap-3">

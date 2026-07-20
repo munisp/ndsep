@@ -33,3 +33,6 @@
 - [x] Parcel-level notification mute durations for 1 hour, 1 day, and until workflow completion
 - [x] Server-synced notification preferences across active devices
 - [x] Smooth transition animations and visual swipe feedback in the notifications inbox
+- [x] Native notification detail sheet with comprehensive alert audit history
+- [x] Geofence-based parcel subscription alerts for location-accurate field notifications
+- [x] AI-generated notification summaries and priority ranking based on interaction history

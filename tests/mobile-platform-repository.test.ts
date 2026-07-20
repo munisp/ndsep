@@ -3,7 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { cloneSeedBundle } from "../lib/mobile-data";
-import { getMobilePlatformBundle, updateLegalWorkflowStatus, updateMissionStatus } from "../server/mobilePlatformRepository";
+import { getMobilePlatformBundle, updateLegalWorkflowStatus, updateMissionStatus, updateParcelGeofencePreference } from "../server/mobilePlatformRepository";
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
 const STORE_PATH = path.join(DATA_DIR, "mobile-platform-store.json");
@@ -43,5 +43,13 @@ describe("mobile platform repository", () => {
     const workflow = updateLegalWorkflowStatus({ workflowId: "roo-amac-11", status: "registered", reviewedBy: "Mobile Registry Supervisor" });
     expect(workflow.registrationNumber).toBeTruthy();
     expect(workflow.timeline.find((item) => item.key === "registered")?.completed).toBe(true);
+  });
+
+  it("persists parcel geofence subscription changes through the notification preference store", () => {
+    const preferences = updateParcelGeofencePreference({ parcelId: 11, enabled: true, radiusMeters: 250, transition: "exit" });
+    const subscription = preferences.geofenceSubscriptions.find((item) => item.parcelId === 11);
+    expect(subscription?.enabled).toBe(true);
+    expect(subscription?.radiusMeters).toBe(250);
+    expect(subscription?.transition).toBe("exit");
   });
 });

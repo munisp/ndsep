@@ -19,6 +19,7 @@ import {
   getUnreadActivityCount,
   markActivityRead,
   markAllActivitiesRead,
+  recordActivityAction,
   subscribeActivityFeed,
 } from "@/lib/mobile-activity";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
@@ -47,14 +48,12 @@ const animatedCardBaseStyle = {
 function SwipeActivityCard({
   item,
   busy,
-  onOpen,
   onInlineAction,
   onDismiss,
   onMarkRead,
 }: {
   item: ActivityRecord;
   busy: boolean;
-  onOpen: (item: ActivityRecord) => void;
   onInlineAction: (item: ActivityRecord) => void;
   onDismiss: (id: string) => void;
   onMarkRead: (id: string) => void;
@@ -86,40 +85,52 @@ function SwipeActivityCard({
       duration: 220,
       easing: Easing.out(Easing.cubic),
     });
-    opacity.value = withTiming(0, {
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-    }, (finished) => {
-      if (finished) {
-        runOnJS(onDismiss)(item.id);
-      }
-    });
+    opacity.value = withTiming(
+      0,
+      {
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+      },
+      (finished) => {
+        if (finished) {
+          runOnJS(onDismiss)(item.id);
+        }
+      },
+    );
   };
 
   const animateMarkRead = () => {
-    translateX.value = withTiming(28, {
-      duration: 120,
-      easing: Easing.out(Easing.cubic),
-    }, (finished) => {
-      if (finished) {
-        runOnJS(onMarkRead)(item.id);
-      }
-    });
-    opacity.value = withTiming(0.96, {
-      duration: 120,
-      easing: Easing.out(Easing.cubic),
-    }, (finished) => {
-      if (finished) {
-        translateX.value = withTiming(0, {
-          duration: 200,
-          easing: Easing.out(Easing.cubic),
-        });
-        opacity.value = withTiming(1, {
-          duration: 200,
-          easing: Easing.out(Easing.cubic),
-        });
-      }
-    });
+    translateX.value = withTiming(
+      28,
+      {
+        duration: 120,
+        easing: Easing.out(Easing.cubic),
+      },
+      (finished) => {
+        if (finished) {
+          runOnJS(onMarkRead)(item.id);
+        }
+      },
+    );
+    opacity.value = withTiming(
+      0.96,
+      {
+        duration: 120,
+        easing: Easing.out(Easing.cubic),
+      },
+      (finished) => {
+        if (finished) {
+          translateX.value = withTiming(0, {
+            duration: 200,
+            easing: Easing.out(Easing.cubic),
+          });
+          opacity.value = withTiming(1, {
+            duration: 200,
+            easing: Easing.out(Easing.cubic),
+          });
+        }
+      },
+    );
   };
 
   const panResponder = useMemo(
@@ -172,8 +183,13 @@ function SwipeActivityCard({
       <View className="flex-row items-start justify-between gap-3">
         <View className="flex-1">
           <Text className="text-base font-semibold text-foreground">{item.title}</Text>
-          <Text className="mt-2 text-sm leading-5 text-muted">{item.description}</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">{item.aiInsight?.summary ?? item.description}</Text>
           {item.parcelNumber ? <Text className="mt-2 text-xs font-medium text-primary">Parcel {item.parcelNumber}</Text> : null}
+          {item.aiInsight ? (
+            <Text className="mt-2 text-xs text-muted">
+              Priority {item.aiInsight.priorityLevel} · Score {item.aiInsight.priorityScore}
+            </Text>
+          ) : null}
         </View>
         <View className={`rounded-full border px-3 py-1 ${toneStyles[item.tone]}`}>
           <Text className="text-xs font-semibold uppercase tracking-wide">{item.category}</Text>
@@ -182,13 +198,21 @@ function SwipeActivityCard({
 
       <View className="mt-3 flex-row items-center justify-between gap-3">
         <Text className="text-xs text-muted">{new Date(item.timestamp).toLocaleString()}</Text>
-        {item.action ? <Text className="text-xs text-muted">Action available</Text> : null}
+        <Text className="text-xs text-muted">{item.auditHistory.length} audit event{item.auditHistory.length === 1 ? "" : "s"}</Text>
       </View>
+
+      <Link href={{ pathname: "/notification/[id]", params: { id: item.id } } as never} asChild>
+        <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
+          <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
+            <Text className="text-center font-semibold text-foreground">Open alert detail</Text>
+          </View>
+        </Pressable>
+      </Link>
 
       {relatedHref ? (
         <Link href={relatedHref} asChild>
-          <Pressable onPress={() => onOpen(item)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
-            <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
+          <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}> 
+            <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-3">
               <Text className="text-center font-semibold text-foreground">Open related task</Text>
             </View>
           </Pressable>
@@ -207,12 +231,13 @@ function SwipeActivityCard({
 }
 
 export default function NotificationsScreen() {
-  const { bundle, refresh, isRefetching, approveIdentityDocument, approveLegalWorkflow } = useMobilePlatformBundle();
+  const { bundle, refresh, isRefetching, approveIdentityDocument, approveLegalWorkflow, analyzeActivities } = useMobilePlatformBundle();
   const [items, setItems] = useState<ActivityRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActivityFilter>("all");
   const [unreadCount, setUnreadCount] = useState(0);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
+  const [isAnalyzingInsights, setIsAnalyzingInsights] = useState(false);
 
   async function loadFeed() {
     const [feed, unread] = await Promise.all([getActivityFeed(), getUnreadActivityCount()]);
@@ -228,15 +253,27 @@ export default function NotificationsScreen() {
     return unsubscribe;
   }, []);
 
+  const pendingInsightIds = useMemo(
+    () =>
+      items
+        .filter((item) => !item.dismissedAt && (!item.aiInsight || item.aiInsight.model === "seeded-mobile-analysis" || item.aiInsight.model === "deterministic-fallback"))
+        .slice(0, 6)
+        .map((item) => item.id)
+        .join("|"),
+    [items],
+  );
+
+  useEffect(() => {
+    if (!pendingInsightIds || isAnalyzingInsights) return;
+    setIsAnalyzingInsights(true);
+    analyzeActivities(items)
+      .catch(() => undefined)
+      .finally(() => setIsAnalyzingInsights(false));
+  }, [analyzeActivities, isAnalyzingInsights, items, pendingInsightIds]);
+
   async function handleRefresh() {
     await refresh();
     await loadFeed();
-  }
-
-  async function handleOpenItem(item: ActivityRecord) {
-    if (item.unread) {
-      await markActivityRead(item.id);
-    }
   }
 
   async function handleInlineAction(item: ActivityRecord) {
@@ -249,6 +286,7 @@ export default function NotificationsScreen() {
       if (item.action.kind === "approve_legal" && item.action.legalWorkflowId) {
         await approveLegalWorkflow(item.action.legalWorkflowId);
       }
+      await recordActivityAction(item.id, item.action.label);
       await markActivityRead(item.id);
     } finally {
       setBusyActionId(null);
@@ -276,6 +314,7 @@ export default function NotificationsScreen() {
           <Text className="mt-2 text-sm leading-5 text-white/85">
             {unreadCount} unread · Sync source: {bundle.syncMeta.source} · Pending mutations: {bundle.syncMeta.pendingMutations}
           </Text>
+          <Text className="mt-2 text-xs text-white/80">{isAnalyzingInsights ? "AI is refreshing summaries and priority order for visible alerts." : "AI summaries and priority ranking stay aligned with recent inbox behavior."}</Text>
           <Link href={"/notifications-preferences" as never} asChild>
             <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
               <View className="mt-4 rounded-2xl bg-white/10 px-4 py-3">
@@ -295,7 +334,7 @@ export default function NotificationsScreen() {
           <TextInput
             value={searchTerm}
             onChangeText={setSearchTerm}
-            placeholder="Search parcel number, event, or workflow"
+            placeholder="Search parcel number, event, workflow, or AI summary"
             placeholderTextColor="#98A2B3"
             className="mt-3 rounded-2xl border border-border bg-background px-4 py-3 text-foreground"
             returnKeyType="search"
@@ -320,7 +359,6 @@ export default function NotificationsScreen() {
               key={item.id}
               item={item}
               busy={busyActionId === item.id}
-              onOpen={(selected) => void handleOpenItem(selected)}
               onInlineAction={(selected) => void handleInlineAction(selected)}
               onDismiss={(id) => void dismissActivity(id)}
               onMarkRead={(id) => void markActivityRead(id)}

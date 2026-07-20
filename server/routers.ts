@@ -7,6 +7,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import {
   analyzeDocumentImage,
   analyzeLivenessSelfie,
+  analyzeNotificationActivities,
   appendBusinessDocument,
   appendIdentityDocument,
   approveIdentityDocument,
@@ -22,6 +23,7 @@ import {
   updateLegalWorkflowStatus,
   updateMissionStatus,
   updateNotificationPreferences,
+  updateParcelGeofencePreference,
 } from "./mobilePlatformRepository";
 
 const businessProfileSchema = z.object({
@@ -100,6 +102,7 @@ export const appRouter = router({
           onboardingAlerts: z.boolean().optional(),
           legalAlerts: z.boolean().optional(),
           geospatialAlerts: z.boolean().optional(),
+          geofenceAlerts: z.boolean().optional(),
           onlyAssignedParcels: z.boolean().optional(),
           followedParcelIds: z.array(z.number()).optional(),
           parcelMutes: z
@@ -110,6 +113,18 @@ export const appRouter = router({
                 mutedAt: z.string(),
                 mutedUntil: z.string().nullable(),
                 workflowId: z.string().nullable().optional(),
+              }),
+            )
+            .optional(),
+          geofenceSubscriptions: z
+            .array(
+              z.object({
+                parcelId: z.number(),
+                radiusMeters: z.number(),
+                transition: z.enum(["enter", "exit", "both"]),
+                enabled: z.boolean(),
+                lastTriggeredAt: z.string().nullable(),
+                lastTransition: z.enum(["enter", "exit"]).nullable(),
               }),
             )
             .optional(),
@@ -138,6 +153,48 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => clearParcelMutePreference(input)),
+    updateParcelGeofence: publicProcedure
+      .input(
+        z.object({
+          parcelId: z.number(),
+          enabled: z.boolean().optional(),
+          radiusMeters: z.number().optional(),
+          transition: z.enum(["enter", "exit", "both"]).optional(),
+          lastTriggeredAt: z.string().nullable().optional(),
+          lastTransition: z.enum(["enter", "exit"]).nullable().optional(),
+        }),
+      )
+      .mutation(({ input }) => updateParcelGeofencePreference(input)),
+    analyzeActivities: publicProcedure
+      .input(
+        z.object({
+          activities: z.array(
+            z.object({
+              id: z.string(),
+              title: z.string(),
+              description: z.string(),
+              category: z.string(),
+              tone: z.string(),
+              unread: z.boolean(),
+              parcelNumber: z.string().nullable().optional(),
+              actionLabel: z.string().nullable().optional(),
+              auditTrailSummary: z.string().nullable().optional(),
+            }),
+          ),
+          interactionProfile: z.object({
+            openedByCategory: z.record(z.string(), z.number()),
+            dismissedByCategory: z.record(z.string(), z.number()),
+            actionedByCategory: z.record(z.string(), z.number()),
+            unreadResolvedByCategory: z.record(z.string(), z.number()),
+            totalOpened: z.number(),
+            totalDismissed: z.number(),
+            totalActioned: z.number(),
+            totalUnreadResolved: z.number(),
+            preferredCategories: z.array(z.string()),
+          }),
+        }),
+      )
+      .mutation(({ input }) => analyzeNotificationActivities(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),
