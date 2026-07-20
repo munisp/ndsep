@@ -1,16 +1,33 @@
 import { Tabs } from "expo-router";
-import { Platform } from "react-native";
+import { Platform, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useEffect, useState } from "react";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
+import { getUnreadActivityCount } from "@/lib/mobile-activity";
+
+function InboxBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+
+  return (
+    <View className="min-w-[18px] rounded-full bg-error px-1.5 py-0.5" style={{ position: "absolute", right: -10, top: -4 }}>
+      <Text className="text-center text-[10px] font-bold text-white">{count > 9 ? "9+" : count}</Text>
+    </View>
+  );
+}
 
 export default function TabLayout() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const [unreadCount, setUnreadCount] = useState(0);
   const bottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, 8);
   const tabBarHeight = 60 + bottomPadding;
+
+  useEffect(() => {
+    getUnreadActivityCount().then(setUnreadCount).catch(() => undefined);
+  }, []);
 
   return (
     <Tabs
@@ -65,7 +82,12 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.crop.circle.fill" color={color} />,
+          tabBarIcon: ({ color }) => (
+            <View>
+              <IconSymbol size={24} name="person.crop.circle.fill" color={color} />
+              <InboxBadge count={unreadCount} />
+            </View>
+          ),
         }}
       />
     </Tabs>

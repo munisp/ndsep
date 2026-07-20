@@ -9,6 +9,7 @@ import {
   analyzeLivenessSelfie,
   appendBusinessDocument,
   appendIdentityDocument,
+  approveIdentityDocument,
   completeLivenessSession,
   getMobilePlatformBundle,
   listLegalWorkflows,
@@ -180,6 +181,13 @@ export const appRouter = router({
           onboarding: getMobilePlatformBundle().onboarding,
         };
       }),
+    approveIdentityDocument: publicProcedure
+      .input(
+        z.object({
+          documentId: z.string(),
+        }),
+      )
+      .mutation(({ input }) => approveIdentityDocument(input)),
   }),
   legal: router({
     list: publicProcedure.query(() => listLegalWorkflows()),
@@ -192,6 +200,14 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => updateLegalWorkflowStatus(input)),
+    approveFromInbox: publicProcedure
+      .input(
+        z.object({
+          workflowId: z.string(),
+          reviewedBy: z.string().nullable().optional(),
+        }),
+      )
+      .mutation(({ input }) => updateLegalWorkflowStatus({ workflowId: input.workflowId, status: "approved", reviewedBy: input.reviewedBy })),
   }),
 });
 

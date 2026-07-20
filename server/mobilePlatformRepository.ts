@@ -428,6 +428,25 @@ export function completeLivenessSession(input: {
   return store.onboarding.latestLivenessSession;
 }
 
+export function approveIdentityDocument(input: { documentId: string }) {
+  const store = readStore();
+  const document = store.onboarding.identityDocuments.find((item) => item.id === input.documentId);
+  if (!document) throw new Error("Identity document not found");
+
+  document.status = "verified";
+  document.confidence = Math.max(document.confidence ?? 88, 88);
+  document.extractedSummary = document.extractedSummary ?? "Approved from mobile inbox review.";
+  queueMutation(store, { type: "onboarding_document", recordId: document.id, queuedAt: new Date().toISOString() });
+  refreshReadiness(store);
+  store.syncMeta = buildSyncMeta(store, "live");
+  writeStore(store);
+
+  return {
+    document,
+    onboarding: store.onboarding,
+  };
+}
+
 export function listLegalWorkflows() {
   return readStore().legalWorkflows;
 }

@@ -23,3 +23,7 @@
 - [x] Push notifications for field updates and sync-state events
 - [x] Background sync replay for offline field mutations
 - [x] Dedicated GeoLibre launch screen with parcel export controls
+- [x] Notification filters and parcel-specific search in the mobile inbox
+- [x] Unread recent-activity badge in the tab shell navigation
+- [x] Interactive KYC approval actions directly from inbox notifications
+- [x] Interactive legal workflow approval actions directly from inbox notifications

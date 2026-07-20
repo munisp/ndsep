@@ -126,7 +126,19 @@ export function useMobilePlatformBundle() {
     },
   });
 
+  const approveIdentityDocument = trpc.onboarding.approveIdentityDocument.useMutation({
+    onSuccess: async () => {
+      await utils.sync.getBundle.invalidate();
+    },
+  });
+
   const advanceLegalWorkflow = trpc.legal.advance.useMutation({
+    onSuccess: async () => {
+      await utils.sync.getBundle.invalidate();
+    },
+  });
+
+  const approveLegalWorkflow = trpc.legal.approveFromInbox.useMutation({
     onSuccess: async () => {
       await utils.sync.getBundle.invalidate();
     },
@@ -222,6 +234,18 @@ export function useMobilePlatformBundle() {
         return result;
       },
     },
+    approveIdentityDocument: async (documentId: string) => {
+      const result = await approveIdentityDocument.mutateAsync({ documentId });
+      await prependActivity({
+        title: "KYC document approved",
+        description: `${result.document.type} was approved directly from the mobile inbox.`,
+        category: "onboarding",
+        tone: "success",
+        route: "/onboarding",
+        action: undefined,
+      });
+      return result;
+    },
     advanceLegalWorkflow: {
       ...advanceLegalWorkflow,
       mutateAsync: async (...args: Parameters<typeof advanceLegalWorkflow.mutateAsync>) => {
@@ -232,9 +256,22 @@ export function useMobilePlatformBundle() {
           category: "legal",
           tone: result.status === "registered" ? "success" : "info",
           route: "/legal-workflow",
+          parcelId: result.parcelId,
         });
         return result;
       },
+    },
+    approveLegalWorkflow: async (workflowId: string) => {
+      const result = await approveLegalWorkflow.mutateAsync({ workflowId, reviewedBy: "Mobile Inbox" });
+      await prependActivity({
+        title: "Legal workflow approved",
+        description: `${result.type} for parcel ${result.parcelId} was approved from the notifications inbox.`,
+        category: "legal",
+        tone: "success",
+        route: "/legal-workflow",
+        parcelId: result.parcelId,
+      });
+      return result;
     },
   };
 }
