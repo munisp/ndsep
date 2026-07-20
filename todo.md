@@ -36,3 +36,5 @@
 - [x] Native notification detail sheet with comprehensive alert audit history
 - [x] Geofence-based parcel subscription alerts for location-accurate field notifications
 - [x] AI-generated notification summaries and priority ranking based on interaction history
+- [x] Offline geofence event replay for parcel alerts after connectivity returns
+- [x] Conflict reconciliation for delayed or duplicate parcel geofence transitions

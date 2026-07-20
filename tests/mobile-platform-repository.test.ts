@@ -3,7 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { cloneSeedBundle } from "../lib/mobile-data";
-import { getMobilePlatformBundle, updateLegalWorkflowStatus, updateMissionStatus, updateParcelGeofencePreference } from "../server/mobilePlatformRepository";
+import { getMobilePlatformBundle, reconcileParcelGeofenceReplay, updateLegalWorkflowStatus, updateMissionStatus, updateParcelGeofencePreference } from "../server/mobilePlatformRepository";
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
 const STORE_PATH = path.join(DATA_DIR, "mobile-platform-store.json");
@@ -51,5 +51,37 @@ describe("mobile platform repository", () => {
     expect(subscription?.enabled).toBe(true);
     expect(subscription?.radiusMeters).toBe(250);
     expect(subscription?.transition).toBe("exit");
+  });
+
+  it("accepts newer offline geofence transitions and rejects stale or duplicate replay events", () => {
+    const accepted = reconcileParcelGeofenceReplay({
+      parcelId: 6,
+      transition: "enter",
+      radiusMeters: 150,
+      latitude: 6.456,
+      longitude: 3.601,
+      triggeredAt: "2026-07-20T13:30:00Z",
+    });
+    expect(accepted.status).toBe("accepted");
+
+    const duplicate = reconcileParcelGeofenceReplay({
+      parcelId: 6,
+      transition: "enter",
+      radiusMeters: 150,
+      latitude: 6.456,
+      longitude: 3.601,
+      triggeredAt: "2026-07-20T13:30:30Z",
+    });
+    expect(duplicate.status).toBe("duplicate");
+
+    const stale = reconcileParcelGeofenceReplay({
+      parcelId: 6,
+      transition: "exit",
+      radiusMeters: 150,
+      latitude: 6.456,
+      longitude: 3.601,
+      triggeredAt: "2026-07-20T13:29:00Z",
+    });
+    expect(stale.status).toBe("stale");
   });
 });

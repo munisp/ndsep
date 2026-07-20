@@ -24,6 +24,7 @@ import {
   updateMissionStatus,
   updateNotificationPreferences,
   updateParcelGeofencePreference,
+  reconcileParcelGeofenceReplay,
 } from "./mobilePlatformRepository";
 
 const businessProfileSchema = z.object({
@@ -195,6 +196,18 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => analyzeNotificationActivities(input)),
+    replayGeofenceEvent: publicProcedure
+      .input(
+        z.object({
+          parcelId: z.number(),
+          transition: z.enum(["enter", "exit"]),
+          radiusMeters: z.number(),
+          latitude: z.number(),
+          longitude: z.number(),
+          triggeredAt: z.string(),
+        }),
+      )
+      .mutation(({ input }) => reconcileParcelGeofenceReplay(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

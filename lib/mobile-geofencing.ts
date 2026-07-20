@@ -3,9 +3,10 @@ import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 
 import { findParcel, type MobilePlatformBundle } from "@/lib/mobile-data";
-import { prependActivity } from "@/lib/mobile-activity";
+import { appendActivityAudit, prependActivity } from "@/lib/mobile-activity";
 import { scheduleFieldUpdateNotification } from "@/lib/mobile-notifications";
 import { recordParcelGeofenceTrigger, shouldNotifyForParcel } from "@/lib/mobile-notification-preferences";
+import { queueGeofenceEventMutation, replayQueuedFieldMutations } from "@/lib/mobile-sync-replay";
 
 export const PARCEL_GEOFENCE_TASK = "idlr_pts_mobile.parcel_geofence";
 
@@ -48,6 +49,7 @@ if (Platform.OS !== "web") {
           : `You exited the monitored geofence for parcel ${parcel.parcelNumber}. Location-sensitive parcel work may need review before the next visit.`;
 
       const activityId = `geofence-${parcelId}-${triggeredAt}`;
+      const radiusMeters = Math.round(Number(geofencingEvent?.region?.radius ?? 150));
       await prependActivity({
         id: activityId,
         title,
@@ -59,13 +61,36 @@ if (Platform.OS !== "web") {
         route: "/parcel/[id]",
         routeParams: { id: String(parcelId) },
         geofenceContext: {
-          radiusMeters: Math.round(Number(geofencingEvent?.region?.radius ?? 150)),
+          radiusMeters,
           transition,
           latitude: parcel.latitude,
           longitude: parcel.longitude,
           triggeredAt,
         },
       });
+
+      await queueGeofenceEventMutation({
+        type: "geofence_event",
+        parcelId,
+        transition,
+        radiusMeters,
+        latitude: parcel.latitude,
+        longitude: parcel.longitude,
+        triggeredAt,
+        activityId,
+      });
+      await appendActivityAudit(activityId, {
+        kind: "preference_synced",
+        label: "Replay queued",
+        actor: "system",
+        detail: "This geofence event was queued locally and will replay against the synced parcel state when connectivity is available.",
+        metadata: {
+          parcelId,
+          transition,
+          radiusMeters,
+        },
+      });
+      await replayQueuedFieldMutations().catch(() => undefined);
 
       await scheduleFieldUpdateNotification({
         title,

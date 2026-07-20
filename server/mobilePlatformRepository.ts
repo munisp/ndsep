@@ -555,6 +555,61 @@ export function updateParcelGeofencePreference(input: {
   return updateNotificationPreferences({ geofenceSubscriptions });
 }
 
+export function reconcileParcelGeofenceReplay(input: {
+  parcelId: number;
+  transition: "enter" | "exit";
+  radiusMeters: number;
+  latitude: number;
+  longitude: number;
+  triggeredAt: string;
+}) {
+  const store = readStore();
+  const existing = store.notificationPreferences.geofenceSubscriptions.find((item) => item.parcelId === input.parcelId) ?? {
+    parcelId: input.parcelId,
+    radiusMeters: input.radiusMeters,
+    transition: "both" as const,
+    enabled: true,
+    lastTriggeredAt: null,
+    lastTransition: null,
+  };
+
+  const existingTimestamp = existing.lastTriggeredAt ? new Date(existing.lastTriggeredAt).getTime() : null;
+  const incomingTimestamp = new Date(input.triggeredAt).getTime();
+
+  if (existingTimestamp && existing.lastTransition === input.transition && Math.abs(existingTimestamp - incomingTimestamp) <= 60_000) {
+    return {
+      status: "duplicate" as const,
+      geofenceSubscription: existing,
+    };
+  }
+
+  if (existingTimestamp && existingTimestamp > incomingTimestamp) {
+    return {
+      status: "stale" as const,
+      geofenceSubscription: existing,
+    };
+  }
+
+  store.notificationPreferences.geofenceSubscriptions = [
+    ...store.notificationPreferences.geofenceSubscriptions.filter((item) => item.parcelId !== input.parcelId),
+    {
+      ...existing,
+      radiusMeters: input.radiusMeters || existing.radiusMeters,
+      lastTriggeredAt: input.triggeredAt,
+      lastTransition: input.transition,
+      enabled: true,
+    },
+  ].sort((a, b) => a.parcelId - b.parcelId);
+  store.notificationPreferences.updatedAt = new Date().toISOString();
+  store.syncMeta = buildSyncMeta(store, "live");
+  writeStore(store);
+
+  return {
+    status: "accepted" as const,
+    geofenceSubscription: store.notificationPreferences.geofenceSubscriptions.find((item) => item.parcelId === input.parcelId) ?? existing,
+  };
+}
+
 export function setParcelMutePreference(input: { parcelId: number; duration: ParcelMuteDuration }) {
   const store = readStore();
   const workflow = store.legalWorkflows.find((item) => item.parcelId === input.parcelId && item.status !== "registered" && item.status !== "rejected") ?? null;

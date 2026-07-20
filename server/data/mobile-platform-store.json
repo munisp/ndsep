@@ -330,31 +330,25 @@
         "radiusMeters": 150,
         "transition": "both",
         "enabled": true,
-        "lastTriggeredAt": null,
-        "lastTransition": null
+        "lastTriggeredAt": "2026-07-20T13:30:00Z",
+        "lastTransition": "enter"
       },
       {
         "parcelId": 11,
-        "radiusMeters": 250,
-        "transition": "exit",
+        "radiusMeters": 150,
+        "transition": "enter",
         "enabled": true,
         "lastTriggeredAt": null,
         "lastTransition": null
       }
     ],
-    "updatedAt": "2026-07-20T13:18:22.834Z"
+    "updatedAt": "2026-07-20T13:28:43.781Z"
   },
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-07-20T13:18:22.834Z",
-    "pendingMutations": 1,
+    "lastSyncedAt": "2026-07-20T13:28:43.781Z",
+    "pendingMutations": 0,
     "offlineReady": true
   },
-  "syncQueue": [
-    {
-      "type": "notification_preference",
-      "recordId": "notification_preferences",
-      "queuedAt": "2026-07-20T13:18:22.834Z"
-    }
-  ]
+  "syncQueue": []
 }
