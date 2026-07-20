@@ -1,0 +1,38 @@
+<slide id="kano_sltr">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="3" fill="brand-green"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">SLTR continuity depends on visible field-to-registry progression</text>
+  <text id="subtitle" x="58" y="86" width="1096" height="30" font="body" size="16" color="muted">The platform supports a Kano workflow where field demarcation, parcel digitisation, C of O generation, and post-certificate control remain connected instead of disappearing across manual handoffs.</text>
+
+  <shape id="step1" type="rect" x="74" y="172" width="166" height="126" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="step1t" x="92" y="190" width="130" height="86" font="body" size="17" color="ink" align="center" anchor="middle"><p><strong>Claim intake</strong></p><p>Claimant data, parcel context, and ownership evidence capture</p></text>
+  <shape id="a1" type="arrow" x="248" y="223" width="46" height="24" fill="accent-blue" head-ratio="0.34"/>
+
+  <shape id="step2" type="rect" x="304" y="172" width="166" height="126" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text id="step2t" x="322" y="190" width="130" height="86" font="body" size="17" color="ink" align="center" anchor="middle"><p><strong>Field demarcation</strong></p><p>Boundary agreement, sketching, and site-level parcel capture</p></text>
+  <shape id="a2" type="arrow" x="478" y="223" width="46" height="24" fill="accent-blue" head-ratio="0.34"/>
+
+  <shape id="step3" type="rect" x="534" y="172" width="166" height="126" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="step3t" x="552" y="190" width="130" height="86" font="body" size="17" color="ink" align="center" anchor="middle"><p><strong>Parcel digitisation</strong></p><p>Field maps, imagery, and claimant data move into the digital record</p></text>
+  <shape id="a3" type="arrow" x="708" y="223" width="46" height="24" fill="accent-blue" head-ratio="0.34"/>
+
+  <shape id="step4" type="rect" x="764" y="172" width="166" height="126" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text id="step4t" x="782" y="190" width="130" height="86" font="body" size="17" color="ink" align="center" anchor="middle"><p><strong>Verification</strong></p><p>Quality assurance, review, and public-display-sensitive control</p></text>
+  <shape id="a4" type="arrow" x="938" y="223" width="46" height="24" fill="accent-blue" head-ratio="0.34"/>
+
+  <shape id="step5" type="rect" x="994" y="172" width="166" height="126" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="step5t" x="1012" y="190" width="130" height="86" font="body" size="17" color="ink" align="center" anchor="middle"><p><strong>C of O generation</strong></p><p>Certificate preparation, audit output, and legal progression visibility</p></text>
+  <shape id="a5" type="arrow" x="1146" y="315" width="0" height="54" fill="accent-blue" rotation="90" head-ratio="0.34"/>
+
+  <shape id="step6" type="rect" x="994" y="350" width="166" height="108" fill="#FEFCE8" stroke="#FDE68A" stroke-width="1"/>
+  <text id="step6t" x="1012" y="366" width="130" height="76" font="body" size="17" color="ink" align="center" anchor="middle"><p><strong>Post-title control</strong></p><p>Assignment, mortgage, ground rent, and verification continuity</p></text>
+
+  <shape id="value-card-1" type="rect" x="74" y="476" width="536" height="132" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="value-card-1t" x="98" y="500" width="488" height="84" font="body" size="18" color="ink" line-height="1.32"><p><strong color="brand-green">Service value</strong></p><p space-before="10">Kano can move from scattered field and registry actions to a visible operational chain that supports certification, claimant confidence, and cleaner desk coordination.</p></text>
+
+  <shape id="value-card-2" type="rect" x="636" y="476" width="524" height="132" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="value-card-2t" x="660" y="500" width="476" height="84" font="body" size="18" color="ink" line-height="1.32"><p><strong color="brand-green">Revenue value</strong></p><p space-before="10">When certification and post-title transactions are traceable, the state gains better control over ground-rent-sensitive records and land-linked administrative value.</p></text>
+
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Kano State</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">4</text>
+</slide>

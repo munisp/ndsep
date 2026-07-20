@@ -78,6 +78,12 @@ function WebLeafletMap({ parcel }: { parcel: ParcelRecord }) {
           Coordinates: {parcel.latitude.toFixed(4)}, {parcel.longitude.toFixed(4)}
         </Text>
       </View>
+
+      <Link href="/fullscreen-map" asChild>
+        <View className="mt-4 rounded-2xl bg-foreground px-4 py-3">
+          <Text className="text-center font-semibold text-background">Open full-screen parcel map</Text>
+        </View>
+      </Link>
     </View>
   );
 }

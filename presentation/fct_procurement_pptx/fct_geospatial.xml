@@ -1,0 +1,23 @@
+<slide id="fct_geospatial">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="3" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Parcel visibility improves capital-region land decisions</text>
+  <text id="subtitle" x="58" y="86" width="1092" height="30" font="body" size="16" color="muted">The platform’s real web map allows FCT officers and decision-makers to connect parcel identity, overlay context, and workflow status in one desk-based review surface.</text>
+  <shape id="shot-frame" type="rect" x="58" y="136" width="736" height="428" fill="paper" stroke="border" stroke-width="1" shadow="true"/>
+  <image id="shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784584273771_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL2Z1bGxzY3JlZW5fbWFwX3NlZWRlZF92MQ.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODQyNzM3NzFfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwyWjFiR3h6WTNKbFpXNWZiV0Z3WDNObFpXUmxaRjkyTVEucG5nP3gtb3NzLXByb2Nlc3M9aW1hZ2UvcmVzaXplLHdfMTU2MCxoXzE1NjAvZm9ybWF0LHdlYnAiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3ODY3NTIwMDB9fX1dfQ__&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEYCIQDlY61IaTjLYsK4XdJPPfod-RuIGdMxd1ibpihXG-yd~wIhAOD9vrXem6Fx5OxhOWq0HLpWFI4I3weZMsh7-SijB0Hh" x="70" y="160" width="712" height="380" fit="cover"/>
+  <text id="shot-label" x="70" y="144" width="712" height="14" font="caption" size="11" color="muted" align="center" wrap="false">Real web screenshot • browser-rendered parcel map with multiple markers, active legends, and corridor overlays</text>
+  <shape id="right-card" type="rect" x="826" y="136" width="396" height="428" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="right-title" x="850" y="162" width="348" height="28" font="body" size="20" color="ink"><p><strong>Why this matters in the FCT</strong></p></text>
+  <text id="right-copy" x="850" y="204" width="348" height="316" font="body" size="17" color="ink" line-height="1.33">
+    <p>FCT land administration benefits when parcel location, desk review, and overlay-sensitive context are visible in one environment rather than split between files and disconnected review channels.</p>
+    <p space-before="14"><strong>This supports:</strong></p>
+    <p space-before="10">• Better desk review of capital-region parcels before field escalation.</p>
+    <p>• Clearer handling of regularisation, mass-housing, and right-of-occupancy workflows.</p>
+    <p>• Stronger coordination between cadastral, registry, and supervisory desks.</p>
+    <p>• More credible oversight where location-sensitive decisions carry public and investment consequences.</p>
+  </text>
+  <shape id="assurance-band" type="rect" x="58" y="586" width="1164" height="40" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text id="assurance" x="82" y="598" width="1116" height="16" font="body" size="15" color="ink" align="center" wrap="false">For the FCT, map-backed parcel review improves informed decision-making, title continuity, and public confidence in high-value land workflows.</text>
+  <text id="footer" x="58" y="686" width="640" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Federal Capital Territory</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">3</text>
+</slide>
