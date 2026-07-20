@@ -1,3 +1,4 @@
+import { Link } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -53,6 +54,19 @@ export default function GeoScreen() {
                   <Text className="text-xs uppercase tracking-wide text-muted">GeoLibre</Text>
                   <Text className="mt-2 text-base font-semibold text-foreground">{parcel.geolibreReady ? "Ready" : "Pending"}</Text>
                 </View>
+              </View>
+
+              <View className="mt-4 gap-3">
+                <Link href={{ pathname: "/parcel/[id]", params: { id: String(parcel.id) } } as never} asChild>
+                  <View className="rounded-2xl bg-foreground px-4 py-3">
+                    <Text className="text-center font-semibold text-background">Open parcel detail</Text>
+                  </View>
+                </Link>
+                <Link href={{ pathname: "/geolibre-launch", params: { parcelId: String(parcel.id) } } as never} asChild>
+                  <View className="rounded-2xl border border-border bg-background px-4 py-3">
+                    <Text className="text-center font-semibold text-foreground">Open GeoLibre launch</Text>
+                  </View>
+                </Link>
               </View>
             </View>
           ))}

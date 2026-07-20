@@ -238,37 +238,37 @@
       "assignedDesk": "Registry Archive",
       "preparedBy": "AMAC Land Desk",
       "reviewedBy": "Mobile Registry Supervisor",
-      "updatedAt": "2026-07-20T04:26:31.262Z",
+      "updatedAt": "2026-07-20T04:34:49.182Z",
       "timeline": [
         {
           "key": "draft",
           "label": "Draft prepared",
           "completed": true,
-          "timestamp": "2026-07-20T04:26:31.262Z"
+          "timestamp": "2026-07-20T04:34:49.182Z"
         },
         {
           "key": "pending_review",
           "label": "Review in progress",
           "completed": true,
-          "timestamp": "2026-07-20T04:26:31.262Z"
+          "timestamp": "2026-07-20T04:34:49.182Z"
         },
         {
           "key": "approved",
           "label": "Approved",
           "completed": true,
-          "timestamp": "2026-07-20T04:26:31.262Z"
+          "timestamp": "2026-07-20T04:34:49.182Z"
         },
         {
           "key": "signed",
           "label": "Signed",
           "completed": true,
-          "timestamp": "2026-07-20T04:26:31.262Z"
+          "timestamp": "2026-07-20T04:34:49.182Z"
         },
         {
           "key": "registered",
           "label": "Registered",
           "completed": true,
-          "timestamp": "2026-07-20T04:26:31.262Z"
+          "timestamp": "2026-07-20T04:34:49.182Z"
         }
       ],
       "registrationNumber": "ROO-0011-2026-1011"
@@ -316,7 +316,7 @@
   ],
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-07-20T04:26:31.262Z",
+    "lastSyncedAt": "2026-07-20T04:34:49.182Z",
     "pendingMutations": 1,
     "offlineReady": true
   },
@@ -324,7 +324,7 @@
     {
       "type": "legal_status",
       "recordId": "roo-amac-11",
-      "queuedAt": "2026-07-20T04:26:31.262Z"
+      "queuedAt": "2026-07-20T04:34:49.182Z"
     }
   ]
 }

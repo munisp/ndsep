@@ -3,10 +3,10 @@
 - [x] Mobile Home / Mission Hub with active tasks, resume actions, and connectivity summary
 - [x] Bottom-tab navigation for Home, Parcels, Field, Geo, and Profile
 - [x] Parcel search and quick lookup flow
-- [ ] Parcel detail screen with linked field, geospatial, and legal actions
+- [x] Parcel detail screen with linked field, geospatial, and legal actions
 - [x] Field mission workflow with offline-safe capture state and queue visibility
 - [x] Geospatial workbench with parcel context and GeoLibre handoff
-- [ ] GeoLibre launch screen with prepared parcel context and export readiness
+- [x] GeoLibre launch screen with prepared parcel context and export readiness
 - [x] Stakeholder onboarding flow for KYC, KYB, documents, and liveness status
 - [x] Legal workflow screen for C of O and related progression tracking
 - [ ] Notifications and recent activity experience
@@ -19,3 +19,7 @@
 - [x] Comprehensive native Certificate of Occupancy legal workflow screen and progression experience
 - [x] Live platform API synchronization for parcel, mission, onboarding, and workflow data
 - [x] Offline persistence and sync recovery for native mobile workflows
+- [x] Dedicated parcel detail screen with deep links into field, geo, and legal tasks
+- [x] Push notifications for field updates and sync-state events
+- [x] Background sync replay for offline field mutations
+- [x] Dedicated GeoLibre launch screen with parcel export controls

@@ -21,7 +21,7 @@ export default function FieldScreen() {
 
   async function advanceMission(missionId: string, currentStatus: "queued" | "active" | "synced") {
     const nextStatus = currentStatus === "queued" ? "active" : "synced";
-    await updateMissionStatus.mutateAsync({ missionId, status: nextStatus });
+    await updateMissionStatus({ missionId, status: nextStatus });
   }
 
   return (

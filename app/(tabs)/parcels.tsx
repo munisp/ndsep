@@ -70,14 +70,19 @@ export default function ParcelsScreen() {
                 {workflow ? <Text className="mt-2 text-sm text-muted">Legal: {workflow.type} · {workflow.status}</Text> : null}
 
                 <View className="mt-4 gap-3">
-                  <Link href={"/(tabs)/field" as never} asChild>
+                  <Link href={{ pathname: "/parcel/[id]", params: { id: String(parcel.id) } } as never} asChild>
                     <View className="rounded-2xl bg-foreground px-4 py-3">
-                      <Text className="text-center font-semibold text-background">Open field workflow</Text>
+                      <Text className="text-center font-semibold text-background">Open parcel detail</Text>
                     </View>
                   </Link>
-                  <Link href={"/(tabs)/geo" as never} asChild>
+                  <Link href={"/(tabs)/field" as never} asChild>
                     <View className="rounded-2xl border border-border bg-background px-4 py-3">
-                      <Text className="text-center font-semibold text-foreground">Open geospatial review</Text>
+                      <Text className="text-center font-semibold text-foreground">Open field workflow</Text>
+                    </View>
+                  </Link>
+                  <Link href={{ pathname: "/geolibre-launch", params: { parcelId: String(parcel.id) } } as never} asChild>
+                    <View className="rounded-2xl border border-border bg-background px-4 py-3">
+                      <Text className="text-center font-semibold text-foreground">Open GeoLibre launch</Text>
                     </View>
                   </Link>
                   <Link href={"/legal-workflow" as never} asChild>
