@@ -32,7 +32,8 @@ function ActionCard({
     | "/(tabs)/geo"
     | "/(tabs)/profile"
     | "/onboarding"
-    | "/legal-workflow";
+    | "/legal-workflow"
+    | "/notifications";
 }) {
   return (
     <Link href={href as never} asChild>
@@ -93,6 +94,7 @@ export default function HomeScreen() {
             <ActionCard title="Geospatial review" description="Inspect parcel intelligence, location context, and GeoLibre readiness on mobile." href="/(tabs)/geo" />
             <ActionCard title="Stakeholder onboarding" description="Run step-by-step KYC, KYB, document analysis, and liveness checks." href="/onboarding" />
             <ActionCard title="C of O workflow" description="Advance Certificate of Occupancy and related legal records through review, signing, and registration." href="/legal-workflow" />
+            <ActionCard title="Notifications inbox" description="Review synchronized, queued, and replayed field plus workflow events in one mobile activity feed." href="/notifications" />
           </View>
         </View>
 

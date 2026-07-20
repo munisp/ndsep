@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BusinessProfileRecord, MobilePlatformBundle } from "@/lib/mobile-data";
 import { cloneSeedBundle } from "@/lib/mobile-data";
 import { registerFieldSyncBackgroundTask } from "@/lib/background-sync";
+import { prependActivity } from "@/lib/mobile-activity";
 import { ensureNotificationPermissions, scheduleFieldUpdateNotification } from "@/lib/mobile-notifications";
 import { getQueuedFieldMutations, queueMissionStatusMutation, replayQueuedFieldMutations } from "@/lib/mobile-sync-replay";
 import { trpc } from "@/lib/trpc";
@@ -46,6 +47,13 @@ export function useMobilePlatformBundle() {
       .then(async (result) => {
         if (result.replayed > 0) {
           setQueuedMutations((current) => Math.max(0, current - result.replayed));
+          await prependActivity({
+            title: "Offline field updates replayed",
+            description: `${result.replayed} queued field update${result.replayed === 1 ? "" : "s"} synchronized successfully after connectivity returned.`,
+            category: "field",
+            tone: "success",
+            route: "/(tabs)/field",
+          });
           await utils.sync.getBundle.invalidate();
         }
       })
@@ -132,6 +140,13 @@ export function useMobilePlatformBundle() {
         body: `Mission ${input.missionId} moved to ${input.status}.`,
         data: input,
       });
+      await prependActivity({
+        title: "Field update synchronized",
+        description: `Mission ${input.missionId} moved to ${input.status} and was written to the live platform bundle.`,
+        category: "field",
+        tone: "success",
+        route: "/(tabs)/field",
+      });
       return result;
     } catch (error) {
       const queued = await queueMissionStatusMutation({
@@ -160,6 +175,13 @@ export function useMobilePlatformBundle() {
         body: `Mission ${input.missionId} will replay automatically when connectivity is available.`,
         data: input,
       });
+      await prependActivity({
+        title: "Field update queued offline",
+        description: `Mission ${input.missionId} was stored locally and will replay through background sync when connectivity returns.`,
+        category: "field",
+        tone: "warning",
+        route: "/(tabs)/field",
+      });
       throw error;
     }
   }
@@ -172,11 +194,47 @@ export function useMobilePlatformBundle() {
     hasLiveConnection: Boolean(liveQuery.data),
     refresh: liveQuery.refetch,
     updateMissionStatus,
-    submitBusinessProfile: (profile: BusinessProfileRecord) => submitBusinessProfile.mutateAsync(profile),
+    submitBusinessProfile: async (profile: BusinessProfileRecord) => {
+      const result = await submitBusinessProfile.mutateAsync(profile);
+      await prependActivity({
+        title: "Business onboarding submitted",
+        description: `${profile.companyName ?? "Business profile"} was submitted for KYB review and onboarding readiness recalculation.`,
+        category: "onboarding",
+        tone: "info",
+        route: "/onboarding",
+      });
+      return result;
+    },
     analyzeIdentityDocument,
     analyzeBusinessDocument,
     startLiveness,
-    completeLiveness,
-    advanceLegalWorkflow,
+    completeLiveness: {
+      ...completeLiveness,
+      mutateAsync: async (...args: Parameters<typeof completeLiveness.mutateAsync>) => {
+        const result = await completeLiveness.mutateAsync(...args);
+        await prependActivity({
+          title: "Liveness review completed",
+          description: `The most recent liveness session finished with status ${result.analysis.status}.`,
+          category: "onboarding",
+          tone: result.analysis.status === "verified" ? "success" : "warning",
+          route: "/onboarding",
+        });
+        return result;
+      },
+    },
+    advanceLegalWorkflow: {
+      ...advanceLegalWorkflow,
+      mutateAsync: async (...args: Parameters<typeof advanceLegalWorkflow.mutateAsync>) => {
+        const result = await advanceLegalWorkflow.mutateAsync(...args);
+        await prependActivity({
+          title: "Legal workflow advanced",
+          description: `${result.type} moved to ${result.status}${result.registrationNumber ? ` with registration ${result.registrationNumber}` : ""}.`,
+          category: "legal",
+          tone: result.status === "registered" ? "success" : "info",
+          route: "/legal-workflow",
+        });
+        return result;
+      },
+    },
   };
 }

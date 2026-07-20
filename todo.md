@@ -9,7 +9,7 @@
 - [x] GeoLibre launch screen with prepared parcel context and export readiness
 - [x] Stakeholder onboarding flow for KYC, KYB, documents, and liveness status
 - [x] Legal workflow screen for C of O and related progression tracking
-- [ ] Notifications and recent activity experience
+- [x] Notifications and recent activity experience
 - [x] Profile and settings screen with role, session, and app readiness details
 - [x] Shared local data layer for seeded parcel, workflow, onboarding, and mission content
 - [x] Mobile-native visual system and brand adaptation for land-registry operations
