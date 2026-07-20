@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -9,6 +10,7 @@ import { storagePut } from "./storage";
 import {
   clonePermittingPlatform,
   type AgencyRole,
+  type PermitApprovalHandoffRecord,
   type PermitAuditEventRecord,
   type PermitCaseRecord,
   type PermitFormFieldRecord,
@@ -150,6 +152,8 @@ function ensureRecordStructure(record: PermitCaseRecord) {
   }));
   record.uploadedDocuments = record.uploadedDocuments ?? [];
   record.activeAssignment = record.activeAssignment ?? null;
+  record.approvalHandoffs = record.approvalHandoffs ?? [];
+  record.latestAuditPackage = record.latestAuditPackage ?? null;
   ensureSeedAuditHistory(record);
   return record;
 }
@@ -164,6 +168,13 @@ function preferredRoles(record: PermitCaseRecord): AgencyRole[] {
   return ["planning_supervisor", "environment_reviewer"];
 }
 
+function upsertApprovalHandoff(record: PermitCaseRecord, handoff: PermitApprovalHandoffRecord) {
+  record.approvalHandoffs = record.approvalHandoffs ?? [];
+  const existingIndex = record.approvalHandoffs.findIndex((item) => item.id === handoff.id);
+  if (existingIndex >= 0) record.approvalHandoffs[existingIndex] = handoff;
+  else record.approvalHandoffs.unshift(handoff);
+}
+
 function autoAssignEscalations(store: PermittingPlatformSnapshot) {
   for (const record of store.permitCases) {
     ensureRecordStructure(record);
@@ -175,12 +186,22 @@ function autoAssignEscalations(store: PermittingPlatformSnapshot) {
     if (!nextAssignee) continue;
     const nextReason = record.priority === "critical" ? "Critical permit priority escalation" : "Obligation risk triggered escalation";
     if (record.activeAssignment?.assignedUserId === nextAssignee.id && record.activeAssignment.reason === nextReason) continue;
+    const assignedAt = new Date().toISOString();
     record.activeAssignment = {
       assignedUserId: nextAssignee.id,
-      assignedAt: new Date().toISOString(),
+      assignedAt,
       reason: nextReason,
       status: "active",
     };
+    upsertApprovalHandoff(record, {
+      id: `handoff-${record.id}-${nextAssignee.role}`,
+      fromRole: "system",
+      toRole: nextAssignee.role,
+      startedAt: assignedAt,
+      dueAt: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(),
+      status: record.priority === "critical" ? "escalated" : "pending",
+      reason: nextReason,
+    });
     appendAuditEvent(record, {
       createdAt: record.activeAssignment.assignedAt,
       actor: nextAssignee.displayName,
@@ -395,6 +416,16 @@ function serializeAuditAsCsv(record: PermitCaseRecord) {
   return [header, ...rows].join("\n");
 }
 
+function getAuditSigningSecret() {
+  return process.env.AUDIT_SIGNING_SECRET || process.env.AUTH_SECRET || "local-audit-secret";
+}
+
+function signAuditContent(content: string) {
+  const sha256 = crypto.createHash("sha256").update(content).digest("hex");
+  const signature = crypto.createHmac("sha256", getAuditSigningSecret()).update(sha256).digest("hex");
+  return { sha256, signature };
+}
+
 export function getPermittingPlatform() {
   const store = readStore();
   store.permitCases = store.permitCases.map((record) => ensureRecordStructure(record));
@@ -424,13 +455,26 @@ export function getPermitCaseForRole(input: { caseId: string; role: AgencyRole }
 }
 
 export function exportPermitAuditHistory(input: { caseId: string; format: "markdown" | "csv" }) {
-  const record = getPermitCase(input.caseId);
-  if (!record) throw new Error("Permit case not found");
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
   const content = input.format === "csv" ? serializeAuditAsCsv(record) : serializeAuditAsMarkdown(record);
+  const { sha256, signature } = signAuditContent(content);
+  const fileName = `${record.id}-audit-history.${input.format === "csv" ? "csv" : "md"}`;
+  record.latestAuditPackage = {
+    generatedAt: new Date().toISOString(),
+    format: input.format,
+    fileName,
+    sha256,
+    signature,
+    signedBy: "portable-audit-signer",
+    verifierHint: "Verify by recomputing the SHA-256 hash of the exported file, then compare the HMAC-SHA256 signature using the configured audit signing secret.",
+  };
+  writeStore(store);
   return {
-    fileName: `${record.id}-audit-history.${input.format === "csv" ? "csv" : "md"}`,
+    fileName,
     mimeType: input.format === "csv" ? "text/csv" : "text/markdown",
     content,
+    packageMetadata: record.latestAuditPackage,
   };
 }
 
@@ -452,6 +496,15 @@ export function overridePermitAssignment(input: {
     reason: input.reason,
     status: "active",
   };
+  upsertApprovalHandoff(record, {
+    id: `handoff-${record.id}-${user.role}`,
+    fromRole: input.actorRole,
+    toRole: user.role,
+    startedAt: assignedAt,
+    dueAt: new Date(Date.now() + 1000 * 60 * 60 * 12).toISOString(),
+    status: "pending",
+    reason: input.reason,
+  });
   record.updatedAt = assignedAt;
   appendAuditEvent(record, {
     createdAt: assignedAt,
@@ -462,6 +515,40 @@ export function overridePermitAssignment(input: {
   });
   writeStore(store);
   return record.activeAssignment;
+}
+
+export function advancePermitHandoff(input: {
+  caseId: string;
+  handoffId: string;
+  actorName: string;
+  actorRole: AgencyRole;
+  action: "accept" | "complete" | "escalate";
+  note: string;
+}) {
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
+  const handoff = (record.approvalHandoffs ?? []).find((item) => item.id === input.handoffId);
+  if (!handoff) throw new Error("Approval handoff not found");
+  const timestamp = new Date().toISOString();
+  if (input.action === "accept") {
+    handoff.status = "accepted";
+  } else if (input.action === "complete") {
+    handoff.status = "completed";
+    handoff.dueAt = timestamp;
+  } else {
+    handoff.status = "escalated";
+    handoff.dueAt = new Date(Date.now() + 1000 * 60 * 60 * 6).toISOString();
+  }
+  record.updatedAt = timestamp;
+  appendAuditEvent(record, {
+    createdAt: timestamp,
+    actor: input.actorName,
+    role: input.actorRole,
+    type: "assignment",
+    summary: `Approval handoff ${input.action}ed by ${input.actorName}: ${input.note}`,
+  });
+  writeStore(store);
+  return handoff;
 }
 
 export function listAgencies() {

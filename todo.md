@@ -75,3 +75,6 @@
 - [x] Visual deadline warnings and interactive queue analytics charts on the SLA dashboard
 - [x] Supervisor override and reassignment controls for auto-assigned permit cases
 - [x] Direct local-device audit history downloads in CSV and PDF formats
+- [x] Signed audit-package exports with tamper-evident hash verification
+- [x] Multi-step approval handoff rules with escalation timers for complex permit workflows
+- [x] Offline audit-package caching for low-connectivity field inspectors

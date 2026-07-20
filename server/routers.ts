@@ -34,6 +34,7 @@ import {
   getPermittingPlatform,
   getPermitCase,
   getPermitCaseForRole,
+  advancePermitHandoff,
   listAgencies,
   listAgencyUsers,
   overridePermitAssignment,
@@ -358,6 +359,18 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => overridePermitAssignment(input)),
+    advanceHandoff: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          handoffId: z.string(),
+          actorName: z.string(),
+          actorRole: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]),
+          action: z.enum(["accept", "complete", "escalate"]),
+          note: z.string().min(3),
+        }),
+      )
+      .mutation(({ input }) => advancePermitHandoff(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

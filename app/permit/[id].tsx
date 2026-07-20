@@ -9,6 +9,27 @@ import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-na
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
 
+type ExportPreview = {
+  fileName: string;
+  mimeType: string;
+  content: string;
+  packageMetadata?: {
+    generatedAt: string;
+    format: "csv" | "pdf" | "markdown";
+    fileName: string;
+    sha256: string;
+    signature: string;
+    signedBy: string;
+    verifierHint: string;
+  } | null;
+};
+
+type AuditCacheManifest = {
+  csvPath?: string;
+  pdfPath?: string;
+  updatedAt: string;
+};
+
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View className="rounded-3xl border border-border bg-surface p-5">
@@ -26,10 +47,17 @@ function ActionButton({
 }: {
   label: string;
   onPress: () => void;
-  tone?: "dark" | "primary" | "success";
+  tone?: "dark" | "primary" | "success" | "warning";
   disabled?: boolean;
 }) {
-  const backgroundClass = tone === "primary" ? "bg-primary" : tone === "success" ? "bg-success" : "bg-foreground";
+  const backgroundClass =
+    tone === "primary"
+      ? "bg-primary"
+      : tone === "success"
+        ? "bg-success"
+        : tone === "warning"
+          ? "bg-warning"
+          : "bg-foreground";
   return (
     <Pressable disabled={disabled} onPress={onPress} style={({ pressed }) => [{ opacity: disabled ? 0.45 : pressed ? 0.85 : 1 }]}>
       <View className={`rounded-2xl px-4 py-3 ${backgroundClass}`}>
@@ -39,13 +67,17 @@ function ActionButton({
   );
 }
 
-function toAuditHtml(title: string, content: string) {
+function toAuditHtml(title: string, content: string, signature?: string) {
   const escaped = content
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\n/g, "<br />");
-  return `<!doctype html><html><head><meta charset="utf-8" /><style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;color:#111827}h1{font-size:24px;margin-bottom:16px}p,div{font-size:12px;line-height:1.5;white-space:normal}</style></head><body><h1>${title}</h1><div>${escaped}</div></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8" /><style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;color:#111827}h1{font-size:24px;margin-bottom:16px}p,div{font-size:12px;line-height:1.5;white-space:normal}.sig{margin-top:20px;padding-top:12px;border-top:1px solid #D1D5DB;color:#4B5563}</style></head><body><h1>${title}</h1><div>${escaped}</div><div class="sig"><strong>Signature:</strong> ${signature ?? "Pending"}</div></body></html>`;
+}
+
+function hoursUntil(dateString: string) {
+  return Math.max(0, Math.round((new Date(dateString).getTime() - Date.now()) / (1000 * 60 * 60)));
 }
 
 export default function PermitDetailScreen() {
@@ -71,7 +103,11 @@ export default function PermitDetailScreen() {
   const [pickedFile, setPickedFile] = useState<{ name: string; mimeType: string; base64Data: string } | null>(null);
   const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
   const [overrideReason, setOverrideReason] = useState("Manual supervisor override");
-  const [exportPreview, setExportPreview] = useState<{ fileName: string; mimeType: string; content: string } | null>(null);
+  const [handoffNote, setHandoffNote] = useState("Accepted for current review stage.");
+  const [exportPreview, setExportPreview] = useState<ExportPreview | null>(null);
+  const [cacheManifest, setCacheManifest] = useState<AuditCacheManifest | null>(null);
+
+  const cacheManifestPath = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}audit-cache-${caseId}.json`;
 
   useEffect(() => {
     if (!record) return;
@@ -85,6 +121,25 @@ export default function PermitDetailScreen() {
     });
     setDraftSections(nextDrafts);
   }, [record]);
+
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    let mounted = true;
+    const loadCacheManifest = async () => {
+      try {
+        const info = await FileSystem.getInfoAsync(cacheManifestPath);
+        if (!info.exists) return;
+        const text = await FileSystem.readAsStringAsync(cacheManifestPath, { encoding: FileSystem.EncodingType.UTF8 });
+        if (mounted) setCacheManifest(JSON.parse(text) as AuditCacheManifest);
+      } catch {
+        if (mounted) setCacheManifest(null);
+      }
+    };
+    void loadCacheManifest();
+    return () => {
+      mounted = false;
+    };
+  }, [cacheManifestPath]);
 
   const updateFormMutation = trpc.permitting.updateFormSections.useMutation({
     onSuccess: async () => {
@@ -133,6 +188,15 @@ export default function PermitDetailScreen() {
     },
   });
 
+  const advanceHandoffMutation = trpc.permitting.advanceHandoff.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.permitting.getPlatform.invalidate(),
+        utils.permitting.getCaseForRole.invalidate({ caseId, role: viewerRole }),
+      ]);
+    },
+  });
+
   const leadAgency = agencies.find((item) => item.id === record?.leadAgencyId) ?? null;
   const participatingAgencies = agencies.filter((item) => record?.participatingAgencyIds.includes(item.id));
   const assignedReviewer = agencyUsers.find((item) => item.id === record?.activeAssignment?.assignedUserId) ?? null;
@@ -141,10 +205,8 @@ export default function PermitDetailScreen() {
   const isApplicant = viewerRole === "applicant";
   const canReview = viewerRole !== "applicant";
   const canOverride = viewerRole === "planning_supervisor";
-  const assignableUsers = useMemo(
-    () => agencyUsers.filter((item) => item.role !== "applicant"),
-    [agencyUsers],
-  );
+  const assignableUsers = useMemo(() => agencyUsers.filter((item) => item.role !== "applicant"), [agencyUsers]);
+  const currentPackageMetadata = exportPreview?.packageMetadata ?? record?.latestAuditPackage ?? null;
 
   if (!record) {
     return (
@@ -154,6 +216,12 @@ export default function PermitDetailScreen() {
       </ScreenContainer>
     );
   }
+
+  const persistCacheManifest = async (nextManifest: AuditCacheManifest) => {
+    if (Platform.OS === "web") return;
+    await FileSystem.writeAsStringAsync(cacheManifestPath, JSON.stringify(nextManifest), { encoding: FileSystem.EncodingType.UTF8 });
+    setCacheManifest(nextManifest);
+  };
 
   const handleSaveForm = () => {
     const formSections = record.formSections.map((section) => ({
@@ -217,25 +285,35 @@ export default function PermitDetailScreen() {
 
   const handlePrepareExport = async (format: "markdown" | "csv") => {
     const exported = await utils.permitting.exportAuditHistory.fetch({ caseId, format });
-    setExportPreview(exported);
+    setExportPreview(exported as ExportPreview);
   };
 
   const handleDownloadAudit = async (format: "csv" | "pdf") => {
-    const markdownExport = await utils.permitting.exportAuditHistory.fetch({ caseId, format: "markdown" });
+    const markdownExport = (await utils.permitting.exportAuditHistory.fetch({ caseId, format: "markdown" })) as ExportPreview;
+    setExportPreview(markdownExport);
+
     if (format === "pdf") {
-      const html = toAuditHtml(record.title, markdownExport.content);
+      const html = toAuditHtml(record.title, markdownExport.content, markdownExport.packageMetadata?.signature);
       const printed = await Print.printToFileAsync({ html });
       if (Platform.OS === "web") {
         window.open(printed.uri, "_blank");
         return;
       }
+      const targetPath = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}${record.id}-audit-history.pdf`;
+      await FileSystem.copyAsync({ from: printed.uri, to: targetPath });
+      await persistCacheManifest({
+        csvPath: cacheManifest?.csvPath,
+        pdfPath: targetPath,
+        updatedAt: new Date().toISOString(),
+      });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(printed.uri, { mimeType: "application/pdf" });
+        await Sharing.shareAsync(targetPath, { mimeType: "application/pdf" });
       }
       return;
     }
 
-    const csvExport = await utils.permitting.exportAuditHistory.fetch({ caseId, format: "csv" });
+    const csvExport = (await utils.permitting.exportAuditHistory.fetch({ caseId, format: "csv" })) as ExportPreview;
+    setExportPreview(csvExport);
     if (Platform.OS === "web") {
       const blob = new Blob([csvExport.content], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
@@ -249,8 +327,20 @@ export default function PermitDetailScreen() {
 
     const targetPath = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}${csvExport.fileName}`;
     await FileSystem.writeAsStringAsync(targetPath, csvExport.content, { encoding: FileSystem.EncodingType.UTF8 });
+    await persistCacheManifest({
+      csvPath: targetPath,
+      pdfPath: cacheManifest?.pdfPath,
+      updatedAt: new Date().toISOString(),
+    });
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(targetPath, { mimeType: "text/csv" });
+    }
+  };
+
+  const handleOpenCachedAudit = async (pathValue?: string) => {
+    if (!pathValue || Platform.OS === "web") return;
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(pathValue);
     }
   };
 
@@ -262,6 +352,18 @@ export default function PermitDetailScreen() {
       actorName: activeAgencyUser.displayName,
       actorRole: activeAgencyUser.role,
       reason: overrideReason.trim(),
+    });
+  };
+
+  const handleAdvanceHandoff = (handoffId: string, action: "accept" | "complete" | "escalate") => {
+    if (!activeAgencyUser || handoffNote.trim().length < 3) return;
+    advanceHandoffMutation.mutate({
+      caseId: record.id,
+      handoffId,
+      actorName: activeAgencyUser.displayName,
+      actorRole: activeAgencyUser.role,
+      action,
+      note: handoffNote.trim(),
     });
   };
 
@@ -301,6 +403,30 @@ export default function PermitDetailScreen() {
               </View>
             </View>
           ) : null}
+        </SectionCard>
+
+        <SectionCard title="Approval handoffs and escalation timers">
+          <TextInput value={handoffNote} onChangeText={setHandoffNote} className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground" placeholder="Handoff acceptance or escalation note" placeholderTextColor="#6B7280" />
+          {(record.approvalHandoffs ?? []).map((handoff) => {
+            const warning = hoursUntil(handoff.dueAt) <= 6;
+            return (
+              <View key={handoff.id} className={`rounded-2xl border p-4 ${warning ? "border-warning bg-warning/5" : "border-border bg-background"}`}>
+                <View className="flex-row items-center justify-between gap-4">
+                  <Text className="flex-1 text-base font-semibold text-foreground">{handoff.toRole.replace(/_/g, " ")}</Text>
+                  <Text className={`text-sm font-semibold ${warning ? "text-warning" : "text-primary"}`}>{handoff.status}</Text>
+                </View>
+                <Text className="mt-2 text-sm text-muted">From {handoff.fromRole.replace(/_/g, " ")} · Due in {hoursUntil(handoff.dueAt)}h</Text>
+                <Text className="mt-1 text-xs text-muted">Reason: {handoff.reason}</Text>
+                {canReview ? (
+                  <View className="mt-3 gap-2 md:flex-row">
+                    <View className="flex-1"><ActionButton label="Accept handoff" onPress={() => handleAdvanceHandoff(handoff.id, "accept")} tone="dark" /></View>
+                    <View className="flex-1"><ActionButton label="Complete handoff" onPress={() => handleAdvanceHandoff(handoff.id, "complete")} tone="success" /></View>
+                    <View className="flex-1"><ActionButton label="Escalate handoff" onPress={() => handleAdvanceHandoff(handoff.id, "escalate")} tone="warning" /></View>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
         </SectionCard>
 
         <SectionCard title="Active reviewer context">
@@ -384,20 +510,41 @@ export default function PermitDetailScreen() {
           </SectionCard>
         ) : null}
 
-        <SectionCard title="Audit history export">
+        <SectionCard title="Signed audit package and offline cache">
           <View className="gap-3 md:flex-row">
-            <View className="flex-1"><ActionButton label="Preview Markdown export" onPress={() => void handlePrepareExport("markdown")} tone="dark" /></View>
-            <View className="flex-1"><ActionButton label="Preview CSV export" onPress={() => void handlePrepareExport("csv")} tone="primary" /></View>
+            <View className="flex-1"><ActionButton label="Preview signed Markdown" onPress={() => void handlePrepareExport("markdown")} tone="dark" /></View>
+            <View className="flex-1"><ActionButton label="Preview signed CSV" onPress={() => void handlePrepareExport("csv")} tone="primary" /></View>
           </View>
           <View className="gap-3 md:flex-row">
-            <View className="flex-1"><ActionButton label="Download CSV to device" onPress={() => void handleDownloadAudit("csv")} tone="primary" /></View>
-            <View className="flex-1"><ActionButton label="Download PDF to device" onPress={() => void handleDownloadAudit("pdf")} tone="success" /></View>
+            <View className="flex-1"><ActionButton label="Download signed CSV" onPress={() => void handleDownloadAudit("csv")} tone="primary" /></View>
+            <View className="flex-1"><ActionButton label="Download signed PDF" onPress={() => void handleDownloadAudit("pdf")} tone="success" /></View>
           </View>
+          {currentPackageMetadata ? (
+            <View className="rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">{currentPackageMetadata.fileName}</Text>
+              <Text className="mt-2 text-xs text-muted">Signed by {currentPackageMetadata.signedBy} · Generated {new Date(currentPackageMetadata.generatedAt).toLocaleString()}</Text>
+              <Text className="mt-2 text-xs text-muted">SHA-256: {currentPackageMetadata.sha256}</Text>
+              <Text className="mt-1 text-xs text-muted">Signature: {currentPackageMetadata.signature}</Text>
+              <Text className="mt-1 text-xs text-muted">{currentPackageMetadata.verifierHint}</Text>
+            </View>
+          ) : null}
           {exportPreview ? (
             <View className="rounded-2xl border border-border bg-background p-4">
               <Text className="text-sm font-semibold text-foreground">{exportPreview.fileName}</Text>
               <Text className="mt-2 text-xs text-muted">{exportPreview.mimeType}</Text>
               <Text className="mt-3 text-xs leading-5 text-muted">{exportPreview.content.slice(0, 900)}</Text>
+            </View>
+          ) : null}
+          {Platform.OS !== "web" ? (
+            <View className="rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">Offline cache</Text>
+              <Text className="mt-2 text-xs text-muted">Updated: {cacheManifest?.updatedAt ? new Date(cacheManifest.updatedAt).toLocaleString() : "No cached package yet"}</Text>
+              <Text className="mt-1 text-xs text-muted">CSV: {cacheManifest?.csvPath ?? "Unavailable"}</Text>
+              <Text className="mt-1 text-xs text-muted">PDF: {cacheManifest?.pdfPath ?? "Unavailable"}</Text>
+              <View className="mt-3 gap-2 md:flex-row">
+                <View className="flex-1"><ActionButton label="Open cached CSV" onPress={() => void handleOpenCachedAudit(cacheManifest?.csvPath)} tone="dark" disabled={!cacheManifest?.csvPath} /></View>
+                <View className="flex-1"><ActionButton label="Open cached PDF" onPress={() => void handleOpenCachedAudit(cacheManifest?.pdfPath)} tone="success" disabled={!cacheManifest?.pdfPath} /></View>
+              </View>
             </View>
           ) : null}
         </SectionCard>

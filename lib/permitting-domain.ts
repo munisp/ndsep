@@ -92,6 +92,26 @@ export type PermitAssignmentRecord = {
   status: "active" | "accepted" | "completed";
 };
 
+export type PermitApprovalHandoffRecord = {
+  id: string;
+  fromRole: AgencyRole | "system";
+  toRole: AgencyRole;
+  startedAt: string;
+  dueAt: string;
+  status: "pending" | "accepted" | "escalated" | "completed";
+  reason: string;
+};
+
+export type PermitAuditPackageRecord = {
+  generatedAt: string;
+  format: "csv" | "pdf" | "markdown";
+  fileName: string;
+  sha256: string;
+  signature: string;
+  signedBy: string;
+  verifierHint: string;
+};
+
 export type AIExtractionResultRecord = {
   documentName: string;
   extractedAt: string;
@@ -156,6 +176,8 @@ export type PermitCaseRecord = {
   reviewNotes: PermitReviewNoteRecord[];
   auditHistory?: PermitAuditEventRecord[];
   activeAssignment?: PermitAssignmentRecord | null;
+  approvalHandoffs?: PermitApprovalHandoffRecord[];
+  latestAuditPackage?: PermitAuditPackageRecord | null;
   lastAiExtraction: AIExtractionResultRecord | null;
   uploadedDocuments?: PermitUploadedDocumentRecord[];
 };
