@@ -69,3 +69,7 @@
 - [ ] Portable enterprise auth upgrade path beyond local JWT baseline
 - [ ] Portable object storage upgrade path beyond local filesystem baseline
 - [x] Comprehensive production validation, self-hosting readiness, and deployment hardening
+- [x] Audit-history export options for permit review and approval records
+- [x] Automated reviewer-assignment rules for escalated permit cases
+- [x] Side-by-side AI extraction verification against uploaded permit PDFs
+- [x] Visual deadline warnings and interactive queue analytics charts on the SLA dashboard

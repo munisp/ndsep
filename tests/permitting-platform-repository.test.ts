@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   appendPermitReviewNote,
+  exportPermitAuditHistory,
   extractPermitDocumentToForm,
   getActiveAgencyUser,
   getPermitCase,
@@ -98,6 +99,22 @@ describe("permitting platform repository", () => {
     expect(analytics.some((item) => item.avgSlaHours >= 48)).toBe(true);
   });
 
+  it("automatically assigns escalated permits to reviewer queues", () => {
+    const platform = getPermittingPlatform();
+    const criticalCase = platform.permitCases.find((item) => item.id === "permit-oilgas-014");
+    expect(criticalCase?.activeAssignment?.assignedUserId).toBeTruthy();
+    expect(criticalCase?.auditHistory?.some((event) => event.type === "assignment")).toBe(true);
+  });
+
+  it("exposes markdown and csv audit-history exports", () => {
+    const markdown = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "markdown" });
+    const csv = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+    expect(markdown.fileName.endsWith(".md")).toBe(true);
+    expect(markdown.content).toContain("Audit history");
+    expect(csv.fileName.endsWith(".csv")).toBe(true);
+    expect(csv.content).toContain("createdAt,type,actor,role,summary");
+  });
+
   it("exposes middleware and polyglot service topology for the expanded platform", () => {
     expect(listMiddlewareComponents().some((item) => item.key === "kafka")).toBe(true);
     expect(listServiceTopology().map((item) => item.language)).toEqual(expect.arrayContaining(["typescript", "python", "go", "rust"]));
@@ -133,5 +150,6 @@ describe("permitting platform repository", () => {
     expect(upload.uploadedDocument.fileName).toBe("petroleum.txt");
     expect(upload.caseRecord.uploadedDocuments?.length).toBeGreaterThan(0);
     expect(upload.extraction?.populatedKeys.length).toBeGreaterThan(0);
+    expect(upload.caseRecord.auditHistory?.some((event) => event.type === "document_upload")).toBe(true);
   });
 });

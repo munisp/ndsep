@@ -103,7 +103,7 @@
       "participatingAgencyIds": [
         "environment-agency"
       ],
-      "updatedAt": "2026-07-20T11:30:00Z",
+      "updatedAt": "2026-07-20T15:36:44.753Z",
       "summary": "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
       "timeline": [
         {
@@ -194,6 +194,7 @@
               "editableBy": [
                 "applicant",
                 "mining_reviewer",
+                "environment_reviewer",
                 "planning_supervisor"
               ]
             },
@@ -212,8 +213,8 @@
                 "planning_supervisor"
               ],
               "editableBy": [
+                "applicant",
                 "mining_reviewer",
-                "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
               ]
@@ -233,8 +234,8 @@
                 "planning_supervisor"
               ],
               "editableBy": [
+                "applicant",
                 "mining_reviewer",
-                "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
               ]
@@ -254,8 +255,8 @@
                 "planning_supervisor"
               ],
               "editableBy": [
+                "applicant",
                 "mining_reviewer",
-                "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
               ]
@@ -284,6 +285,7 @@
               "editableBy": [
                 "applicant",
                 "mining_reviewer",
+                "environment_reviewer",
                 "planning_supervisor"
               ]
             },
@@ -303,7 +305,6 @@
               ],
               "editableBy": [
                 "mining_reviewer",
-                "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
               ]
@@ -325,6 +326,7 @@
               "editableBy": [
                 "applicant",
                 "mining_reviewer",
+                "environment_reviewer",
                 "planning_supervisor"
               ]
             }
@@ -343,7 +345,39 @@
         }
       ],
       "lastAiExtraction": null,
-      "uploadedDocuments": []
+      "uploadedDocuments": [],
+      "activeAssignment": {
+        "assignedUserId": "user-mining-1",
+        "assignedAt": "2026-07-20T15:36:44.753Z",
+        "reason": "Obligation risk triggered escalation",
+        "status": "active"
+      },
+      "auditHistory": [
+        {
+          "id": "audit-1784561804753-ezv3zj",
+          "createdAt": "2026-07-20T15:36:44.753Z",
+          "actor": "Haruna Bello",
+          "role": "mining_reviewer",
+          "type": "assignment",
+          "summary": "Auto-assigned escalated case to Haruna Bello for obligation risk triggered escalation."
+        },
+        {
+          "id": "audit-review-note-mining-001",
+          "createdAt": "2026-07-20T11:35:00Z",
+          "actor": "Haruna Bello",
+          "role": "mining_reviewer",
+          "type": "review_note",
+          "summary": "needs changes: Applicant should attach a more explicit signed minimum work programme and cadastre-unit coverage note."
+        },
+        {
+          "id": "audit-seed-permit-mining-001",
+          "createdAt": "2026-07-20T11:30:00Z",
+          "actor": "system",
+          "role": "system",
+          "type": "status_change",
+          "summary": "Permit case initialized at technical review."
+        }
+      ]
     },
     {
       "id": "permit-oilgas-014",
@@ -360,7 +394,7 @@
         "environment-agency",
         "planning-authority"
       ],
-      "updatedAt": "2026-07-20T15:18:45.805Z",
+      "updatedAt": "2026-07-20T15:36:45.986Z",
       "summary": "Local infrastructure dependencies cleared, but mitigation conditions and abandonment security confirmation remain outstanding.",
       "timeline": [
         {
@@ -452,6 +486,7 @@
               "editableBy": [
                 "applicant",
                 "petroleum_reviewer",
+                "environment_reviewer",
                 "planning_supervisor"
               ]
             },
@@ -470,7 +505,7 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
+                "applicant",
                 "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
@@ -491,7 +526,7 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
+                "applicant",
                 "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
@@ -512,7 +547,7 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
+                "applicant",
                 "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
@@ -540,7 +575,7 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
+                "applicant",
                 "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
@@ -561,7 +596,6 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
                 "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
@@ -582,7 +616,7 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
+                "applicant",
                 "petroleum_reviewer",
                 "environment_reviewer",
                 "planning_supervisor"
@@ -604,7 +638,7 @@
       ],
       "lastAiExtraction": {
         "documentName": "petroleum.txt",
-        "extractedAt": "2026-07-20T15:18:45.805Z",
+        "extractedAt": "2026-07-20T15:36:45.986Z",
         "model": "gpt-5-nano",
         "populatedKeys": [
           "operator_name",
@@ -617,15 +651,63 @@
       },
       "uploadedDocuments": [
         {
-          "id": "doc-1784560725805",
+          "id": "doc-1784561805986",
           "fileName": "petroleum.txt",
           "mimeType": "text/plain",
-          "storagePath": "permits/permit-oilgas-014/petroleum_d0c0ae63.txt",
-          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_d0c0ae63.txt",
-          "uploadedAt": "2026-07-20T15:18:45.805Z",
+          "storagePath": "permits/permit-oilgas-014/petroleum_afbca42f.txt",
+          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_afbca42f.txt",
+          "uploadedAt": "2026-07-20T15:36:45.986Z",
           "uploadedByRole": "petroleum_reviewer",
           "extractedTextPreview": "Operator: Delta Frontier Energy\nBlock: OML-500\nWell: WELL-55\nOperation Type: Offshore intervention",
           "extractionStatus": "processed"
+        }
+      ],
+      "activeAssignment": {
+        "assignedUserId": "user-petroleum-1",
+        "assignedAt": "2026-07-20T15:36:44.753Z",
+        "reason": "Critical permit priority escalation",
+        "status": "active"
+      },
+      "auditHistory": [
+        {
+          "id": "audit-1784561805986-nz0xob",
+          "createdAt": "2026-07-20T15:36:45.986Z",
+          "actor": "system",
+          "role": "system",
+          "type": "ai_extraction",
+          "summary": "AI extraction completed for petroleum.txt with confidence 52."
+        },
+        {
+          "id": "audit-1784561805986-dzz4e4",
+          "createdAt": "2026-07-20T15:36:45.986Z",
+          "actor": "petroleum_reviewer",
+          "role": "petroleum_reviewer",
+          "type": "document_upload",
+          "summary": "Uploaded petroleum.txt for extraction with 4 populated fields."
+        },
+        {
+          "id": "audit-1784561804753-oxtot0",
+          "createdAt": "2026-07-20T15:36:44.753Z",
+          "actor": "Ijeoma Peters",
+          "role": "petroleum_reviewer",
+          "type": "assignment",
+          "summary": "Auto-assigned escalated case to Ijeoma Peters for critical permit priority escalation."
+        },
+        {
+          "id": "audit-review-note-oil-001",
+          "createdAt": "2026-07-20T10:05:00Z",
+          "actor": "Ijeoma Peters",
+          "role": "petroleum_reviewer",
+          "type": "review_note",
+          "summary": "comment: Operational sequence is acceptable, but abandonment security wording must match the latest regulator template."
+        },
+        {
+          "id": "audit-seed-permit-oilgas-014",
+          "createdAt": "2026-07-20T09:45:00Z",
+          "actor": "system",
+          "role": "system",
+          "type": "status_change",
+          "summary": "Permit case initialized at environmental review."
         }
       ]
     },
@@ -645,7 +727,7 @@
         "mining-cadastre",
         "petroleum-regulator"
       ],
-      "updatedAt": "2026-07-20T08:10:00Z",
+      "updatedAt": "2026-07-20T15:36:44.753Z",
       "summary": "Unified intake completed. The case is in parallel agency review with one deficiency notice pending from environmental compliance.",
       "timeline": [
         {
@@ -729,10 +811,9 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
-                "petroleum_reviewer",
-                "environment_reviewer",
-                "planning_supervisor"
+                "applicant",
+                "planning_supervisor",
+                "environment_reviewer"
               ]
             },
             {
@@ -750,10 +831,9 @@
                 "planning_supervisor"
               ],
               "editableBy": [
-                "mining_reviewer",
-                "petroleum_reviewer",
-                "environment_reviewer",
-                "planning_supervisor"
+                "applicant",
+                "planning_supervisor",
+                "environment_reviewer"
               ]
             }
           ]
@@ -771,7 +851,39 @@
         }
       ],
       "lastAiExtraction": null,
-      "uploadedDocuments": []
+      "uploadedDocuments": [],
+      "activeAssignment": {
+        "assignedUserId": "user-env-1",
+        "assignedAt": "2026-07-20T15:36:44.753Z",
+        "reason": "Obligation risk triggered escalation",
+        "status": "active"
+      },
+      "auditHistory": [
+        {
+          "id": "audit-1784561804753-ujwid0",
+          "createdAt": "2026-07-20T15:36:44.753Z",
+          "actor": "Grace Ogbodo",
+          "role": "environment_reviewer",
+          "type": "assignment",
+          "summary": "Auto-assigned escalated case to Grace Ogbodo for obligation risk triggered escalation."
+        },
+        {
+          "id": "audit-review-note-multi-001",
+          "createdAt": "2026-07-20T08:30:00Z",
+          "actor": "Tunde Solarin",
+          "role": "planning_supervisor",
+          "type": "review_note",
+          "summary": "comment: Parallel agency queues are active. Environmental deficiency response is the current blocker."
+        },
+        {
+          "id": "audit-seed-permit-multi-023",
+          "createdAt": "2026-07-20T08:10:00Z",
+          "actor": "system",
+          "role": "system",
+          "type": "status_change",
+          "summary": "Permit case initialized at agency coordination."
+        }
+      ]
     }
   ],
   "approvalQueues": [
@@ -801,7 +913,7 @@
         "permit-oilgas-014"
       ],
       "pendingCount": 1,
-      "overdueCount": 1,
+      "overdueCount": 0,
       "avgSlaHours": 96,
       "breachedCaseIds": []
     },
@@ -817,7 +929,7 @@
         "permit-multi-023"
       ],
       "pendingCount": 3,
-      "overdueCount": 3,
+      "overdueCount": 2,
       "avgSlaHours": 120,
       "breachedCaseIds": [
         "permit-mining-001",
@@ -993,7 +1105,7 @@
       "agencyId": "petroleum-regulator",
       "role": "petroleum_reviewer",
       "pendingCount": 1,
-      "overdueCount": 1,
+      "overdueCount": 0,
       "avgSlaHours": 96,
       "breachedCaseIds": [],
       "criticalCaseIds": [
@@ -1004,7 +1116,7 @@
       "agencyId": "environment-agency",
       "role": "environment_reviewer",
       "pendingCount": 3,
-      "overdueCount": 3,
+      "overdueCount": 2,
       "avgSlaHours": 120,
       "breachedCaseIds": [
         "permit-mining-001",

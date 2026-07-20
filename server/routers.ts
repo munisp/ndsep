@@ -28,6 +28,7 @@ import {
 } from "./mobilePlatformRepository";
 import {
   appendPermitReviewNote,
+  exportPermitAuditHistory,
   extractPermitDocumentToForm,
   getActiveAgencyUser,
   getPermittingPlatform,
@@ -337,6 +338,14 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => uploadPermitDocumentAndExtract(input)),
+    exportAuditHistory: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          format: z.enum(["markdown", "csv"]),
+        }),
+      )
+      .query(({ input }) => exportPermitAuditHistory(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

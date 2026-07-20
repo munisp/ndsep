@@ -27,14 +27,9 @@ function ActionButton({
   tone?: "dark" | "primary" | "success";
   disabled?: boolean;
 }) {
-  const backgroundClass =
-    tone === "primary" ? "bg-primary" : tone === "success" ? "bg-success" : "bg-foreground";
+  const backgroundClass = tone === "primary" ? "bg-primary" : tone === "success" ? "bg-success" : "bg-foreground";
   return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [{ opacity: disabled ? 0.45 : pressed ? 0.85 : 1 }]}
-    >
+    <Pressable disabled={disabled} onPress={onPress} style={({ pressed }) => [{ opacity: disabled ? 0.45 : pressed ? 0.85 : 1 }]}>
       <View className={`rounded-2xl px-4 py-3 ${backgroundClass}`}>
         <Text className="text-center text-sm font-semibold text-background">{label}</Text>
       </View>
@@ -50,9 +45,16 @@ export default function PermitDetailScreen() {
   const viewerRole = activeAgencyUserQuery.data?.role ?? "applicant";
   const recordQuery = trpc.permitting.getCaseForRole.useQuery({ caseId, role: viewerRole });
   const platformQuery = trpc.permitting.getPlatform.useQuery();
+  const [exportFormat, setExportFormat] = useState<"markdown" | "csv" | null>(null);
+  const exportQuery = trpc.permitting.exportAuditHistory.useQuery(
+    { caseId, format: exportFormat ?? "markdown" },
+    { enabled: exportFormat !== null },
+  );
+
   const record = recordQuery.data;
   const agencies = platformQuery.data?.agencies ?? [];
   const services = platformQuery.data?.services ?? [];
+  const agencyUsers = platformQuery.data?.agencyUsers ?? [];
   const activeAgencyUser = activeAgencyUserQuery.data;
 
   const [summary, setSummary] = useState("");
@@ -114,10 +116,9 @@ export default function PermitDetailScreen() {
 
   const leadAgency = agencies.find((item) => item.id === record?.leadAgencyId) ?? null;
   const participatingAgencies = agencies.filter((item) => record?.participatingAgencyIds.includes(item.id));
-  const canUseEditableForms = useMemo(
-    () => record?.sector === "mining" || record?.sector === "oil_gas",
-    [record?.sector],
-  );
+  const assignedReviewer = agencyUsers.find((item) => item.id === record?.activeAssignment?.assignedUserId) ?? null;
+  const latestUploadedDocument = record?.uploadedDocuments?.[0] ?? null;
+  const canUseEditableForms = useMemo(() => record?.sector === "mining" || record?.sector === "oil_gas", [record?.sector]);
   const isApplicant = viewerRole === "applicant";
   const canReview = viewerRole !== "applicant";
 
@@ -125,9 +126,7 @@ export default function PermitDetailScreen() {
     return (
       <ScreenContainer className="items-center justify-center p-6">
         <Text className="text-lg font-semibold text-foreground">Permit case not found</Text>
-        <Text className="mt-2 text-center text-sm text-muted">
-          The selected permit detail could not be loaded from the expanded platform snapshot.
-        </Text>
+        <Text className="mt-2 text-center text-sm text-muted">The selected permit detail could not be loaded from the expanded platform snapshot.</Text>
       </ScreenContainer>
     );
   }
@@ -138,10 +137,7 @@ export default function PermitDetailScreen() {
       fields: section.fields.map((field) => ({
         ...field,
         value: draftSections[field.key] ?? field.value,
-        source:
-          field.source === "ai" && (draftSections[field.key] ?? field.value) === field.value
-            ? ("ai" as const)
-            : ("manual" as const),
+        source: field.source === "ai" && (draftSections[field.key] ?? field.value) === field.value ? ("ai" as const) : ("manual" as const),
       })),
     }));
     updateFormMutation.mutate({ caseId: record.id, actorRole: viewerRole, summary, formSections });
@@ -173,12 +169,9 @@ export default function PermitDetailScreen() {
       type: ["application/pdf", "image/*", "text/plain"],
       copyToCacheDirectory: true,
     });
-
     if (result.canceled || !result.assets?.length) return;
     const asset = result.assets[0];
-    const base64Data = await FileSystem.readAsStringAsync(asset.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    const base64Data = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
     setPickedFile({
       name: asset.name ?? "permit-upload",
       mimeType: asset.mimeType ?? "application/octet-stream",
@@ -205,22 +198,23 @@ export default function PermitDetailScreen() {
           <Text className="text-sm font-medium text-white/80">{record.permitType}</Text>
           <Text className="mt-3 text-3xl font-bold text-white">{record.title}</Text>
           <Text className="mt-3 text-base leading-6 text-white/85">{record.summary}</Text>
-          <Text className="mt-4 text-sm text-white/80">
-            {record.applicantName} · {record.locationLabel} · {record.assetReference}
-          </Text>
+          <Text className="mt-4 text-sm text-white/80">{record.applicantName} · {record.locationLabel} · {record.assetReference}</Text>
         </View>
+
+        <SectionCard title="Escalation and reviewer assignment">
+          <View className="rounded-2xl border border-border bg-background p-4">
+            <Text className="text-base font-semibold text-foreground">{assignedReviewer?.displayName ?? "No active assignee"}</Text>
+            <Text className="mt-2 text-sm text-muted">Role: {assignedReviewer?.role.replace(/_/g, " ") ?? "Not assigned"}</Text>
+            <Text className="mt-1 text-xs text-muted">Reason: {record.activeAssignment?.reason ?? "No escalation rule applied yet"}</Text>
+            <Text className="mt-1 text-xs text-muted">Status: {record.activeAssignment?.status ?? "n/a"}</Text>
+          </View>
+        </SectionCard>
 
         <SectionCard title="Active reviewer context">
           <View className="rounded-2xl border border-border bg-background p-4">
-            <Text className="text-base font-semibold text-foreground">
-              {activeAgencyUser?.displayName ?? "No active agency user"}
-            </Text>
-            <Text className="mt-2 text-sm text-muted">
-              Role: {activeAgencyUser?.role.replace(/_/g, " ") ?? "Unavailable"}
-            </Text>
-            <Text className="mt-1 text-xs text-muted">
-              Agency: {activeAgencyUser?.agencyId ?? "Applicant context"}
-            </Text>
+            <Text className="text-base font-semibold text-foreground">{activeAgencyUser?.displayName ?? "No active agency user"}</Text>
+            <Text className="mt-2 text-sm text-muted">Role: {activeAgencyUser?.role.replace(/_/g, " ") ?? "Unavailable"}</Text>
+            <Text className="mt-1 text-xs text-muted">Agency: {activeAgencyUser?.agencyId ?? "Applicant context"}</Text>
           </View>
         </SectionCard>
 
@@ -228,14 +222,7 @@ export default function PermitDetailScreen() {
           <SectionCard title="Editable intake and review form">
             <View className="rounded-2xl border border-border bg-background p-4">
               <Text className="text-sm font-semibold text-foreground">Permit summary</Text>
-              <TextInput
-                editable={isApplicant || canReview}
-                value={summary}
-                onChangeText={setSummary}
-                multiline
-                className="mt-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground"
-                style={{ minHeight: 88, textAlignVertical: "top" }}
-              />
+              <TextInput editable={isApplicant || canReview} value={summary} onChangeText={setSummary} multiline className="mt-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground" style={{ minHeight: 88, textAlignVertical: "top" }} />
             </View>
             {record.formSections.map((section) => (
               <View key={section.id} className="rounded-2xl border border-border bg-background p-4">
@@ -250,37 +237,26 @@ export default function PermitDetailScreen() {
                         <TextInput
                           editable={editable}
                           value={draftSections[field.key] ?? ""}
-                          onChangeText={(value) =>
-                            setDraftSections((current) => ({ ...current, [field.key]: value }))
-                          }
+                          onChangeText={(value) => setDraftSections((current) => ({ ...current, [field.key]: value }))}
                           multiline={field.fieldType === "textarea"}
                           keyboardType={field.fieldType === "number" ? "numeric" : "default"}
                           className="mt-2 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground"
                           style={{ minHeight: field.fieldType === "textarea" ? 92 : 52, textAlignVertical: "top" }}
                         />
-                        <Text className="mt-1 text-xs text-muted">
-                          {field.required ? "Required" : "Optional"} · Source: {field.source} ·
-                          Editable by: {(field.editableBy ?? [viewerRole]).join(", ").replace(/_/g, " ")}
-                        </Text>
+                        <Text className="mt-1 text-xs text-muted">{field.required ? "Required" : "Optional"} · Source: {field.source} · Editable by: {(field.editableBy ?? [viewerRole]).join(", ").replace(/_/g, " ")}</Text>
                       </View>
                     );
                   })}
                 </View>
               </View>
             ))}
-            <ActionButton
-              label={updateFormMutation.isPending ? "Saving…" : "Save permit form"}
-              onPress={handleSaveForm}
-              tone="primary"
-            />
+            <ActionButton label={updateFormMutation.isPending ? "Saving…" : "Save permit form"} onPress={handleSaveForm} tone="primary" />
           </SectionCard>
         ) : null}
 
         {canUseEditableForms ? (
           <SectionCard title="Document ingestion and AI prefill">
-            <Text className="text-sm leading-5 text-muted">
-              Use direct document upload for real PDF and image parsing, or paste raw extracted text when needed for fallback extraction.
-            </Text>
+            <Text className="text-sm leading-5 text-muted">Use direct document upload for real PDF and image parsing, or paste raw extracted text when needed for fallback extraction.</Text>
             <View className="gap-3">
               <ActionButton label="Pick PDF or image document" onPress={handlePickDocument} tone="dark" />
               {pickedFile ? (
@@ -289,86 +265,70 @@ export default function PermitDetailScreen() {
                   <Text className="mt-2 text-sm text-muted">{pickedFile.name} · {pickedFile.mimeType}</Text>
                 </View>
               ) : null}
-              <ActionButton
-                label={uploadDocumentMutation.isPending ? "Uploading and extracting…" : "Upload and extract"}
-                onPress={handleUploadPickedDocument}
-                tone="success"
-                disabled={!pickedFile}
-              />
+              <ActionButton label={uploadDocumentMutation.isPending ? "Uploading and extracting…" : "Upload and extract"} onPress={handleUploadPickedDocument} tone="success" disabled={!pickedFile} />
             </View>
 
-            <TextInput
-              value={documentName}
-              onChangeText={setDocumentName}
-              className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground"
-            />
-            <TextInput
-              value={documentText}
-              onChangeText={setDocumentText}
-              multiline
-              className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground"
-              style={{ minHeight: 150, textAlignVertical: "top" }}
-              placeholder="Paste OCR text or extracted permit text here"
-              placeholderTextColor="#6B7280"
-            />
-            <ActionButton
-              label={extractDocumentMutation.isPending ? "Extracting…" : "Extract from pasted text"}
-              onPress={handleExtractDocument}
-              tone="primary"
-              disabled={documentText.trim().length < 20}
-            />
+            <TextInput value={documentName} onChangeText={setDocumentName} className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground" />
+            <TextInput value={documentText} onChangeText={setDocumentText} multiline className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground" style={{ minHeight: 150, textAlignVertical: "top" }} placeholder="Paste OCR text or extracted permit text here" placeholderTextColor="#6B7280" />
+            <ActionButton label={extractDocumentMutation.isPending ? "Extracting…" : "Extract from pasted text"} onPress={handleExtractDocument} tone="primary" disabled={documentText.trim().length < 20} />
+
+            <View className="gap-4 md:flex-row">
+              <View className="flex-1 rounded-2xl border border-border bg-background p-4">
+                <Text className="text-sm font-semibold text-foreground">Uploaded document preview</Text>
+                <Text className="mt-2 text-sm text-muted">{latestUploadedDocument?.fileName ?? "No uploaded document yet"}</Text>
+                <Text className="mt-2 text-xs text-muted">{latestUploadedDocument?.extractedTextPreview ?? "Upload a PDF or image to inspect the extracted source text preview here."}</Text>
+              </View>
+              <View className="flex-1 rounded-2xl border border-border bg-background p-4">
+                <Text className="text-sm font-semibold text-foreground">Extracted field verification</Text>
+                <View className="mt-3 gap-2">
+                  {record.formSections.flatMap((section) => section.fields).map((field) => (
+                    <View key={field.key} className="rounded-xl border border-border bg-surface px-3 py-2">
+                      <Text className="text-xs font-semibold text-foreground">{field.label}</Text>
+                      <Text className="mt-1 text-xs text-muted">{field.value || "No value extracted"}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
 
             {record.lastAiExtraction ? (
               <View className="rounded-2xl border border-border bg-background p-4">
                 <Text className="text-sm font-semibold text-foreground">Last AI extraction</Text>
-                <Text className="mt-2 text-sm text-muted">
-                  {record.lastAiExtraction.documentName} · {record.lastAiExtraction.model}
-                </Text>
-                <Text className="mt-1 text-xs text-muted">
-                  Source: {record.lastAiExtraction.sourceType ?? "text"} · Confidence: {record.lastAiExtraction.confidence ?? 0}
-                </Text>
-                <Text className="mt-1 text-xs text-muted">
-                  Populated: {record.lastAiExtraction.populatedKeys.join(", ") || "No matching fields yet"}
-                </Text>
+                <Text className="mt-2 text-sm text-muted">{record.lastAiExtraction.documentName} · {record.lastAiExtraction.model}</Text>
+                <Text className="mt-1 text-xs text-muted">Source: {record.lastAiExtraction.sourceType ?? "text"} · Confidence: {record.lastAiExtraction.confidence ?? 0}</Text>
+                <Text className="mt-1 text-xs text-muted">Populated: {record.lastAiExtraction.populatedKeys.join(", ") || "No matching fields yet"}</Text>
               </View>
             ) : null}
-
-            {(record.uploadedDocuments ?? []).map((document) => (
-              <View key={document.id} className="rounded-2xl border border-border bg-background p-4">
-                <Text className="text-sm font-semibold text-foreground">{document.fileName}</Text>
-                <Text className="mt-1 text-sm text-muted">{document.mimeType} · {document.extractionStatus}</Text>
-                <Text className="mt-1 text-xs text-muted">
-                  Uploaded by {document.uploadedByRole.replace(/_/g, " ")} · {new Date(document.uploadedAt).toLocaleString()}
-                </Text>
-                <Text className="mt-2 text-xs text-muted">{document.extractedTextPreview || "No preview available"}</Text>
-              </View>
-            ))}
           </SectionCard>
         ) : null}
+
+        <SectionCard title="Audit history export">
+          <View className="gap-3 md:flex-row">
+            <View className="flex-1"><ActionButton label="Prepare Markdown export" onPress={() => setExportFormat("markdown")} tone="dark" /></View>
+            <View className="flex-1"><ActionButton label="Prepare CSV export" onPress={() => setExportFormat("csv")} tone="primary" /></View>
+          </View>
+          {exportQuery.data ? (
+            <View className="rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">{exportQuery.data.fileName}</Text>
+              <Text className="mt-2 text-xs text-muted">{exportQuery.data.mimeType}</Text>
+              <Text className="mt-3 text-xs leading-5 text-muted">{exportQuery.data.content.slice(0, 900)}</Text>
+            </View>
+          ) : null}
+        </SectionCard>
 
         <SectionCard title="Lifecycle timeline">
           {record.timeline.map((entry) => (
             <View key={entry.key} className="rounded-2xl border border-border bg-background p-4">
               <Text className="text-base font-semibold text-foreground">{entry.label}</Text>
               <Text className="mt-1 text-sm text-muted">{entry.completed ? "Completed" : "Pending"}</Text>
-              <Text className="mt-1 text-xs text-muted">
-                {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Awaiting progression"}
-              </Text>
+              <Text className="mt-1 text-xs text-muted">{entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Awaiting progression"}</Text>
             </View>
           ))}
         </SectionCard>
 
         {canReview ? (
           <SectionCard title="Review notes and approval actions">
-            <TextInput
-              value={reviewNote}
-              onChangeText={setReviewNote}
-              multiline
-              className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground"
-              style={{ minHeight: 110, textAlignVertical: "top" }}
-              placeholder="Write a reviewer note or approval decision context"
-              placeholderTextColor="#6B7280"
-            />
+            <TextInput value={reviewNote} onChangeText={setReviewNote} multiline className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground" style={{ minHeight: 110, textAlignVertical: "top" }} placeholder="Write a reviewer note or approval decision context" placeholderTextColor="#6B7280" />
             <View className="gap-3">
               <ActionButton label="Save comment" onPress={() => handleAddReviewNote("comment")} tone="dark" />
               <ActionButton label="Request changes" onPress={() => handleAddReviewNote("needs_changes")} tone="primary" />
@@ -377,17 +337,15 @@ export default function PermitDetailScreen() {
           </SectionCard>
         ) : null}
 
-        <SectionCard title="Review history">
-          {record.reviewNotes.map((note) => (
-            <View key={note.id} className="rounded-2xl border border-border bg-background p-4">
+        <SectionCard title="Review and audit events">
+          {(record.auditHistory ?? []).map((event) => (
+            <View key={event.id} className="rounded-2xl border border-border bg-background p-4">
               <View className="flex-row items-center justify-between gap-4">
-                <Text className="flex-1 text-base font-semibold text-foreground">{note.author}</Text>
-                <Text className="text-sm font-semibold text-primary">{note.decision.replace(/_/g, " ")}</Text>
+                <Text className="flex-1 text-base font-semibold text-foreground">{event.actor}</Text>
+                <Text className="text-sm font-semibold text-primary">{event.type.replace(/_/g, " ")}</Text>
               </View>
-              <Text className="mt-2 text-sm leading-5 text-muted">{note.note}</Text>
-              <Text className="mt-2 text-xs text-muted">
-                {note.role.replace(/_/g, " ")} · {new Date(note.createdAt).toLocaleString()}
-              </Text>
+              <Text className="mt-2 text-sm leading-5 text-muted">{event.summary}</Text>
+              <Text className="mt-2 text-xs text-muted">{event.role.replace(/_/g, " ")} · {new Date(event.createdAt).toLocaleString()}</Text>
             </View>
           ))}
         </SectionCard>
@@ -415,9 +373,7 @@ export default function PermitDetailScreen() {
             <View key={agency.id} className="rounded-2xl border border-border bg-background p-4">
               <Text className="text-base font-semibold text-foreground">{agency.name}</Text>
               <Text className="mt-2 text-sm text-muted">{agency.role}</Text>
-              <Text className="mt-1 text-xs text-muted">
-                {agency.jurisdiction} · SLA {agency.reviewSlaHours}h
-              </Text>
+              <Text className="mt-1 text-xs text-muted">{agency.jurisdiction} · SLA {agency.reviewSlaHours}h</Text>
             </View>
           ))}
         </SectionCard>
@@ -430,9 +386,7 @@ export default function PermitDetailScreen() {
                 <Text className="text-sm font-semibold text-primary">{service.language}</Text>
               </View>
               <Text className="mt-2 text-sm leading-5 text-muted">{service.responsibility}</Text>
-              <Text className="mt-2 text-xs text-muted">
-                Runtime: {service.runtimeMode.replace(/_/g, " ")} · Endpoint: {service.endpointPath}
-              </Text>
+              <Text className="mt-2 text-xs text-muted">Runtime: {service.runtimeMode.replace(/_/g, " ")} · Endpoint: {service.endpointPath}</Text>
             </View>
           ))}
         </SectionCard>

@@ -76,6 +76,22 @@ export type PermitReviewNoteRecord = {
   createdAt: string;
 };
 
+export type PermitAuditEventRecord = {
+  id: string;
+  createdAt: string;
+  actor: string;
+  role: AgencyRole | "system";
+  type: "status_change" | "review_note" | "assignment" | "document_upload" | "ai_extraction";
+  summary: string;
+};
+
+export type PermitAssignmentRecord = {
+  assignedUserId: string;
+  assignedAt: string;
+  reason: string;
+  status: "active" | "accepted" | "completed";
+};
+
 export type AIExtractionResultRecord = {
   documentName: string;
   extractedAt: string;
@@ -138,6 +154,8 @@ export type PermitCaseRecord = {
   obligations: PermitObligation[];
   formSections: PermitFormSectionRecord[];
   reviewNotes: PermitReviewNoteRecord[];
+  auditHistory?: PermitAuditEventRecord[];
+  activeAssignment?: PermitAssignmentRecord | null;
   lastAiExtraction: AIExtractionResultRecord | null;
   uploadedDocuments?: PermitUploadedDocumentRecord[];
 };

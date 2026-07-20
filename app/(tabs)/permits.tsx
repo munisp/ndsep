@@ -11,13 +11,13 @@ function Pill({ label, active = false, onPress }: { label: string; active?: bool
       <Text className={`text-xs font-semibold uppercase tracking-wide ${active ? "text-primary" : "text-muted"}`}>{label}</Text>
     </View>
   );
-
   if (!onPress) return body;
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
-      {body}
-    </Pressable>
-  );
+  return <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>{body}</Pressable>;
+}
+
+function daysUntil(dateString: string) {
+  const diff = new Date(dateString).getTime() - Date.now();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
 function PermitCard({
@@ -29,6 +29,7 @@ function PermitCard({
   applicantName,
   locationLabel,
   priority,
+  nearestDueDays,
 }: {
   caseId: string;
   title: string;
@@ -38,17 +39,19 @@ function PermitCard({
   applicantName: string;
   locationLabel: string;
   priority: string;
+  nearestDueDays: number | null;
 }) {
-  const toneClass =
-    priority === "critical" ? "text-error" : priority === "elevated" ? "text-warning" : "text-success";
+  const toneClass = priority === "critical" ? "text-error" : priority === "elevated" ? "text-warning" : "text-success";
+  const warningLabel = nearestDueDays === null ? null : nearestDueDays <= 1 ? "Due within 24h" : nearestDueDays <= 3 ? "Due within 72h" : null;
 
   return (
     <Link href={{ pathname: "/permit/[id]", params: { id: caseId } }} asChild>
-      <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
+      <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
         <View className="rounded-3xl border border-border bg-surface p-5">
           <View className="flex-row flex-wrap items-center gap-2">
             <Pill label={sector.replace("_", " ")} />
             <Pill label={permitType} />
+            {warningLabel ? <Pill label={warningLabel} active /> : null}
           </View>
           <Text className="mt-4 text-lg font-semibold text-foreground">{title}</Text>
           <Text className="mt-2 text-sm leading-5 text-muted">{applicantName} · {locationLabel}</Text>
@@ -62,13 +65,32 @@ function PermitCard({
   );
 }
 
+function AnalyticsBar({ label, value, max, tone }: { label: string; value: number; max: number; tone: "primary" | "warning" | "error" }) {
+  const width = (max > 0 ? `${Math.max(10, (value / max) * 100)}%` : "10%") as unknown as `${number}%`;
+  const toneClass = tone === "error" ? "bg-error" : tone === "warning" ? "bg-warning" : "bg-primary";
+  return (
+    <View className="gap-2">
+      <View className="flex-row items-center justify-between">
+        <Text className="text-sm text-foreground">{label}</Text>
+        <Text className="text-xs font-semibold text-muted">{value}</Text>
+      </View>
+      <View className="h-3 rounded-full bg-border/50">
+        <View className={`h-3 rounded-full ${toneClass}`} style={{ width }} />
+      </View>
+    </View>
+  );
+}
+
 export default function PermitsScreen() {
   const platformQuery = trpc.permitting.getPlatform.useQuery();
   const activeAgencyUserQuery = trpc.permitting.getActiveAgencyUser.useQuery();
   const queueAnalyticsQuery = trpc.permitting.listQueueAnalytics.useQuery();
   const platform = platformQuery.data;
   const activeAgencyUser = activeAgencyUserQuery.data;
+  const analytics = queueAnalyticsQuery.data ?? [];
+
   const [selectedAgencyId, setSelectedAgencyId] = useState<string>("all");
+  const [chartMetric, setChartMetric] = useState<"pending" | "overdue" | "critical">("pending");
 
   const filteredQueues = useMemo(() => {
     const queues = platform?.approvalQueues ?? [];
@@ -78,14 +100,24 @@ export default function PermitsScreen() {
   const filteredCases = useMemo(() => {
     const cases = platform?.permitCases ?? [];
     if (selectedAgencyId === "all") return cases;
-    return cases.filter(
-      (item) => item.leadAgencyId === selectedAgencyId || item.participatingAgencyIds.includes(selectedAgencyId),
-    );
+    return cases.filter((item) => item.leadAgencyId === selectedAgencyId || item.participatingAgencyIds.includes(selectedAgencyId));
   }, [platform?.permitCases, selectedAgencyId]);
 
-  const analytics = queueAnalyticsQuery.data ?? [];
+  const chartData = filteredQueues.map((queue) => {
+    const metric = analytics.find((item) => item.agencyId === queue.agencyId && item.role === queue.role);
+    return {
+      id: queue.id,
+      label: queue.title,
+      pending: metric?.pendingCount ?? queue.pendingCount,
+      overdue: metric?.overdueCount ?? queue.overdueCount,
+      critical: metric?.criticalCaseIds.length ?? 0,
+    };
+  });
+
+  const chartMax = Math.max(1, ...chartData.map((item) => item[chartMetric]));
   const totalPending = analytics.reduce((sum, item) => sum + item.pendingCount, 0);
   const totalOverdue = analytics.reduce((sum, item) => sum + item.overdueCount, 0);
+  const totalCritical = analytics.reduce((sum, item) => sum + item.criticalCaseIds.length, 0);
   const activeAgencies = platform?.agencies.filter((item) => item.active).length ?? 0;
 
   return (
@@ -94,12 +126,8 @@ export default function PermitsScreen() {
         <View className="rounded-[28px] bg-primary p-6">
           <Text className="text-sm font-medium text-white/80">Expanded permitting platform</Text>
           <Text className="mt-3 text-3xl font-bold text-white">Permits and licensing</Text>
-          <Text className="mt-3 text-base leading-6 text-white/85">
-            Track mining permits, oil and gas licensing, and multi-agency approvals from one shared product surface with parity across mobile and web.
-          </Text>
-          <Text className="mt-4 text-sm text-white/80">
-            Active role: {activeAgencyUser?.role.replace(/_/g, " ") ?? "unassigned"}
-          </Text>
+          <Text className="mt-3 text-base leading-6 text-white/85">Track mining permits, oil and gas licensing, and multi-agency approvals from one shared product surface with parity across mobile and web.</Text>
+          <Text className="mt-4 text-sm text-white/80">Active role: {activeAgencyUser?.role.replace(/_/g, " ") ?? "unassigned"}</Text>
         </View>
 
         <View className="flex-row gap-3">
@@ -112,6 +140,10 @@ export default function PermitsScreen() {
             <Text className="mt-3 text-3xl font-bold text-warning">{totalOverdue}</Text>
           </View>
           <View className="flex-1 rounded-3xl border border-border bg-surface p-5">
+            <Text className="text-sm text-muted">Critical cases</Text>
+            <Text className="mt-3 text-3xl font-bold text-error">{totalCritical}</Text>
+          </View>
+          <View className="flex-1 rounded-3xl border border-border bg-surface p-5">
             <Text className="text-sm text-muted">Active agencies</Text>
             <Text className="mt-3 text-3xl font-bold text-success">{activeAgencies}</Text>
           </View>
@@ -119,18 +151,27 @@ export default function PermitsScreen() {
 
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Queue filters</Text>
-          <Text className="mt-2 text-sm text-muted">
-            Filter queues and permit cases by lead or participating agency to focus reviewer workload and SLA exposure.
-          </Text>
+          <Text className="mt-2 text-sm text-muted">Filter queues and permit cases by lead or participating agency to focus reviewer workload and SLA exposure.</Text>
           <View className="mt-4 flex-row flex-wrap gap-2">
             <Pill label="All agencies" active={selectedAgencyId === "all"} onPress={() => setSelectedAgencyId("all")} />
             {platform?.agencies.map((agency) => (
-              <Pill
-                key={agency.id}
-                label={agency.name}
-                active={selectedAgencyId === agency.id}
-                onPress={() => setSelectedAgencyId(agency.id)}
-              />
+              <Pill key={agency.id} label={agency.name} active={selectedAgencyId === agency.id} onPress={() => setSelectedAgencyId(agency.id)} />
+            ))}
+          </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <View className="flex-row items-center justify-between gap-4">
+            <Text className="text-lg font-semibold text-foreground">Interactive queue analytics</Text>
+            <View className="flex-row gap-2">
+              <Pill label="Pending" active={chartMetric === "pending"} onPress={() => setChartMetric("pending")} />
+              <Pill label="Overdue" active={chartMetric === "overdue"} onPress={() => setChartMetric("overdue")} />
+              <Pill label="Critical" active={chartMetric === "critical"} onPress={() => setChartMetric("critical")} />
+            </View>
+          </View>
+          <View className="mt-4 gap-4">
+            {chartData.map((item) => (
+              <AnalyticsBar key={item.id} label={item.label} value={item[chartMetric]} max={chartMax} tone={chartMetric === "critical" ? "error" : chartMetric === "overdue" ? "warning" : "primary"} />
             ))}
           </View>
         </View>
@@ -140,54 +181,32 @@ export default function PermitsScreen() {
           <View className="mt-4 gap-3">
             {filteredQueues.map((queue) => {
               const metric = analytics.find((item) => item.agencyId === queue.agencyId && item.role === queue.role);
+              const nearDeadline = filteredCases.filter((item) => queue.caseIds.includes(item.id)).some((item) => item.obligations.some((obligation) => daysUntil(obligation.dueAt) <= 3));
               return (
-                <View key={queue.id} className="rounded-2xl border border-border bg-background p-4">
+                <View key={queue.id} className={`rounded-2xl border p-4 ${nearDeadline ? "border-warning bg-warning/5" : "border-border bg-background"}`}>
                   <View className="flex-row items-center justify-between gap-4">
                     <Text className="flex-1 text-base font-semibold text-foreground">{queue.title}</Text>
-                    <Text className="text-sm font-semibold text-primary">{metric?.pendingCount ?? queue.pendingCount} pending</Text>
+                    <Text className={`text-sm font-semibold ${nearDeadline ? "text-warning" : "text-primary"}`}>{metric?.pendingCount ?? queue.pendingCount} pending</Text>
                   </View>
                   <Text className="mt-2 text-sm leading-5 text-muted">{queue.description}</Text>
-                  <Text className="mt-2 text-xs text-muted">
-                    Avg SLA: {metric?.avgSlaHours ?? queue.avgSlaHours ?? 0}h · Overdue: {metric?.overdueCount ?? queue.overdueCount}
-                  </Text>
-                  <Text className="mt-1 text-xs text-muted">
-                    Breached cases: {(metric?.breachedCaseIds ?? queue.breachedCaseIds ?? []).join(", ") || "None"}
-                  </Text>
+                  <Text className="mt-2 text-xs text-muted">Avg SLA: {metric?.avgSlaHours ?? queue.avgSlaHours ?? 0}h · Overdue: {metric?.overdueCount ?? queue.overdueCount}</Text>
+                  <Text className="mt-1 text-xs text-muted">Breached cases: {(metric?.breachedCaseIds ?? queue.breachedCaseIds ?? []).join(", ") || "None"}</Text>
+                  {nearDeadline ? <Text className="mt-2 text-xs font-semibold text-warning">Warning: one or more permits in this queue approach deadline within 72 hours.</Text> : null}
                 </View>
               );
             })}
           </View>
         </View>
 
-        <View className="rounded-3xl border border-border bg-surface p-5">
-          <Text className="text-lg font-semibold text-foreground">Product parity</Text>
-          <View className="mt-4 gap-3">
-            {platform?.parity.map((item) => (
-              <View key={item.surface} className="rounded-2xl border border-border bg-background p-4">
-                <Text className="text-base font-semibold capitalize text-foreground">{item.surface.replace("_", " ")}</Text>
-                <Text className="mt-2 text-sm text-muted">Parity score: {item.score}/100</Text>
-                <Text className="mt-2 text-sm leading-5 text-muted">Next focus: {item.nextFocus}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
         <View>
           <Text className="text-lg font-semibold text-foreground">Filtered permit cases</Text>
           <View className="mt-3 gap-3">
-            {filteredCases.map((item) => (
-              <PermitCard
-                key={item.id}
-                caseId={item.id}
-                title={item.title}
-                permitType={item.permitType}
-                sector={item.sector}
-                stage={item.stage}
-                applicantName={item.applicantName}
-                locationLabel={item.locationLabel}
-                priority={item.priority}
-              />
-            ))}
+            {filteredCases.map((item) => {
+              const dueDays = item.obligations.length ? Math.min(...item.obligations.map((obligation) => daysUntil(obligation.dueAt))) : null;
+              return (
+                <PermitCard key={item.id} caseId={item.id} title={item.title} permitType={item.permitType} sector={item.sector} stage={item.stage} applicantName={item.applicantName} locationLabel={item.locationLabel} priority={item.priority} nearestDueDays={Number.isFinite(dueDays as number) ? (dueDays as number) : null} />
+              );
+            })}
           </View>
         </View>
       </ScrollView>

@@ -9,6 +9,7 @@ import { storagePut } from "./storage";
 import {
   clonePermittingPlatform,
   type AgencyRole,
+  type PermitAuditEventRecord,
   type PermitCaseRecord,
   type PermitFormFieldRecord,
   type PermitFormSectionRecord,
@@ -31,8 +32,7 @@ function ensureStore() {
 function readStore(): PermittingPlatformSnapshot {
   ensureStore();
   try {
-    const raw = fs.readFileSync(STORE_PATH, "utf8");
-    return JSON.parse(raw) as PermittingPlatformSnapshot;
+    return JSON.parse(fs.readFileSync(STORE_PATH, "utf8")) as PermittingPlatformSnapshot;
   } catch {
     const fallback = clonePermittingPlatform();
     fs.writeFileSync(STORE_PATH, JSON.stringify(fallback, null, 2));
@@ -83,31 +83,62 @@ function getRecordOrThrow(store: PermittingPlatformSnapshot, caseId: string) {
   return record;
 }
 
+function appendAuditEvent(record: PermitCaseRecord, event: Omit<PermitAuditEventRecord, "id">) {
+  const nextEvent: PermitAuditEventRecord = {
+    id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ...event,
+  };
+  record.auditHistory = record.auditHistory ?? [];
+  record.auditHistory.unshift(nextEvent);
+  return nextEvent;
+}
+
+function ensureSeedAuditHistory(record: PermitCaseRecord) {
+  if (record.auditHistory?.length) return;
+  record.auditHistory = [
+    {
+      id: `audit-seed-${record.id}`,
+      createdAt: record.updatedAt,
+      actor: "system",
+      role: "system" as const,
+      type: "status_change" as const,
+      summary: `Permit case initialized at ${record.stage.replace(/_/g, " ")}.`,
+    },
+    ...record.reviewNotes.map((note) => ({
+      id: `audit-review-${note.id}`,
+      createdAt: note.createdAt,
+      actor: note.author,
+      role: note.role,
+      type: "review_note" as const,
+      summary: `${note.decision.replace(/_/g, " ")}: ${note.note}`,
+    })),
+  ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 function inferFieldPermissions(record: PermitCaseRecord, field: PermitFormFieldRecord) {
-  if (field.viewableBy?.length || field.editableBy?.length) {
-    return field;
-  }
+  if (field.viewableBy?.length || field.editableBy?.length) return field;
 
-  const applicantAndReviewers: AgencyRole[] = ["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"];
-  const reviewerOnly: AgencyRole[] = ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"];
-  const sectorReviewer =
+  const allRoles: AgencyRole[] = [
+    "applicant",
+    "mining_reviewer",
+    "petroleum_reviewer",
+    "environment_reviewer",
+    "planning_supervisor",
+  ];
+
+  const sectorReviewers: AgencyRole[] =
     record.sector === "mining"
-      ? (["mining_reviewer", "planning_supervisor"] as AgencyRole[])
+      ? ["mining_reviewer", "environment_reviewer", "planning_supervisor"]
       : record.sector === "oil_gas"
-        ? (["petroleum_reviewer", "planning_supervisor"] as AgencyRole[])
-        : (["planning_supervisor", "environment_reviewer"] as AgencyRole[]);
+        ? ["petroleum_reviewer", "environment_reviewer", "planning_supervisor"]
+        : ["planning_supervisor", "environment_reviewer"];
 
-  const editableBy = field.key.includes("consent") || field.key.includes("programme") || field.key.includes("operator") || field.key.includes("company")
-    ? (["applicant", ...sectorReviewer] as AgencyRole[])
-    : reviewerOnly;
-
-  const viewableBy = field.key.includes("financial") || field.key.includes("bond")
-    ? applicantAndReviewers
-    : applicantAndReviewers;
+  const reviewerOnly = field.key.includes("financial") || field.key.includes("bond") || field.key.includes("security");
+  const editableBy: AgencyRole[] = reviewerOnly ? sectorReviewers : (["applicant", ...sectorReviewers] as AgencyRole[]);
 
   return {
     ...field,
-    viewableBy,
+    viewableBy: allRoles,
     editableBy,
   };
 }
@@ -118,22 +149,57 @@ function ensureRecordStructure(record: PermitCaseRecord) {
     fields: section.fields.map((field) => inferFieldPermissions(record, field)),
   }));
   record.uploadedDocuments = record.uploadedDocuments ?? [];
+  record.activeAssignment = record.activeAssignment ?? null;
+  ensureSeedAuditHistory(record);
   return record;
 }
 
+function shouldEscalate(record: PermitCaseRecord) {
+  return record.priority === "critical" || record.obligations.some((item) => item.status === "at_risk");
+}
+
+function preferredRoles(record: PermitCaseRecord): AgencyRole[] {
+  if (record.sector === "mining") return ["mining_reviewer", "environment_reviewer", "planning_supervisor"];
+  if (record.sector === "oil_gas") return ["petroleum_reviewer", "environment_reviewer", "planning_supervisor"];
+  return ["planning_supervisor", "environment_reviewer"];
+}
+
+function autoAssignEscalations(store: PermittingPlatformSnapshot) {
+  for (const record of store.permitCases) {
+    ensureRecordStructure(record);
+    if (!shouldEscalate(record)) continue;
+    const candidateRoles = preferredRoles(record);
+    const candidates = store.agencyUsers.filter((user) => candidateRoles.includes(user.role));
+    if (!candidates.length) continue;
+    const nextAssignee = candidates.sort((a, b) => a.queueIds.length - b.queueIds.length)[0];
+    if (!nextAssignee) continue;
+    const nextReason = record.priority === "critical" ? "Critical permit priority escalation" : "Obligation risk triggered escalation";
+    if (record.activeAssignment?.assignedUserId === nextAssignee.id && record.activeAssignment.reason === nextReason) continue;
+    record.activeAssignment = {
+      assignedUserId: nextAssignee.id,
+      assignedAt: new Date().toISOString(),
+      reason: nextReason,
+      status: "active",
+    };
+    appendAuditEvent(record, {
+      createdAt: record.activeAssignment.assignedAt,
+      actor: nextAssignee.displayName,
+      role: nextAssignee.role,
+      type: "assignment",
+      summary: `Auto-assigned escalated case to ${nextAssignee.displayName} for ${nextReason.toLowerCase()}.`,
+    });
+    record.updatedAt = record.activeAssignment.assignedAt;
+  }
+}
+
 function computeQueueAnalytics(store: PermittingPlatformSnapshot): QueueAnalyticsRecord[] {
+  autoAssignEscalations(store);
   const analytics = store.approvalQueues.map((queue) => {
     const queueCases = store.permitCases.filter((record) => queue.caseIds.includes(record.id));
     const pendingCount = queueCases.length;
-    const overdueCount = queueCases.filter((record) =>
-      record.priority === "critical" || record.obligations.some((item) => item.status === "at_risk"),
-    ).length;
-    const avgSlaHours = Math.round(
-      (store.agencies.find((agency) => agency.id === queue.agencyId)?.reviewSlaHours ?? 0) * 10,
-    ) / 10;
-    const breachedCaseIds = queueCases
-      .filter((record) => record.obligations.some((item) => item.status === "at_risk"))
-      .map((record) => record.id);
+    const overdueCount = queueCases.filter((record) => record.obligations.some((item) => item.status === "at_risk")).length;
+    const avgSlaHours = store.agencies.find((agency) => agency.id === queue.agencyId)?.reviewSlaHours ?? 0;
+    const breachedCaseIds = queueCases.filter((record) => record.obligations.some((item) => item.status === "at_risk")).map((record) => record.id);
     const criticalCaseIds = queueCases.filter((record) => record.priority === "critical").map((record) => record.id);
     return {
       agencyId: queue.agencyId,
@@ -151,9 +217,9 @@ function computeQueueAnalytics(store: PermittingPlatformSnapshot): QueueAnalytic
     const metric = analytics.find((item) => item.agencyId === queue.agencyId && item.role === queue.role);
     return {
       ...queue,
-      pendingCount: metric?.pendingCount ?? queue.pendingCount,
-      overdueCount: metric?.overdueCount ?? queue.overdueCount,
-      avgSlaHours: metric?.avgSlaHours ?? queue.avgSlaHours ?? 0,
+      pendingCount: metric?.pendingCount ?? 0,
+      overdueCount: metric?.overdueCount ?? 0,
+      avgSlaHours: metric?.avgSlaHours ?? 0,
       breachedCaseIds: metric?.breachedCaseIds ?? [],
     };
   });
@@ -171,20 +237,15 @@ function applyExtractedFields(record: PermitCaseRecord, extracted: Array<{ key: 
     ...section,
     fields: section.fields.map((field) => {
       const matched = extracted.find((item) => item.key === field.key);
-      if (!matched || !matched.value) return inferFieldPermissions(record, field);
+      if (!matched?.value) return inferFieldPermissions(record, field);
       populatedKeys.push(field.key);
-      return inferFieldPermissions(record, {
-        ...field,
-        value: matched.value,
-        source: "ai",
-      });
+      return inferFieldPermissions(record, { ...field, value: matched.value, source: "ai" });
     }),
   }));
   return populatedKeys;
 }
 
 function heuristicExtraction(record: PermitCaseRecord, documentText: string) {
-  const lower = documentText.toLowerCase();
   const values: Array<{ key: string; value: string }> = [];
   const addIf = (key: string, patterns: RegExp[]) => {
     for (const pattern of patterns) {
@@ -216,21 +277,18 @@ function heuristicExtraction(record: PermitCaseRecord, documentText: string) {
     addIf("local_approvals", [/local approvals?[:\-]\s*(.+)/i]);
   }
 
-  if (values.length === 0 && lower.length > 0) {
+  if (values.length === 0 && documentText.trim()) {
     const firstTextField = record.formSections.flatMap((section) => section.fields).find((field) => field.fieldType !== "number");
     if (firstTextField) values.push({ key: firstTextField.key, value: documentText.slice(0, 180) });
   }
-
   return values;
 }
 
 async function runStructuredExtraction(record: PermitCaseRecord, documentText: string) {
   let model = "heuristic-fallback";
-  let extracted: Array<{ key: string; value: string }> = [];
-
   try {
     const models = await listLLMModels();
-    model = models.data.find((item) => item.id === "llama3.1:8b")?.id ?? models.data[0]?.id ?? "llama3.1:8b";
+    model = models.data.find((item) => item.id.includes("llama"))?.id ?? models.data[0]?.id ?? "portable-model";
     const response = await Promise.race([
       invokeLLM({
         model,
@@ -271,12 +329,10 @@ async function runStructuredExtraction(record: PermitCaseRecord, documentText: s
       }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("LLM extraction timeout")), 1200)),
     ]);
-
     const content = response.choices[0]?.message?.content;
     const parsed = typeof content === "string" ? JSON.parse(content) : { extracted: [], confidence: 0 };
-    extracted = Array.isArray(parsed.extracted) ? parsed.extracted : [];
     return {
-      extracted,
+      extracted: Array.isArray(parsed.extracted) ? parsed.extracted : [],
       model,
       confidence: Number(parsed.confidence) || 0,
     };
@@ -289,41 +345,54 @@ async function runStructuredExtraction(record: PermitCaseRecord, documentText: s
   }
 }
 
-async function extractTextFromUpload(input: { mimeType: string; buffer: Buffer; fileName: string }) {
+async function extractTextFromUpload(input: { mimeType: string; buffer: Buffer }) {
   if (input.mimeType.includes("pdf")) {
     try {
       const pdfParse = (pdfParseModule as unknown as { default?: (buffer: Buffer) => Promise<{ text?: string }> }).default;
       const parsed = pdfParse ? await pdfParse(input.buffer) : { text: input.buffer.toString("utf8") };
-      return {
-        text: parsed.text?.trim() || "",
-        sourceType: "pdf" as const,
-      };
+      return { text: parsed.text?.trim() || "", sourceType: "pdf" as const };
     } catch {
-      return {
-        text: input.buffer.toString("utf8"),
-        sourceType: "pdf" as const,
-      };
+      return { text: input.buffer.toString("utf8"), sourceType: "pdf" as const };
     }
   }
-
   if (input.mimeType.startsWith("image/")) {
-    return {
-      text: "",
-      sourceType: "image" as const,
-    };
+    return { text: "", sourceType: "image" as const };
   }
-
-  return {
-    text: input.buffer.toString("utf8"),
-    sourceType: "text" as const,
-  };
+  return { text: input.buffer.toString("utf8"), sourceType: "text" as const };
 }
 
 function buildFieldPairsFromVisionResult(result: Awaited<ReturnType<typeof analyzeDocumentImage>>) {
-  const entries = Object.entries(result.extractedFields ?? {})
+  return Object.entries(result.extractedFields ?? {})
     .filter(([, value]) => typeof value === "string" && value.trim().length > 0)
     .map(([key, value]) => ({ key, value }));
-  return entries;
+}
+
+function serializeAuditAsMarkdown(record: PermitCaseRecord) {
+  const lines = [
+    `# Audit history for ${record.title}`,
+    "",
+    `- Permit ID: ${record.id}`,
+    `- Sector: ${record.sector}`,
+    `- Stage: ${record.stage}`,
+    `- Priority: ${record.priority}`,
+    "",
+    "## Events",
+    "",
+  ];
+  for (const event of record.auditHistory ?? []) {
+    lines.push(`- ${event.createdAt} | ${event.type} | ${event.actor} | ${event.summary}`);
+  }
+  return lines.join("\n");
+}
+
+function serializeAuditAsCsv(record: PermitCaseRecord) {
+  const header = "createdAt,type,actor,role,summary";
+  const rows = (record.auditHistory ?? []).map((event) =>
+    [event.createdAt, event.type, event.actor, event.role, event.summary]
+      .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+      .join(","),
+  );
+  return [header, ...rows].join("\n");
 }
 
 export function getPermittingPlatform() {
@@ -354,6 +423,17 @@ export function getPermitCaseForRole(input: { caseId: string; role: AgencyRole }
   };
 }
 
+export function exportPermitAuditHistory(input: { caseId: string; format: "markdown" | "csv" }) {
+  const record = getPermitCase(input.caseId);
+  if (!record) throw new Error("Permit case not found");
+  const content = input.format === "csv" ? serializeAuditAsCsv(record) : serializeAuditAsMarkdown(record);
+  return {
+    fileName: `${record.id}-audit-history.${input.format === "csv" ? "csv" : "md"}`,
+    mimeType: input.format === "csv" ? "text/csv" : "text/markdown",
+    content,
+  };
+}
+
 export function listAgencies() {
   return getPermittingPlatform().agencies;
 }
@@ -378,17 +458,15 @@ export function setActiveAgencyUser(input: { userId: string }) {
 
 export function listApprovalQueues(input?: { agencyId?: string; role?: AgencyRole }) {
   const store = getPermittingPlatform();
-  const filtered = store.approvalQueues.filter((queue) => {
+  return store.approvalQueues.filter((queue) => {
     if (input?.agencyId && queue.agencyId !== input.agencyId) return false;
     if (input?.role && queue.role !== input.role) return false;
     return true;
   });
-  return filtered;
 }
 
 export function listQueueAnalytics() {
-  const store = getPermittingPlatform();
-  return store.queueAnalytics ?? [];
+  return getPermittingPlatform().queueAnalytics ?? [];
 }
 
 export function listMiddlewareComponents() {
@@ -410,6 +488,13 @@ export function updatePermitCaseStage(input: { caseId: string; stage: PermitStag
   record.stage = input.stage;
   record.updatedAt = updatedAt;
   record.timeline = buildTimeline(input.stage, updatedAt);
+  appendAuditEvent(record, {
+    createdAt: updatedAt,
+    actor: "system",
+    role: "system",
+    type: "status_change",
+    summary: `Case moved to ${input.stage.replace(/_/g, " ")}.`,
+  });
   computeQueueAnalytics(store);
   writeStore(store);
   return record;
@@ -423,13 +508,8 @@ export function updatePermitFormSections(input: { caseId: string; formSections: 
     ...section,
     fields: section.fields.map((field) => {
       const current = record.formSections.flatMap((item) => item.fields).find((item) => item.key === field.key);
-      const guarded = inferFieldPermissions(record, {
-        ...(current ?? field),
-        ...field,
-      });
-      if (guarded.editableBy && !guarded.editableBy.includes(actorRole) && current) {
-        return current;
-      }
+      const guarded = inferFieldPermissions(record, { ...(current ?? field), ...field });
+      if (guarded.editableBy && !guarded.editableBy.includes(actorRole) && current) return current;
       return guarded;
     }),
   }));
@@ -460,6 +540,13 @@ export function appendPermitReviewNote(input: {
   };
   record.reviewNotes.unshift(reviewNote);
   record.updatedAt = reviewNote.createdAt;
+  appendAuditEvent(record, {
+    createdAt: reviewNote.createdAt,
+    actor: input.author,
+    role: input.role,
+    type: "review_note",
+    summary: `${input.decision.replace(/_/g, " ")}: ${input.note}`,
+  });
   if (input.decision === "approved" && record.stage === "approval") {
     record.stage = "issued";
     record.timeline = buildTimeline("issued", reviewNote.createdAt);
@@ -483,11 +570,15 @@ export async function extractPermitDocumentToForm(input: { caseId: string; docum
     confidence: result.confidence,
   };
   record.updatedAt = record.lastAiExtraction.extractedAt;
+  appendAuditEvent(record, {
+    createdAt: record.lastAiExtraction.extractedAt,
+    actor: "system",
+    role: "system",
+    type: "ai_extraction",
+    summary: `Text extraction populated ${populatedKeys.length} fields from ${input.documentName}.`,
+  });
   writeStore(store);
-  return {
-    caseRecord: record,
-    extraction: record.lastAiExtraction,
-  };
+  return { caseRecord: record, extraction: record.lastAiExtraction };
 }
 
 export async function uploadPermitDocumentAndExtract(input: {
@@ -501,9 +592,9 @@ export async function uploadPermitDocumentAndExtract(input: {
   const record = getRecordOrThrow(store, input.caseId);
   const buffer = Buffer.from(input.base64Data, "base64");
   const uploaded = await storagePut(`permits/${input.caseId}/${input.fileName}`, buffer, input.mimeType);
-  const extractedSource = await extractTextFromUpload({ mimeType: input.mimeType, buffer, fileName: input.fileName });
+  const extractedSource = await extractTextFromUpload({ mimeType: input.mimeType, buffer });
 
-  let extracted = [] as Array<{ key: string; value: string }>;
+  let extracted: Array<{ key: string; value: string }> = [];
   let model = "heuristic-fallback";
   let confidence = 45;
 
@@ -515,25 +606,24 @@ export async function uploadPermitDocumentAndExtract(input: {
       documentType: `${record.sector}-permit`,
     });
     extracted = buildFieldPairsFromVisionResult(analysis);
-    confidence = analysis.confidence;
     model = analysis.engine ?? "vision-analysis";
-    if (extracted.length === 0 && analysis.summary) {
+    confidence = analysis.confidence;
+    if (!extracted.length && analysis.summary) {
       const fallback = await runStructuredExtraction(record, analysis.summary);
       extracted = fallback.extracted;
-      confidence = Math.max(confidence, fallback.confidence);
       model = fallback.model;
+      confidence = Math.max(confidence, fallback.confidence);
     }
   } else {
     const structured = await runStructuredExtraction(record, extractedSource.text);
     extracted = structured.extracted;
-    confidence = structured.confidence;
     model = structured.model;
+    confidence = structured.confidence;
   }
 
-  if (extracted.length === 0 && extractedSource.text) {
-    extracted = heuristicExtraction(record, extractedSource.text);
-  }
+  if (!extracted.length && extractedSource.text) extracted = heuristicExtraction(record, extractedSource.text);
 
+  const uploadedAt = new Date().toISOString();
   const populatedKeys = applyExtractedFields(record, extracted);
   const uploadedDocument = {
     id: `doc-${Date.now()}`,
@@ -541,44 +631,47 @@ export async function uploadPermitDocumentAndExtract(input: {
     mimeType: input.mimeType,
     storagePath: uploaded.key,
     publicUrl: uploaded.url,
-    uploadedAt: new Date().toISOString(),
+    uploadedAt,
     uploadedByRole: input.uploadedByRole,
-    extractedTextPreview:
-      extractedSource.sourceType === "image"
-        ? `Vision-assisted extraction for ${input.fileName}`
-        : extractedSource.text.slice(0, 240),
+    extractedTextPreview: extractedSource.sourceType === "image" ? `Vision-assisted extraction for ${input.fileName}` : extractedSource.text.slice(0, 320),
     extractionStatus: "processed" as const,
   };
-
   record.uploadedDocuments = record.uploadedDocuments ?? [];
   record.uploadedDocuments.unshift(uploadedDocument);
   record.lastAiExtraction = {
     documentName: input.fileName,
-    extractedAt: uploadedDocument.uploadedAt,
+    extractedAt: uploadedAt,
     model,
     populatedKeys,
     sourceType: extractedSource.sourceType,
     confidence,
   };
-  record.updatedAt = uploadedDocument.uploadedAt;
+  record.updatedAt = uploadedAt;
+  appendAuditEvent(record, {
+    createdAt: uploadedAt,
+    actor: input.uploadedByRole,
+    role: input.uploadedByRole,
+    type: "document_upload",
+    summary: `Uploaded ${input.fileName} for extraction with ${populatedKeys.length} populated fields.`,
+  });
+  appendAuditEvent(record, {
+    createdAt: uploadedAt,
+    actor: "system",
+    role: "system",
+    type: "ai_extraction",
+    summary: `AI extraction completed for ${input.fileName} with confidence ${confidence}.`,
+  });
   writeStore(store);
-
-  return {
-    caseRecord: record,
-    extraction: record.lastAiExtraction,
-    uploadedDocument,
-  };
+  return { caseRecord: record, extraction: record.lastAiExtraction, uploadedDocument };
 }
 
 export function upsertPermitCase(input: PermitCaseRecord) {
   const store = getPermittingPlatform();
+  const normalized = ensureRecordStructure(input);
   const existingIndex = store.permitCases.findIndex((item) => item.id === input.id);
-  if (existingIndex >= 0) {
-    store.permitCases[existingIndex] = ensureRecordStructure(input);
-  } else {
-    store.permitCases.unshift(ensureRecordStructure(input));
-  }
+  if (existingIndex >= 0) store.permitCases[existingIndex] = normalized;
+  else store.permitCases.unshift(normalized);
   computeQueueAnalytics(store);
   writeStore(store);
-  return input;
+  return normalized;
 }
