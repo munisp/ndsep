@@ -73,3 +73,5 @@
 - [x] Automated reviewer-assignment rules for escalated permit cases
 - [x] Side-by-side AI extraction verification against uploaded permit PDFs
 - [x] Visual deadline warnings and interactive queue analytics charts on the SLA dashboard
+- [x] Supervisor override and reassignment controls for auto-assigned permit cases
+- [x] Direct local-device audit history downloads in CSV and PDF formats

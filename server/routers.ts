@@ -36,6 +36,7 @@ import {
   getPermitCaseForRole,
   listAgencies,
   listAgencyUsers,
+  overridePermitAssignment,
   listApprovalQueues,
   listMiddlewareComponents,
   listParityState,
@@ -346,6 +347,17 @@ export const appRouter = router({
         }),
       )
       .query(({ input }) => exportPermitAuditHistory(input)),
+    overrideAssignment: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          assignedUserId: z.string(),
+          actorName: z.string(),
+          actorRole: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]),
+          reason: z.string().min(3),
+        }),
+      )
+      .mutation(({ input }) => overridePermitAssignment(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

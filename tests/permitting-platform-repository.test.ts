@@ -12,6 +12,7 @@ import {
   getPermittingPlatform,
   listApprovalQueues,
   listMiddlewareComponents,
+  overridePermitAssignment,
   listQueueAnalytics,
   listServiceTopology,
   setActiveAgencyUser,
@@ -113,6 +114,19 @@ describe("permitting platform repository", () => {
     expect(markdown.content).toContain("Audit history");
     expect(csv.fileName.endsWith(".csv")).toBe(true);
     expect(csv.content).toContain("createdAt,type,actor,role,summary");
+  });
+
+  it("allows planning supervisors to override auto-assigned reviewers", () => {
+    const reassigned = overridePermitAssignment({
+      caseId: "permit-oilgas-014",
+      assignedUserId: "user-env-1",
+      actorName: "Tunde Solarin",
+      actorRole: "planning_supervisor",
+      reason: "Environmental dependency now blocks issuance.",
+    });
+    expect(reassigned.assignedUserId).toBe("user-env-1");
+    expect(reassigned.reason).toContain("Environmental dependency");
+    expect(getPermitCase("permit-oilgas-014")?.auditHistory?.some((event) => event.summary.includes("Supervisor reassigned case"))).toBe(true);
   });
 
   it("exposes middleware and polyglot service topology for the expanded platform", () => {

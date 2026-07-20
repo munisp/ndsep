@@ -1,8 +1,10 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
@@ -37,6 +39,15 @@ function ActionButton({
   );
 }
 
+function toAuditHtml(title: string, content: string) {
+  const escaped = content
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br />");
+  return `<!doctype html><html><head><meta charset="utf-8" /><style>body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:24px;color:#111827}h1{font-size:24px;margin-bottom:16px}p,div{font-size:12px;line-height:1.5;white-space:normal}</style></head><body><h1>${title}</h1><div>${escaped}</div></body></html>`;
+}
+
 export default function PermitDetailScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
   const caseId = params.id ?? "permit-mining-001";
@@ -45,11 +56,6 @@ export default function PermitDetailScreen() {
   const viewerRole = activeAgencyUserQuery.data?.role ?? "applicant";
   const recordQuery = trpc.permitting.getCaseForRole.useQuery({ caseId, role: viewerRole });
   const platformQuery = trpc.permitting.getPlatform.useQuery();
-  const [exportFormat, setExportFormat] = useState<"markdown" | "csv" | null>(null);
-  const exportQuery = trpc.permitting.exportAuditHistory.useQuery(
-    { caseId, format: exportFormat ?? "markdown" },
-    { enabled: exportFormat !== null },
-  );
 
   const record = recordQuery.data;
   const agencies = platformQuery.data?.agencies ?? [];
@@ -63,10 +69,14 @@ export default function PermitDetailScreen() {
   const [documentName, setDocumentName] = useState("permit-supporting-document.txt");
   const [documentText, setDocumentText] = useState("");
   const [pickedFile, setPickedFile] = useState<{ name: string; mimeType: string; base64Data: string } | null>(null);
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
+  const [overrideReason, setOverrideReason] = useState("Manual supervisor override");
+  const [exportPreview, setExportPreview] = useState<{ fileName: string; mimeType: string; content: string } | null>(null);
 
   useEffect(() => {
     if (!record) return;
     setSummary(record.summary);
+    setSelectedAssigneeId(record.activeAssignment?.assignedUserId ?? "");
     const nextDrafts: Record<string, string> = {};
     record.formSections.forEach((section) => {
       section.fields.forEach((field) => {
@@ -114,6 +124,15 @@ export default function PermitDetailScreen() {
     },
   });
 
+  const overrideAssignmentMutation = trpc.permitting.overrideAssignment.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.permitting.getPlatform.invalidate(),
+        utils.permitting.getCaseForRole.invalidate({ caseId, role: viewerRole }),
+      ]);
+    },
+  });
+
   const leadAgency = agencies.find((item) => item.id === record?.leadAgencyId) ?? null;
   const participatingAgencies = agencies.filter((item) => record?.participatingAgencyIds.includes(item.id));
   const assignedReviewer = agencyUsers.find((item) => item.id === record?.activeAssignment?.assignedUserId) ?? null;
@@ -121,6 +140,11 @@ export default function PermitDetailScreen() {
   const canUseEditableForms = useMemo(() => record?.sector === "mining" || record?.sector === "oil_gas", [record?.sector]);
   const isApplicant = viewerRole === "applicant";
   const canReview = viewerRole !== "applicant";
+  const canOverride = viewerRole === "planning_supervisor";
+  const assignableUsers = useMemo(
+    () => agencyUsers.filter((item) => item.role !== "applicant"),
+    [agencyUsers],
+  );
 
   if (!record) {
     return (
@@ -191,6 +215,56 @@ export default function PermitDetailScreen() {
     });
   };
 
+  const handlePrepareExport = async (format: "markdown" | "csv") => {
+    const exported = await utils.permitting.exportAuditHistory.fetch({ caseId, format });
+    setExportPreview(exported);
+  };
+
+  const handleDownloadAudit = async (format: "csv" | "pdf") => {
+    const markdownExport = await utils.permitting.exportAuditHistory.fetch({ caseId, format: "markdown" });
+    if (format === "pdf") {
+      const html = toAuditHtml(record.title, markdownExport.content);
+      const printed = await Print.printToFileAsync({ html });
+      if (Platform.OS === "web") {
+        window.open(printed.uri, "_blank");
+        return;
+      }
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(printed.uri, { mimeType: "application/pdf" });
+      }
+      return;
+    }
+
+    const csvExport = await utils.permitting.exportAuditHistory.fetch({ caseId, format: "csv" });
+    if (Platform.OS === "web") {
+      const blob = new Blob([csvExport.content], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = csvExport.fileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const targetPath = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}${csvExport.fileName}`;
+    await FileSystem.writeAsStringAsync(targetPath, csvExport.content, { encoding: FileSystem.EncodingType.UTF8 });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(targetPath, { mimeType: "text/csv" });
+    }
+  };
+
+  const handleOverrideAssignment = () => {
+    if (!activeAgencyUser || !selectedAssigneeId || overrideReason.trim().length < 3) return;
+    overrideAssignmentMutation.mutate({
+      caseId: record.id,
+      assignedUserId: selectedAssigneeId,
+      actorName: activeAgencyUser.displayName,
+      actorRole: activeAgencyUser.role,
+      reason: overrideReason.trim(),
+    });
+  };
+
   return (
     <ScreenContainer className="bg-background">
       <ScrollView contentContainerStyle={{ padding: 20, gap: 20 }}>
@@ -208,6 +282,25 @@ export default function PermitDetailScreen() {
             <Text className="mt-1 text-xs text-muted">Reason: {record.activeAssignment?.reason ?? "No escalation rule applied yet"}</Text>
             <Text className="mt-1 text-xs text-muted">Status: {record.activeAssignment?.status ?? "n/a"}</Text>
           </View>
+          {canOverride ? (
+            <View className="rounded-2xl border border-border bg-background p-4">
+              <Text className="text-sm font-semibold text-foreground">Supervisor override</Text>
+              <View className="mt-3 flex-row flex-wrap gap-2">
+                {assignableUsers.map((user) => (
+                  <Pressable key={user.id} onPress={() => setSelectedAssigneeId(user.id)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
+                    <View className={`rounded-full border px-3 py-2 ${selectedAssigneeId === user.id ? "border-primary bg-primary/10" : "border-border bg-surface"}`}>
+                      <Text className={`text-xs font-semibold ${selectedAssigneeId === user.id ? "text-primary" : "text-foreground"}`}>{user.displayName}</Text>
+                      <Text className="text-[11px] text-muted">{user.role.replace(/_/g, " ")}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+              <TextInput value={overrideReason} onChangeText={setOverrideReason} className="mt-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground" placeholder="Reason for reassignment" placeholderTextColor="#6B7280" />
+              <View className="mt-3">
+                <ActionButton label={overrideAssignmentMutation.isPending ? "Reassigning…" : "Apply supervisor reassignment"} onPress={handleOverrideAssignment} tone="primary" disabled={!selectedAssigneeId} />
+              </View>
+            </View>
+          ) : null}
         </SectionCard>
 
         <SectionCard title="Active reviewer context">
@@ -234,15 +327,7 @@ export default function PermitDetailScreen() {
                     return (
                       <View key={field.key}>
                         <Text className="text-sm font-semibold text-foreground">{field.label}</Text>
-                        <TextInput
-                          editable={editable}
-                          value={draftSections[field.key] ?? ""}
-                          onChangeText={(value) => setDraftSections((current) => ({ ...current, [field.key]: value }))}
-                          multiline={field.fieldType === "textarea"}
-                          keyboardType={field.fieldType === "number" ? "numeric" : "default"}
-                          className="mt-2 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground"
-                          style={{ minHeight: field.fieldType === "textarea" ? 92 : 52, textAlignVertical: "top" }}
-                        />
+                        <TextInput editable={editable} value={draftSections[field.key] ?? ""} onChangeText={(value) => setDraftSections((current) => ({ ...current, [field.key]: value }))} multiline={field.fieldType === "textarea"} keyboardType={field.fieldType === "number" ? "numeric" : "default"} className="mt-2 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground" style={{ minHeight: field.fieldType === "textarea" ? 92 : 52, textAlignVertical: "top" }} />
                         <Text className="mt-1 text-xs text-muted">{field.required ? "Required" : "Optional"} · Source: {field.source} · Editable by: {(field.editableBy ?? [viewerRole]).join(", ").replace(/_/g, " ")}</Text>
                       </View>
                     );
@@ -267,11 +352,9 @@ export default function PermitDetailScreen() {
               ) : null}
               <ActionButton label={uploadDocumentMutation.isPending ? "Uploading and extracting…" : "Upload and extract"} onPress={handleUploadPickedDocument} tone="success" disabled={!pickedFile} />
             </View>
-
             <TextInput value={documentName} onChangeText={setDocumentName} className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground" />
             <TextInput value={documentText} onChangeText={setDocumentText} multiline className="rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground" style={{ minHeight: 150, textAlignVertical: "top" }} placeholder="Paste OCR text or extracted permit text here" placeholderTextColor="#6B7280" />
             <ActionButton label={extractDocumentMutation.isPending ? "Extracting…" : "Extract from pasted text"} onPress={handleExtractDocument} tone="primary" disabled={documentText.trim().length < 20} />
-
             <View className="gap-4 md:flex-row">
               <View className="flex-1 rounded-2xl border border-border bg-background p-4">
                 <Text className="text-sm font-semibold text-foreground">Uploaded document preview</Text>
@@ -290,7 +373,6 @@ export default function PermitDetailScreen() {
                 </View>
               </View>
             </View>
-
             {record.lastAiExtraction ? (
               <View className="rounded-2xl border border-border bg-background p-4">
                 <Text className="text-sm font-semibold text-foreground">Last AI extraction</Text>
@@ -304,14 +386,18 @@ export default function PermitDetailScreen() {
 
         <SectionCard title="Audit history export">
           <View className="gap-3 md:flex-row">
-            <View className="flex-1"><ActionButton label="Prepare Markdown export" onPress={() => setExportFormat("markdown")} tone="dark" /></View>
-            <View className="flex-1"><ActionButton label="Prepare CSV export" onPress={() => setExportFormat("csv")} tone="primary" /></View>
+            <View className="flex-1"><ActionButton label="Preview Markdown export" onPress={() => void handlePrepareExport("markdown")} tone="dark" /></View>
+            <View className="flex-1"><ActionButton label="Preview CSV export" onPress={() => void handlePrepareExport("csv")} tone="primary" /></View>
           </View>
-          {exportQuery.data ? (
+          <View className="gap-3 md:flex-row">
+            <View className="flex-1"><ActionButton label="Download CSV to device" onPress={() => void handleDownloadAudit("csv")} tone="primary" /></View>
+            <View className="flex-1"><ActionButton label="Download PDF to device" onPress={() => void handleDownloadAudit("pdf")} tone="success" /></View>
+          </View>
+          {exportPreview ? (
             <View className="rounded-2xl border border-border bg-background p-4">
-              <Text className="text-sm font-semibold text-foreground">{exportQuery.data.fileName}</Text>
-              <Text className="mt-2 text-xs text-muted">{exportQuery.data.mimeType}</Text>
-              <Text className="mt-3 text-xs leading-5 text-muted">{exportQuery.data.content.slice(0, 900)}</Text>
+              <Text className="text-sm font-semibold text-foreground">{exportPreview.fileName}</Text>
+              <Text className="mt-2 text-xs text-muted">{exportPreview.mimeType}</Text>
+              <Text className="mt-3 text-xs leading-5 text-muted">{exportPreview.content.slice(0, 900)}</Text>
             </View>
           ) : null}
         </SectionCard>

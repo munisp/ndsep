@@ -434,6 +434,36 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
   };
 }
 
+export function overridePermitAssignment(input: {
+  caseId: string;
+  assignedUserId: string;
+  actorName: string;
+  actorRole: AgencyRole;
+  reason: string;
+}) {
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
+  const user = store.agencyUsers.find((item) => item.id === input.assignedUserId);
+  if (!user) throw new Error("Agency user not found");
+  const assignedAt = new Date().toISOString();
+  record.activeAssignment = {
+    assignedUserId: user.id,
+    assignedAt,
+    reason: input.reason,
+    status: "active",
+  };
+  record.updatedAt = assignedAt;
+  appendAuditEvent(record, {
+    createdAt: assignedAt,
+    actor: input.actorName,
+    role: input.actorRole,
+    type: "assignment",
+    summary: `Supervisor reassigned case to ${user.displayName} with reason: ${input.reason}`,
+  });
+  writeStore(store);
+  return record.activeAssignment;
+}
+
 export function listAgencies() {
   return getPermittingPlatform().agencies;
 }

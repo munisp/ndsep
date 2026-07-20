@@ -103,7 +103,7 @@
       "participatingAgencyIds": [
         "environment-agency"
       ],
-      "updatedAt": "2026-07-20T15:36:44.753Z",
+      "updatedAt": "2026-07-20T16:33:01.509Z",
       "summary": "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
       "timeline": [
         {
@@ -348,14 +348,14 @@
       "uploadedDocuments": [],
       "activeAssignment": {
         "assignedUserId": "user-mining-1",
-        "assignedAt": "2026-07-20T15:36:44.753Z",
+        "assignedAt": "2026-07-20T16:33:01.509Z",
         "reason": "Obligation risk triggered escalation",
         "status": "active"
       },
       "auditHistory": [
         {
-          "id": "audit-1784561804753-ezv3zj",
-          "createdAt": "2026-07-20T15:36:44.753Z",
+          "id": "audit-1784565181509-is8zwm",
+          "createdAt": "2026-07-20T16:33:01.509Z",
           "actor": "Haruna Bello",
           "role": "mining_reviewer",
           "type": "assignment",
@@ -394,7 +394,7 @@
         "environment-agency",
         "planning-authority"
       ],
-      "updatedAt": "2026-07-20T15:36:45.986Z",
+      "updatedAt": "2026-07-20T16:33:02.729Z",
       "summary": "Local infrastructure dependencies cleared, but mitigation conditions and abandonment security confirmation remain outstanding.",
       "timeline": [
         {
@@ -638,7 +638,7 @@
       ],
       "lastAiExtraction": {
         "documentName": "petroleum.txt",
-        "extractedAt": "2026-07-20T15:36:45.986Z",
+        "extractedAt": "2026-07-20T16:33:02.729Z",
         "model": "gpt-5-nano",
         "populatedKeys": [
           "operator_name",
@@ -651,12 +651,12 @@
       },
       "uploadedDocuments": [
         {
-          "id": "doc-1784561805986",
+          "id": "doc-1784565182730",
           "fileName": "petroleum.txt",
           "mimeType": "text/plain",
-          "storagePath": "permits/permit-oilgas-014/petroleum_afbca42f.txt",
-          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_afbca42f.txt",
-          "uploadedAt": "2026-07-20T15:36:45.986Z",
+          "storagePath": "permits/permit-oilgas-014/petroleum_29e0e9d6.txt",
+          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_29e0e9d6.txt",
+          "uploadedAt": "2026-07-20T16:33:02.729Z",
           "uploadedByRole": "petroleum_reviewer",
           "extractedTextPreview": "Operator: Delta Frontier Energy\nBlock: OML-500\nWell: WELL-55\nOperation Type: Offshore intervention",
           "extractionStatus": "processed"
@@ -664,30 +664,30 @@
       ],
       "activeAssignment": {
         "assignedUserId": "user-petroleum-1",
-        "assignedAt": "2026-07-20T15:36:44.753Z",
+        "assignedAt": "2026-07-20T16:33:01.509Z",
         "reason": "Critical permit priority escalation",
         "status": "active"
       },
       "auditHistory": [
         {
-          "id": "audit-1784561805986-nz0xob",
-          "createdAt": "2026-07-20T15:36:45.986Z",
+          "id": "audit-1784565182730-cjm63r",
+          "createdAt": "2026-07-20T16:33:02.729Z",
           "actor": "system",
           "role": "system",
           "type": "ai_extraction",
           "summary": "AI extraction completed for petroleum.txt with confidence 52."
         },
         {
-          "id": "audit-1784561805986-dzz4e4",
-          "createdAt": "2026-07-20T15:36:45.986Z",
+          "id": "audit-1784565182730-wg5t2g",
+          "createdAt": "2026-07-20T16:33:02.729Z",
           "actor": "petroleum_reviewer",
           "role": "petroleum_reviewer",
           "type": "document_upload",
           "summary": "Uploaded petroleum.txt for extraction with 4 populated fields."
         },
         {
-          "id": "audit-1784561804753-oxtot0",
-          "createdAt": "2026-07-20T15:36:44.753Z",
+          "id": "audit-1784565181509-3gzslg",
+          "createdAt": "2026-07-20T16:33:01.509Z",
           "actor": "Ijeoma Peters",
           "role": "petroleum_reviewer",
           "type": "assignment",
@@ -727,7 +727,7 @@
         "mining-cadastre",
         "petroleum-regulator"
       ],
-      "updatedAt": "2026-07-20T15:36:44.753Z",
+      "updatedAt": "2026-07-20T16:33:01.509Z",
       "summary": "Unified intake completed. The case is in parallel agency review with one deficiency notice pending from environmental compliance.",
       "timeline": [
         {
@@ -854,14 +854,14 @@
       "uploadedDocuments": [],
       "activeAssignment": {
         "assignedUserId": "user-env-1",
-        "assignedAt": "2026-07-20T15:36:44.753Z",
+        "assignedAt": "2026-07-20T16:33:01.509Z",
         "reason": "Obligation risk triggered escalation",
         "status": "active"
       },
       "auditHistory": [
         {
-          "id": "audit-1784561804753-ujwid0",
-          "createdAt": "2026-07-20T15:36:44.753Z",
+          "id": "audit-1784565181509-kf32ay",
+          "createdAt": "2026-07-20T16:33:01.509Z",
           "actor": "Grace Ogbodo",
           "role": "environment_reviewer",
           "type": "assignment",
