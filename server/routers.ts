@@ -32,16 +32,19 @@ import {
   getActiveAgencyUser,
   getPermittingPlatform,
   getPermitCase,
+  getPermitCaseForRole,
   listAgencies,
   listAgencyUsers,
   listApprovalQueues,
   listMiddlewareComponents,
   listParityState,
   listPermitCases,
+  listQueueAnalytics,
   listServiceTopology,
   setActiveAgencyUser,
   updatePermitCaseStage,
   updatePermitFormSections,
+  uploadPermitDocumentAndExtract,
 } from "./permittingPlatformRepository";
 
 const businessProfileSchema = z.object({
@@ -230,13 +233,31 @@ export const appRouter = router({
     getPlatform: publicProcedure.query(() => getPermittingPlatform()),
     listCases: publicProcedure.query(() => listPermitCases()),
     getCase: publicProcedure.input(z.object({ caseId: z.string() })).query(({ input }) => getPermitCase(input.caseId)),
+    getCaseForRole: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          role: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]),
+        }),
+      )
+      .query(({ input }) => getPermitCaseForRole(input)),
     listAgencies: publicProcedure.query(() => listAgencies()),
     listAgencyUsers: publicProcedure.query(() => listAgencyUsers()),
     getActiveAgencyUser: publicProcedure.query(() => getActiveAgencyUser()),
     setActiveAgencyUser: publicProcedure
       .input(z.object({ userId: z.string() }))
       .mutation(({ input }) => setActiveAgencyUser(input)),
-    listApprovalQueues: publicProcedure.query(() => listApprovalQueues()),
+    listApprovalQueues: publicProcedure
+      .input(
+        z
+          .object({
+            agencyId: z.string().optional(),
+            role: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => listApprovalQueues(input)),
+    listQueueAnalytics: publicProcedure.query(() => listQueueAnalytics()),
     listMiddleware: publicProcedure.query(() => listMiddlewareComponents()),
     listServices: publicProcedure.query(() => listServiceTopology()),
     listParity: publicProcedure.query(() => listParityState()),
@@ -262,6 +283,7 @@ export const appRouter = router({
       .input(
         z.object({
           caseId: z.string(),
+          actorRole: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]).optional(),
           summary: z.string().nullable().optional(),
           formSections: z.array(
             z.object({
@@ -304,6 +326,17 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => extractPermitDocumentToForm(input)),
+    uploadDocumentAndExtract: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string(),
+          fileName: z.string(),
+          mimeType: z.string(),
+          base64Data: z.string().min(32),
+          uploadedByRole: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]),
+        }),
+      )
+      .mutation(({ input }) => uploadPermitDocumentAndExtract(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

@@ -6,22 +6,27 @@ import {
   appendPermitReviewNote,
   extractPermitDocumentToForm,
   getActiveAgencyUser,
-  getPermittingPlatform,
   getPermitCase,
+  getPermitCaseForRole,
+  getPermittingPlatform,
   listApprovalQueues,
   listMiddlewareComponents,
+  listQueueAnalytics,
   listServiceTopology,
   setActiveAgencyUser,
   updatePermitCaseStage,
   updatePermitFormSections,
+  uploadPermitDocumentAndExtract,
 } from "../server/permittingPlatformRepository";
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
 const STORE_PATH = path.join(DATA_DIR, "permitting-platform.json");
+const UPLOAD_DIR = path.join(process.cwd(), "server", "uploads");
 
 describe("permitting platform repository", () => {
   beforeEach(() => {
     fs.rmSync(STORE_PATH, { force: true });
+    fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
     fs.mkdirSync(DATA_DIR, { recursive: true });
   });
 
@@ -48,7 +53,12 @@ describe("permitting platform repository", () => {
         field.key === "company_name" ? { ...field, value: "Northern Lithium Ventures", source: "manual" as const } : field,
       ),
     }));
-    const updated = updatePermitFormSections({ caseId: "permit-mining-001", summary: "Updated summary", formSections: updatedSections });
+    const updated = updatePermitFormSections({
+      caseId: "permit-mining-001",
+      actorRole: "applicant",
+      summary: "Updated summary",
+      formSections: updatedSections,
+    });
     expect(updated.summary).toBe("Updated summary");
     expect(updated.formSections[0]?.fields.find((field) => field.key === "company_name")?.value).toBe("Northern Lithium Ventures");
   });
@@ -57,7 +67,7 @@ describe("permitting platform repository", () => {
     const switched = setActiveAgencyUser({ userId: "user-petroleum-1" });
     expect(switched.role).toBe("petroleum_reviewer");
     expect(getActiveAgencyUser()?.id).toBe("user-petroleum-1");
-    expect(listApprovalQueues().some((queue) => queue.id === "queue-petroleum-review")).toBe(true);
+    expect(listApprovalQueues({ agencyId: "petroleum-regulator" }).some((queue) => queue.id === "queue-petroleum-review")).toBe(true);
   });
 
   it("stores review notes for role-based approval activity", () => {
@@ -71,6 +81,21 @@ describe("permitting platform repository", () => {
     });
     expect(note.decision).toBe("comment");
     expect(getPermitCase("permit-oilgas-014")?.reviewNotes[0]?.note).toContain("HSE attachment");
+  });
+
+  it("returns role-filtered permit fields for applicant and reviewer contexts", () => {
+    const applicantView = getPermitCaseForRole({ caseId: "permit-mining-001", role: "applicant" });
+    const reviewerView = getPermitCaseForRole({ caseId: "permit-mining-001", role: "mining_reviewer" });
+    expect(applicantView?.formSections.length).toBeGreaterThan(0);
+    expect(reviewerView?.formSections.length).toBeGreaterThan(0);
+    expect(applicantView?.formSections.flatMap((section) => section.fields).length).toBeGreaterThan(0);
+  });
+
+  it("computes queue analytics for SLA and critical-case visibility", () => {
+    const analytics = listQueueAnalytics();
+    expect(analytics.length).toBeGreaterThan(0);
+    expect(analytics.some((item) => item.pendingCount >= 1)).toBe(true);
+    expect(analytics.some((item) => item.avgSlaHours >= 48)).toBe(true);
   });
 
   it("exposes middleware and polyglot service topology for the expanded platform", () => {
@@ -88,10 +113,25 @@ describe("permitting platform repository", () => {
     const result = await extractPermitDocumentToForm({
       caseId: "permit-mining-001",
       documentName: "mining-intake.txt",
-      documentText: "Company: Atlas Mining PLC\nMineral: Tin\nCadastre Units: 88\nEmail: permits@atlas.ng\nWork Programme: Surface mapping and trenching across two corridors.",
+      documentText:
+        "Company: Atlas Mining PLC\nMineral: Tin\nCadastre Units: 88\nEmail: permits@atlas.ng\nWork Programme: Surface mapping and trenching across two corridors.",
     });
     const companyField = result.caseRecord.formSections.flatMap((section) => section.fields).find((field) => field.key === "company_name");
     expect(companyField?.value).toBeTruthy();
     expect(result.extraction?.documentName).toBe("mining-intake.txt");
+  });
+
+  it("stores uploaded permit documents and extracts fields from portable file uploads", async () => {
+    const text = "Operator: Delta Frontier Energy\nBlock: OML-500\nWell: WELL-55\nOperation Type: Offshore intervention";
+    const upload = await uploadPermitDocumentAndExtract({
+      caseId: "permit-oilgas-014",
+      fileName: "petroleum.txt",
+      mimeType: "text/plain",
+      base64Data: Buffer.from(text, "utf8").toString("base64"),
+      uploadedByRole: "petroleum_reviewer",
+    });
+    expect(upload.uploadedDocument.fileName).toBe("petroleum.txt");
+    expect(upload.caseRecord.uploadedDocuments?.length).toBeGreaterThan(0);
+    expect(upload.extraction?.populatedKeys.length).toBeGreaterThan(0);
   });
 });

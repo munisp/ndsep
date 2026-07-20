@@ -1,14 +1,22 @@
 import { Link } from "expo-router";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
 
-function Pill({ label }: { label: string }) {
-  return (
-    <View className="rounded-full border border-border bg-background px-3 py-1.5">
-      <Text className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</Text>
+function Pill({ label, active = false, onPress }: { label: string; active?: boolean; onPress?: () => void }) {
+  const body = (
+    <View className={`rounded-full border px-3 py-1.5 ${active ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
+      <Text className={`text-xs font-semibold uppercase tracking-wide ${active ? "text-primary" : "text-muted"}`}>{label}</Text>
     </View>
+  );
+
+  if (!onPress) return body;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
+      {body}
+    </Pressable>
   );
 }
 
@@ -31,7 +39,8 @@ function PermitCard({
   locationLabel: string;
   priority: string;
 }) {
-  const toneClass = priority === "critical" ? "text-error" : priority === "elevated" ? "text-warning" : "text-success";
+  const toneClass =
+    priority === "critical" ? "text-error" : priority === "elevated" ? "text-warning" : "text-success";
 
   return (
     <Link href={{ pathname: "/permit/[id]", params: { id: caseId } }} asChild>
@@ -55,7 +64,29 @@ function PermitCard({
 
 export default function PermitsScreen() {
   const platformQuery = trpc.permitting.getPlatform.useQuery();
+  const activeAgencyUserQuery = trpc.permitting.getActiveAgencyUser.useQuery();
+  const queueAnalyticsQuery = trpc.permitting.listQueueAnalytics.useQuery();
   const platform = platformQuery.data;
+  const activeAgencyUser = activeAgencyUserQuery.data;
+  const [selectedAgencyId, setSelectedAgencyId] = useState<string>("all");
+
+  const filteredQueues = useMemo(() => {
+    const queues = platform?.approvalQueues ?? [];
+    return selectedAgencyId === "all" ? queues : queues.filter((queue) => queue.agencyId === selectedAgencyId);
+  }, [platform?.approvalQueues, selectedAgencyId]);
+
+  const filteredCases = useMemo(() => {
+    const cases = platform?.permitCases ?? [];
+    if (selectedAgencyId === "all") return cases;
+    return cases.filter(
+      (item) => item.leadAgencyId === selectedAgencyId || item.participatingAgencyIds.includes(selectedAgencyId),
+    );
+  }, [platform?.permitCases, selectedAgencyId]);
+
+  const analytics = queueAnalyticsQuery.data ?? [];
+  const totalPending = analytics.reduce((sum, item) => sum + item.pendingCount, 0);
+  const totalOverdue = analytics.reduce((sum, item) => sum + item.overdueCount, 0);
+  const activeAgencies = platform?.agencies.filter((item) => item.active).length ?? 0;
 
   return (
     <ScreenContainer className="bg-background">
@@ -66,19 +97,65 @@ export default function PermitsScreen() {
           <Text className="mt-3 text-base leading-6 text-white/85">
             Track mining permits, oil and gas licensing, and multi-agency approvals from one shared product surface with parity across mobile and web.
           </Text>
-          <View className="mt-4 flex-row flex-wrap gap-3">
-            <View className="rounded-2xl bg-white/10 px-4 py-3">
-              <Text className="text-xs text-white/70">Cases</Text>
-              <Text className="mt-1 text-xl font-semibold text-white">{platform?.permitCases.length ?? 0}</Text>
-            </View>
-            <View className="rounded-2xl bg-white/10 px-4 py-3">
-              <Text className="text-xs text-white/70">Agencies</Text>
-              <Text className="mt-1 text-xl font-semibold text-white">{platform?.agencies.length ?? 0}</Text>
-            </View>
-            <View className="rounded-2xl bg-white/10 px-4 py-3">
-              <Text className="text-xs text-white/70">Middleware</Text>
-              <Text className="mt-1 text-xl font-semibold text-white">{platform?.middleware.length ?? 0}</Text>
-            </View>
+          <Text className="mt-4 text-sm text-white/80">
+            Active role: {activeAgencyUser?.role.replace(/_/g, " ") ?? "unassigned"}
+          </Text>
+        </View>
+
+        <View className="flex-row gap-3">
+          <View className="flex-1 rounded-3xl border border-border bg-surface p-5">
+            <Text className="text-sm text-muted">Queued reviews</Text>
+            <Text className="mt-3 text-3xl font-bold text-foreground">{totalPending}</Text>
+          </View>
+          <View className="flex-1 rounded-3xl border border-border bg-surface p-5">
+            <Text className="text-sm text-muted">SLA risks</Text>
+            <Text className="mt-3 text-3xl font-bold text-warning">{totalOverdue}</Text>
+          </View>
+          <View className="flex-1 rounded-3xl border border-border bg-surface p-5">
+            <Text className="text-sm text-muted">Active agencies</Text>
+            <Text className="mt-3 text-3xl font-bold text-success">{activeAgencies}</Text>
+          </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Queue filters</Text>
+          <Text className="mt-2 text-sm text-muted">
+            Filter queues and permit cases by lead or participating agency to focus reviewer workload and SLA exposure.
+          </Text>
+          <View className="mt-4 flex-row flex-wrap gap-2">
+            <Pill label="All agencies" active={selectedAgencyId === "all"} onPress={() => setSelectedAgencyId("all")} />
+            {platform?.agencies.map((agency) => (
+              <Pill
+                key={agency.id}
+                label={agency.name}
+                active={selectedAgencyId === agency.id}
+                onPress={() => setSelectedAgencyId(agency.id)}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">SLA dashboard</Text>
+          <View className="mt-4 gap-3">
+            {filteredQueues.map((queue) => {
+              const metric = analytics.find((item) => item.agencyId === queue.agencyId && item.role === queue.role);
+              return (
+                <View key={queue.id} className="rounded-2xl border border-border bg-background p-4">
+                  <View className="flex-row items-center justify-between gap-4">
+                    <Text className="flex-1 text-base font-semibold text-foreground">{queue.title}</Text>
+                    <Text className="text-sm font-semibold text-primary">{metric?.pendingCount ?? queue.pendingCount} pending</Text>
+                  </View>
+                  <Text className="mt-2 text-sm leading-5 text-muted">{queue.description}</Text>
+                  <Text className="mt-2 text-xs text-muted">
+                    Avg SLA: {metric?.avgSlaHours ?? queue.avgSlaHours ?? 0}h · Overdue: {metric?.overdueCount ?? queue.overdueCount}
+                  </Text>
+                  <Text className="mt-1 text-xs text-muted">
+                    Breached cases: {(metric?.breachedCaseIds ?? queue.breachedCaseIds ?? []).join(", ") || "None"}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
         </View>
 
@@ -96,9 +173,9 @@ export default function PermitsScreen() {
         </View>
 
         <View>
-          <Text className="text-lg font-semibold text-foreground">Active permit queues</Text>
+          <Text className="text-lg font-semibold text-foreground">Filtered permit cases</Text>
           <View className="mt-3 gap-3">
-            {platform?.permitCases.map((item) => (
+            {filteredCases.map((item) => (
               <PermitCard
                 key={item.id}
                 caseId={item.id}
@@ -110,22 +187,6 @@ export default function PermitsScreen() {
                 locationLabel={item.locationLabel}
                 priority={item.priority}
               />
-            ))}
-          </View>
-        </View>
-
-        <View className="rounded-3xl border border-border bg-surface p-5">
-          <Text className="text-lg font-semibold text-foreground">Agency routing readiness</Text>
-          <View className="mt-4 gap-3">
-            {platform?.agencies.map((agency) => (
-              <View key={agency.id} className="rounded-2xl border border-border bg-background p-4">
-                <View className="flex-row items-center justify-between gap-4">
-                  <Text className="flex-1 text-base font-semibold text-foreground">{agency.name}</Text>
-                  <Text className="text-sm font-semibold text-primary">{agency.queueDepth} queued</Text>
-                </View>
-                <Text className="mt-2 text-sm leading-5 text-muted">{agency.role}</Text>
-                <Text className="mt-2 text-xs text-muted">{agency.jurisdiction} · SLA {agency.reviewSlaHours}h</Text>
-              </View>
             ))}
           </View>
         </View>

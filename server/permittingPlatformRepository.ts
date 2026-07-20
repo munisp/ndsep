@@ -1,15 +1,21 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import * as pdfParseModule from "pdf-parse";
+
 import { invokeLLM, listLLMModels } from "./_core/llm";
+import { analyzeDocumentImage } from "./mobilePlatformRepository";
+import { storagePut } from "./storage";
 import {
   clonePermittingPlatform,
   type AgencyRole,
   type PermitCaseRecord,
+  type PermitFormFieldRecord,
   type PermitFormSectionRecord,
   type PermitReviewNoteRecord,
   type PermitStage,
   type PermittingPlatformSnapshot,
+  type QueueAnalyticsRecord,
 } from "../lib/permitting-domain";
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
@@ -77,118 +83,86 @@ function getRecordOrThrow(store: PermittingPlatformSnapshot, caseId: string) {
   return record;
 }
 
-function syncQueueCounts(store: PermittingPlatformSnapshot) {
-  store.approvalQueues = store.approvalQueues.map((queue) => {
+function inferFieldPermissions(record: PermitCaseRecord, field: PermitFormFieldRecord) {
+  if (field.viewableBy?.length || field.editableBy?.length) {
+    return field;
+  }
+
+  const applicantAndReviewers: AgencyRole[] = ["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"];
+  const reviewerOnly: AgencyRole[] = ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"];
+  const sectorReviewer =
+    record.sector === "mining"
+      ? (["mining_reviewer", "planning_supervisor"] as AgencyRole[])
+      : record.sector === "oil_gas"
+        ? (["petroleum_reviewer", "planning_supervisor"] as AgencyRole[])
+        : (["planning_supervisor", "environment_reviewer"] as AgencyRole[]);
+
+  const editableBy = field.key.includes("consent") || field.key.includes("programme") || field.key.includes("operator") || field.key.includes("company")
+    ? (["applicant", ...sectorReviewer] as AgencyRole[])
+    : reviewerOnly;
+
+  const viewableBy = field.key.includes("financial") || field.key.includes("bond")
+    ? applicantAndReviewers
+    : applicantAndReviewers;
+
+  return {
+    ...field,
+    viewableBy,
+    editableBy,
+  };
+}
+
+function ensureRecordStructure(record: PermitCaseRecord) {
+  record.formSections = record.formSections.map((section) => ({
+    ...section,
+    fields: section.fields.map((field) => inferFieldPermissions(record, field)),
+  }));
+  record.uploadedDocuments = record.uploadedDocuments ?? [];
+  return record;
+}
+
+function computeQueueAnalytics(store: PermittingPlatformSnapshot): QueueAnalyticsRecord[] {
+  const analytics = store.approvalQueues.map((queue) => {
     const queueCases = store.permitCases.filter((record) => queue.caseIds.includes(record.id));
     const pendingCount = queueCases.length;
-    const overdueCount = queueCases.filter((record) => record.priority === "critical" || record.obligations.some((item) => item.status === "at_risk")).length;
-    return { ...queue, pendingCount, overdueCount };
+    const overdueCount = queueCases.filter((record) =>
+      record.priority === "critical" || record.obligations.some((item) => item.status === "at_risk"),
+    ).length;
+    const avgSlaHours = Math.round(
+      (store.agencies.find((agency) => agency.id === queue.agencyId)?.reviewSlaHours ?? 0) * 10,
+    ) / 10;
+    const breachedCaseIds = queueCases
+      .filter((record) => record.obligations.some((item) => item.status === "at_risk"))
+      .map((record) => record.id);
+    const criticalCaseIds = queueCases.filter((record) => record.priority === "critical").map((record) => record.id);
+    return {
+      agencyId: queue.agencyId,
+      role: queue.role,
+      pendingCount,
+      overdueCount,
+      avgSlaHours,
+      breachedCaseIds,
+      criticalCaseIds,
+    } satisfies QueueAnalyticsRecord;
   });
+
+  store.queueAnalytics = analytics;
+  store.approvalQueues = store.approvalQueues.map((queue) => {
+    const metric = analytics.find((item) => item.agencyId === queue.agencyId && item.role === queue.role);
+    return {
+      ...queue,
+      pendingCount: metric?.pendingCount ?? queue.pendingCount,
+      overdueCount: metric?.overdueCount ?? queue.overdueCount,
+      avgSlaHours: metric?.avgSlaHours ?? queue.avgSlaHours ?? 0,
+      breachedCaseIds: metric?.breachedCaseIds ?? [],
+    };
+  });
+
+  return analytics;
 }
 
-export function getPermittingPlatform() {
-  return readStore();
-}
-
-export function listPermitCases() {
-  return readStore().permitCases;
-}
-
-export function getPermitCase(caseId: string) {
-  return readStore().permitCases.find((item) => item.id === caseId) ?? null;
-}
-
-export function listAgencies() {
-  return readStore().agencies;
-}
-
-export function listAgencyUsers() {
-  return readStore().agencyUsers;
-}
-
-export function getActiveAgencyUser() {
-  const store = readStore();
-  return store.agencyUsers.find((item) => item.id === store.activeAgencyUserId) ?? null;
-}
-
-export function setActiveAgencyUser(input: { userId: string }) {
-  const store = readStore();
-  const user = store.agencyUsers.find((item) => item.id === input.userId);
-  if (!user) throw new Error("Agency user not found");
-  store.activeAgencyUserId = user.id;
-  writeStore(store);
-  return user;
-}
-
-export function listApprovalQueues() {
-  const store = readStore();
-  syncQueueCounts(store);
-  writeStore(store);
-  return store.approvalQueues;
-}
-
-export function listMiddlewareComponents() {
-  return readStore().middleware;
-}
-
-export function listServiceTopology() {
-  return readStore().services;
-}
-
-export function listParityState() {
-  return readStore().parity;
-}
-
-export function updatePermitCaseStage(input: { caseId: string; stage: PermitStage }) {
-  const store = readStore();
-  const record = getRecordOrThrow(store, input.caseId);
-  const updatedAt = new Date().toISOString();
-  record.stage = input.stage;
-  record.updatedAt = updatedAt;
-  record.timeline = buildTimeline(input.stage, updatedAt);
-  syncQueueCounts(store);
-  writeStore(store);
-  return record;
-}
-
-export function updatePermitFormSections(input: { caseId: string; formSections: PermitFormSectionRecord[]; summary?: string | null }) {
-  const store = readStore();
-  const record = getRecordOrThrow(store, input.caseId);
-  record.formSections = input.formSections;
-  if (input.summary) record.summary = input.summary;
-  record.updatedAt = new Date().toISOString();
-  writeStore(store);
-  return record;
-}
-
-export function appendPermitReviewNote(input: {
-  caseId: string;
-  author: string;
-  role: AgencyRole;
-  agencyId: string | null;
-  decision: PermitReviewNoteRecord["decision"];
-  note: string;
-}) {
-  const store = readStore();
-  const record = getRecordOrThrow(store, input.caseId);
-  const reviewNote: PermitReviewNoteRecord = {
-    id: `note-${Date.now()}`,
-    author: input.author,
-    role: input.role,
-    agencyId: input.agencyId,
-    decision: input.decision,
-    note: input.note,
-    createdAt: new Date().toISOString(),
-  };
-  record.reviewNotes.unshift(reviewNote);
-  record.updatedAt = reviewNote.createdAt;
-  if (input.decision === "approved" && record.stage === "approval") {
-    record.stage = "issued";
-    record.timeline = buildTimeline("issued", reviewNote.createdAt);
-  }
-  syncQueueCounts(store);
-  writeStore(store);
-  return reviewNote;
+function getFieldMap(record: PermitCaseRecord) {
+  return record.formSections.flatMap((section) => section.fields).map((field) => field.key);
 }
 
 function applyExtractedFields(record: PermitCaseRecord, extracted: Array<{ key: string; value: string }>) {
@@ -197,13 +171,13 @@ function applyExtractedFields(record: PermitCaseRecord, extracted: Array<{ key: 
     ...section,
     fields: section.fields.map((field) => {
       const matched = extracted.find((item) => item.key === field.key);
-      if (!matched || !matched.value) return field;
+      if (!matched || !matched.value) return inferFieldPermissions(record, field);
       populatedKeys.push(field.key);
-      return {
+      return inferFieldPermissions(record, {
         ...field,
         value: matched.value,
         source: "ai",
-      };
+      });
     }),
   }));
   return populatedKeys;
@@ -250,28 +224,23 @@ function heuristicExtraction(record: PermitCaseRecord, documentText: string) {
   return values;
 }
 
-export async function extractPermitDocumentToForm(input: { caseId: string; documentName: string; documentText: string }) {
-  const store = readStore();
-  const record = getRecordOrThrow(store, input.caseId);
-  let extracted: Array<{ key: string; value: string }> = [];
+async function runStructuredExtraction(record: PermitCaseRecord, documentText: string) {
   let model = "heuristic-fallback";
+  let extracted: Array<{ key: string; value: string }> = [];
 
   try {
     const models = await listLLMModels();
-    model = models.data.find((item) => item.id === "gpt-5-mini")?.id ?? models.data[0]?.id ?? "gpt-5-mini";
+    model = models.data.find((item) => item.id === "llama3.1:8b")?.id ?? models.data[0]?.id ?? "llama3.1:8b";
     const response = await Promise.race([
       invokeLLM({
         model,
         messages: [
-        { role: "system", content: "Extract permit intake fields from the document text and return JSON only." },
-        {
-          role: "user",
-          content: `Sector: ${record.sector}\nExpected field keys: ${record.formSections
-            .flatMap((section) => section.fields)
-            .map((field) => field.key)
-            .join(", ")}\n\nDocument text:\n${input.documentText}`,
-        },
-      ],
+          { role: "system", content: "Extract permit intake fields from the document text and return strict JSON only." },
+          {
+            role: "user",
+            content: `Sector: ${record.sector}\nExpected field keys: ${getFieldMap(record).join(", ")}\n\nDocument text:\n${documentText}`,
+          },
+        ],
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -292,8 +261,9 @@ export async function extractPermitDocumentToForm(input: { caseId: string; docum
                     additionalProperties: false,
                   },
                 },
+                confidence: { type: "number" },
               },
-              required: ["extracted"],
+              required: ["extracted", "confidence"],
               additionalProperties: false,
             },
           },
@@ -301,23 +271,216 @@ export async function extractPermitDocumentToForm(input: { caseId: string; docum
       }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("LLM extraction timeout")), 1200)),
     ]);
+
     const content = response.choices[0]?.message?.content;
-    const parsed = typeof content === "string" ? JSON.parse(content) : { extracted: [] };
+    const parsed = typeof content === "string" ? JSON.parse(content) : { extracted: [], confidence: 0 };
     extracted = Array.isArray(parsed.extracted) ? parsed.extracted : [];
+    return {
+      extracted,
+      model,
+      confidence: Number(parsed.confidence) || 0,
+    };
   } catch {
-    extracted = heuristicExtraction(record, input.documentText);
+    return {
+      extracted: heuristicExtraction(record, documentText),
+      model,
+      confidence: 52,
+    };
+  }
+}
+
+async function extractTextFromUpload(input: { mimeType: string; buffer: Buffer; fileName: string }) {
+  if (input.mimeType.includes("pdf")) {
+    try {
+      const pdfParse = (pdfParseModule as unknown as { default?: (buffer: Buffer) => Promise<{ text?: string }> }).default;
+      const parsed = pdfParse ? await pdfParse(input.buffer) : { text: input.buffer.toString("utf8") };
+      return {
+        text: parsed.text?.trim() || "",
+        sourceType: "pdf" as const,
+      };
+    } catch {
+      return {
+        text: input.buffer.toString("utf8"),
+        sourceType: "pdf" as const,
+      };
+    }
   }
 
-  if (extracted.length === 0) {
-    extracted = heuristicExtraction(record, input.documentText);
+  if (input.mimeType.startsWith("image/")) {
+    return {
+      text: "",
+      sourceType: "image" as const,
+    };
   }
 
-  const populatedKeys = applyExtractedFields(record, extracted);
+  return {
+    text: input.buffer.toString("utf8"),
+    sourceType: "text" as const,
+  };
+}
+
+function buildFieldPairsFromVisionResult(result: Awaited<ReturnType<typeof analyzeDocumentImage>>) {
+  const entries = Object.entries(result.extractedFields ?? {})
+    .filter(([, value]) => typeof value === "string" && value.trim().length > 0)
+    .map(([key, value]) => ({ key, value }));
+  return entries;
+}
+
+export function getPermittingPlatform() {
+  const store = readStore();
+  store.permitCases = store.permitCases.map((record) => ensureRecordStructure(record));
+  computeQueueAnalytics(store);
+  writeStore(store);
+  return store;
+}
+
+export function listPermitCases() {
+  return getPermittingPlatform().permitCases;
+}
+
+export function getPermitCase(caseId: string) {
+  return getPermittingPlatform().permitCases.find((item) => item.id === caseId) ?? null;
+}
+
+export function getPermitCaseForRole(input: { caseId: string; role: AgencyRole }) {
+  const record = getPermitCase(input.caseId);
+  if (!record) return null;
+  return {
+    ...record,
+    formSections: record.formSections.map((section) => ({
+      ...section,
+      fields: section.fields.filter((field) => !field.viewableBy || field.viewableBy.includes(input.role)),
+    })),
+  };
+}
+
+export function listAgencies() {
+  return getPermittingPlatform().agencies;
+}
+
+export function listAgencyUsers() {
+  return getPermittingPlatform().agencyUsers;
+}
+
+export function getActiveAgencyUser() {
+  const store = getPermittingPlatform();
+  return store.agencyUsers.find((item) => item.id === store.activeAgencyUserId) ?? null;
+}
+
+export function setActiveAgencyUser(input: { userId: string }) {
+  const store = getPermittingPlatform();
+  const user = store.agencyUsers.find((item) => item.id === input.userId);
+  if (!user) throw new Error("Agency user not found");
+  store.activeAgencyUserId = user.id;
+  writeStore(store);
+  return user;
+}
+
+export function listApprovalQueues(input?: { agencyId?: string; role?: AgencyRole }) {
+  const store = getPermittingPlatform();
+  const filtered = store.approvalQueues.filter((queue) => {
+    if (input?.agencyId && queue.agencyId !== input.agencyId) return false;
+    if (input?.role && queue.role !== input.role) return false;
+    return true;
+  });
+  return filtered;
+}
+
+export function listQueueAnalytics() {
+  const store = getPermittingPlatform();
+  return store.queueAnalytics ?? [];
+}
+
+export function listMiddlewareComponents() {
+  return getPermittingPlatform().middleware;
+}
+
+export function listServiceTopology() {
+  return getPermittingPlatform().services;
+}
+
+export function listParityState() {
+  return getPermittingPlatform().parity;
+}
+
+export function updatePermitCaseStage(input: { caseId: string; stage: PermitStage }) {
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
+  const updatedAt = new Date().toISOString();
+  record.stage = input.stage;
+  record.updatedAt = updatedAt;
+  record.timeline = buildTimeline(input.stage, updatedAt);
+  computeQueueAnalytics(store);
+  writeStore(store);
+  return record;
+}
+
+export function updatePermitFormSections(input: { caseId: string; formSections: PermitFormSectionRecord[]; summary?: string | null; actorRole?: AgencyRole }) {
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
+  const actorRole = input.actorRole ?? getActiveAgencyUser()?.role ?? "applicant";
+  record.formSections = input.formSections.map((section) => ({
+    ...section,
+    fields: section.fields.map((field) => {
+      const current = record.formSections.flatMap((item) => item.fields).find((item) => item.key === field.key);
+      const guarded = inferFieldPermissions(record, {
+        ...(current ?? field),
+        ...field,
+      });
+      if (guarded.editableBy && !guarded.editableBy.includes(actorRole) && current) {
+        return current;
+      }
+      return guarded;
+    }),
+  }));
+  if (typeof input.summary === "string") record.summary = input.summary;
+  record.updatedAt = new Date().toISOString();
+  writeStore(store);
+  return record;
+}
+
+export function appendPermitReviewNote(input: {
+  caseId: string;
+  author: string;
+  role: AgencyRole;
+  agencyId: string | null;
+  decision: PermitReviewNoteRecord["decision"];
+  note: string;
+}) {
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
+  const reviewNote: PermitReviewNoteRecord = {
+    id: `note-${Date.now()}`,
+    author: input.author,
+    role: input.role,
+    agencyId: input.agencyId,
+    decision: input.decision,
+    note: input.note,
+    createdAt: new Date().toISOString(),
+  };
+  record.reviewNotes.unshift(reviewNote);
+  record.updatedAt = reviewNote.createdAt;
+  if (input.decision === "approved" && record.stage === "approval") {
+    record.stage = "issued";
+    record.timeline = buildTimeline("issued", reviewNote.createdAt);
+  }
+  computeQueueAnalytics(store);
+  writeStore(store);
+  return reviewNote;
+}
+
+export async function extractPermitDocumentToForm(input: { caseId: string; documentName: string; documentText: string }) {
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
+  const result = await runStructuredExtraction(record, input.documentText);
+  const populatedKeys = applyExtractedFields(record, result.extracted);
   record.lastAiExtraction = {
     documentName: input.documentName,
     extractedAt: new Date().toISOString(),
-    model,
+    model: result.model,
     populatedKeys,
+    sourceType: "text",
+    confidence: result.confidence,
   };
   record.updatedAt = record.lastAiExtraction.extractedAt;
   writeStore(store);
@@ -327,15 +490,95 @@ export async function extractPermitDocumentToForm(input: { caseId: string; docum
   };
 }
 
+export async function uploadPermitDocumentAndExtract(input: {
+  caseId: string;
+  fileName: string;
+  mimeType: string;
+  base64Data: string;
+  uploadedByRole: AgencyRole;
+}) {
+  const store = getPermittingPlatform();
+  const record = getRecordOrThrow(store, input.caseId);
+  const buffer = Buffer.from(input.base64Data, "base64");
+  const uploaded = await storagePut(`permits/${input.caseId}/${input.fileName}`, buffer, input.mimeType);
+  const extractedSource = await extractTextFromUpload({ mimeType: input.mimeType, buffer, fileName: input.fileName });
+
+  let extracted = [] as Array<{ key: string; value: string }>;
+  let model = "heuristic-fallback";
+  let confidence = 45;
+
+  if (extractedSource.sourceType === "image") {
+    const analysis = await analyzeDocumentImage({
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      base64Data: input.base64Data,
+      documentType: `${record.sector}-permit`,
+    });
+    extracted = buildFieldPairsFromVisionResult(analysis);
+    confidence = analysis.confidence;
+    model = analysis.engine ?? "vision-analysis";
+    if (extracted.length === 0 && analysis.summary) {
+      const fallback = await runStructuredExtraction(record, analysis.summary);
+      extracted = fallback.extracted;
+      confidence = Math.max(confidence, fallback.confidence);
+      model = fallback.model;
+    }
+  } else {
+    const structured = await runStructuredExtraction(record, extractedSource.text);
+    extracted = structured.extracted;
+    confidence = structured.confidence;
+    model = structured.model;
+  }
+
+  if (extracted.length === 0 && extractedSource.text) {
+    extracted = heuristicExtraction(record, extractedSource.text);
+  }
+
+  const populatedKeys = applyExtractedFields(record, extracted);
+  const uploadedDocument = {
+    id: `doc-${Date.now()}`,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    storagePath: uploaded.key,
+    publicUrl: uploaded.url,
+    uploadedAt: new Date().toISOString(),
+    uploadedByRole: input.uploadedByRole,
+    extractedTextPreview:
+      extractedSource.sourceType === "image"
+        ? `Vision-assisted extraction for ${input.fileName}`
+        : extractedSource.text.slice(0, 240),
+    extractionStatus: "processed" as const,
+  };
+
+  record.uploadedDocuments = record.uploadedDocuments ?? [];
+  record.uploadedDocuments.unshift(uploadedDocument);
+  record.lastAiExtraction = {
+    documentName: input.fileName,
+    extractedAt: uploadedDocument.uploadedAt,
+    model,
+    populatedKeys,
+    sourceType: extractedSource.sourceType,
+    confidence,
+  };
+  record.updatedAt = uploadedDocument.uploadedAt;
+  writeStore(store);
+
+  return {
+    caseRecord: record,
+    extraction: record.lastAiExtraction,
+    uploadedDocument,
+  };
+}
+
 export function upsertPermitCase(input: PermitCaseRecord) {
-  const store = readStore();
+  const store = getPermittingPlatform();
   const existingIndex = store.permitCases.findIndex((item) => item.id === input.id);
   if (existingIndex >= 0) {
-    store.permitCases[existingIndex] = input;
+    store.permitCases[existingIndex] = ensureRecordStructure(input);
   } else {
-    store.permitCases.unshift(input);
+    store.permitCases.unshift(ensureRecordStructure(input));
   }
-  syncQueueCounts(store);
+  computeQueueAnalytics(store);
   writeStore(store);
   return input;
 }

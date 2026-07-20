@@ -103,7 +103,7 @@
       "participatingAgencyIds": [
         "environment-agency"
       ],
-      "updatedAt": "2026-07-20T14:48:32.794Z",
+      "updatedAt": "2026-07-20T11:30:00Z",
       "summary": "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
       "timeline": [
         {
@@ -180,34 +180,85 @@
             {
               "key": "company_name",
               "label": "Company name",
-              "value": "Atlas Mining PLC",
+              "value": "Plateau Critical Minerals Ltd",
               "required": true,
               "fieldType": "text",
-              "source": "ai"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "mineral_type",
               "label": "Mineral commodity",
-              "value": "Tin",
+              "value": "Lithium",
               "required": true,
               "fieldType": "text",
-              "source": "ai"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "cadastre_units",
               "label": "Cadastre units",
-              "value": "88",
+              "value": "144",
               "required": true,
               "fieldType": "number",
-              "source": "ai"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "contact_email",
               "label": "Contact email",
-              "value": "permits@atlas.ng",
+              "value": "permits@plateauminerals.ng",
               "required": true,
               "fieldType": "text",
-              "source": "ai"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             }
           ]
         },
@@ -219,10 +270,22 @@
             {
               "key": "work_programme_summary",
               "label": "Work programme summary",
-              "value": "Surface mapping and trenching across two corridors.",
+              "value": "Phase 1 mapping and trenching across the northern concession boundary.",
               "required": true,
               "fieldType": "textarea",
-              "source": "ai"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "financial_capability",
@@ -230,7 +293,20 @@
               "value": "Bank guarantee and audited reserves available.",
               "required": true,
               "fieldType": "textarea",
-              "source": "manual"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "landowner_consent",
@@ -238,7 +314,19 @@
               "value": "Attached with sworn affidavit",
               "required": true,
               "fieldType": "text",
-              "source": "manual"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "planning_supervisor"
+              ]
             }
           ]
         }
@@ -254,18 +342,8 @@
           "createdAt": "2026-07-20T11:35:00Z"
         }
       ],
-      "lastAiExtraction": {
-        "documentName": "mining-intake.txt",
-        "extractedAt": "2026-07-20T14:48:32.794Z",
-        "model": "gpt-5-mini",
-        "populatedKeys": [
-          "company_name",
-          "mineral_type",
-          "cadastre_units",
-          "contact_email",
-          "work_programme_summary"
-        ]
-      }
+      "lastAiExtraction": null,
+      "uploadedDocuments": []
     },
     {
       "id": "permit-oilgas-014",
@@ -282,7 +360,7 @@
         "environment-agency",
         "planning-authority"
       ],
-      "updatedAt": "2026-07-20T09:45:00Z",
+      "updatedAt": "2026-07-20T15:18:45.805Z",
       "summary": "Local infrastructure dependencies cleared, but mitigation conditions and abandonment security confirmation remain outstanding.",
       "timeline": [
         {
@@ -363,31 +441,82 @@
               "value": "Delta Frontier Energy",
               "required": true,
               "fieldType": "text",
-              "source": "manual"
+              "source": "ai",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "petroleum_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "block_reference",
               "label": "Block reference",
-              "value": "OML-118",
+              "value": "OML-500",
               "required": true,
               "fieldType": "text",
-              "source": "manual"
+              "source": "ai",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "well_identifier",
               "label": "Well identifier",
-              "value": "WELL-DFE-A7",
+              "value": "WELL-55",
               "required": true,
               "fieldType": "text",
-              "source": "manual"
+              "source": "ai",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "operation_type",
               "label": "Operation type",
-              "value": "Appraisal well workover and drilling approval",
+              "value": "Offshore intervention",
               "required": true,
               "fieldType": "textarea",
-              "source": "manual"
+              "source": "ai",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             }
           ]
         },
@@ -402,7 +531,20 @@
               "value": "Revision pending environmental review.",
               "required": true,
               "fieldType": "textarea",
-              "source": "manual"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "abandonment_security",
@@ -410,7 +552,20 @@
               "value": "Bond draft submitted to regulator.",
               "required": true,
               "fieldType": "textarea",
-              "source": "manual"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "local_approvals",
@@ -418,7 +573,20 @@
               "value": "Marine infrastructure dependency cleared.",
               "required": true,
               "fieldType": "textarea",
-              "source": "manual"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             }
           ]
         }
@@ -434,7 +602,32 @@
           "createdAt": "2026-07-20T10:05:00Z"
         }
       ],
-      "lastAiExtraction": null
+      "lastAiExtraction": {
+        "documentName": "petroleum.txt",
+        "extractedAt": "2026-07-20T15:18:45.805Z",
+        "model": "gpt-5-nano",
+        "populatedKeys": [
+          "operator_name",
+          "block_reference",
+          "well_identifier",
+          "operation_type"
+        ],
+        "sourceType": "text",
+        "confidence": 52
+      },
+      "uploadedDocuments": [
+        {
+          "id": "doc-1784560725805",
+          "fileName": "petroleum.txt",
+          "mimeType": "text/plain",
+          "storagePath": "permits/permit-oilgas-014/petroleum_d0c0ae63.txt",
+          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_d0c0ae63.txt",
+          "uploadedAt": "2026-07-20T15:18:45.805Z",
+          "uploadedByRole": "petroleum_reviewer",
+          "extractedTextPreview": "Operator: Delta Frontier Energy\nBlock: OML-500\nWell: WELL-55\nOperation Type: Offshore intervention",
+          "extractionStatus": "processed"
+        }
+      ]
     },
     {
       "id": "permit-multi-023",
@@ -527,7 +720,20 @@
               "value": "Eastern Corridor Logistics Hub",
               "required": true,
               "fieldType": "text",
-              "source": "manual"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             },
             {
               "key": "corridor_scope",
@@ -535,7 +741,20 @@
               "value": "Interstate logistics hub, right-of-way, and environmental coordination package.",
               "required": true,
               "fieldType": "textarea",
-              "source": "manual"
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
             }
           ]
         }
@@ -551,7 +770,8 @@
           "createdAt": "2026-07-20T08:30:00Z"
         }
       ],
-      "lastAiExtraction": null
+      "lastAiExtraction": null,
+      "uploadedDocuments": []
     }
   ],
   "approvalQueues": [
@@ -565,7 +785,11 @@
         "permit-mining-001"
       ],
       "pendingCount": 1,
-      "overdueCount": 0
+      "overdueCount": 1,
+      "avgSlaHours": 72,
+      "breachedCaseIds": [
+        "permit-mining-001"
+      ]
     },
     {
       "id": "queue-petroleum-review",
@@ -577,7 +801,9 @@
         "permit-oilgas-014"
       ],
       "pendingCount": 1,
-      "overdueCount": 1
+      "overdueCount": 1,
+      "avgSlaHours": 96,
+      "breachedCaseIds": []
     },
     {
       "id": "queue-env-review",
@@ -591,7 +817,12 @@
         "permit-multi-023"
       ],
       "pendingCount": 3,
-      "overdueCount": 1
+      "overdueCount": 3,
+      "avgSlaHours": 120,
+      "breachedCaseIds": [
+        "permit-mining-001",
+        "permit-multi-023"
+      ]
     },
     {
       "id": "queue-multi-agency",
@@ -603,7 +834,11 @@
         "permit-multi-023"
       ],
       "pendingCount": 1,
-      "overdueCount": 0
+      "overdueCount": 1,
+      "avgSlaHours": 48,
+      "breachedCaseIds": [
+        "permit-multi-023"
+      ]
     }
   ],
   "middleware": [
@@ -740,6 +975,55 @@
         "shared permit timelines"
       ],
       "nextFocus": "install experience, background sync visibility, and richer admin data tables"
+    }
+  ],
+  "queueAnalytics": [
+    {
+      "agencyId": "mining-cadastre",
+      "role": "mining_reviewer",
+      "pendingCount": 1,
+      "overdueCount": 1,
+      "avgSlaHours": 72,
+      "breachedCaseIds": [
+        "permit-mining-001"
+      ],
+      "criticalCaseIds": []
+    },
+    {
+      "agencyId": "petroleum-regulator",
+      "role": "petroleum_reviewer",
+      "pendingCount": 1,
+      "overdueCount": 1,
+      "avgSlaHours": 96,
+      "breachedCaseIds": [],
+      "criticalCaseIds": [
+        "permit-oilgas-014"
+      ]
+    },
+    {
+      "agencyId": "environment-agency",
+      "role": "environment_reviewer",
+      "pendingCount": 3,
+      "overdueCount": 3,
+      "avgSlaHours": 120,
+      "breachedCaseIds": [
+        "permit-mining-001",
+        "permit-multi-023"
+      ],
+      "criticalCaseIds": [
+        "permit-oilgas-014"
+      ]
+    },
+    {
+      "agencyId": "planning-authority",
+      "role": "planning_supervisor",
+      "pendingCount": 1,
+      "overdueCount": 1,
+      "avgSlaHours": 48,
+      "breachedCaseIds": [
+        "permit-multi-023"
+      ],
+      "criticalCaseIds": []
     }
   ]
 }

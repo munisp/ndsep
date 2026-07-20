@@ -55,6 +55,8 @@ export type PermitFormFieldRecord = {
   required: boolean;
   fieldType: "text" | "textarea" | "number" | "date";
   source: "manual" | "ai";
+  viewableBy?: AgencyRole[];
+  editableBy?: AgencyRole[];
 };
 
 export type PermitFormSectionRecord = {
@@ -79,6 +81,20 @@ export type AIExtractionResultRecord = {
   extractedAt: string;
   model: string;
   populatedKeys: string[];
+  sourceType?: "text" | "image" | "pdf";
+  confidence?: number;
+};
+
+export type PermitUploadedDocumentRecord = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  storagePath: string;
+  publicUrl: string;
+  uploadedAt: string;
+  uploadedByRole: AgencyRole;
+  extractedTextPreview: string;
+  extractionStatus: "pending" | "processed" | "failed";
 };
 
 export type ApprovalQueueRecord = {
@@ -90,6 +106,18 @@ export type ApprovalQueueRecord = {
   caseIds: string[];
   pendingCount: number;
   overdueCount: number;
+  avgSlaHours?: number;
+  breachedCaseIds?: string[];
+};
+
+export type QueueAnalyticsRecord = {
+  agencyId: string;
+  role: AgencyRole;
+  pendingCount: number;
+  overdueCount: number;
+  avgSlaHours: number;
+  breachedCaseIds: string[];
+  criticalCaseIds: string[];
 };
 
 export type PermitCaseRecord = {
@@ -111,6 +139,7 @@ export type PermitCaseRecord = {
   formSections: PermitFormSectionRecord[];
   reviewNotes: PermitReviewNoteRecord[];
   lastAiExtraction: AIExtractionResultRecord | null;
+  uploadedDocuments?: PermitUploadedDocumentRecord[];
 };
 
 export type MiddlewareComponentRecord = {
@@ -145,6 +174,7 @@ export type PermittingPlatformSnapshot = {
   activeAgencyUserId: string;
   permitCases: PermitCaseRecord[];
   approvalQueues: ApprovalQueueRecord[];
+  queueAnalytics?: QueueAnalyticsRecord[];
   middleware: MiddlewareComponentRecord[];
   services: ServiceTopologyRecord[];
   parity: ProductParityRecord[];

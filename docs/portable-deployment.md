@@ -32,6 +32,10 @@ This platform has been refactored toward a **portable stack** so it can run outs
 
 The backend can run as a standard Node.js service behind Nginx, Caddy, or Traefik. Uploaded files are served from `server/uploads/` locally or mapped to external object storage. For AI extraction, start with **Ollama** for local development and move to a compatible provider only if you need larger multimodal models.
 
+A starter orchestration file is included at `docker-compose.portable.yml`. It brings up the app, MySQL, MinIO, and Ollama so teams can reproduce the portable baseline quickly in non-Manus environments.
+
 ## Suggested next infrastructure steps
 
 Use **Keycloak** or **Authentik** if you want enterprise-grade identity beyond the local JWT login. Use **MinIO** if you want object storage parity in development and production. Use **Temporal**, **Kafka**, and **Redis** only when you are ready to deploy the wider workflow and event topology introduced elsewhere in this platform.
+
+If you are taking this to production, the recommended sequence is to replace local JWT login with Keycloak or Authentik, move uploads from the local filesystem to MinIO or S3-compatible storage, front the APIs with Caddy or Traefik, and pin the AI runtime to a managed Ollama or OpenAI-compatible model endpoint.
