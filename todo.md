@@ -78,3 +78,23 @@
 - [x] Signed audit-package exports with tamper-evident hash verification
 - [x] Multi-step approval handoff rules with escalation timers for complex permit workflows
 - [x] Offline audit-package caching for low-connectivity field inspectors
+- [x] Dedicated audit-package signature verification page with upload and validation results
+- [x] In-app notification center for handoff deadlines, escalations, and reviewer alerts
+- [x] Encrypted offline audit cache with biometric unlock for field inspectors
+- [ ] Background reminder scheduler for handoffs nearing escalation thresholds
+- [ ] Public-key verification workflow for signed audit packages
+- [ ] Audit-package chain-of-custody timeline and verification status badges
+- [ ] Role-based notification preferences for reviewers, supervisors, and inspectors
+- [ ] Reviewer workload balancing rules across agencies and permit sectors
+- [ ] SLA breach incident log with acknowledgement and resolution tracking
+- [ ] Supervisor dashboard for override reasons, reassignment analytics, and exception trends
+- [ ] Permit package download bundles that combine audit, documents, and signatures
+- [ ] Offline-first inspector workspace for cached permit evidence and audit packages
+- [ ] Tamper-evident evidence manifest for uploaded permit documents
+- [ ] Approval handoff dependency graph for multi-agency sequencing visibility
+- [ ] Scheduled digest notifications for queue backlog and at-risk permits
+- [ ] Field-inspector secure session timeout and re-authentication policies
+- [ ] Stronger self-hosting secrets management and signing-key rotation support
+- [ ] MinIO or S3-compatible object storage upgrade for audit and evidence packages
+- [ ] Enterprise identity-provider integration path for role federation and SSO
+- [ ] Operations telemetry for notification delivery, handoff latency, and audit download usage

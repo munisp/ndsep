@@ -34,6 +34,7 @@ import {
   getPermittingPlatform,
   getPermitCase,
   getPermitCaseForRole,
+  verifyAuditPackage,
   advancePermitHandoff,
   listAgencies,
   listAgencyUsers,
@@ -371,6 +372,17 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => advancePermitHandoff(input)),
+    verifyAuditPackage: publicProcedure
+      .input(
+        z.object({
+          caseId: z.string().optional(),
+          fileName: z.string(),
+          content: z.string().min(10),
+          sha256: z.string().min(32),
+          signature: z.string().min(32),
+        }),
+      )
+      .mutation(({ input }) => verifyAuditPackage(input)),
   }),
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),

@@ -426,6 +426,17 @@ function signAuditContent(content: string) {
   return { sha256, signature };
 }
 
+function verifySignedAuditContent(input: { content: string; sha256: string; signature: string }) {
+  const recalculatedHash = crypto.createHash("sha256").update(input.content).digest("hex");
+  const recalculatedSignature = crypto.createHmac("sha256", getAuditSigningSecret()).update(recalculatedHash).digest("hex");
+  return {
+    hashMatches: recalculatedHash === input.sha256,
+    signatureMatches: recalculatedSignature === input.signature,
+    recalculatedHash,
+    recalculatedSignature,
+  };
+}
+
 export function getPermittingPlatform() {
   const store = readStore();
   store.permitCases = store.permitCases.map((record) => ensureRecordStructure(record));
@@ -475,6 +486,28 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
     mimeType: input.format === "csv" ? "text/csv" : "text/markdown",
     content,
     packageMetadata: record.latestAuditPackage,
+  };
+}
+
+export function verifyAuditPackage(input: {
+  caseId?: string;
+  fileName: string;
+  content: string;
+  sha256: string;
+  signature: string;
+}) {
+  const verification = verifySignedAuditContent(input);
+  const linkedCase = input.caseId ? getPermitCase(input.caseId) : null;
+  const matchesLatestPackage = !!linkedCase?.latestAuditPackage && linkedCase.latestAuditPackage.sha256 === input.sha256 && linkedCase.latestAuditPackage.signature === input.signature;
+  return {
+    fileName: input.fileName,
+    valid: verification.hashMatches && verification.signatureMatches,
+    hashMatches: verification.hashMatches,
+    signatureMatches: verification.signatureMatches,
+    recalculatedHash: verification.recalculatedHash,
+    recalculatedSignature: verification.recalculatedSignature,
+    matchesLatestPackage,
+    linkedCaseId: linkedCase?.id ?? null,
   };
 }
 

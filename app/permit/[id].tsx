@@ -2,11 +2,12 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import { useLocalSearchParams } from "expo-router";
+import { Link, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { loadAuditCacheManifest, readEncryptedAuditPackage, saveEncryptedAuditPackage, type CachedAuditManifest } from "@/lib/offline-audit-cache";
 import { trpc } from "@/lib/trpc";
 
 type ExportPreview = {
@@ -22,12 +23,6 @@ type ExportPreview = {
     signedBy: string;
     verifierHint: string;
   } | null;
-};
-
-type AuditCacheManifest = {
-  csvPath?: string;
-  pdfPath?: string;
-  updatedAt: string;
 };
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -105,9 +100,7 @@ export default function PermitDetailScreen() {
   const [overrideReason, setOverrideReason] = useState("Manual supervisor override");
   const [handoffNote, setHandoffNote] = useState("Accepted for current review stage.");
   const [exportPreview, setExportPreview] = useState<ExportPreview | null>(null);
-  const [cacheManifest, setCacheManifest] = useState<AuditCacheManifest | null>(null);
-
-  const cacheManifestPath = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}audit-cache-${caseId}.json`;
+  const [cacheManifest, setCacheManifest] = useState<CachedAuditManifest | null>(null);
 
   useEffect(() => {
     if (!record) return;
@@ -125,21 +118,19 @@ export default function PermitDetailScreen() {
   useEffect(() => {
     if (Platform.OS === "web") return;
     let mounted = true;
-    const loadCacheManifest = async () => {
+    const bootstrapCacheManifest = async () => {
       try {
-        const info = await FileSystem.getInfoAsync(cacheManifestPath);
-        if (!info.exists) return;
-        const text = await FileSystem.readAsStringAsync(cacheManifestPath, { encoding: FileSystem.EncodingType.UTF8 });
-        if (mounted) setCacheManifest(JSON.parse(text) as AuditCacheManifest);
+        const manifest = await loadAuditCacheManifest(caseId);
+        if (mounted) setCacheManifest(manifest);
       } catch {
         if (mounted) setCacheManifest(null);
       }
     };
-    void loadCacheManifest();
+    void bootstrapCacheManifest();
     return () => {
       mounted = false;
     };
-  }, [cacheManifestPath]);
+  }, [caseId]);
 
   const updateFormMutation = trpc.permitting.updateFormSections.useMutation({
     onSuccess: async () => {
@@ -217,12 +208,6 @@ export default function PermitDetailScreen() {
     );
   }
 
-  const persistCacheManifest = async (nextManifest: AuditCacheManifest) => {
-    if (Platform.OS === "web") return;
-    await FileSystem.writeAsStringAsync(cacheManifestPath, JSON.stringify(nextManifest), { encoding: FileSystem.EncodingType.UTF8 });
-    setCacheManifest(nextManifest);
-  };
-
   const handleSaveForm = () => {
     const formSections = record.formSections.map((section) => ({
       ...section,
@@ -299,15 +284,17 @@ export default function PermitDetailScreen() {
         window.open(printed.uri, "_blank");
         return;
       }
-      const targetPath = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}${record.id}-audit-history.pdf`;
-      await FileSystem.copyAsync({ from: printed.uri, to: targetPath });
-      await persistCacheManifest({
-        csvPath: cacheManifest?.csvPath,
-        pdfPath: targetPath,
+      const base64Pdf = await FileSystem.readAsStringAsync(printed.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const manifest = await saveEncryptedAuditPackage(caseId, {
+        format: "pdf",
+        fileName: `${record.id}-audit-history.pdf`,
+        mimeType: "application/pdf",
+        payload: base64Pdf,
         updatedAt: new Date().toISOString(),
       });
+      setCacheManifest(manifest);
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(targetPath, { mimeType: "application/pdf" });
+        await Sharing.shareAsync(printed.uri, { mimeType: "application/pdf" });
       }
       return;
     }
@@ -325,22 +312,33 @@ export default function PermitDetailScreen() {
       return;
     }
 
-    const targetPath = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory}${csvExport.fileName}`;
-    await FileSystem.writeAsStringAsync(targetPath, csvExport.content, { encoding: FileSystem.EncodingType.UTF8 });
-    await persistCacheManifest({
-      csvPath: targetPath,
-      pdfPath: cacheManifest?.pdfPath,
+    const manifest = await saveEncryptedAuditPackage(caseId, {
+      format: "csv",
+      fileName: csvExport.fileName,
+      mimeType: "text/csv",
+      payload: csvExport.content,
       updatedAt: new Date().toISOString(),
     });
+    setCacheManifest(manifest);
+    const targetPath = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${csvExport.fileName}`;
+    await FileSystem.writeAsStringAsync(targetPath, csvExport.content, { encoding: FileSystem.EncodingType.UTF8 });
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(targetPath, { mimeType: "text/csv" });
     }
   };
 
-  const handleOpenCachedAudit = async (pathValue?: string) => {
-    if (!pathValue || Platform.OS === "web") return;
+  const handleOpenCachedAudit = async (format: "csv" | "pdf") => {
+    if (Platform.OS === "web") return;
+    const cached = await readEncryptedAuditPackage(caseId, format);
+    if (!cached) return;
+    const targetPath = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${cached.fileName}`;
+    if (format === "pdf") {
+      await FileSystem.writeAsStringAsync(targetPath, cached.payload, { encoding: FileSystem.EncodingType.Base64 });
+    } else {
+      await FileSystem.writeAsStringAsync(targetPath, cached.payload, { encoding: FileSystem.EncodingType.UTF8 });
+    }
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(pathValue);
+      await Sharing.shareAsync(targetPath, { mimeType: cached.mimeType });
     }
   };
 
@@ -515,6 +513,13 @@ export default function PermitDetailScreen() {
             <View className="flex-1"><ActionButton label="Preview signed Markdown" onPress={() => void handlePrepareExport("markdown")} tone="dark" /></View>
             <View className="flex-1"><ActionButton label="Preview signed CSV" onPress={() => void handlePrepareExport("csv")} tone="primary" /></View>
           </View>
+          <Link href={{ pathname: "/audit-verify", params: { caseId: record.id } } as never} asChild>
+            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+              <View className="rounded-2xl border border-border bg-background px-4 py-3">
+                <Text className="text-center text-sm font-semibold text-foreground">Open verification page</Text>
+              </View>
+            </Pressable>
+          </Link>
           <View className="gap-3 md:flex-row">
             <View className="flex-1"><ActionButton label="Download signed CSV" onPress={() => void handleDownloadAudit("csv")} tone="primary" /></View>
             <View className="flex-1"><ActionButton label="Download signed PDF" onPress={() => void handleDownloadAudit("pdf")} tone="success" /></View>
@@ -539,11 +544,11 @@ export default function PermitDetailScreen() {
             <View className="rounded-2xl border border-border bg-background p-4">
               <Text className="text-sm font-semibold text-foreground">Offline cache</Text>
               <Text className="mt-2 text-xs text-muted">Updated: {cacheManifest?.updatedAt ? new Date(cacheManifest.updatedAt).toLocaleString() : "No cached package yet"}</Text>
-              <Text className="mt-1 text-xs text-muted">CSV: {cacheManifest?.csvPath ?? "Unavailable"}</Text>
-              <Text className="mt-1 text-xs text-muted">PDF: {cacheManifest?.pdfPath ?? "Unavailable"}</Text>
+              <Text className="mt-1 text-xs text-muted">CSV: {cacheManifest?.csvPath ? "Encrypted package available" : "Unavailable"}</Text>
+              <Text className="mt-1 text-xs text-muted">PDF: {cacheManifest?.pdfPath ? "Encrypted package available" : "Unavailable"}</Text>
               <View className="mt-3 gap-2 md:flex-row">
-                <View className="flex-1"><ActionButton label="Open cached CSV" onPress={() => void handleOpenCachedAudit(cacheManifest?.csvPath)} tone="dark" disabled={!cacheManifest?.csvPath} /></View>
-                <View className="flex-1"><ActionButton label="Open cached PDF" onPress={() => void handleOpenCachedAudit(cacheManifest?.pdfPath)} tone="success" disabled={!cacheManifest?.pdfPath} /></View>
+                <View className="flex-1"><ActionButton label="Unlock cached CSV" onPress={() => void handleOpenCachedAudit("csv")} tone="dark" disabled={!cacheManifest?.csvPath} /></View>
+                <View className="flex-1"><ActionButton label="Unlock cached PDF" onPress={() => void handleOpenCachedAudit("pdf")} tone="success" disabled={!cacheManifest?.pdfPath} /></View>
               </View>
             </View>
           ) : null}

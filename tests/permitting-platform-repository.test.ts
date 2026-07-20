@@ -3,6 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  advancePermitHandoff,
   appendPermitReviewNote,
   exportPermitAuditHistory,
   extractPermitDocumentToForm,
@@ -10,6 +11,7 @@ import {
   getPermitCase,
   getPermitCaseForRole,
   getPermittingPlatform,
+  verifyAuditPackage,
   listApprovalQueues,
   listMiddlewareComponents,
   overridePermitAssignment,
@@ -114,6 +116,23 @@ describe("permitting platform repository", () => {
     expect(markdown.content).toContain("Audit history");
     expect(csv.fileName.endsWith(".csv")).toBe(true);
     expect(csv.content).toContain("createdAt,type,actor,role,summary");
+    expect(csv.packageMetadata?.sha256).toBeTruthy();
+    expect(csv.packageMetadata?.signature).toBeTruthy();
+  });
+
+  it("verifies signed audit packages against exported content", () => {
+    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+    const verification = verifyAuditPackage({
+      caseId: "permit-mining-001",
+      fileName: exported.fileName,
+      content: exported.content,
+      sha256: exported.packageMetadata!.sha256,
+      signature: exported.packageMetadata!.signature,
+    });
+    expect(verification.valid).toBe(true);
+    expect(verification.hashMatches).toBe(true);
+    expect(verification.signatureMatches).toBe(true);
+    expect(verification.matchesLatestPackage).toBe(true);
   });
 
   it("allows planning supervisors to override auto-assigned reviewers", () => {
@@ -127,6 +146,36 @@ describe("permitting platform repository", () => {
     expect(reassigned.assignedUserId).toBe("user-env-1");
     expect(reassigned.reason).toContain("Environmental dependency");
     expect(getPermitCase("permit-oilgas-014")?.auditHistory?.some((event) => event.summary.includes("Supervisor reassigned case"))).toBe(true);
+  });
+
+  it("advances multi-step approval handoffs through accept and escalate actions", () => {
+    overridePermitAssignment({
+      caseId: "permit-oilgas-014",
+      assignedUserId: "user-env-1",
+      actorName: "Tunde Solarin",
+      actorRole: "planning_supervisor",
+      reason: "Environmental dependency now blocks issuance.",
+    });
+    const handoffId = getPermitCase("permit-oilgas-014")?.approvalHandoffs?.[0]?.id;
+    expect(handoffId).toBeTruthy();
+    const accepted = advancePermitHandoff({
+      caseId: "permit-oilgas-014",
+      handoffId: handoffId!,
+      actorName: "Amina Bello",
+      actorRole: "environment_reviewer",
+      action: "accept",
+      note: "Picked up for environmental review.",
+    });
+    expect(accepted.status).toBe("accepted");
+    const escalated = advancePermitHandoff({
+      caseId: "permit-oilgas-014",
+      handoffId: handoffId!,
+      actorName: "Amina Bello",
+      actorRole: "environment_reviewer",
+      action: "escalate",
+      note: "Need planning supervisor intervention.",
+    });
+    expect(escalated.status).toBe("escalated");
   });
 
   it("exposes middleware and polyglot service topology for the expanded platform", () => {

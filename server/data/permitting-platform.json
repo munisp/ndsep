@@ -103,7 +103,7 @@
       "participatingAgencyIds": [
         "environment-agency"
       ],
-      "updatedAt": "2026-07-20T16:41:05.126Z",
+      "updatedAt": "2026-07-20T16:50:17.148Z",
       "summary": "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
       "timeline": [
         {
@@ -348,7 +348,7 @@
       "uploadedDocuments": [],
       "activeAssignment": {
         "assignedUserId": "user-mining-1",
-        "assignedAt": "2026-07-20T16:41:05.126Z",
+        "assignedAt": "2026-07-20T16:50:17.148Z",
         "reason": "Obligation risk triggered escalation",
         "status": "active"
       },
@@ -357,8 +357,8 @@
           "id": "handoff-permit-mining-001-mining_reviewer",
           "fromRole": "system",
           "toRole": "mining_reviewer",
-          "startedAt": "2026-07-20T16:41:05.126Z",
-          "dueAt": "2026-07-21T16:41:05.126Z",
+          "startedAt": "2026-07-20T16:50:17.148Z",
+          "dueAt": "2026-07-21T16:50:17.148Z",
           "status": "pending",
           "reason": "Obligation risk triggered escalation"
         }
@@ -366,8 +366,8 @@
       "latestAuditPackage": null,
       "auditHistory": [
         {
-          "id": "audit-1784565665126-37b6eb",
-          "createdAt": "2026-07-20T16:41:05.126Z",
+          "id": "audit-1784566217148-fvrway",
+          "createdAt": "2026-07-20T16:50:17.148Z",
           "actor": "Haruna Bello",
           "role": "mining_reviewer",
           "type": "assignment",
@@ -406,7 +406,7 @@
         "environment-agency",
         "planning-authority"
       ],
-      "updatedAt": "2026-07-20T16:41:06.349Z",
+      "updatedAt": "2026-07-20T16:50:18.371Z",
       "summary": "Local infrastructure dependencies cleared, but mitigation conditions and abandonment security confirmation remain outstanding.",
       "timeline": [
         {
@@ -650,7 +650,7 @@
       ],
       "lastAiExtraction": {
         "documentName": "petroleum.txt",
-        "extractedAt": "2026-07-20T16:41:06.349Z",
+        "extractedAt": "2026-07-20T16:50:18.371Z",
         "model": "gpt-5-nano",
         "populatedKeys": [
           "operator_name",
@@ -663,12 +663,12 @@
       },
       "uploadedDocuments": [
         {
-          "id": "doc-1784565666349",
+          "id": "doc-1784566218371",
           "fileName": "petroleum.txt",
           "mimeType": "text/plain",
-          "storagePath": "permits/permit-oilgas-014/petroleum_e2fea4e7.txt",
-          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_e2fea4e7.txt",
-          "uploadedAt": "2026-07-20T16:41:06.349Z",
+          "storagePath": "permits/permit-oilgas-014/petroleum_02ced773.txt",
+          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_02ced773.txt",
+          "uploadedAt": "2026-07-20T16:50:18.371Z",
           "uploadedByRole": "petroleum_reviewer",
           "extractedTextPreview": "Operator: Delta Frontier Energy\nBlock: OML-500\nWell: WELL-55\nOperation Type: Offshore intervention",
           "extractionStatus": "processed"
@@ -676,7 +676,7 @@
       ],
       "activeAssignment": {
         "assignedUserId": "user-petroleum-1",
-        "assignedAt": "2026-07-20T16:41:05.126Z",
+        "assignedAt": "2026-07-20T16:50:17.148Z",
         "reason": "Critical permit priority escalation",
         "status": "active"
       },
@@ -685,8 +685,8 @@
           "id": "handoff-permit-oilgas-014-petroleum_reviewer",
           "fromRole": "system",
           "toRole": "petroleum_reviewer",
-          "startedAt": "2026-07-20T16:41:05.126Z",
-          "dueAt": "2026-07-21T16:41:05.126Z",
+          "startedAt": "2026-07-20T16:50:17.148Z",
+          "dueAt": "2026-07-21T16:50:17.148Z",
           "status": "escalated",
           "reason": "Critical permit priority escalation"
         }
@@ -694,24 +694,24 @@
       "latestAuditPackage": null,
       "auditHistory": [
         {
-          "id": "audit-1784565666349-8ytbma",
-          "createdAt": "2026-07-20T16:41:06.349Z",
+          "id": "audit-1784566218371-o1hlp9",
+          "createdAt": "2026-07-20T16:50:18.371Z",
           "actor": "system",
           "role": "system",
           "type": "ai_extraction",
           "summary": "AI extraction completed for petroleum.txt with confidence 52."
         },
         {
-          "id": "audit-1784565666349-pjrkj1",
-          "createdAt": "2026-07-20T16:41:06.349Z",
+          "id": "audit-1784566218371-jsbq0o",
+          "createdAt": "2026-07-20T16:50:18.371Z",
           "actor": "petroleum_reviewer",
           "role": "petroleum_reviewer",
           "type": "document_upload",
           "summary": "Uploaded petroleum.txt for extraction with 4 populated fields."
         },
         {
-          "id": "audit-1784565665126-g29pva",
-          "createdAt": "2026-07-20T16:41:05.126Z",
+          "id": "audit-1784566217148-i7x5wz",
+          "createdAt": "2026-07-20T16:50:17.148Z",
           "actor": "Ijeoma Peters",
           "role": "petroleum_reviewer",
           "type": "assignment",
@@ -751,7 +751,7 @@
         "mining-cadastre",
         "petroleum-regulator"
       ],
-      "updatedAt": "2026-07-20T16:41:05.126Z",
+      "updatedAt": "2026-07-20T16:50:17.148Z",
       "summary": "Unified intake completed. The case is in parallel agency review with one deficiency notice pending from environmental compliance.",
       "timeline": [
         {
@@ -878,7 +878,7 @@
       "uploadedDocuments": [],
       "activeAssignment": {
         "assignedUserId": "user-env-1",
-        "assignedAt": "2026-07-20T16:41:05.126Z",
+        "assignedAt": "2026-07-20T16:50:17.148Z",
         "reason": "Obligation risk triggered escalation",
         "status": "active"
       },
@@ -887,8 +887,8 @@
           "id": "handoff-permit-multi-023-environment_reviewer",
           "fromRole": "system",
           "toRole": "environment_reviewer",
-          "startedAt": "2026-07-20T16:41:05.126Z",
-          "dueAt": "2026-07-21T16:41:05.126Z",
+          "startedAt": "2026-07-20T16:50:17.148Z",
+          "dueAt": "2026-07-21T16:50:17.148Z",
           "status": "pending",
           "reason": "Obligation risk triggered escalation"
         }
@@ -896,8 +896,8 @@
       "latestAuditPackage": null,
       "auditHistory": [
         {
-          "id": "audit-1784565665126-wlwsfv",
-          "createdAt": "2026-07-20T16:41:05.126Z",
+          "id": "audit-1784566217148-8piamg",
+          "createdAt": "2026-07-20T16:50:17.148Z",
           "actor": "Grace Ogbodo",
           "role": "environment_reviewer",
           "type": "assignment",

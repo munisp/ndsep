@@ -23,6 +23,7 @@ import {
   subscribeActivityFeed,
 } from "@/lib/mobile-activity";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
+import { trpc } from "@/lib/trpc";
 
 const toneStyles = {
   info: "bg-primary/10 text-primary border-primary/20",
@@ -232,6 +233,8 @@ function SwipeActivityCard({
 
 export default function NotificationsScreen() {
   const { bundle, refresh, isRefetching, approveIdentityDocument, approveLegalWorkflow, analyzeActivities } = useMobilePlatformBundle();
+  const platformQuery = trpc.permitting.getPlatform.useQuery();
+  const activeAgencyUserQuery = trpc.permitting.getActiveAgencyUser.useQuery();
   const [items, setItems] = useState<ActivityRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActivityFilter>("all");
@@ -294,6 +297,24 @@ export default function NotificationsScreen() {
   }
 
   const visibleItems = useMemo(() => filterActivities(items, activeFilter, searchTerm), [items, activeFilter, searchTerm]);
+  const handoffAlerts = useMemo(() => {
+    const role = activeAgencyUserQuery.data?.role;
+    if (!role) return [];
+    return (platformQuery.data?.permitCases ?? [])
+      .flatMap((record) =>
+        (record.approvalHandoffs ?? [])
+          .filter((handoff) => handoff.toRole === role && handoff.status !== "completed")
+          .map((handoff) => ({
+            caseId: record.id,
+            title: record.title,
+            dueAt: handoff.dueAt,
+            status: handoff.status,
+            handoffId: handoff.id,
+            reason: handoff.reason,
+          })),
+      )
+      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+  }, [activeAgencyUserQuery.data?.role, platformQuery.data?.permitCases]);
 
   return (
     <ScreenContainer className="bg-background">
@@ -351,6 +372,36 @@ export default function NotificationsScreen() {
               );
             })}
           </ScrollView>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-4">
+          <Text className="text-sm font-semibold text-foreground">Approval handoff alerts</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">Reviewers and supervisors can monitor imminent handoff deadlines and escalations from the same notification center.</Text>
+          <View className="mt-4 gap-3">
+            {handoffAlerts.length === 0 ? (
+              <View className="rounded-2xl border border-border bg-background p-4">
+                <Text className="text-sm text-muted">No pending handoff alerts for the active review role.</Text>
+              </View>
+            ) : (
+              handoffAlerts.map((alert) => {
+                const hoursRemaining = Math.max(0, Math.round((new Date(alert.dueAt).getTime() - Date.now()) / (1000 * 60 * 60)));
+                const warning = hoursRemaining <= 6;
+                return (
+                  <Link key={alert.handoffId} href={{ pathname: "/permit/[id]", params: { id: alert.caseId } } as never} asChild>
+                    <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
+                      <View className={`rounded-2xl border p-4 ${warning ? "border-warning bg-warning/5" : "border-border bg-background"}`}>
+                        <View className="flex-row items-center justify-between gap-3">
+                          <Text className="flex-1 text-sm font-semibold text-foreground">{alert.title}</Text>
+                          <Text className={`text-xs font-semibold ${warning ? "text-warning" : "text-primary"}`}>{alert.status}</Text>
+                        </View>
+                        <Text className="mt-2 text-xs text-muted">Due in {hoursRemaining}h · {alert.reason}</Text>
+                      </View>
+                    </Pressable>
+                  </Link>
+                );
+              })
+            )}
+          </View>
         </View>
 
         <View className="gap-3">
