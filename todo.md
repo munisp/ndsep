@@ -105,3 +105,9 @@
 - [x] Signing-key rotation with revocation tracking for audit-package verification
 - [x] Visual chain-of-custody timeline for audit and evidence packages
 - [x] Scheduled email and in-app digest notifications for supervisor backlog and overdue handoff summaries
+- [ ] Revised stakeholder presentation deck with real platform screenshots
+- [ ] Nigeria and Africa positioning narrative for federal, state, builders, NGOs, and end buyers
+- [ ] Corrected slide layouts, tables, footers, and screenshot validation for the platform deck
+- [x] Realistic Nigerian seed data for agencies, applicants, permits, parcels, and public-sector workflows
+- [x] Realistic audit trails, notifications, handoffs, and dashboard analytics for presentation-quality screens
+- [x] Presentation-ready seeded screenshots across core product surfaces
