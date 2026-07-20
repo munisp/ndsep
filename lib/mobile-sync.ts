@@ -145,11 +145,16 @@ export function useMobilePlatformBundle() {
   });
 
   async function updateMissionStatus(input: { missionId: string; status: "queued" | "active" | "synced" }) {
+    const mission = bundle.missions.find((item) => item.id === input.missionId);
+    const parcel = mission ? bundle.parcels.find((item) => item.id === mission.parcelId) : undefined;
+
     try {
       const result = await rawMissionStatusMutation.mutateAsync(input);
       await scheduleFieldUpdateNotification({
         title: "Field update synchronized",
         body: `Mission ${input.missionId} moved to ${input.status}.`,
+        category: "field",
+        parcelId: parcel?.id,
         data: input,
       });
       await prependActivity({
@@ -158,6 +163,8 @@ export function useMobilePlatformBundle() {
         category: "field",
         tone: "success",
         route: "/(tabs)/field",
+        parcelId: parcel?.id,
+        parcelNumber: parcel?.parcelNumber,
       });
       return result;
     } catch (error) {
@@ -170,8 +177,8 @@ export function useMobilePlatformBundle() {
 
       const optimisticBundle = {
         ...bundle,
-        missions: bundle.missions.map((mission) =>
-          mission.id === input.missionId ? { ...mission, status: input.status, lastUpdated: queued.queuedAt } : mission,
+        missions: bundle.missions.map((missionItem) =>
+          missionItem.id === input.missionId ? { ...missionItem, status: input.status, lastUpdated: queued.queuedAt } : missionItem,
         ),
         syncMeta: {
           ...bundle.syncMeta,
@@ -185,6 +192,8 @@ export function useMobilePlatformBundle() {
       await scheduleFieldUpdateNotification({
         title: "Field update queued offline",
         body: `Mission ${input.missionId} will replay automatically when connectivity is available.`,
+        category: "field",
+        parcelId: parcel?.id,
         data: input,
       });
       await prependActivity({
@@ -193,6 +202,8 @@ export function useMobilePlatformBundle() {
         category: "field",
         tone: "warning",
         route: "/(tabs)/field",
+        parcelId: parcel?.id,
+        parcelNumber: parcel?.parcelNumber,
       });
       throw error;
     }
@@ -215,6 +226,11 @@ export function useMobilePlatformBundle() {
         tone: "info",
         route: "/onboarding",
       });
+      await scheduleFieldUpdateNotification({
+        title: "Business onboarding updated",
+        body: `${profile.companyName ?? "Business profile"} was submitted for review.`,
+        category: "onboarding",
+      });
       return result;
     },
     analyzeIdentityDocument,
@@ -231,6 +247,11 @@ export function useMobilePlatformBundle() {
           tone: result.analysis.status === "verified" ? "success" : "warning",
           route: "/onboarding",
         });
+        await scheduleFieldUpdateNotification({
+          title: "Liveness review updated",
+          body: `Liveness session finished with status ${result.analysis.status}.`,
+          category: "onboarding",
+        });
         return result;
       },
     },
@@ -242,7 +263,11 @@ export function useMobilePlatformBundle() {
         category: "onboarding",
         tone: "success",
         route: "/onboarding",
-        action: undefined,
+      });
+      await scheduleFieldUpdateNotification({
+        title: "KYC document approved",
+        body: `${result.document.type} was approved from the mobile inbox.`,
+        category: "onboarding",
       });
       return result;
     },
@@ -250,6 +275,7 @@ export function useMobilePlatformBundle() {
       ...advanceLegalWorkflow,
       mutateAsync: async (...args: Parameters<typeof advanceLegalWorkflow.mutateAsync>) => {
         const result = await advanceLegalWorkflow.mutateAsync(...args);
+        const parcel = bundle.parcels.find((item) => item.id === result.parcelId);
         await prependActivity({
           title: "Legal workflow advanced",
           description: `${result.type} moved to ${result.status}${result.registrationNumber ? ` with registration ${result.registrationNumber}` : ""}.`,
@@ -257,18 +283,33 @@ export function useMobilePlatformBundle() {
           tone: result.status === "registered" ? "success" : "info",
           route: "/legal-workflow",
           parcelId: result.parcelId,
+          parcelNumber: parcel?.parcelNumber,
+        });
+        await scheduleFieldUpdateNotification({
+          title: "Legal workflow updated",
+          body: `${result.type} for parcel ${parcel?.parcelNumber ?? result.parcelId} moved to ${result.status}.`,
+          category: "legal",
+          parcelId: result.parcelId,
         });
         return result;
       },
     },
     approveLegalWorkflow: async (workflowId: string) => {
       const result = await approveLegalWorkflow.mutateAsync({ workflowId, reviewedBy: "Mobile Inbox" });
+      const parcel = bundle.parcels.find((item) => item.id === result.parcelId);
       await prependActivity({
         title: "Legal workflow approved",
         description: `${result.type} for parcel ${result.parcelId} was approved from the notifications inbox.`,
         category: "legal",
         tone: "success",
         route: "/legal-workflow",
+        parcelId: result.parcelId,
+        parcelNumber: parcel?.parcelNumber,
+      });
+      await scheduleFieldUpdateNotification({
+        title: "Legal workflow approved",
+        body: `${result.type} for parcel ${parcel?.parcelNumber ?? result.parcelId} was approved from the inbox.`,
+        category: "legal",
         parcelId: result.parcelId,
       });
       return result;

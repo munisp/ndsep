@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "expo-router";
-import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import { PanResponder, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import type { ActivityFilter, ActivityRecord } from "@/lib/mobile-activity";
 import {
+  dismissActivity,
   filterActivities,
   getActivityFeed,
   getUnreadActivityCount,
   markActivityRead,
   markAllActivitiesRead,
+  subscribeActivityFeed,
 } from "@/lib/mobile-activity";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
@@ -28,14 +30,90 @@ const filters: Array<{ key: ActivityFilter; label: string }> = [
   { key: "geospatial", label: "Geo" },
 ];
 
+function SwipeActivityCard({
+  item,
+  busy,
+  onOpen,
+  onInlineAction,
+  onDismiss,
+  onMarkRead,
+}: {
+  item: ActivityRecord;
+  busy: boolean;
+  onOpen: (item: ActivityRecord) => void;
+  onInlineAction: (item: ActivityRecord) => void;
+  onDismiss: (id: string) => void;
+  onMarkRead: (id: string) => void;
+}) {
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 24 && Math.abs(gestureState.dy) < 16,
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx < -80) {
+            onDismiss(item.id);
+            return;
+          }
+          if (gestureState.dx > 80 && item.unread) {
+            onMarkRead(item.id);
+          }
+        },
+      }),
+    [item.id, item.unread, onDismiss, onMarkRead],
+  );
+
+  const relatedHref = item.route
+    ? item.routeParams
+      ? ({ pathname: item.route, params: item.routeParams } as never)
+      : (item.route as never)
+    : null;
+
+  return (
+    <View {...panResponder.panHandlers} className={`rounded-3xl border bg-surface p-5 ${item.unread ? "border-primary/30" : "border-border"}`}>
+      <View className="mb-3 flex-row items-center justify-between">
+        <Text className="text-[11px] font-medium uppercase tracking-wide text-muted">Swipe right to mark read · left to dismiss</Text>
+        {item.unread ? <Text className="text-xs font-semibold text-primary">Unread</Text> : <Text className="text-xs text-muted">Read</Text>}
+      </View>
+
+      <View className="flex-row items-start justify-between gap-3">
+        <View className="flex-1">
+          <Text className="text-base font-semibold text-foreground">{item.title}</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">{item.description}</Text>
+          {item.parcelNumber ? <Text className="mt-2 text-xs font-medium text-primary">Parcel {item.parcelNumber}</Text> : null}
+        </View>
+        <View className={`rounded-full border px-3 py-1 ${toneStyles[item.tone]}`}>
+          <Text className="text-xs font-semibold uppercase tracking-wide">{item.category}</Text>
+        </View>
+      </View>
+
+      <View className="mt-3 flex-row items-center justify-between gap-3">
+        <Text className="text-xs text-muted">{new Date(item.timestamp).toLocaleString()}</Text>
+        {item.action ? <Text className="text-xs text-muted">Action available</Text> : null}
+      </View>
+
+      {relatedHref ? (
+        <Link href={relatedHref} asChild>
+          <Pressable onPress={() => onOpen(item)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
+            <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
+              <Text className="text-center font-semibold text-foreground">Open related task</Text>
+            </View>
+          </Pressable>
+        </Link>
+      ) : null}
+
+      {item.action ? (
+        <Pressable onPress={() => onInlineAction(item)} disabled={busy} style={({ pressed }) => [{ opacity: pressed || busy ? 0.7 : 1 }]}>
+          <View className="mt-3 rounded-2xl bg-foreground px-4 py-3">
+            <Text className="text-center text-sm font-semibold text-background">{busy ? "Processing…" : item.action.label}</Text>
+          </View>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export default function NotificationsScreen() {
-  const {
-    bundle,
-    refresh,
-    isRefetching,
-    approveIdentityDocument,
-    approveLegalWorkflow,
-  } = useMobilePlatformBundle();
+  const { bundle, refresh, isRefetching, approveIdentityDocument, approveLegalWorkflow } = useMobilePlatformBundle();
   const [items, setItems] = useState<ActivityRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActivityFilter>("all");
@@ -50,6 +128,10 @@ export default function NotificationsScreen() {
 
   useEffect(() => {
     void loadFeed();
+    const unsubscribe = subscribeActivityFeed(() => {
+      void loadFeed();
+    });
+    return unsubscribe;
   }, []);
 
   async function handleRefresh() {
@@ -60,7 +142,6 @@ export default function NotificationsScreen() {
   async function handleOpenItem(item: ActivityRecord) {
     if (item.unread) {
       await markActivityRead(item.id);
-      await loadFeed();
     }
   }
 
@@ -75,7 +156,6 @@ export default function NotificationsScreen() {
         await approveLegalWorkflow(item.action.legalWorkflowId);
       }
       await markActivityRead(item.id);
-      await loadFeed();
     } finally {
       setBusyActionId(null);
     }
@@ -102,11 +182,15 @@ export default function NotificationsScreen() {
           <Text className="mt-2 text-sm leading-5 text-white/85">
             {unreadCount} unread · Sync source: {bundle.syncMeta.source} · Pending mutations: {bundle.syncMeta.pendingMutations}
           </Text>
-          <Pressable
-            onPress={() => void markAllActivitiesRead().then(() => loadFeed())}
-            style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
-          >
-            <View className="mt-4 rounded-2xl bg-white/10 px-4 py-3">
+          <Link href={"/notifications-preferences" as never} asChild>
+            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+              <View className="mt-4 rounded-2xl bg-white/10 px-4 py-3">
+                <Text className="text-center font-semibold text-white">Open notification preferences</Text>
+              </View>
+            </Pressable>
+          </Link>
+          <Pressable onPress={() => void markAllActivitiesRead()} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}>
+            <View className="mt-3 rounded-2xl border border-white/20 bg-white/5 px-4 py-3">
               <Text className="text-center font-semibold text-white">Mark all as read</Text>
             </View>
           </Pressable>
@@ -126,11 +210,7 @@ export default function NotificationsScreen() {
             {filters.map((filter) => {
               const selected = activeFilter === filter.key;
               return (
-                <Pressable
-                  key={filter.key}
-                  onPress={() => setActiveFilter(filter.key)}
-                  style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
-                >
+                <Pressable key={filter.key} onPress={() => setActiveFilter(filter.key)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
                   <View className={`rounded-full border px-4 py-2 ${selected ? "border-primary bg-primary/10" : "border-border bg-background"}`}>
                     <Text className={`text-sm font-semibold ${selected ? "text-primary" : "text-foreground"}`}>{filter.label}</Text>
                   </View>
@@ -141,54 +221,17 @@ export default function NotificationsScreen() {
         </View>
 
         <View className="gap-3">
-          {visibleItems.map((item) => {
-            const relatedHref = item.route
-              ? item.routeParams
-                ? ({ pathname: item.route, params: item.routeParams } as never)
-                : (item.route as never)
-              : null;
-
-            return (
-              <View key={item.id} className={`rounded-3xl border bg-surface p-5 ${item.unread ? "border-primary/30" : "border-border"}`}>
-                <View className="flex-row items-start justify-between gap-3">
-                  <View className="flex-1">
-                    <Text className="text-base font-semibold text-foreground">{item.title}</Text>
-                    <Text className="mt-2 text-sm leading-5 text-muted">{item.description}</Text>
-                    {item.parcelNumber ? <Text className="mt-2 text-xs font-medium text-primary">Parcel {item.parcelNumber}</Text> : null}
-                  </View>
-                  <View className={`rounded-full border px-3 py-1 ${toneStyles[item.tone]}`}>
-                    <Text className="text-xs font-semibold uppercase tracking-wide">{item.category}</Text>
-                  </View>
-                </View>
-                <View className="mt-3 flex-row items-center justify-between gap-3">
-                  <Text className="text-xs text-muted">{new Date(item.timestamp).toLocaleString()}</Text>
-                  {item.unread ? <Text className="text-xs font-semibold text-primary">Unread</Text> : null}
-                </View>
-                {relatedHref ? (
-                  <Link href={relatedHref} asChild>
-                    <Pressable onPress={() => void handleOpenItem(item)} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
-                      <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
-                        <Text className="text-center font-semibold text-foreground">Open related task</Text>
-                      </View>
-                    </Pressable>
-                  </Link>
-                ) : null}
-                {item.action ? (
-                  <Pressable
-                    onPress={() => void handleInlineAction(item)}
-                    disabled={busyActionId === item.id}
-                    style={({ pressed }) => [{ opacity: pressed || busyActionId === item.id ? 0.7 : 1 }]}
-                  >
-                    <View className="mt-3 rounded-2xl bg-foreground px-4 py-3">
-                      <Text className="text-center text-sm font-semibold text-background">
-                        {busyActionId === item.id ? "Processing…" : item.action.label}
-                      </Text>
-                    </View>
-                  </Pressable>
-                ) : null}
-              </View>
-            );
-          })}
+          {visibleItems.map((item) => (
+            <SwipeActivityCard
+              key={item.id}
+              item={item}
+              busy={busyActionId === item.id}
+              onOpen={(selected) => void handleOpenItem(selected)}
+              onInlineAction={(selected) => void handleInlineAction(selected)}
+              onDismiss={(id) => void dismissActivity(id)}
+              onMarkRead={(id) => void markActivityRead(id)}
+            />
+          ))}
         </View>
       </ScrollView>
     </ScreenContainer>

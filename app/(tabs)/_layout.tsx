@@ -1,12 +1,12 @@
+import { useEffect, useState } from "react";
 import { Tabs } from "expo-router";
 import { Platform, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useEffect, useState } from "react";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
-import { getUnreadActivityCount } from "@/lib/mobile-activity";
+import { getUnreadActivityCount, subscribeActivityFeed } from "@/lib/mobile-activity";
 
 function InboxBadge({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -26,7 +26,13 @@ export default function TabLayout() {
   const tabBarHeight = 60 + bottomPadding;
 
   useEffect(() => {
-    getUnreadActivityCount().then(setUnreadCount).catch(() => undefined);
+    const refreshUnread = () => {
+      getUnreadActivityCount().then(setUnreadCount).catch(() => undefined);
+    };
+
+    refreshUnread();
+    const unsubscribe = subscribeActivityFeed(refreshUnread);
+    return unsubscribe;
   }, []);
 
   return (

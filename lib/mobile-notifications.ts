@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 
+import { getNotificationPreferences, shouldNotifyForParcel } from "./mobile-notification-preferences";
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldPlaySound: false,
@@ -31,13 +33,29 @@ export async function ensureNotificationPermissions() {
 export async function scheduleFieldUpdateNotification(input: {
   title: string;
   body: string;
+  category?: "field" | "onboarding" | "legal" | "geospatial";
+  parcelId?: number | null;
   data?: Record<string, unknown>;
 }) {
-  await Notifications.scheduleNotificationAsync({
+  const preferences = await getNotificationPreferences();
+  const category = input.category ?? "field";
+
+  if (!preferences.pushEnabled) return null;
+  if (category === "field" && !preferences.fieldAlerts) return null;
+  if (category === "onboarding" && !preferences.onboardingAlerts) return null;
+  if (category === "legal" && !preferences.legalAlerts) return null;
+  if (category === "geospatial" && !preferences.geospatialAlerts) return null;
+  if (!(await shouldNotifyForParcel(input.parcelId))) return null;
+
+  return Notifications.scheduleNotificationAsync({
     content: {
       title: input.title,
       body: input.body,
-      data: input.data,
+      data: {
+        ...input.data,
+        category,
+        parcelId: input.parcelId ?? null,
+      },
     },
     trigger: null,
   });

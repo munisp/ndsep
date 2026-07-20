@@ -27,3 +27,6 @@
 - [x] Unread recent-activity badge in the tab shell navigation
 - [x] Interactive KYC approval actions directly from inbox notifications
 - [x] Interactive legal workflow approval actions directly from inbox notifications
+- [x] Verify parcel-level notification subscriptions are fully implemented in the mobile app
+- [x] Verify notifications preference screen is fully implemented in the mobile app
+- [x] Verify swipe-to-dismiss and mark-as-read inbox gestures are fully implemented in the mobile app

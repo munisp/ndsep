@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { Link, useLocalSearchParams } from "expo-router";
-import { ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { findMissionByParcel, findWorkflowByParcel } from "@/lib/mobile-data";
+import { getNotificationPreferences, toggleParcelSubscription } from "@/lib/mobile-notification-preferences";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
 function DetailCard({ label, value }: { label: string; value: string }) {
@@ -17,10 +19,29 @@ function DetailCard({ label, value }: { label: string; value: string }) {
 export default function ParcelDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { bundle } = useMobilePlatformBundle();
+  const [followedParcelIds, setFollowedParcelIds] = useState<number[]>([]);
+  const [onlyAssignedParcels, setOnlyAssignedParcels] = useState(false);
+
   const parcelId = Number(id ?? bundle.parcels[0]?.id ?? 0);
   const parcel = bundle.parcels.find((item) => item.id === parcelId) ?? bundle.parcels[0];
   const mission = findMissionByParcel(parcel.id, bundle.missions);
   const workflow = findWorkflowByParcel(parcel.id, bundle.legalWorkflows);
+  const isFollowed = followedParcelIds.includes(parcel.id);
+
+  useEffect(() => {
+    getNotificationPreferences()
+      .then((preferences) => {
+        setFollowedParcelIds(preferences.followedParcelIds);
+        setOnlyAssignedParcels(preferences.onlyAssignedParcels);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  async function handleToggleFollow() {
+    const next = await toggleParcelSubscription(parcel.id);
+    setFollowedParcelIds(next.followedParcelIds);
+    setOnlyAssignedParcels(next.onlyAssignedParcels);
+  }
 
   return (
     <ScreenContainer className="bg-background">
@@ -28,7 +49,7 @@ export default function ParcelDetailScreen() {
         <View>
           <Text className="text-3xl font-bold text-foreground">Parcel detail</Text>
           <Text className="mt-2 text-sm leading-5 text-muted">
-            Review parcel intelligence, field continuity, legal progression, and GeoLibre readiness from one native detail surface.
+            Review parcel intelligence, field continuity, legal progression, GeoLibre readiness, and parcel-specific alert control from one native detail surface.
           </Text>
         </View>
 
@@ -38,6 +59,32 @@ export default function ParcelDetailScreen() {
           <Text className="mt-2 text-sm leading-5 text-white/85">
             {parcel.lga}, {parcel.state} · {parcel.areaHectares} hectares · Risk score {parcel.riskScore}
           </Text>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Parcel notification subscription</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">
+            {isFollowed
+              ? "This parcel is currently followed for parcel-tagged alerts and inbox discovery."
+              : "This parcel is not currently followed for parcel-tagged alerts."}
+          </Text>
+          <Text className="mt-2 text-sm text-muted">
+            Delivery mode: {onlyAssignedParcels ? "Assigned/followed parcels only" : "All parcel-tagged events"}
+          </Text>
+          <Pressable onPress={() => void handleToggleFollow()} style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
+            <View className={`mt-4 rounded-2xl px-4 py-4 ${isFollowed ? "bg-foreground" : "border border-border bg-background"}`}>
+              <Text className={`text-center font-semibold ${isFollowed ? "text-background" : "text-foreground"}`}>
+                {isFollowed ? "Unfollow parcel alerts" : "Follow parcel alerts"}
+              </Text>
+            </View>
+          </Pressable>
+          <Link href={"/notifications-preferences" as never} asChild>
+            <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}>
+              <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4">
+                <Text className="text-center font-semibold text-foreground">Open notification preferences</Text>
+              </View>
+            </Pressable>
+          </Link>
         </View>
 
         <View className="flex-row gap-3">

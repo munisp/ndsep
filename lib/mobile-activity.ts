@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export type ActivityCategory = "field" | "onboarding" | "legal" | "geospatial" | "system";
 export type ActivityTone = "info" | "success" | "warning";
 export type ActivityFilter = "all" | ActivityCategory | "unread";
-export type ActivityRoute = "/(tabs)/field" | "/onboarding" | "/legal-workflow" | "/geolibre-launch" | "/parcel/[id]";
+export type ActivityRoute = "/(tabs)/field" | "/onboarding" | "/legal-workflow" | "/geolibre-launch" | "/parcel/[id]" | "/notifications-preferences";
 export type ActivityActionKind = "approve_kyc" | "approve_legal";
 
 export type ActivityAction = {
@@ -31,6 +31,7 @@ export type ActivityRecord = {
 const STORAGE_KEY = "idlr_pts_mobile.activity_feed.v2";
 const LEGACY_STORAGE_KEY = "idlr_pts_mobile.activity_feed.v1";
 const MAX_ITEMS = 60;
+const listeners = new Set<() => void>();
 
 export const defaultActivityFeed: ActivityRecord[] = [
   {
@@ -81,6 +82,17 @@ export const defaultActivityFeed: ActivityRecord[] = [
   },
 ];
 
+function notifyListeners() {
+  listeners.forEach((listener) => listener());
+}
+
+export function subscribeActivityFeed(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 function normalizeRecord(record: Partial<ActivityRecord> & Pick<ActivityRecord, "title" | "description" | "category" | "tone">): ActivityRecord {
   return {
     id: record.id ?? `activity-${Date.now()}`,
@@ -124,6 +136,7 @@ export async function getActivityFeed() {
 
 export async function saveActivityFeed(feed: ActivityRecord[]) {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(feed.slice(0, MAX_ITEMS)));
+  notifyListeners();
 }
 
 export async function prependActivity(
@@ -139,6 +152,13 @@ export async function prependActivity(
 export async function markActivityRead(id: string) {
   const current = await getActivityFeed();
   const next = current.map((item) => (item.id === id ? { ...item, unread: false } : item));
+  await saveActivityFeed(next);
+  return next;
+}
+
+export async function dismissActivity(id: string) {
+  const current = await getActivityFeed();
+  const next = current.filter((item) => item.id !== id);
   await saveActivityFeed(next);
   return next;
 }
@@ -169,13 +189,7 @@ export function filterActivities(feed: ActivityRecord[], filter: ActivityFilter,
     if (!matchesFilter) return false;
     if (!normalizedTerm) return true;
 
-    const haystack = [
-      item.title,
-      item.description,
-      item.category,
-      item.parcelNumber ?? "",
-      item.action?.label ?? "",
-    ]
+    const haystack = [item.title, item.description, item.category, item.parcelNumber ?? "", item.action?.label ?? ""]
       .join(" ")
       .toLowerCase();
 
