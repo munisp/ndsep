@@ -1,10 +1,27 @@
+const aiApiUrl = process.env.AI_API_URL ?? process.env.OPENAI_API_BASE ?? "http://localhost:11434/v1";
+const aiApiKey = process.env.AI_API_KEY ?? process.env.OPENAI_API_KEY ?? "ollama";
+
 export const ENV = {
-  appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
+  appId: process.env.APP_ID ?? process.env.VITE_APP_ID ?? "idlr-pts-platform",
+  appName: process.env.APP_NAME ?? "IDLR-PTS Platform",
+  cookieSecret: process.env.JWT_SECRET ?? process.env.SESSION_SECRET ?? "change-me-in-production",
   databaseUrl: process.env.DATABASE_URL ?? "",
-  oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
-  ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
+  authIssuer: process.env.AUTH_ISSUER ?? "idlr-pts-local",
+  authAudience: process.env.AUTH_AUDIENCE ?? "idlr-pts-clients",
+  authPortalUrl: process.env.AUTH_PORTAL_URL ?? "",
+  oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? process.env.AUTH_SERVER_URL ?? "",
+  ownerOpenId: process.env.OWNER_OPEN_ID ?? process.env.AUTH_ADMIN_ID ?? "local-admin",
+  ownerName: process.env.OWNER_NAME ?? "Platform Administrator",
   isProduction: process.env.NODE_ENV === "production",
-  forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
-  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  aiApiUrl,
+  aiApiKey,
+  aiModel: process.env.AI_MODEL ?? "llama3.1:8b",
+  forgeApiUrl: aiApiUrl,
+  forgeApiKey: aiApiKey,
+  objectStorageEndpoint: process.env.S3_ENDPOINT ?? process.env.OBJECT_STORAGE_ENDPOINT ?? "",
+  objectStorageBucket: process.env.S3_BUCKET ?? process.env.OBJECT_STORAGE_BUCKET ?? "idlr-pts",
+  objectStorageRegion: process.env.S3_REGION ?? process.env.OBJECT_STORAGE_REGION ?? "auto",
+  objectStorageAccessKey: process.env.S3_ACCESS_KEY_ID ?? process.env.OBJECT_STORAGE_ACCESS_KEY ?? "",
+  objectStorageSecretKey: process.env.S3_SECRET_ACCESS_KEY ?? process.env.OBJECT_STORAGE_SECRET_KEY ?? "",
+  publicStorageBaseUrl: process.env.PUBLIC_STORAGE_BASE_URL ?? "",
 };

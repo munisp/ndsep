@@ -259,9 +259,10 @@ export async function extractPermitDocumentToForm(input: { caseId: string; docum
   try {
     const models = await listLLMModels();
     model = models.data.find((item) => item.id === "gpt-5-mini")?.id ?? models.data[0]?.id ?? "gpt-5-mini";
-    const response = await invokeLLM({
-      model,
-      messages: [
+    const response = await Promise.race([
+      invokeLLM({
+        model,
+        messages: [
         { role: "system", content: "Extract permit intake fields from the document text and return JSON only." },
         {
           role: "user",
@@ -271,33 +272,35 @@ export async function extractPermitDocumentToForm(input: { caseId: string; docum
             .join(", ")}\n\nDocument text:\n${input.documentText}`,
         },
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "permit_form_extraction",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              extracted: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    key: { type: "string" },
-                    value: { type: "string" },
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "permit_form_extraction",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                extracted: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      key: { type: "string" },
+                      value: { type: "string" },
+                    },
+                    required: ["key", "value"],
+                    additionalProperties: false,
                   },
-                  required: ["key", "value"],
-                  additionalProperties: false,
                 },
               },
+              required: ["extracted"],
+              additionalProperties: false,
             },
-            required: ["extracted"],
-            additionalProperties: false,
           },
         },
-      },
-    });
+      }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("LLM extraction timeout")), 1200)),
+    ]);
     const content = response.choices[0]?.message?.content;
     const parsed = typeof content === "string" ? JSON.parse(content) : { extracted: [] };
     extracted = Array.isArray(parsed.extracted) ? parsed.extracted : [];

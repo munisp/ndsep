@@ -54,3 +54,11 @@
 - [x] Editable oil and gas permit intake and review forms
 - [x] Role-based agency login and approval queues for multi-agency permitting
 - [x] AI document extraction to prefill permit intake forms
+- [ ] True PDF and image permit document upload parsing for AI form prefilling
+- [ ] Per-agency approval queue filters and SLA dashboards
+- [ ] Field-level role permissions for applicant and reviewer permit form controls
+- [x] Replace Manus-specific authentication with portable open-source auth and role management
+- [x] Replace Manus-specific storage and document proxy flows with portable object storage integration
+- [x] Replace Manus-specific AI and OCR helpers with portable open-source or standard-provider integrations
+- [x] Remove Manus-specific runtime and environment assumptions from mobile and web clients
+- [x] Add external deployment and self-hosting documentation for the permitting stack

@@ -19,7 +19,7 @@ export type FileContent = {
   type: "file_url";
   file_url: {
     url: string;
-    mime_type?: "audio/mpeg" | "audio/wav" | "application/pdf" | "audio/mp4" | "video/mp4";
+    mime_type?: "audio/mpeg" | "audio/wav" | "application/pdf" | "audio/mp4" | "video/mp4" | "image/png" | "image/jpeg";
   };
 };
 
@@ -118,15 +118,7 @@ const normalizeContentPart = (part: MessageContent): TextContent | ImageContent 
     return { type: "text", text: part };
   }
 
-  if (part.type === "text") {
-    return part;
-  }
-
-  if (part.type === "image_url") {
-    return part;
-  }
-
-  if (part.type === "file_url") {
+  if (part.type === "text" || part.type === "image_url" || part.type === "file_url") {
     return part;
   }
 
@@ -135,84 +127,31 @@ const normalizeContentPart = (part: MessageContent): TextContent | ImageContent 
 
 const normalizeMessage = (message: Message) => {
   const { role, name, tool_call_id } = message;
-
   if (role === "tool" || role === "function") {
     const content = ensureArray(message.content)
       .map((part) => (typeof part === "string" ? part : JSON.stringify(part)))
       .join("\n");
-
-    return {
-      role,
-      name,
-      tool_call_id,
-      content,
-    };
+    return { role, name, tool_call_id, content };
   }
 
   const contentParts = ensureArray(message.content).map(normalizeContentPart);
-
-  // If there's only text content, collapse to a single string for compatibility
   if (contentParts.length === 1 && contentParts[0].type === "text") {
-    return {
-      role,
-      name,
-      content: contentParts[0].text,
-    };
+    return { role, name, content: contentParts[0].text };
   }
-
-  return {
-    role,
-    name,
-    content: contentParts,
-  };
+  return { role, name, content: contentParts };
 };
 
-const normalizeToolChoice = (
-  toolChoice: ToolChoice | undefined,
-  tools: Tool[] | undefined,
-): "none" | "auto" | ToolChoiceExplicit | undefined => {
+const normalizeToolChoice = (toolChoice: ToolChoice | undefined, tools: Tool[] | undefined) => {
   if (!toolChoice) return undefined;
-
-  if (toolChoice === "none" || toolChoice === "auto") {
-    return toolChoice;
-  }
-
+  if (toolChoice === "none" || toolChoice === "auto") return toolChoice;
   if (toolChoice === "required") {
-    if (!tools || tools.length === 0) {
-      throw new Error("tool_choice 'required' was provided but no tools were configured");
-    }
-
-    if (tools.length > 1) {
-      throw new Error(
-        "tool_choice 'required' needs a single tool or specify the tool name explicitly",
-      );
-    }
-
-    return {
-      type: "function",
-      function: { name: tools[0].function.name },
-    };
+    if (!tools?.length) throw new Error("tool_choice 'required' was provided but no tools were configured");
+    return { type: "function", function: { name: tools[0].function.name } };
   }
-
   if ("name" in toolChoice) {
-    return {
-      type: "function",
-      function: { name: toolChoice.name },
-    };
+    return { type: "function", function: { name: toolChoice.name } };
   }
-
   return toolChoice;
-};
-
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
-
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
 };
 
 const normalizeResponseFormat = ({
@@ -225,26 +164,11 @@ const normalizeResponseFormat = ({
   response_format?: ResponseFormat;
   outputSchema?: OutputSchema;
   output_schema?: OutputSchema;
-}):
-  | { type: "json_schema"; json_schema: JsonSchema }
-  | { type: "text" }
-  | { type: "json_object" }
-  | undefined => {
+}) => {
   const explicitFormat = responseFormat || response_format;
-  if (explicitFormat) {
-    if (explicitFormat.type === "json_schema" && !explicitFormat.json_schema?.schema) {
-      throw new Error("responseFormat json_schema requires a defined schema object");
-    }
-    return explicitFormat;
-  }
-
+  if (explicitFormat) return explicitFormat;
   const schema = outputSchema || output_schema;
   if (!schema) return undefined;
-
-  if (!schema.name || !schema.schema) {
-    throw new Error("outputSchema requires both name and schema");
-  }
-
   return {
     type: "json_schema",
     json_schema: {
@@ -252,74 +176,47 @@ const normalizeResponseFormat = ({
       schema: schema.schema,
       ...(typeof schema.strict === "boolean" ? { strict: schema.strict } : {}),
     },
-  };
+  } as const;
 };
 
-const RETRY_MAX_RETRIES = 4;
+const RETRY_MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 500;
-const RETRY_MAX_DELAY_MS = 30_000;
-
-type FetchInit = NonNullable<Parameters<typeof fetch>[1]>;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-const parseRetryAfter = (value: string | null): number | undefined => {
-  if (!value) return undefined;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
-  const at = Date.parse(value);
-  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
-};
-
-// Equal-jitter exponential backoff. The cap/2 floor guarantees a minimum delay so a
-// misbehaving caller loop slows down instead of hammering the upstream while it keeps
-// returning errors.
-const computeBackoffDelay = (attempt: number, retryAfterMs?: number): number => {
-  const cap = Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS);
-  const jittered = cap / 2 + Math.random() * (cap / 2);
-  return Math.min(Math.max(jittered, retryAfterMs ?? 0), RETRY_MAX_DELAY_MS);
-};
-
-// Retries non-2xx responses and network errors with exponential backoff, then returns
-// the final Response so callers keep their existing error handling.
-const fetchWithBackoff = async (url: string, init: FetchInit): Promise<Response> => {
-  let lastError: unknown;
-
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let error: unknown;
   for (let attempt = 0; attempt <= RETRY_MAX_RETRIES; attempt++) {
     try {
       const response = await fetch(url, init);
-      if (response.ok || attempt === RETRY_MAX_RETRIES) {
-        return response;
-      }
-
-      const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
-      try {
-        await response.body?.cancel();
-      } catch {
-        // Body already settled; nothing to clean up.
-      }
-      console.warn(
-        `LLM request retry ${attempt + 1}/${RETRY_MAX_RETRIES} after status ${response.status}`,
-      );
-      await sleep(computeBackoffDelay(attempt, retryAfterMs));
-    } catch (error) {
-      lastError = error;
-      if (attempt === RETRY_MAX_RETRIES) throw error;
-      console.warn(
-        `LLM request retry ${attempt + 1}/${RETRY_MAX_RETRIES} after network error`,
-      );
-      await sleep(computeBackoffDelay(attempt));
+      if (response.ok || attempt === RETRY_MAX_RETRIES) return response;
+      await sleep(RETRY_BASE_DELAY_MS * (attempt + 1));
+    } catch (caught) {
+      error = caught;
+      if (attempt === RETRY_MAX_RETRIES) throw caught;
+      await sleep(RETRY_BASE_DELAY_MS * (attempt + 1));
     }
   }
+  throw error instanceof Error ? error : new Error("LLM request failed");
+}
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("LLM request failed after exhausting retries");
-};
+function resolveApiBaseUrl() {
+  return ENV.aiApiUrl.replace(/\/$/, "");
+}
+
+function resolveChatUrl() {
+  return `${resolveApiBaseUrl()}/chat/completions`;
+}
+
+function resolveModelsUrl() {
+  return `${resolveApiBaseUrl()}/models`;
+}
+
+function resolveApiKey() {
+  return ENV.aiApiKey || "ollama";
+}
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
-
   const {
     messages,
     tools,
@@ -337,33 +234,17 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const payload: Record<string, unknown> = {
+    model: model || ENV.aiModel,
     messages: messages.map(normalizeMessage),
   };
 
-  if (model) {
-    payload.model = model;
-  }
-
-  if (tools && tools.length > 0) {
-    payload.tools = tools;
-  }
-
+  if (tools?.length) payload.tools = tools;
   const normalizedToolChoice = normalizeToolChoice(toolChoice || tool_choice, tools);
-  if (normalizedToolChoice) {
-    payload.tool_choice = normalizedToolChoice;
-  }
-
-  const resolvedMaxTokens = max_tokens ?? maxTokens;
-  if (typeof resolvedMaxTokens === "number") {
-    payload.max_tokens = resolvedMaxTokens;
-  }
-
-  if (thinking) {
-    payload.thinking = thinking;
-  }
-  if (reasoning) {
-    payload.reasoning = reasoning;
-  }
+  if (normalizedToolChoice) payload.tool_choice = normalizedToolChoice;
+  const tokenBudget = max_tokens ?? maxTokens;
+  if (typeof tokenBudget === "number") payload.max_tokens = tokenBudget;
+  if (thinking) payload.thinking = thinking;
+  if (reasoning) payload.reasoning = reasoning;
 
   const normalizedResponseFormat = normalizeResponseFormat({
     responseFormat,
@@ -371,23 +252,19 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     outputSchema,
     output_schema,
   });
+  if (normalizedResponseFormat) payload.response_format = normalizedResponseFormat;
 
-  if (normalizedResponseFormat) {
-    payload.response_format = normalizedResponseFormat;
-  }
-
-  const response = await fetchWithBackoff(resolveApiUrl(), {
+  const response = await fetchWithRetry(resolveChatUrl(), {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${resolveApiKey()}`,
     },
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
+    throw new Error(`LLM invoke failed: ${response.status} ${response.statusText} – ${await response.text()}`);
   }
 
   return (await response.json()) as InvokeResult;
@@ -396,8 +273,8 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 export type ModelInfo = {
   id: string;
   object: string;
-  created: number;
-  owned_by: string;
+  created?: number;
+  owned_by?: string;
 };
 
 export type ModelsResponse = {
@@ -406,22 +283,12 @@ export type ModelsResponse = {
 };
 
 export async function listLLMModels(): Promise<ModelsResponse> {
-  assertApiKey();
-
-  const url =
-    ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-      ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/models`
-      : "https://forge.manus.im/v1/models";
-
-  const response = await fetchWithBackoff(url, {
-    headers: { authorization: `Bearer ${ENV.forgeApiKey}` },
+  const response = await fetchWithRetry(resolveModelsUrl(), {
+    headers: { authorization: `Bearer ${resolveApiKey()}` },
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `List LLM models failed: ${response.status} ${response.statusText} – ${errorText}`,
-    );
+    throw new Error(`List LLM models failed: ${response.status} ${response.statusText} – ${await response.text()}`);
   }
 
   return (await response.json()) as ModelsResponse;

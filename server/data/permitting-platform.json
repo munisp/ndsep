@@ -103,7 +103,7 @@
       "participatingAgencyIds": [
         "environment-agency"
       ],
-      "updatedAt": "2026-07-20T14:26:02.810Z",
+      "updatedAt": "2026-07-20T14:48:32.794Z",
       "summary": "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
       "timeline": [
         {
@@ -256,7 +256,7 @@
       ],
       "lastAiExtraction": {
         "documentName": "mining-intake.txt",
-        "extractedAt": "2026-07-20T14:26:02.810Z",
+        "extractedAt": "2026-07-20T14:48:32.794Z",
         "model": "gpt-5-mini",
         "populatedKeys": [
           "company_name",
