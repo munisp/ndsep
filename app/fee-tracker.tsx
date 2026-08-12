@@ -1,11 +1,26 @@
+import { useState, useEffect } from "react";
 import { Alert, Pressable, ScrollView, Text, View, Platform } from "react-native";
 import { router } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { NIGERIA_FEE_SCHEDULE, formatNaira, type FeeCategory } from "@/lib/payment-domain";
+// Fee tracker reads approved offline payments via fetch to update timeline
 
 /** C of O and permit fee status tracker — shows required fees and their payment state */
 export default function FeeTrackerScreen() {
+  const [approvedFees, setApprovedFees] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Load approved offline payments to update timeline status
+    fetch("/api/trpc/listOfflinePayments?input=" + encodeURIComponent(JSON.stringify({ filter: "approved" })))
+      .then((r) => r.json())
+      .then((json: any) => {
+        const payments = json?.result?.data ?? [];
+        setApprovedFees(payments.map((p: any) => p.feeCategory));
+      })
+      .catch(() => {}); // Silently fail if not admin — timeline shows default unpaid
+  }, []);
+
   /** C of O Application Progress Timeline */
   const cofOStages = [
     { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15", tooltip: "Submit completed application form with parcel details and supporting documents to the State Land Bureau.", actionBadge: null, actionRoute: null, feeBreakdown: "Application form: Free | Document compilation: ₦5,000" },
@@ -22,14 +37,14 @@ export default function FeeTrackerScreen() {
   // In production, this would query the payment ledger (TigerBeetle) for each fee's status.
   // Currently all fees show as "unpaid / gateway not connected".
   const feeStatus: Record<FeeCategory, "unpaid" | "pending" | "paid"> = {
-    c_of_o_application: "unpaid",
-    c_of_o_renewal: "unpaid",
-    permit_mining: "unpaid",
-    permit_oil_gas: "unpaid",
-    survey_fee: "unpaid",
-    stamp_duty: "unpaid",
-    development_levy: "unpaid",
-    consent_fee: "unpaid",
+    c_of_o_application: approvedFees.includes("c_of_o_application") ? "paid" : "unpaid",
+    c_of_o_renewal: approvedFees.includes("c_of_o_renewal") ? "paid" : "unpaid",
+    permit_mining: approvedFees.includes("permit_mining") ? "paid" : "unpaid",
+    permit_oil_gas: approvedFees.includes("permit_oil_gas") ? "paid" : "unpaid",
+    survey_fee: approvedFees.includes("survey_fee") ? "paid" : "unpaid",
+    stamp_duty: approvedFees.includes("stamp_duty") ? "paid" : "unpaid",
+    development_levy: approvedFees.includes("development_levy") ? "paid" : "unpaid",
+    consent_fee: approvedFees.includes("consent_fee") ? "paid" : "unpaid",
   };
 
   const statusColors = { unpaid: "border-error/30 bg-error/5", pending: "border-warning/30 bg-warning/5", paid: "border-success/30 bg-success/5" };
