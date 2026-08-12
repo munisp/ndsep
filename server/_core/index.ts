@@ -7,6 +7,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { registerDevelopmentProviderEmulators } from "../developmentProviderEmulators";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -54,6 +55,7 @@ async function startServer() {
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  registerDevelopmentProviderEmulators(app);
 
   app.use("/uploads", express.static(path.join(process.cwd(), "server", "uploads")));
   registerOAuthRoutes(app);

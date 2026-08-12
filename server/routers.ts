@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { COOKIE_NAME } from "../shared/const";
 import { systemRouter } from "./_core/systemRouter";
-import { enterpriseProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, enterpriseProcedure, publicProcedure, router } from "./_core/trpc";
 import { assertEnterpriseRole, type EnterpriseAgencyRole } from "./_core/enterpriseAuth";
 import {
   analyzeDocumentImage,
@@ -59,6 +59,7 @@ import {
   advancePermitHandoff,
 } from "./permittingPlatformRepository";
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
+import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -148,6 +149,12 @@ export const appRouter = router({
         assertEnterpriseRole(ctx.enterprise, ["planning_supervisor"]);
         return verifyRegistryTitle(input);
       }),
+  }),
+  integrationSettings: router({
+    status: publicProcedure.query(() => getIntegrationSettingsStatus()),
+    save: adminProcedure
+      .input(z.object(Object.fromEntries(INTEGRATION_FIELDS.map((field) => [field, z.string().max(5000).optional()]))))
+      .mutation(({ input }) => saveIntegrationSettings(input)),
   }),
   notifications: router({
     getPreferences: publicProcedure.query(() => getMobilePlatformBundle().notificationPreferences),

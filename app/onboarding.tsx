@@ -6,9 +6,11 @@ import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-nativ
 
 import { ScreenContainer } from "@/components/screen-container";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
+import { trpc } from "@/lib/trpc";
 
 export default function OnboardingScreen() {
   const { bundle, submitBusinessProfile, analyzeIdentityDocument, analyzeBusinessDocument, startLiveness, completeLiveness } = useMobilePlatformBundle();
+  const providerHealthQuery = trpc.trust.providerHealth.useQuery();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -148,7 +150,24 @@ export default function OnboardingScreen() {
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Verification service availability</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">Unavailable authority services are intentionally disabled. Document upload can still run its separately labelled assistive review flow, but it cannot replace NIN, CAC, or title verification.</Text>
+          <View className="mt-4 gap-3">
+            {providerHealthQuery.isLoading ? <Text className="text-sm text-muted">Checking secure service availability…</Text> : providerHealthQuery.data?.map((provider) => (
+              <View key={provider.provider} className="rounded-2xl border border-border bg-background p-4">
+                <View className="flex-row items-center justify-between gap-3">
+                  <Text className="flex-1 text-sm font-semibold text-foreground">{provider.provider.replace(/_/g, " ")}</Text>
+                  <Text className={`text-xs font-semibold ${provider.state === "ready" ? "text-success" : "text-warning"}`}>{provider.state === "ready" ? "Available" : "Unavailable"}</Text>
+                </View>
+                {provider.reason ? <Text className="mt-1 text-xs leading-4 text-muted">{provider.reason}</Text> : <Text className="mt-1 text-xs text-muted">Configured service; the final outcome remains subject to authorised review.</Text>}
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Business profile</Text>
+          {!providerHealthQuery.data?.some((provider) => provider.provider === "cac_vas_bridge" && provider.state === "ready") ? <Text className="mt-2 text-sm leading-5 text-warning">CAC verification is unavailable. You may save the profile, but no registration claim will be verified until an authorized bridge is configured.</Text> : null}
           <View className="mt-4 gap-3">
             <TextInput value={form.companyName} onChangeText={(value) => setForm((current) => ({ ...current, companyName: value }))} placeholder="Company name" placeholderTextColor="#94A3B8" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
             <TextInput value={form.cacNumber} onChangeText={(value) => setForm((current) => ({ ...current, cacNumber: value }))} placeholder="CAC / RC number" placeholderTextColor="#94A3B8" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
@@ -168,6 +187,7 @@ export default function OnboardingScreen() {
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Document intelligence</Text>
           <Text className="mt-2 text-sm text-muted">Capture or select clear images for model-assisted screening and evidence extraction. Automated screening never verifies identity, registry authority, or document authenticity by itself.</Text>
+          {!providerHealthQuery.data?.some((provider) => provider.provider === "docling" && provider.state === "ready") ? <Text className="mt-2 text-sm leading-5 text-warning">Docling conversion is unavailable. Uploaded files will use only the separately labelled assistive screening path where configured.</Text> : null}
           <View className="mt-4 gap-3">
             <Pressable onPress={() => pickDocument("identity", "National Identification Slip")}>
               <View className="rounded-2xl border border-border bg-background px-4 py-4">

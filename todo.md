@@ -177,3 +177,7 @@
 - [ ] Integrate approved CAC bridge endpoint and validate authorized business-registration verification
 - [ ] Run authenticated end-to-end trust-provider verification and publish evidence
 - [x] Reconfirm default-unavailable Keycloak, Docling, NIMC, and CAC state before any live credential activation
+- [x] Add an administrator-only integration settings page with server-side configuration handling
+- [x] Add development-only Keycloak and Docling emulators that are explicit, non-production, and non-verifying
+- [x] Add availability-aware controls, disabled actions, and user-friendly provider failure messages
+- [x] Add regression coverage for settings access control, test-emulator labelling, and unavailable-service UX behavior

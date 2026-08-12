@@ -1,4 +1,5 @@
 export type ProviderState = "ready" | "unavailable" | "failed";
+import { getConfiguredIntegrationValue } from "./integrationSettingsRepository";
 
 export type ProviderHealth = {
   provider: "docling" | "dojah_liveness" | "nimc_nvs_bridge" | "cac_vas_bridge" | "state_registry_bridge";
@@ -23,8 +24,8 @@ function nonEmpty(value: string | undefined | null) {
 }
 
 function doclingConfig() {
-  const baseUrl = nonEmpty(process.env.DOCLING_SERVICE_URL);
-  const apiKey = nonEmpty(process.env.DOCLING_SERVICE_API_KEY);
+  const baseUrl = nonEmpty(getConfiguredIntegrationValue("DOCLING_SERVICE_URL"));
+  const apiKey = nonEmpty(getConfiguredIntegrationValue("DOCLING_SERVICE_API_KEY"));
   return { baseUrl, apiKey };
 }
 
@@ -35,8 +36,10 @@ function dojahConfig() {
 }
 
 function bridgeConfig(prefix: "NIMC_NVS" | "CAC_VAS" | "STATE_REGISTRY") {
-  const endpoint = nonEmpty(process.env[`${prefix}_BRIDGE_URL`]);
-  const token = nonEmpty(process.env[`${prefix}_BRIDGE_TOKEN`]);
+  const endpointField = `${prefix}_BRIDGE_URL` as "NIMC_NVS_BRIDGE_URL" | "CAC_VAS_BRIDGE_URL" | "STATE_REGISTRY_BRIDGE_URL";
+  const tokenField = `${prefix}_BRIDGE_TOKEN` as "NIMC_NVS_BRIDGE_TOKEN" | "CAC_VAS_BRIDGE_TOKEN" | "STATE_REGISTRY_BRIDGE_TOKEN";
+  const endpoint = nonEmpty(getConfiguredIntegrationValue(endpointField));
+  const token = nonEmpty(getConfiguredIntegrationValue(tokenField));
   return { endpoint, token };
 }
 
