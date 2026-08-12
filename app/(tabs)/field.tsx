@@ -1,8 +1,12 @@
 import { ScrollView, Text, View, Pressable } from "react-native";
 
+import { useEffect, useState } from "react";
+import { Alert, TextInput } from "react-native";
+
 import { ScreenContainer } from "@/components/screen-container";
 import { findParcel } from "@/lib/mobile-data";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
+import { getOfflineFieldEvidenceQueue, queueOfflineFieldEvidence, replayOfflineFieldEvidence } from "@/lib/offline-field-evidence";
 
 function RiskTone({ label, value }: { label: string; value: string }) {
   const accent = value === "high" ? "#DC2626" : value === "moderate" ? "#D97706" : "#059669";
@@ -17,11 +21,52 @@ function RiskTone({ label, value }: { label: string; value: string }) {
 }
 
 export default function FieldScreen() {
-  const { bundle, updateMissionStatus } = useMobilePlatformBundle();
+  const { bundle, updateMissionStatus, hasLiveConnection } = useMobilePlatformBundle();
+  const [selectedMissionId, setSelectedMissionId] = useState(bundle.missions[0]?.id ?? "");
+  const [observationType, setObservationType] = useState<"boundary_marker" | "occupancy" | "encroachment" | "infrastructure" | "community_engagement" | "other">("boundary_marker");
+  const [notes, setNotes] = useState("");
+  const [queuedEvidence, setQueuedEvidence] = useState<Awaited<ReturnType<typeof getOfflineFieldEvidenceQueue>>>([]);
+  const [replaySummary, setReplaySummary] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getOfflineFieldEvidenceQueue().then(setQueuedEvidence);
+  }, []);
 
   async function advanceMission(missionId: string, currentStatus: "queued" | "active" | "synced") {
     const nextStatus = currentStatus === "queued" ? "active" : "synced";
     await updateMissionStatus({ missionId, status: nextStatus });
+  }
+
+  const selectedMission = bundle.missions.find((mission) => mission.id === selectedMissionId);
+  const selectedParcel = selectedMission ? findParcel(selectedMission.parcelId, bundle.parcels) : null;
+
+  async function captureOfflineObservation() {
+    if (!selectedMission || !selectedParcel) return;
+    if (notes.trim().length < 3) {
+      Alert.alert("Observation note required", "Add a concise field note before saving the offline evidence draft.");
+      return;
+    }
+    const draft = await queueOfflineFieldEvidence({
+      missionId: selectedMission.id,
+      parcelId: selectedParcel.id,
+      observationType,
+      notes: notes.trim(),
+      capturedAt: new Date().toISOString(),
+      coordinateSource: "parcel_reference",
+      latitude: selectedParcel.latitude,
+      longitude: selectedParcel.longitude,
+      attachmentCount: 0,
+      verificationState: "unverified",
+    });
+    setQueuedEvidence((current) => [draft, ...current]);
+    setNotes("");
+    setReplaySummary("Draft saved on this device. It is unverified and will not change the registry until reconciliation succeeds.");
+  }
+
+  async function reconcileEvidence() {
+    const result = await replayOfflineFieldEvidence();
+    setQueuedEvidence(await getOfflineFieldEvidenceQueue());
+    setReplaySummary(`${result.recorded} evidence record${result.recorded === 1 ? "" : "s"} recorded, ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"} reconciled, and ${result.pending} still pending.`);
   }
 
   return (
@@ -40,6 +85,30 @@ export default function FieldScreen() {
             <RiskTone label="Active" value={String(bundle.missions.filter((mission) => mission.status === "active").length)} />
             <RiskTone label="High-risk sync" value={String(bundle.missions.filter((mission) => mission.syncRisk === "high").length)} />
           </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Offline evidence capture</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">Save a field observation without connectivity. The device stores an unverified evidence manifest; authorized reconciliation is required before it becomes a platform record.</Text>
+          <Text className={`mt-2 text-sm font-semibold ${hasLiveConnection ? "text-success" : "text-warning"}`}>{hasLiveConnection ? "Live API reachable — queued drafts can be reconciled." : "Offline or API unavailable — drafts are retained on this device."}</Text>
+          <View className="mt-4 flex-row flex-wrap gap-2">
+            {bundle.missions.map((mission) => (
+              <Pressable key={mission.id} onPress={() => setSelectedMissionId(mission.id)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                <View className={`rounded-full border px-3 py-2 ${selectedMissionId === mission.id ? "border-primary bg-primary/10" : "border-border bg-background"}`}><Text className={`text-xs font-semibold ${selectedMissionId === mission.id ? "text-primary" : "text-muted"}`}>{mission.title}</Text></View>
+              </Pressable>
+            ))}
+          </View>
+          <Text className="mt-3 text-xs text-muted">Reference parcel: {selectedParcel?.parcelNumber ?? "Unavailable"} · Coordinates use the local parcel reference and are not a live position claim.</Text>
+          <View className="mt-4 flex-row flex-wrap gap-2">
+            {(["boundary_marker", "occupancy", "encroachment", "infrastructure", "community_engagement", "other"] as const).map((type) => (
+              <Pressable key={type} onPress={() => setObservationType(type)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}><View className={`rounded-full border px-3 py-2 ${observationType === type ? "border-primary bg-primary/10" : "border-border bg-background"}`}><Text className={`text-xs font-semibold ${observationType === type ? "text-primary" : "text-muted"}`}>{type.replace(/_/g, " ")}</Text></View></Pressable>
+            ))}
+          </View>
+          <TextInput value={notes} onChangeText={setNotes} placeholder="Describe the observation, field context, and any safety or dispute concern" placeholderTextColor="#94A3B8" multiline className="mt-4 min-h-[100px] rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
+          <Pressable onPress={() => void captureOfflineObservation()} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}><View className="mt-3 rounded-2xl bg-foreground px-4 py-4"><Text className="text-center font-semibold text-background">Save offline observation</Text></View></Pressable>
+          <Pressable onPress={() => void reconcileEvidence()} disabled={!hasLiveConnection || queuedEvidence.length === 0} style={({ pressed }) => [{ opacity: !hasLiveConnection || queuedEvidence.length === 0 ? 0.45 : pressed ? 0.8 : 1 }]}><View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Reconcile {queuedEvidence.length} queued observation{queuedEvidence.length === 1 ? "" : "s"}</Text></View></Pressable>
+          {replaySummary ? <Text className="mt-3 text-xs leading-5 text-muted">{replaySummary}</Text> : null}
+          {queuedEvidence.length > 0 ? <View className="mt-4 gap-2">{queuedEvidence.slice(0, 3).map((draft) => <View key={draft.id} className="rounded-2xl border border-warning bg-warning/5 p-3"><Text className="text-sm font-semibold text-foreground">{draft.observationType.replace(/_/g, " ")} · unverified</Text><Text className="mt-1 text-xs text-muted">Queued {new Date(draft.queuedAt).toLocaleString()} · Attempts: {draft.attempts}</Text></View>)}</View> : null}
         </View>
 
         <View className="gap-4">

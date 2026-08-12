@@ -60,6 +60,7 @@ import {
 } from "./permittingPlatformRepository";
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
+import { listFieldEvidence, recordFieldEvidence } from "./fieldEvidenceRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -128,6 +129,25 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => updateMissionStatus(input)),
+  }),
+  fieldEvidence: router({
+    list: publicProcedure.input(z.object({ missionId: z.string().optional() }).optional()).query(({ input }) => listFieldEvidence(input?.missionId)),
+    record: publicProcedure
+      .input(z.object({
+        id: z.string().min(8),
+        missionId: z.string().min(1),
+        parcelId: z.number().int().positive(),
+        observationType: z.enum(["boundary_marker", "occupancy", "encroachment", "infrastructure", "community_engagement", "other"]),
+        notes: z.string().min(3).max(5000),
+        capturedAt: z.string(),
+        coordinateSource: z.enum(["parcel_reference", "operator_entered", "unavailable"]),
+        latitude: z.number().nullable(),
+        longitude: z.number().nullable(),
+        attachmentCount: z.number().int().min(0),
+        verificationState: z.literal("unverified"),
+        origin: z.enum(["offline_queue", "online"]),
+      }))
+      .mutation(({ input }) => recordFieldEvidence(input)),
   }),
   trust: router({
     providerHealth: publicProcedure.query(() => getProviderHealth()),

@@ -190,3 +190,10 @@
 - [ ] Configure and validate real staging provider integrations without emulator fallback
 - [ ] Preserve real staging verification evidence with secrets redacted
 - [ ] Defer real staging activation until approved provider values are supplied through secure configuration
+- [ ] Collect authorized real Keycloak, Docling, NIMC, CAC, encryption, and bootstrap-administrator values through secure configuration
+- [ ] Run redacted real-provider staging verification after secure configuration is activated
+- [ ] Maintain default-unavailable external integrations without requesting credentials unless the user explicitly supplies them or requests activation
+- [x] Strengthen offline field evidence capture, draft queueing, and conflict-aware reconciliation
+- [x] Add Nigeria-specific land and multi-agency permitting controls using clearly labelled local domain data
+- [x] Enhance administrator auditability, integrity monitoring, and operational UX without external-provider dependency
+- [x] Add regression coverage for the strengthened offline, local-domain, and administrator workflows

@@ -6,6 +6,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
 
 type StakeholderView = "federal" | "state" | "builder";
+type NigerianJurisdiction = "all" | "lagos" | "fct" | "kano" | "ogun" | "rivers";
 
 function Pill({ label, active = false, onPress }: { label: string; active?: boolean; onPress?: () => void }) {
   const body = (
@@ -125,6 +126,7 @@ export default function PermitsScreen() {
   const [chartMetric, setChartMetric] = useState<"pending" | "overdue" | "critical">("pending");
   const [exceptionMetric, setExceptionMetric] = useState<"escalatedCount" | "reassignmentCount" | "avgHoursToAssignment">("escalatedCount");
   const [stakeholderView, setStakeholderView] = useState<StakeholderView>("federal");
+  const [selectedJurisdiction, setSelectedJurisdiction] = useState<NigerianJurisdiction>("all");
 
   const filteredQueues = useMemo(() => {
     const queues = platform?.approvalQueues ?? [];
@@ -138,9 +140,12 @@ export default function PermitsScreen() {
       if (stakeholderView === "state") return ["multi_agency"].includes(item.sector) || item.title.toLowerCase().includes("housing");
       return item.title.toLowerCase().includes("housing") || item.title.toLowerCase().includes("corridor") || item.sector === "multi_agency";
     });
-    if (selectedAgencyId === "all") return audienceCases;
-    return audienceCases.filter((item) => item.leadAgencyId === selectedAgencyId || item.participatingAgencyIds.includes(selectedAgencyId));
-  }, [platform?.permitCases, selectedAgencyId, stakeholderView]);
+    const jurisdictionCases = selectedJurisdiction === "all"
+      ? audienceCases
+      : audienceCases.filter((item) => item.locationLabel.toLowerCase().includes(selectedJurisdiction === "fct" ? "abuja" : selectedJurisdiction));
+    if (selectedAgencyId === "all") return jurisdictionCases;
+    return jurisdictionCases.filter((item) => item.leadAgencyId === selectedAgencyId || item.participatingAgencyIds.includes(selectedAgencyId));
+  }, [platform?.permitCases, selectedAgencyId, selectedJurisdiction, stakeholderView]);
 
   const chartData = filteredQueues.map((queue) => {
     const metric = analytics.find((item) => item.agencyId === queue.agencyId && item.role === queue.role);
@@ -206,6 +211,18 @@ export default function PermitsScreen() {
             <Pill label="Federal" active={stakeholderView === "federal"} onPress={() => setStakeholderView("federal")} />
             <Pill label="State" active={stakeholderView === "state"} onPress={() => setStakeholderView("state")} />
             <Pill label="Builders" active={stakeholderView === "builder"} onPress={() => setStakeholderView("builder")} />
+          </View>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Nigeria jurisdiction lens</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">Focus local operating scenarios across Lagos, FCT, Kano, Ogun, and Rivers while retaining the federal multi-agency view. These are locally seeded workflow scenarios, not official registry or permit authority confirmation.</Text>
+          <View className="mt-4 flex-row flex-wrap gap-2">
+            {(["all", "lagos", "fct", "kano", "ogun", "rivers"] as const).map((jurisdiction) => <Pill key={jurisdiction} label={jurisdiction === "all" ? "All jurisdictions" : jurisdiction.toUpperCase()} active={selectedJurisdiction === jurisdiction} onPress={() => setSelectedJurisdiction(jurisdiction)} />)}
+          </View>
+          <View className="mt-4 rounded-2xl border border-border bg-background p-4">
+            <Text className="text-sm font-semibold text-foreground">Local operating control</Text>
+            <Text className="mt-2 text-xs leading-5 text-muted">Cases are grouped by local scenario labels and still require configured government systems, signed evidence, and authorized agency review before any land, planning, mining, petroleum, or corridor decision is official.</Text>
           </View>
         </View>
 

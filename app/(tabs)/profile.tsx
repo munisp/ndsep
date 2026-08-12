@@ -140,6 +140,14 @@ export default function ProfileScreen() {
             <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open integration settings</Text></View>
           </Link>
         </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <Text className="text-lg font-semibold text-foreground">Administrator operations</Text>
+          <Text className="mt-2 text-sm leading-5 text-muted">Review field evidence awaiting authorisation, external-service posture, supervisor backlog digests, and audit controls without converting any local status into an official decision.</Text>
+          <Link href={"/operations" as never} asChild>
+            <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open operations control center</Text></View>
+          </Link>
+        </View>
       </ScrollView>
     </ScreenContainer>
   );
