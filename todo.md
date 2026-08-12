@@ -209,3 +209,7 @@
 - [x] Add in-app alerts for supervisor reviews exceeding the 48-hour local target
 - [x] Add protected local SLA policy history export as an integrity-marked PDF package
 - [x] Add regression coverage for storage cleanup, review alerts, and policy export integrity
+- [x] Add filtering and priority sorting for supervisor field-manifest review queue
+- [x] Add visually explicit warning and critical states to offline storage quota progress
+- [x] Add local SLA policy history preview before protected PDF export
+- [x] Add regression coverage for review prioritization, quota states, and policy preview data
