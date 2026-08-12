@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 
@@ -28,6 +28,53 @@ export default function OfflinePaymentsScreen() {
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [loading, setLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkNote, setBulkNote] = useState("");
+  const [bulkMode, setBulkMode] = useState(false);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  async function handleBulkDecision(decision: "approved" | "rejected") {
+    if (!bulkNote.trim()) {
+      Alert.alert("Note Required", "Please provide a review note for the bulk decision.");
+      return;
+    }
+    if (selectedIds.size === 0) {
+      Alert.alert("No Selection", "Select at least one payment to process.");
+      return;
+    }
+    Alert.alert(
+      `${decision === "approved" ? "Approve" : "Reject"} ${selectedIds.size} payment(s)?`,
+      `This will ${decision === "approved" ? "approve" : "reject"} all selected offline payments.\n\n⚠ Approval does NOT constitute gateway verification.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Confirm", style: decision === "rejected" ? "destructive" : "default", onPress: async () => {
+          let processed = 0;
+          for (const id of selectedIds) {
+            try {
+              const res = await fetch(`${API_BASE}/reviewOfflinePayment`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, decision, reviewedBy: "admin", note: bulkNote.trim() }),
+              });
+              if (res.ok) processed++;
+            } catch {}
+          }
+          Alert.alert("Bulk Review Complete", `${processed} of ${selectedIds.size} payment(s) ${decision}.`);
+          setSelectedIds(new Set());
+          setBulkNote("");
+          setBulkMode(false);
+          loadPayments();
+        }},
+      ]
+    );
+  }
 
   useEffect(() => {
     loadPayments();
@@ -99,6 +146,11 @@ export default function OfflinePaymentsScreen() {
           </View>
 
           <View className="flex-row flex-wrap gap-2">
+            <Pressable onPress={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()); }}>
+              <View className={`rounded-full px-3 py-1 border ${bulkMode ? "border-primary bg-primary/10" : "border-border"}`}>
+                <Text className={`text-[10px] ${bulkMode ? "text-primary font-semibold" : "text-muted"}`}>Bulk Mode</Text>
+              </View>
+            </Pressable>
             {(["pending_review", "approved", "rejected", "all"] as const).map((f) => (
               <Pressable key={f} onPress={() => setFilter(f)}>
                 <View className={`rounded-full px-3 py-1 border ${filter === f ? "border-primary bg-primary/10" : "border-border"}`}>
@@ -125,7 +177,16 @@ export default function OfflinePaymentsScreen() {
 
           <View className="gap-3">
             {payments.map((payment) => (
-              <View key={payment.id} className={`rounded-2xl border p-4 gap-2 ${statusColors[payment.status]}`}>
+              <Pressable key={payment.id} onPress={() => { if (bulkMode && payment.status === "pending_review") toggleSelect(payment.id); }} style={({ pressed }) => [{ opacity: bulkMode ? (pressed ? 0.7 : 1) : 1 }]}>
+              <View className={`rounded-2xl border p-4 gap-2 ${statusColors[payment.status]} ${bulkMode && selectedIds.has(payment.id) ? "border-primary border-2" : ""}`}>
+                {bulkMode && payment.status === "pending_review" && (
+                  <View className="flex-row items-center gap-2 mb-1">
+                    <View className={`w-5 h-5 rounded border ${selectedIds.has(payment.id) ? "bg-primary border-primary" : "border-muted"} items-center justify-center`}>
+                      {selectedIds.has(payment.id) && <Text className="text-[10px] text-white font-bold">✓</Text>}
+                    </View>
+                    <Text className="text-[10px] text-muted">Tap to select</Text>
+                  </View>
+                )}
                 <View className="flex-row justify-between items-center">
                   <Text className="text-sm font-semibold text-foreground">{payment.description}</Text>
                   <Text className="text-[10px] font-bold text-muted">{statusLabels[payment.status]}</Text>
@@ -180,7 +241,34 @@ export default function OfflinePaymentsScreen() {
                   </>
                 )}
               </View>
+              </Pressable>
             ))}
+
+          {bulkMode && selectedIds.size > 0 && (
+            <View className="rounded-2xl border border-primary bg-primary/5 p-4 gap-3">
+              <Text className="text-sm font-semibold text-foreground">{selectedIds.size} payment(s) selected</Text>
+              <TextInput
+                className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground"
+                placeholder="Bulk review note (required)…"
+                placeholderTextColor="#9BA1A6"
+                value={bulkNote}
+                onChangeText={setBulkNote}
+                multiline
+              />
+              <View className="flex-row gap-2">
+                <Pressable onPress={() => handleBulkDecision("approved")} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}>
+                  <View className="rounded-xl bg-success px-3 py-3">
+                    <Text className="text-center text-xs font-bold text-white">Approve All</Text>
+                  </View>
+                </Pressable>
+                <Pressable onPress={() => handleBulkDecision("rejected")} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}>
+                  <View className="rounded-xl bg-error px-3 py-3">
+                    <Text className="text-center text-xs font-bold text-white">Reject All</Text>
+                  </View>
+                </Pressable>
+              </View>
+            </View>
+          )}
           </View>
 
           <Pressable onPress={() => router.back()} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>

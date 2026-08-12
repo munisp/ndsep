@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View, Platform, Alert, Keyboard, Share } from "react-native";
+import QRCode from "react-native-qrcode-svg";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
@@ -210,6 +211,11 @@ export default function PaymentHistoryScreen() {
                       <View className="flex-row justify-between"><Text className="text-xs text-muted">Date</Text><Text className="text-xs text-foreground">{new Date(selectedReceipt.createdAt).toLocaleString("en-NG")}</Text></View>
                       <View className="flex-row justify-between"><Text className="text-xs text-muted">Status</Text><Text className={`text-xs font-bold ${STATUS_LABELS[selectedReceipt.status].color}`}>{STATUS_LABELS[selectedReceipt.status].label}</Text></View>
                       <View className="flex-row justify-between"><Text className="text-xs text-muted">Gateway Verified</Text><Text className="text-xs font-bold text-error">No</Text></View>
+                    </View>
+                    <View className="items-center rounded-2xl border border-border bg-background p-4">
+                      <Text className="text-[10px] text-muted mb-2">Scan for verification lookup</Text>
+                      <QRCode value={`IDLR-PTS:${selectedReceipt.referenceNumber}`} size={120} />
+                      <Text className="text-[10px] text-muted mt-2">{selectedReceipt.referenceNumber}</Text>
                     </View>
                     <Pressable onPress={() => downloadReceiptPdf(selectedReceipt)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
                       <View className="rounded-xl bg-foreground px-4 py-4">

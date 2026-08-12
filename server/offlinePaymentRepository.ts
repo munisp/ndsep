@@ -82,5 +82,26 @@ export function reviewOfflinePayment(id: string, decision: "approved" | "rejecte
   record.reviewNote = note;
   // verified remains false — only a connected gateway can verify
   saveStore(records);
+  // Record in-app notification for the applicant
+  recordPaymentNotification(record);
   return record;
+}
+
+/** Store a simple in-app notification for the applicant about their payment decision */
+function recordPaymentNotification(record: OfflinePaymentRecord) {
+  const notifPath = path.join(__dirname, "data", "payment-notifications.json");
+  let notifications: any[] = [];
+  try { if (fs.existsSync(notifPath)) notifications = JSON.parse(fs.readFileSync(notifPath, "utf-8")); } catch {}
+  notifications.push({
+    id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    applicantId: record.applicantId,
+    type: record.status === "approved" ? "payment_approved" : "payment_rejected",
+    title: record.status === "approved" ? "Payment Approved" : "Payment Rejected",
+    message: record.status === "approved"
+      ? `Your offline payment of ${record.amount} NGN for "${record.description}" (Ref: ${record.referenceNumber}) has been approved by an administrator. Note: This does NOT constitute gateway verification.`
+      : `Your offline payment of ${record.amount} NGN for "${record.description}" (Ref: ${record.referenceNumber}) has been rejected. Reason: ${record.reviewNote}`,
+    createdAt: new Date().toISOString(),
+    read: false,
+  });
+  fs.writeFileSync(notifPath, JSON.stringify(notifications, null, 2));
 }
