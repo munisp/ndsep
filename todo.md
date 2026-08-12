@@ -213,3 +213,6 @@
 - [x] Add visually explicit warning and critical states to offline storage quota progress
 - [x] Add local SLA policy history preview before protected PDF export
 - [x] Add regression coverage for review prioritization, quota states, and policy preview data
+- [x] Add auditable one-tap internal escalation for overdue field-manifest reviews
+- [x] Add saved supervisor dashboard filter presets for priority review workflows
+- [x] Add regression coverage for escalation records and saved preset application

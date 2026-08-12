@@ -60,7 +60,7 @@ import {
 } from "./permittingPlatformRepository";
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
-import { assignFieldEvidenceSupervisor, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
+import { assignFieldEvidenceSupervisor, escalateFieldEvidence, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
 
 const businessProfileSchema = z.object({
@@ -165,6 +165,7 @@ export const appRouter = router({
     assign: adminProcedure
       .input(z.object({ id: z.string().min(8), supervisor: z.string().min(3).max(200) }))
       .mutation(({ ctx, input }) => assignFieldEvidenceSupervisor({ ...input, assignedBy: ctx.user.openId })),
+    escalate: adminProcedure.input(z.object({ id: z.string().min(8) })).mutation(({ ctx, input }) => escalateFieldEvidence({ ...input, escalatedBy: ctx.user.openId })),
   }),
   localPolicy: router({
     list: publicProcedure.query(() => listLocalPolicies()),
