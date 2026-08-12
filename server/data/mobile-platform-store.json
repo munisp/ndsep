@@ -342,11 +342,11 @@
         "lastTransition": null
       }
     ],
-    "updatedAt": "2026-08-12T17:13:56.847Z"
+    "updatedAt": "2026-08-12T17:23:14.380Z"
   },
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-08-12T17:13:56.847Z",
+    "lastSyncedAt": "2026-08-12T17:23:14.380Z",
     "pendingMutations": 0,
     "offlineReady": true
   },

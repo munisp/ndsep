@@ -244,6 +244,9 @@
 - [ ] Run deterministic end-to-end local dashboard workflow validation with explicit external-service exclusions
 - [ ] Repair visible Import button access to the shared-preset file picker
 - [ ] Validate supervisor dashboard local paths and document all remaining non-local or untested boundaries
+- [x] Add deterministic shared-preset import success and invalid-payload feedback tests
+- [x] Diagnose and resolve Expo SDK package-version warnings
+- [x] Re-run release validation after dependency alignment
 - [ ] Complete pending shared-preset import UI, weekly resolution snapshot, and acknowledgement success feedback
 - [ ] Validate delivered claims through source review, compilation, and behavioral tests before reporting completion
 - [ ] Add file-picker import and validation for shared supervisor filter presets

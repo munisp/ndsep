@@ -84,6 +84,9 @@ const config: ExpoConfig = {
     "expo-router",
     "expo-background-task",
     "expo-notifications",
+    "expo-asset",
+    "expo-font",
+    "expo-web-browser",
     [
       "expo-camera",
       {
