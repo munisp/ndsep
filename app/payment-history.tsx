@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Modal, Pressable, ScrollView, Text, TextInput, View, Platform, Alert, Keyboard } from "react-native";
+import { Modal, Pressable, ScrollView, Text, TextInput, View, Platform, Alert, Keyboard, Share } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
@@ -214,6 +214,14 @@ export default function PaymentHistoryScreen() {
                     <Pressable onPress={() => downloadReceiptPdf(selectedReceipt)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
                       <View className="rounded-xl bg-foreground px-4 py-4">
                         <Text className="text-center font-semibold text-background">Download Receipt</Text>
+                      </View>
+                    </Pressable>
+                    <Pressable onPress={async () => {
+                      const text = `IDLR-PTS Receipt\nRef: ${selectedReceipt.referenceNumber}\nAmount: ${formatNaira(selectedReceipt.amount)}\nFee: ${selectedReceipt.description}\nDate: ${new Date(selectedReceipt.createdAt).toLocaleString("en-NG")}\nStatus: ${selectedReceipt.status}\n⚠ UNVERIFIED — No gateway connected`;
+                      try { await Share.share({ message: text, title: "Payment Receipt" }); } catch {}
+                    }} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                      <View className="rounded-xl border border-foreground px-4 py-3">
+                        <Text className="text-center font-semibold text-foreground">Share Receipt</Text>
                       </View>
                     </Pressable>
                     {(selectedReceipt.status === "failed" || selectedReceipt.status === "pending_gateway") && (

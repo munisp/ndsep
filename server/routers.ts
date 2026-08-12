@@ -6,6 +6,11 @@ import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, enterpriseProcedure, publicProcedure, router } from "./_core/trpc";
 import { assertEnterpriseRole, type EnterpriseAgencyRole } from "./_core/enterpriseAuth";
 import {
+  listOfflinePayments,
+  markPaymentOffline,
+  reviewOfflinePayment,
+} from "./offlinePaymentRepository";
+import {
   analyzeDocumentImage,
   analyzeLivenessSelfie,
   analyzeNotificationActivities,
@@ -96,6 +101,32 @@ const businessProfileSchema = z.object({
 
 export const appRouter = router({
   system: systemRouter,
+
+  // --- Offline Payment Management ---
+  markPaymentOffline: publicProcedure
+    .input(z.object({
+      referenceNumber: z.string(),
+      amount: z.number(),
+      currency: z.string().default("NGN"),
+      feeCategory: z.string(),
+      description: z.string(),
+      method: z.enum(["cash", "bank_transfer", "other"]),
+      applicantId: z.string(),
+    }))
+    .mutation(({ input }) => markPaymentOffline(input)),
+
+  listOfflinePayments: adminProcedure
+    .input(z.object({ filter: z.enum(["pending_review", "approved", "rejected"]).optional() }).optional())
+    .query(({ input }) => listOfflinePayments(input?.filter)),
+
+  reviewOfflinePayment: adminProcedure
+    .input(z.object({
+      id: z.string(),
+      decision: z.enum(["approved", "rejected"]),
+      reviewedBy: z.string(),
+      note: z.string(),
+    }))
+    .mutation(({ input }) => reviewOfflinePayment(input.id, input.decision, input.reviewedBy, input.note)),
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {

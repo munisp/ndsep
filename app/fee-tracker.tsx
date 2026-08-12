@@ -8,12 +8,12 @@ import { NIGERIA_FEE_SCHEDULE, formatNaira, type FeeCategory } from "@/lib/payme
 export default function FeeTrackerScreen() {
   /** C of O Application Progress Timeline */
   const cofOStages = [
-    { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15", tooltip: "Submit completed application form with parcel details and supporting documents to the State Land Bureau.", actionBadge: null, actionRoute: null },
-    { id: "fee_payment", label: "Application Fee Payment", status: "current" as const, date: null, tooltip: "Pay the prescribed application processing fee via approved payment channels.", actionBadge: "Payment Required", actionRoute: "/checkout" as const },
-    { id: "survey", label: "Survey & Demarcation", status: "pending" as const, date: null, tooltip: "Licensed surveyor conducts physical boundary survey and produces a survey plan.", actionBadge: "Upload Survey Plan", actionRoute: "/onboarding" as const },
-    { id: "review", label: "State Land Bureau Review", status: "pending" as const, date: null, tooltip: "Land Bureau officers verify documentation, confirm no encumbrances, and prepare recommendation.", actionBadge: null, actionRoute: null },
-    { id: "consent", label: "Governor's Consent", status: "pending" as const, date: null, tooltip: "The State Governor (or delegate) reviews and grants formal consent for the land allocation.", actionBadge: null, actionRoute: null },
-    { id: "issuance", label: "C of O Issuance", status: "pending" as const, date: null, tooltip: "Certificate of Occupancy is printed, signed, and issued to the applicant.", actionBadge: "Collect Document", actionRoute: null },
+    { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15", tooltip: "Submit completed application form with parcel details and supporting documents to the State Land Bureau.", actionBadge: null, actionRoute: null, feeBreakdown: "Application form: Free | Document compilation: ₦5,000" },
+    { id: "fee_payment", label: "Application Fee Payment", status: "current" as const, date: null, tooltip: "Pay the prescribed application processing fee via approved payment channels.", actionBadge: "Payment Required", actionRoute: "/checkout" as const, feeBreakdown: "Processing fee: ₦50,000 | Administrative charge: ₦10,000 | Total: ₦60,000" },
+    { id: "survey", label: "Survey & Demarcation", status: "pending" as const, date: null, tooltip: "Licensed surveyor conducts physical boundary survey and produces a survey plan.", actionBadge: "Upload Survey Plan", actionRoute: "/onboarding" as const, feeBreakdown: "Survey fee: ₦75,000–₦250,000 (varies by plot size) | Beacon placement: ₦15,000" },
+    { id: "review", label: "State Land Bureau Review", status: "pending" as const, date: null, tooltip: "Land Bureau officers verify documentation, confirm no encumbrances, and prepare recommendation.", actionBadge: null, actionRoute: null, feeBreakdown: "Review fee: ₦25,000 | Search report: ₦10,000" },
+    { id: "consent", label: "Governor's Consent", status: "pending" as const, date: null, tooltip: "The State Governor (or delegate) reviews and grants formal consent for the land allocation.", actionBadge: null, actionRoute: null, feeBreakdown: "Consent fee: 3–6% of property value | Stamp duty: 2% of property value" },
+    { id: "issuance", label: "C of O Issuance", status: "pending" as const, date: null, tooltip: "Certificate of Occupancy is printed, signed, and issued to the applicant.", actionBadge: "Collect Document", actionRoute: null, feeBreakdown: "Registration fee: ₦15,000 | Certificate printing: ₦5,000 | Collection: Free" },
   ];
 
   const completedStages = cofOStages.filter((s) => s.status === "complete").length;
@@ -72,6 +72,12 @@ export default function FeeTrackerScreen() {
                     {stage.date && <Text className="text-[10px] text-muted">{stage.date}</Text>}
                     {stage.status === "current" && <Text className="text-[10px] text-primary mt-0.5">← Action required</Text>}
                     {"tooltip" in stage && <Text className="text-[10px] text-muted mt-0.5">{(stage as any).tooltip}</Text>}
+                    {"feeBreakdown" in stage && (
+                      <View className="mt-1 rounded-lg border border-border bg-background p-2">
+                        <Text className="text-[9px] font-semibold text-foreground mb-0.5">Fee Breakdown:</Text>
+                        <Text className="text-[9px] text-muted">{(stage as any).feeBreakdown}</Text>
+                      </View>
+                    )}
                     {(stage as any).actionBadge && (
                       <Pressable
                         onPress={() => {
