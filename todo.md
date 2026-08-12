@@ -171,3 +171,9 @@
 - [x] Add tests for unconfigured, failed, and authorized provider execution paths
 - [x] Produce provider onboarding and deployment requirements for the external services that cannot be truthfully simulated
 - [x] Present and preserve unconfigured fail-closed provider defaults until approved production credentials are supplied
+- [ ] Configure Keycloak OpenID Connect issuer, audience, JWKS, and agency claim mappings
+- [ ] Deploy a secured persistent Docling Serve environment and validate authenticated document conversion
+- [ ] Integrate approved NIMC NVS bridge endpoint and validate authorized NIN verification
+- [ ] Integrate approved CAC bridge endpoint and validate authorized business-registration verification
+- [ ] Run authenticated end-to-end trust-provider verification and publish evidence
+- [x] Reconfirm default-unavailable Keycloak, Docling, NIMC, and CAC state before any live credential activation
