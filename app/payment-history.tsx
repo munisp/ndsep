@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, View, Platform, Alert } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -24,6 +26,42 @@ const STATUS_LABELS: Record<PaymentStatus, { label: string; color: string }> = {
 export default function PaymentHistoryScreen() {
   const [filter, setFilter] = useState<"all" | PaymentStatus>("all");
   const filtered = filter === "all" ? DEMO_HISTORY : DEMO_HISTORY.filter((p) => p.status === filter);
+  const [selectedReceipt, setSelectedReceipt] = useState<PaymentRecord | null>(null);
+
+  async function downloadReceiptPdf(record: PaymentRecord) {
+    const content = [
+      "IDLR-PTS PAYMENT RECEIPT",
+      "========================",
+      "",
+      `Reference: ${record.referenceNumber}`,
+      `Amount: ${formatNaira(record.amount)}`,
+      `Fee: ${record.description}`,
+      `Category: ${record.feeCategory}`,
+      `Method: ${record.method ?? "Not selected"}`,
+      `Date: ${new Date(record.createdAt).toLocaleString("en-NG")}`,
+      `Status: ${record.status}`,
+      "",
+      `Gateway Verified: ${record.gatewayVerified ? "YES" : "NO"}`,
+      `Verification Note: ${record.verificationNote}`,
+      "",
+      "---",
+      "This receipt is generated locally and does NOT constitute",
+      "proof of payment until verified by a connected payment gateway.",
+      "---",
+      `Generated: ${new Date().toISOString()}`,
+    ].join("\n");
+
+    if (Platform.OS === "web") {
+      Alert.alert("PDF Export", "PDF download is available on native devices. Receipt content:\n\n" + content.slice(0, 200));
+      return;
+    }
+
+    const path = `${FileSystem.documentDirectory}receipt-${record.referenceNumber}.txt`;
+    await FileSystem.writeAsStringAsync(path, content);
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(path, { mimeType: "text/plain", dialogTitle: "Save Payment Receipt" });
+    }
+  }
 
   return (
     <ScreenContainer className="p-6">
@@ -51,7 +89,8 @@ export default function PaymentHistoryScreen() {
 
           <View className="gap-3">
             {filtered.map((payment) => (
-              <View key={payment.id} className="rounded-2xl border border-border bg-surface p-4 gap-2">
+              <Pressable key={payment.id} onPress={() => setSelectedReceipt(payment)} style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}>
+              <View className="rounded-2xl border border-border bg-surface p-4 gap-2">
                 <View className="flex-row justify-between items-center">
                   <Text className="text-sm font-semibold text-foreground">{payment.description}</Text>
                   <Text className={`text-xs font-bold ${STATUS_LABELS[payment.status].color}`}>{STATUS_LABELS[payment.status].label}</Text>
@@ -65,7 +104,9 @@ export default function PaymentHistoryScreen() {
                     <Text className="text-[10px] text-warning">Not verified — {payment.verificationNote}</Text>
                   </View>
                 )}
+                <Text className="mt-1 text-[10px] text-primary">Tap for receipt details →</Text>
               </View>
+              </Pressable>
             ))}
             {filtered.length === 0 && (
               <View className="items-center p-8">
@@ -80,6 +121,41 @@ export default function PaymentHistoryScreen() {
               <Text className="text-center font-semibold text-muted">Return</Text>
             </View>
           </Pressable>
+
+          {/* Receipt Detail Modal */}
+          <Modal visible={Boolean(selectedReceipt)} animationType="slide" onRequestClose={() => setSelectedReceipt(null)}>
+            <View className="flex-1 bg-background p-6 pt-16">
+              <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+                {selectedReceipt && (
+                  <View className="gap-4">
+                    <Text className="text-2xl font-bold text-foreground">Transaction Receipt</Text>
+                    <View className="rounded-2xl border border-warning bg-warning/5 p-3">
+                      <Text className="text-[10px] font-bold text-warning">⚠ UNVERIFIED — No gateway connected</Text>
+                    </View>
+                    <View className="rounded-2xl border border-border bg-surface p-4 gap-3">
+                      <View className="flex-row justify-between"><Text className="text-xs text-muted">Reference</Text><Text className="text-xs font-semibold text-foreground">{selectedReceipt.referenceNumber}</Text></View>
+                      <View className="flex-row justify-between"><Text className="text-xs text-muted">Amount</Text><Text className="text-sm font-bold text-foreground">{formatNaira(selectedReceipt.amount)}</Text></View>
+                      <View className="flex-row justify-between"><Text className="text-xs text-muted">Fee Type</Text><Text className="text-xs text-foreground">{selectedReceipt.description}</Text></View>
+                      <View className="flex-row justify-between"><Text className="text-xs text-muted">Method</Text><Text className="text-xs text-foreground">{selectedReceipt.method ?? "—"}</Text></View>
+                      <View className="flex-row justify-between"><Text className="text-xs text-muted">Date</Text><Text className="text-xs text-foreground">{new Date(selectedReceipt.createdAt).toLocaleString("en-NG")}</Text></View>
+                      <View className="flex-row justify-between"><Text className="text-xs text-muted">Status</Text><Text className={`text-xs font-bold ${STATUS_LABELS[selectedReceipt.status].color}`}>{STATUS_LABELS[selectedReceipt.status].label}</Text></View>
+                      <View className="flex-row justify-between"><Text className="text-xs text-muted">Gateway Verified</Text><Text className="text-xs font-bold text-error">No</Text></View>
+                    </View>
+                    <Pressable onPress={() => downloadReceiptPdf(selectedReceipt)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                      <View className="rounded-xl bg-foreground px-4 py-4">
+                        <Text className="text-center font-semibold text-background">Download Receipt</Text>
+                      </View>
+                    </Pressable>
+                    <Pressable onPress={() => setSelectedReceipt(null)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                      <View className="px-4 py-3">
+                        <Text className="text-center font-semibold text-muted">Close</Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </Modal>
         </View>
       </ScrollView>
     </ScreenContainer>

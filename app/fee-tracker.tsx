@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View, Platform } from "react-native";
 import { router } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -6,6 +6,19 @@ import { NIGERIA_FEE_SCHEDULE, formatNaira, type FeeCategory } from "@/lib/payme
 
 /** C of O and permit fee status tracker — shows required fees and their payment state */
 export default function FeeTrackerScreen() {
+  /** C of O Application Progress Timeline */
+  const cofOStages = [
+    { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15" },
+    { id: "fee_payment", label: "Application Fee Payment", status: "current" as const, date: null },
+    { id: "survey", label: "Survey & Demarcation", status: "pending" as const, date: null },
+    { id: "review", label: "State Land Bureau Review", status: "pending" as const, date: null },
+    { id: "consent", label: "Governor's Consent", status: "pending" as const, date: null },
+    { id: "issuance", label: "C of O Issuance", status: "pending" as const, date: null },
+  ];
+
+  const completedStages = cofOStages.filter((s) => s.status === "complete").length;
+  const progressPercent = Math.round((completedStages / cofOStages.length) * 100);
+
   // In production, this would query the payment ledger (TigerBeetle) for each fee's status.
   // Currently all fees show as "unpaid / gateway not connected".
   const feeStatus: Record<FeeCategory, "unpaid" | "pending" | "paid"> = {
@@ -34,6 +47,35 @@ export default function FeeTrackerScreen() {
           <View className="rounded-2xl border border-warning bg-warning/5 p-4">
             <Text className="text-xs font-bold text-warning">⚠ LEDGER NOT CONNECTED</Text>
             <Text className="mt-1 text-xs text-muted">Fee payment status requires TigerBeetle ledger integration. All fees currently show as unpaid because no payment infrastructure is configured.</Text>
+          </View>
+
+          {/* C of O Progress Timeline */}
+          <View className="rounded-2xl border border-border bg-surface p-4 gap-3">
+            <Text className="text-sm font-semibold text-foreground">C of O Application Progress</Text>
+            <View className="flex-row items-center gap-2">
+              <View className="flex-1 h-2 rounded-full bg-border overflow-hidden">
+                <View className="h-full rounded-full bg-primary" style={{ width: `${progressPercent}%` }} />
+              </View>
+              <Text className="text-xs font-bold text-primary">{progressPercent}%</Text>
+            </View>
+            <View className="gap-2 mt-2">
+              {cofOStages.map((stage, index) => (
+                <View key={stage.id} className="flex-row items-start gap-3">
+                  <View className="items-center">
+                    <View className={`w-5 h-5 rounded-full items-center justify-center ${stage.status === "complete" ? "bg-success" : stage.status === "current" ? "bg-primary" : "bg-border"}`}>
+                      <Text className="text-[9px] text-white font-bold">{stage.status === "complete" ? "✓" : index + 1}</Text>
+                    </View>
+                    {index < cofOStages.length - 1 && <View className={`w-0.5 h-4 mt-1 ${stage.status === "complete" ? "bg-success" : "bg-border"}`} />}
+                  </View>
+                  <View className="flex-1 pb-1">
+                    <Text className={`text-xs font-semibold ${stage.status === "complete" ? "text-success" : stage.status === "current" ? "text-primary" : "text-muted"}`}>{stage.label}</Text>
+                    {stage.date && <Text className="text-[10px] text-muted">{stage.date}</Text>}
+                    {stage.status === "current" && <Text className="text-[10px] text-primary mt-0.5">← Action required</Text>}
+                  </View>
+                </View>
+              ))}
+            </View>
+            <Text className="text-[10px] text-muted mt-1">Timeline stages are illustrative. Real progression requires connected state land bureau systems.</Text>
           </View>
 
           <View className="gap-3">
@@ -75,4 +117,3 @@ export default function FeeTrackerScreen() {
     </ScreenContainer>
   );
 }
-

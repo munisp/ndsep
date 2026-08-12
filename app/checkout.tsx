@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { useState } from "react";
+import { Alert, Pressable, ScrollView, Text, View, Platform } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, router } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -13,6 +14,9 @@ export default function CheckoutScreen() {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState<PaymentRecord | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
 
   const methods: { key: PaymentMethod; label: string; description: string }[] = [
     { key: "card", label: "Debit/Credit Card", description: "Visa, Mastercard, Verve" },
@@ -23,7 +27,12 @@ export default function CheckoutScreen() {
 
   function initiatePayment() {
     if (!selectedMethod) { Alert.alert("Select a payment method"); return; }
+    if (retryCount >= MAX_RETRIES) {
+      Alert.alert("Maximum retries reached", "Please try again later or contact support.");
+      return;
+    }
     setProcessing(true);
+    setError(null);
 
     // This creates a PENDING record. No real money moves.
     // A real implementation would call Paystack/Flutterwave initialize endpoint here.
@@ -49,8 +58,18 @@ export default function CheckoutScreen() {
     };
 
     setTimeout(() => {
-      setResult(record);
-      setProcessing(false);
+      // Simulate gateway unavailability — in production this would be a real HTTP call
+      const gatewayAvailable = false; // Always false until real gateway is configured
+      if (!gatewayAvailable) {
+        setError("Payment gateway is not configured. In production, this would connect to Paystack or Flutterwave.");
+        setRetryCount((c) => c + 1);
+        setProcessing(false);
+        if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      } else {
+        setResult(record);
+        setProcessing(false);
+        if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
     }, 800);
   }
 
@@ -132,9 +151,24 @@ export default function CheckoutScreen() {
 
           <Pressable onPress={initiatePayment} disabled={processing || !selectedMethod} style={({ pressed }) => [{ opacity: pressed || processing || !selectedMethod ? 0.5 : 1 }]}>
             <View className="rounded-xl bg-foreground px-4 py-4">
-              <Text className="text-center font-semibold text-background">{processing ? "Processing…" : `Pay ${formatNaira(feeItem.baseAmount)}`}</Text>
+            <Text className="text-center font-semibold text-background">{processing ? "Processing…" : `Pay ${formatNaira(feeItem.baseAmount)}`}</Text>
             </View>
           </Pressable>
+
+          {error && (
+            <View className="rounded-2xl border border-error bg-error/5 p-4">
+              <Text className="text-xs font-bold text-error">Payment Failed</Text>
+              <Text className="mt-1 text-xs text-muted">{error}</Text>
+              <Text className="mt-2 text-xs text-muted">Attempt {retryCount} of {MAX_RETRIES}</Text>
+              {retryCount < MAX_RETRIES && (
+                <Pressable onPress={initiatePayment} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                  <View className="mt-3 rounded-xl border border-primary px-4 py-3">
+                    <Text className="text-center text-xs font-semibold text-primary">Retry Payment</Text>
+                  </View>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           <Text className="text-[10px] text-muted text-center">By proceeding you acknowledge that no real payment gateway is connected. This is a demonstration of the intended checkout flow.</Text>
         </View>
