@@ -224,3 +224,7 @@
 - [ ] Add shared supervisor preset import validation and compatible local import flow
 - [ ] Add local management escalation trend and resolution-time analytics visualization
 - [ ] Add regression coverage for accountability, preset validation, and escalation analytics
+- [ ] Add editable escalation owner and handoff date controls to the acknowledgement modal
+- [ ] Add file-based shared supervisor preset import with compatibility validation
+- [ ] Add weekly local escalation resolution-time snapshot analytics
+- [ ] Add regression coverage for modal accountability edits, preset import, and weekly snapshots
