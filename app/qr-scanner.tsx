@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Alert, Platform, Pressable, Text, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
@@ -13,6 +13,7 @@ export default function QRScannerScreen() {
   const [scanned, setScanned] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const [torchOn, setTorchOn] = useState(false);
 
   async function handleBarCodeScanned({ data }: { data: string }) {
     if (scanned) return;
@@ -77,12 +78,20 @@ export default function QRScannerScreen() {
         {!scanned && (
           <CameraView
             style={{ flex: 1 }}
+            enableTorch={torchOn}
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
             onBarcodeScanned={handleBarCodeScanned}
           >
             <View className="flex-1 items-center justify-center">
               <View className="w-64 h-64 border-2 border-white/50 rounded-3xl" />
               <Text className="text-white text-sm mt-4">Align QR code within the frame</Text>
+              <Pressable onPress={() => setTorchOn(!torchOn)} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1, marginTop: 20 }]}>
+                <View className={`rounded-full px-5 py-2 ${torchOn ? "bg-warning" : "bg-white/20"}`}>
+                  <Text className={`text-sm font-semibold ${torchOn ? "text-black" : "text-white"}`}>
+                    {torchOn ? "🔦 Light ON" : "🔦 Light OFF"}
+                  </Text>
+                </View>
+              </Pressable>
             </View>
           </CameraView>
         )}

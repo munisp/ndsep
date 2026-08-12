@@ -32,6 +32,8 @@ export default function OfflinePaymentsScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkNote, setBulkNote] = useState("");
   const [bulkMode, setBulkMode] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState("");
+  const [exportEndDate, setExportEndDate] = useState("");
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -274,7 +276,16 @@ export default function OfflinePaymentsScreen() {
                 </Pressable>
               </View>
               <Pressable onPress={async () => {
-                const selected = payments.filter((p) => selectedIds.has(p.id));
+                let selected = payments.filter((p) => selectedIds.has(p.id));
+                // Apply date-range filter if set
+                if (exportStartDate.trim()) {
+                  const start = new Date(exportStartDate.trim()).getTime();
+                  if (!Number.isNaN(start)) selected = selected.filter((p) => new Date(p.markedAt).getTime() >= start);
+                }
+                if (exportEndDate.trim()) {
+                  const end = new Date(exportEndDate.trim()).getTime() + 86400000;
+                  if (!Number.isNaN(end)) selected = selected.filter((p) => new Date(p.markedAt).getTime() <= end);
+                }
                 if (selected.length === 0) return;
                 const header = "id,reference,amount,description,method,status,marked_at\n";
                 const rows = selected.map((p) => `${p.id},${p.referenceNumber},${p.amount},${p.description},${p.method},${p.status},${p.markedAt}`).join("\n");
@@ -288,9 +299,25 @@ export default function OfflinePaymentsScreen() {
                 await Share.share({ url: path, title: "Offline payments export" });
               }} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
                 <View className="rounded-xl border border-muted px-3 py-2">
-                  <Text className="text-center text-[10px] font-semibold text-muted">Export Selected as CSV</Text>
+                <Text className="text-center text-[10px] font-semibold text-muted">Export Selected as CSV</Text>
                 </View>
               </Pressable>
+              <View className="flex-row gap-2 mt-1">
+                <TextInput
+                  className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-[10px] text-foreground"
+                  placeholder="Start (YYYY-MM-DD)"
+                  placeholderTextColor="#9BA1A6"
+                  value={exportStartDate}
+                  onChangeText={setExportStartDate}
+                />
+                <TextInput
+                  className="flex-1 rounded-lg border border-border bg-background px-2 py-1 text-[10px] text-foreground"
+                  placeholder="End (YYYY-MM-DD)"
+                  placeholderTextColor="#9BA1A6"
+                  value={exportEndDate}
+                  onChangeText={setExportEndDate}
+                />
+              </View>
             </View>
           )}
           </View>
