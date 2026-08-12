@@ -9,7 +9,8 @@ import { ScreenContainer } from "@/components/screen-container";
 import { findParcel } from "@/lib/mobile-data";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 import { getOfflineFieldEvidenceQueue, queueOfflineFieldEvidence, replayOfflineFieldEvidence } from "@/lib/offline-field-evidence";
-import { MAX_OFFLINE_ATTACHMENTS_PER_MANIFEST, MAX_OFFLINE_ATTACHMENT_BYTES, persistOfflineFieldAttachment, type OfflineFieldAttachment } from "@/lib/offline-field-attachments";
+import { MAX_OFFLINE_ATTACHMENTS_PER_MANIFEST, MAX_OFFLINE_ATTACHMENT_BYTES, deleteOfflineFieldAttachment, getOfflineAttachmentUsage, persistOfflineFieldAttachment, type OfflineFieldAttachment } from "@/lib/offline-field-attachments";
+import { MAX_OFFLINE_MANIFEST_BYTES } from "@/lib/offline-field-attachment-policy";
 
 function RiskTone({ label, value }: { label: string; value: string }) {
   const accent = value === "high" ? "#DC2626" : value === "moderate" ? "#D97706" : "#059669";
@@ -34,6 +35,7 @@ export default function FieldScreen() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const attachmentUsage = getOfflineAttachmentUsage(attachments);
 
   useEffect(() => {
     void getOfflineFieldEvidenceQueue().then(setQueuedEvidence);
@@ -94,7 +96,7 @@ export default function FieldScreen() {
     if (!photo?.uri) return;
     try {
       const attachment = await persistOfflineFieldAttachment({ uri: photo.uri, kind: "photo", name: `field-photo-${Date.now()}.jpg`, mimeType: "image/jpeg", size: null });
-      setAttachments((current) => current.length >= MAX_OFFLINE_ATTACHMENTS_PER_MANIFEST ? current : [...current, attachment]);
+      setAttachments((current) => current.length >= MAX_OFFLINE_ATTACHMENTS_PER_MANIFEST || attachmentUsage.usedBytes + (attachment.size ?? 0) > MAX_OFFLINE_MANIFEST_BYTES ? current : [...current, attachment]);
     } catch (error) {
       Alert.alert("Photo not attached", error instanceof Error ? error.message : "The device could not store this photo offline.");
     }
@@ -106,10 +108,15 @@ export default function FieldScreen() {
     if (result.canceled) return;
     try {
       const additions = await Promise.all(result.assets.slice(0, Math.max(0, MAX_OFFLINE_ATTACHMENTS_PER_MANIFEST - attachments.length)).map((asset) => persistOfflineFieldAttachment({ uri: asset.uri, kind: asset.mimeType?.startsWith("image/") ? "photo" : "file", name: asset.name, mimeType: asset.mimeType ?? null, size: asset.size ?? null })));
-      setAttachments((current) => [...current, ...additions]);
+      setAttachments((current) => [...current, ...additions].filter((attachment, index, all) => index < MAX_OFFLINE_ATTACHMENTS_PER_MANIFEST && all.slice(0, index + 1).reduce((sum, item) => sum + (item.size ?? 0), 0) <= MAX_OFFLINE_MANIFEST_BYTES));
     } catch (error) {
       Alert.alert("File not attached", error instanceof Error ? error.message : "One or more files could not be stored offline.");
     }
+  }
+
+  async function removeAttachment(attachment: OfflineFieldAttachment) {
+    await deleteOfflineFieldAttachment(attachment);
+    setAttachments((current) => current.filter((item) => item.id !== attachment.id));
   }
 
   return (
@@ -151,7 +158,8 @@ export default function FieldScreen() {
           {cameraOpen ? <View className="mt-4 overflow-hidden rounded-2xl border border-border bg-background"><CameraView ref={cameraRef} style={{ height: 280 }} facing="back" /><View className="flex-row gap-3 p-3"><Pressable onPress={() => void takePhotoAttachment()} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl bg-foreground px-3 py-3"><Text className="text-center font-semibold text-background">Capture photo</Text></View></Pressable><Pressable onPress={() => setCameraOpen(false)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl border border-border px-3 py-3"><Text className="font-semibold text-foreground">Cancel</Text></View></Pressable></View></View> : null}
           <View className="mt-4 flex-row gap-3"><Pressable onPress={() => void openCamera()} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-2xl border border-border bg-background px-4 py-3"><Text className="text-center font-semibold text-foreground">Attach camera photo</Text></View></Pressable><Pressable onPress={() => void pickFileAttachment()} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-2xl border border-border bg-background px-4 py-3"><Text className="text-center font-semibold text-foreground">Attach file</Text></View></Pressable></View>
           <Text className="mt-2 text-xs leading-4 text-muted">Attachments are kept in the app document directory on native devices. Maximum {MAX_OFFLINE_ATTACHMENTS_PER_MANIFEST} attachments and {Math.round(MAX_OFFLINE_ATTACHMENT_BYTES / (1024 * 1024))} MB per file. They remain local and unverified until a supervisor reviews the reconciled manifest.</Text>
-          {attachments.length > 0 ? <View className="mt-3 gap-2">{attachments.map((attachment) => <View key={attachment.id} className="flex-row items-center gap-3 rounded-xl border border-border bg-background p-3">{attachment.kind === "photo" ? <Image source={{ uri: attachment.localUri }} style={{ width: 56, height: 56, borderRadius: 10 }} /> : <View className="h-14 w-14 items-center justify-center rounded-xl bg-surface"><Text className="text-xs font-semibold text-muted">FILE</Text></View>}<View className="flex-1"><Text className="text-sm font-semibold text-foreground">{attachment.kind} · {attachment.name}</Text><Text className="mt-1 text-xs text-muted">{attachment.persistence.replace(/_/g, " ")} · {attachment.size ? `${Math.round(attachment.size / 1024)} KB` : "size unavailable"}</Text></View></View>)}</View> : null}
+          <View className="mt-3"><View className="h-2 overflow-hidden rounded-full bg-border"><View className={`h-2 rounded-full ${attachmentUsage.percent >= 90 ? "bg-error" : attachmentUsage.percent >= 70 ? "bg-warning" : "bg-primary"}`} style={{ width: `${attachmentUsage.percent}%` }} /></View><Text className="mt-1 text-xs text-muted">Offline draft storage: {Math.round(attachmentUsage.usedBytes / 1024)} KB of {Math.round(MAX_OFFLINE_MANIFEST_BYTES / (1024 * 1024))} MB ({attachmentUsage.percent}%)</Text></View>
+          {attachments.length > 0 ? <View className="mt-3 gap-2">{attachments.map((attachment) => <View key={attachment.id} className="flex-row items-center gap-3 rounded-xl border border-border bg-background p-3">{attachment.kind === "photo" ? <Image source={{ uri: attachment.localUri }} style={{ width: 56, height: 56, borderRadius: 10 }} /> : <View className="h-14 w-14 items-center justify-center rounded-xl bg-surface"><Text className="text-xs font-semibold text-muted">FILE</Text></View>}<View className="flex-1"><Text className="text-sm font-semibold text-foreground">{attachment.kind} · {attachment.name}</Text><Text className="mt-1 text-xs text-muted">{attachment.persistence.replace(/_/g, " ")} · {attachment.size ? `${Math.round(attachment.size / 1024)} KB` : "size unavailable"}</Text></View><Pressable onPress={() => void removeAttachment(attachment)}><View className="rounded-lg border border-error px-2 py-2"><Text className="text-xs font-semibold text-error">Delete</Text></View></Pressable></View>)}</View> : null}
           <Pressable onPress={() => void captureOfflineObservation()} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}><View className="mt-3 rounded-2xl bg-foreground px-4 py-4"><Text className="text-center font-semibold text-background">Save offline observation</Text></View></Pressable>
           <Pressable onPress={() => void reconcileEvidence()} disabled={!hasLiveConnection || queuedEvidence.length === 0} style={({ pressed }) => [{ opacity: !hasLiveConnection || queuedEvidence.length === 0 ? 0.45 : pressed ? 0.8 : 1 }]}><View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Reconcile {queuedEvidence.length} queued observation{queuedEvidence.length === 1 ? "" : "s"}</Text></View></Pressable>
           {replaySummary ? <Text className="mt-3 text-xs leading-5 text-muted">{replaySummary}</Text> : null}

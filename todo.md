@@ -205,3 +205,7 @@
 - [x] Add supervisor assignment and review-turnaround timers for field manifests
 - [x] Add authorized local SLA policy editing with version history and audit trail
 - [x] Add regression coverage for attachment limits, assignment timers, and policy versions
+- [x] Add offline attachment deletion and storage quota progress visibility
+- [x] Add in-app alerts for supervisor reviews exceeding the 48-hour local target
+- [x] Add protected local SLA policy history export as an integrity-marked PDF package
+- [x] Add regression coverage for storage cleanup, review alerts, and policy export integrity

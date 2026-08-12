@@ -61,7 +61,7 @@ import {
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
 import { assignFieldEvidenceSupervisor, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
-import { listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
+import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -168,6 +168,7 @@ export const appRouter = router({
   }),
   localPolicy: router({
     list: publicProcedure.query(() => listLocalPolicies()),
+    exportPdf: adminProcedure.mutation(() => exportLocalPolicyHistoryPdf()),
     update: adminProcedure
       .input(z.object({ jurisdiction: z.enum(["lagos", "fct", "kano", "ogun", "rivers"]), slaHours: z.number().int().min(1).max(720), checklist: z.array(z.string().min(3).max(300)).min(1).max(12), reason: z.string().min(3).max(1000) }))
       .mutation(({ ctx, input }) => updateLocalPolicy({ ...input, updatedBy: ctx.user.openId })),

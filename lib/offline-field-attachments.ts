@@ -36,3 +36,15 @@ export async function persistOfflineFieldAttachment(input: Omit<OfflineFieldAtta
   await FileSystem.copyAsync({ from: input.uri, to: localUri });
   return { ...input, size: resolvedSize, id, localUri, persistence: "app_document_directory" as const, capturedAt };
 }
+
+export async function deleteOfflineFieldAttachment(attachment: OfflineFieldAttachment) {
+  if (attachment.persistence === "app_document_directory") {
+    const info = await FileSystem.getInfoAsync(attachment.localUri);
+    if (info.exists) await FileSystem.deleteAsync(attachment.localUri, { idempotent: true });
+  }
+}
+
+export function getOfflineAttachmentUsage(attachments: OfflineFieldAttachment[]) {
+  const usedBytes = attachments.reduce((total, attachment) => total + (attachment.size ?? 0), 0);
+  return { usedBytes, limitBytes: 50 * 1024 * 1024, percent: Math.min(100, Math.round((usedBytes / (50 * 1024 * 1024)) * 100)) };
+}
