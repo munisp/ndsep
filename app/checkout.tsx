@@ -151,9 +151,18 @@ export default function CheckoutScreen() {
 
           <Pressable onPress={initiatePayment} disabled={processing || !selectedMethod} style={({ pressed }) => [{ opacity: pressed || processing || !selectedMethod ? 0.5 : 1 }]}>
             <View className="rounded-xl bg-foreground px-4 py-4">
-            <Text className="text-center font-semibold text-background">{processing ? "Processing…" : `Pay ${formatNaira(feeItem.baseAmount)}`}</Text>
+              <Text className="text-center font-semibold text-background">{processing ? "Processing…" : `Pay ${formatNaira(feeItem.baseAmount)}`}</Text>
             </View>
           </Pressable>
+
+          {processing && (
+            <View className="gap-3 mt-4">
+              <View className="h-4 w-3/4 rounded-full bg-border" />
+              <View className="h-4 w-1/2 rounded-full bg-border" />
+              <View className="h-4 w-2/3 rounded-full bg-border" />
+              <Text className="text-[10px] text-muted text-center mt-2">Connecting to payment gateway…</Text>
+            </View>
+          )}
 
           {error && (
             <View className="rounded-2xl border border-error bg-error/5 p-4">

@@ -8,12 +8,12 @@ import { NIGERIA_FEE_SCHEDULE, formatNaira, type FeeCategory } from "@/lib/payme
 export default function FeeTrackerScreen() {
   /** C of O Application Progress Timeline */
   const cofOStages = [
-    { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15" },
-    { id: "fee_payment", label: "Application Fee Payment", status: "current" as const, date: null },
-    { id: "survey", label: "Survey & Demarcation", status: "pending" as const, date: null },
-    { id: "review", label: "State Land Bureau Review", status: "pending" as const, date: null },
-    { id: "consent", label: "Governor's Consent", status: "pending" as const, date: null },
-    { id: "issuance", label: "C of O Issuance", status: "pending" as const, date: null },
+    { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15", tooltip: "Submit completed application form with parcel details and supporting documents to the State Land Bureau." },
+    { id: "fee_payment", label: "Application Fee Payment", status: "current" as const, date: null, tooltip: "Pay the prescribed application processing fee via approved payment channels." },
+    { id: "survey", label: "Survey & Demarcation", status: "pending" as const, date: null, tooltip: "Licensed surveyor conducts physical boundary survey and produces a survey plan." },
+    { id: "review", label: "State Land Bureau Review", status: "pending" as const, date: null, tooltip: "Land Bureau officers verify documentation, confirm no encumbrances, and prepare recommendation." },
+    { id: "consent", label: "Governor's Consent", status: "pending" as const, date: null, tooltip: "The State Governor (or delegate) reviews and grants formal consent for the land allocation." },
+    { id: "issuance", label: "C of O Issuance", status: "pending" as const, date: null, tooltip: "Certificate of Occupancy is printed, signed, and issued to the applicant." },
   ];
 
   const completedStages = cofOStages.filter((s) => s.status === "complete").length;
@@ -71,6 +71,7 @@ export default function FeeTrackerScreen() {
                     <Text className={`text-xs font-semibold ${stage.status === "complete" ? "text-success" : stage.status === "current" ? "text-primary" : "text-muted"}`}>{stage.label}</Text>
                     {stage.date && <Text className="text-[10px] text-muted">{stage.date}</Text>}
                     {stage.status === "current" && <Text className="text-[10px] text-primary mt-0.5">← Action required</Text>}
+                    {"tooltip" in stage && <Text className="text-[10px] text-muted mt-0.5">{(stage as any).tooltip}</Text>}
                   </View>
                 </View>
               ))}

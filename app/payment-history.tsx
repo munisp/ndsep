@@ -25,7 +25,9 @@ const STATUS_LABELS: Record<PaymentStatus, { label: string; color: string }> = {
 
 export default function PaymentHistoryScreen() {
   const [filter, setFilter] = useState<"all" | PaymentStatus>("all");
-  const filtered = filter === "all" ? DEMO_HISTORY : DEMO_HISTORY.filter((p) => p.status === filter);
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "highest" | "lowest">("newest");
+  const filtered = (filter === "all" ? DEMO_HISTORY : DEMO_HISTORY.filter((p) => p.status === filter))
+    .sort((a, b) => sortBy === "newest" ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() : sortBy === "oldest" ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : sortBy === "highest" ? b.amount - a.amount : a.amount - b.amount);
   const [selectedReceipt, setSelectedReceipt] = useState<PaymentRecord | null>(null);
 
   async function downloadReceiptPdf(record: PaymentRecord) {
@@ -75,6 +77,17 @@ export default function PaymentHistoryScreen() {
           <View className="rounded-2xl border border-warning bg-warning/5 p-4">
             <Text className="text-xs font-bold text-warning">⚠ NO GATEWAY CONNECTED</Text>
             <Text className="mt-1 text-xs text-muted">All records below are pending real payment gateway verification. No money has been collected or transferred.</Text>
+          </View>
+
+          <View className="flex-row flex-wrap gap-2 mb-2">
+            <Text className="text-xs font-semibold text-foreground self-center mr-1">Sort:</Text>
+            {(["newest", "oldest", "highest", "lowest"] as const).map((s) => (
+              <Pressable key={s} onPress={() => setSortBy(s)}>
+                <View className={`rounded-full px-3 py-1 border ${sortBy === s ? "border-primary bg-primary/10" : "border-border"}`}>
+                  <Text className={`text-[10px] ${sortBy === s ? "text-primary font-semibold" : "text-muted"}`}>{s.charAt(0).toUpperCase() + s.slice(1)}</Text>
+                </View>
+              </Pressable>
+            ))}
           </View>
 
           <View className="flex-row flex-wrap gap-2">
