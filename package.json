@@ -5,7 +5,9 @@
   "main": "expo-router/entry",
   "expo": {
     "install": {
-      "exclude": ["@react-navigation/native"]
+      "exclude": [
+        "@react-navigation/native"
+      ]
     }
   },
   "scripts": {
@@ -78,6 +80,7 @@
     "react-dom": "19.1.0",
     "react-leaflet": "^5.0.0",
     "react-native": "0.81.5",
+    "react-native-calendars": "^1.1314.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-maps": "1.20.1",
     "react-native-reanimated": "~4.1.6",
