@@ -33,6 +33,9 @@ export type FieldEvidenceManifest = {
   reviewDueAt: string | null;
   escalatedAt: string | null;
   escalatedBy: string | null;
+  escalationStatus: "pending" | "acknowledged" | "resolved" | null;
+  escalationNote: string | null;
+  escalationUpdatedAt: string | null;
 };
 
 const STORE_PATH = path.join(process.cwd(), "server", "data", "field-evidence.json");
@@ -55,11 +58,11 @@ export function listFieldEvidence(missionId?: string) {
   return (missionId ? records.filter((record) => record.missionId === missionId) : records).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
 }
 
-export function recordFieldEvidence(input: Omit<FieldEvidenceManifest, "recordedAt" | "reviewedAt" | "reviewedBy" | "reviewReason" | "assignedSupervisor" | "assignedAt" | "reviewDueAt" | "escalatedAt" | "escalatedBy">) {
+export function recordFieldEvidence(input: Omit<FieldEvidenceManifest, "recordedAt" | "reviewedAt" | "reviewedBy" | "reviewReason" | "assignedSupervisor" | "assignedAt" | "reviewDueAt" | "escalatedAt" | "escalatedBy" | "escalationStatus" | "escalationNote" | "escalationUpdatedAt">) {
   const records = readStore();
   const existing = records.find((record) => record.id === input.id);
   if (existing) return { status: "duplicate" as const, evidence: existing };
-  const evidence: FieldEvidenceManifest = { ...input, attachmentCount: input.attachments.length, recordedAt: new Date().toISOString(), reviewedAt: null, reviewedBy: null, reviewReason: null, assignedSupervisor: null, assignedAt: null, reviewDueAt: null, escalatedAt: null, escalatedBy: null };
+  const evidence: FieldEvidenceManifest = { ...input, attachmentCount: input.attachments.length, recordedAt: new Date().toISOString(), reviewedAt: null, reviewedBy: null, reviewReason: null, assignedSupervisor: null, assignedAt: null, reviewDueAt: null, escalatedAt: null, escalatedBy: null, escalationStatus: null, escalationNote: null, escalationUpdatedAt: null };
   records.unshift(evidence);
   writeStore(records);
   return { status: "recorded" as const, evidence };
@@ -103,6 +106,14 @@ export function escalateFieldEvidence(input: { id: string; escalatedBy: string }
   if (index < 0) throw new Error("Field evidence manifest was not found.");
   const existing = records[index];
   if (existing.verificationState !== "unverified") return { status: "already_reviewed" as const, evidence: existing };
-  const evidence: FieldEvidenceManifest = { ...existing, escalatedAt: existing.escalatedAt ?? new Date().toISOString(), escalatedBy: existing.escalatedBy ?? input.escalatedBy };
+  const evidence: FieldEvidenceManifest = { ...existing, escalatedAt: existing.escalatedAt ?? new Date().toISOString(), escalatedBy: existing.escalatedBy ?? input.escalatedBy, escalationStatus: existing.escalationStatus ?? "pending", escalationUpdatedAt: new Date().toISOString() };
   records[index] = evidence; writeStore(records); return { status: "escalated" as const, evidence };
+}
+
+export function acknowledgeFieldEvidenceEscalation(input: { id: string; status: "acknowledged" | "resolved"; note: string; updatedBy: string }) {
+  const records = readStore(); const index = records.findIndex((record) => record.id === input.id);
+  if (index < 0) throw new Error("Field evidence manifest was not found.");
+  const existing = records[index]; if (!existing.escalatedAt) throw new Error("Only an escalated manifest can be acknowledged.");
+  const evidence: FieldEvidenceManifest = { ...existing, escalationStatus: input.status, escalationNote: input.note, escalationUpdatedAt: new Date().toISOString() };
+  records[index] = evidence; writeStore(records); return { status: "updated" as const, evidence };
 }

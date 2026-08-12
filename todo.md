@@ -216,3 +216,7 @@
 - [x] Add auditable one-tap internal escalation for overdue field-manifest reviews
 - [x] Add saved supervisor dashboard filter presets for priority review workflows
 - [x] Add regression coverage for escalation records and saved preset application
+- [x] Add management escalation acknowledgement with resolution notes and status updates
+- [x] Add rename, delete, and local team-sharing controls for saved supervisor presets
+- [x] Add clearly visible escalated badges to overdue field-manifest alerts
+- [x] Add regression coverage for acknowledgement lifecycle and preset management
