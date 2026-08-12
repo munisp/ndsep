@@ -197,3 +197,7 @@
 - [x] Add Nigeria-specific land and multi-agency permitting controls using clearly labelled local domain data
 - [x] Enhance administrator auditability, integrity monitoring, and operational UX without external-provider dependency
 - [x] Add regression coverage for the strengthened offline, local-domain, and administrator workflows
+- [x] Add offline device-camera and file attachments with durable local evidence metadata
+- [x] Add supervisor approve/reject review workflow for reconciled field evidence manifests
+- [x] Add configurable Nigeria jurisdiction permit checklists and local SLA tracking rules
+- [x] Add regression coverage for evidence attachments, supervisor decisions, and jurisdiction policy calculations

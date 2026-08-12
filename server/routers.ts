@@ -60,7 +60,7 @@ import {
 } from "./permittingPlatformRepository";
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
-import { listFieldEvidence, recordFieldEvidence } from "./fieldEvidenceRepository";
+import { listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -144,10 +144,23 @@ export const appRouter = router({
         latitude: z.number().nullable(),
         longitude: z.number().nullable(),
         attachmentCount: z.number().int().min(0),
+        attachments: z.array(z.object({
+          id: z.string().min(8),
+          kind: z.enum(["photo", "file"]),
+          name: z.string().min(1).max(200),
+          mimeType: z.string().nullable(),
+          size: z.number().int().nonnegative().nullable(),
+          localUri: z.string().min(1),
+          persistence: z.enum(["app_document_directory", "browser_session"]),
+          capturedAt: z.string(),
+        })).max(10),
         verificationState: z.literal("unverified"),
         origin: z.enum(["offline_queue", "online"]),
       }))
       .mutation(({ input }) => recordFieldEvidence(input)),
+    review: adminProcedure
+      .input(z.object({ id: z.string().min(8), decision: z.enum(["approved", "rejected"]), reason: z.string().min(3).max(2000) }))
+      .mutation(({ ctx, input }) => reviewFieldEvidence({ ...input, reviewer: ctx.user.openId })),
   }),
   trust: router({
     providerHealth: publicProcedure.query(() => getProviderHealth()),

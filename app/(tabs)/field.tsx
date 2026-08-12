@@ -1,12 +1,15 @@
 import { ScrollView, Text, View, Pressable } from "react-native";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, TextInput } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import * as DocumentPicker from "expo-document-picker";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { findParcel } from "@/lib/mobile-data";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 import { getOfflineFieldEvidenceQueue, queueOfflineFieldEvidence, replayOfflineFieldEvidence } from "@/lib/offline-field-evidence";
+import { persistOfflineFieldAttachment, type OfflineFieldAttachment } from "@/lib/offline-field-attachments";
 
 function RiskTone({ label, value }: { label: string; value: string }) {
   const accent = value === "high" ? "#DC2626" : value === "moderate" ? "#D97706" : "#059669";
@@ -27,6 +30,10 @@ export default function FieldScreen() {
   const [notes, setNotes] = useState("");
   const [queuedEvidence, setQueuedEvidence] = useState<Awaited<ReturnType<typeof getOfflineFieldEvidenceQueue>>>([]);
   const [replaySummary, setReplaySummary] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<OfflineFieldAttachment[]>([]);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const cameraRef = useRef<CameraView>(null);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   useEffect(() => {
     void getOfflineFieldEvidenceQueue().then(setQueuedEvidence);
@@ -55,11 +62,13 @@ export default function FieldScreen() {
       coordinateSource: "parcel_reference",
       latitude: selectedParcel.latitude,
       longitude: selectedParcel.longitude,
-      attachmentCount: 0,
+      attachmentCount: attachments.length,
+      attachments,
       verificationState: "unverified",
     });
     setQueuedEvidence((current) => [draft, ...current]);
     setNotes("");
+    setAttachments([]);
     setReplaySummary("Draft saved on this device. It is unverified and will not change the registry until reconciliation succeeds.");
   }
 
@@ -67,6 +76,32 @@ export default function FieldScreen() {
     const result = await replayOfflineFieldEvidence();
     setQueuedEvidence(await getOfflineFieldEvidenceQueue());
     setReplaySummary(`${result.recorded} evidence record${result.recorded === 1 ? "" : "s"} recorded, ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"} reconciled, and ${result.pending} still pending.`);
+  }
+
+  async function openCamera() {
+    if (!cameraPermission?.granted) {
+      const permission = await requestCameraPermission();
+      if (!permission.granted) {
+        Alert.alert("Camera unavailable", "Camera permission is required to attach a photo. You can attach a file instead.");
+        return;
+      }
+    }
+    setCameraOpen(true);
+  }
+
+  async function takePhotoAttachment() {
+    const photo = await cameraRef.current?.takePictureAsync({ quality: 0.65, exif: false, base64: false });
+    if (!photo?.uri) return;
+    const attachment = await persistOfflineFieldAttachment({ uri: photo.uri, kind: "photo", name: `field-photo-${Date.now()}.jpg`, mimeType: "image/jpeg", size: null });
+    setAttachments((current) => [...current, attachment]);
+    setCameraOpen(false);
+  }
+
+  async function pickFileAttachment() {
+    const result = await DocumentPicker.getDocumentAsync({ type: ["image/*", "application/pdf"], multiple: true, copyToCacheDirectory: true });
+    if (result.canceled) return;
+    const additions = await Promise.all(result.assets.slice(0, Math.max(0, 10 - attachments.length)).map((asset) => persistOfflineFieldAttachment({ uri: asset.uri, kind: asset.mimeType?.startsWith("image/") ? "photo" : "file", name: asset.name, mimeType: asset.mimeType ?? null, size: asset.size ?? null })));
+    setAttachments((current) => [...current, ...additions]);
   }
 
   return (
@@ -105,6 +140,10 @@ export default function FieldScreen() {
             ))}
           </View>
           <TextInput value={notes} onChangeText={setNotes} placeholder="Describe the observation, field context, and any safety or dispute concern" placeholderTextColor="#94A3B8" multiline className="mt-4 min-h-[100px] rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
+          {cameraOpen ? <View className="mt-4 overflow-hidden rounded-2xl border border-border bg-background"><CameraView ref={cameraRef} style={{ height: 280 }} facing="back" /><View className="flex-row gap-3 p-3"><Pressable onPress={() => void takePhotoAttachment()} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl bg-foreground px-3 py-3"><Text className="text-center font-semibold text-background">Capture photo</Text></View></Pressable><Pressable onPress={() => setCameraOpen(false)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl border border-border px-3 py-3"><Text className="font-semibold text-foreground">Cancel</Text></View></Pressable></View></View> : null}
+          <View className="mt-4 flex-row gap-3"><Pressable onPress={() => void openCamera()} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-2xl border border-border bg-background px-4 py-3"><Text className="text-center font-semibold text-foreground">Attach camera photo</Text></View></Pressable><Pressable onPress={() => void pickFileAttachment()} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-2xl border border-border bg-background px-4 py-3"><Text className="text-center font-semibold text-foreground">Attach file</Text></View></Pressable></View>
+          <Text className="mt-2 text-xs leading-4 text-muted">Attachments are kept in the app document directory on native devices. They remain local and unverified until a supervisor reviews the reconciled manifest.</Text>
+          {attachments.length > 0 ? <View className="mt-3 gap-2">{attachments.map((attachment) => <View key={attachment.id} className="rounded-xl border border-border bg-background p-3"><Text className="text-sm font-semibold text-foreground">{attachment.kind} · {attachment.name}</Text><Text className="mt-1 text-xs text-muted">{attachment.persistence.replace(/_/g, " ")} · {attachment.size ?? "size unavailable"}</Text></View>)}</View> : null}
           <Pressable onPress={() => void captureOfflineObservation()} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}><View className="mt-3 rounded-2xl bg-foreground px-4 py-4"><Text className="text-center font-semibold text-background">Save offline observation</Text></View></Pressable>
           <Pressable onPress={() => void reconcileEvidence()} disabled={!hasLiveConnection || queuedEvidence.length === 0} style={({ pressed }) => [{ opacity: !hasLiveConnection || queuedEvidence.length === 0 ? 0.45 : pressed ? 0.8 : 1 }]}><View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Reconcile {queuedEvidence.length} queued observation{queuedEvidence.length === 1 ? "" : "s"}</Text></View></Pressable>
           {replaySummary ? <Text className="mt-3 text-xs leading-5 text-muted">{replaySummary}</Text> : null}

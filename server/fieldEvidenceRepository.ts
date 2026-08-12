@@ -12,9 +12,22 @@ export type FieldEvidenceManifest = {
   latitude: number | null;
   longitude: number | null;
   attachmentCount: number;
-  verificationState: "unverified";
+  attachments: Array<{
+    id: string;
+    kind: "photo" | "file";
+    name: string;
+    mimeType: string | null;
+    size: number | null;
+    localUri: string;
+    persistence: "app_document_directory" | "browser_session";
+    capturedAt: string;
+  }>;
+  verificationState: "unverified" | "approved" | "rejected";
   origin: "offline_queue" | "online";
   recordedAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  reviewReason: string | null;
 };
 
 const STORE_PATH = path.join(process.cwd(), "server", "data", "field-evidence.json");
@@ -37,12 +50,32 @@ export function listFieldEvidence(missionId?: string) {
   return (missionId ? records.filter((record) => record.missionId === missionId) : records).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
 }
 
-export function recordFieldEvidence(input: Omit<FieldEvidenceManifest, "recordedAt">) {
+export function recordFieldEvidence(input: Omit<FieldEvidenceManifest, "recordedAt" | "reviewedAt" | "reviewedBy" | "reviewReason">) {
   const records = readStore();
   const existing = records.find((record) => record.id === input.id);
   if (existing) return { status: "duplicate" as const, evidence: existing };
-  const evidence: FieldEvidenceManifest = { ...input, recordedAt: new Date().toISOString() };
+  const evidence: FieldEvidenceManifest = { ...input, attachmentCount: input.attachments.length, recordedAt: new Date().toISOString(), reviewedAt: null, reviewedBy: null, reviewReason: null };
   records.unshift(evidence);
   writeStore(records);
   return { status: "recorded" as const, evidence };
+}
+
+export function reviewFieldEvidence(input: { id: string; decision: "approved" | "rejected"; reviewer: string; reason: string }) {
+  const records = readStore();
+  const index = records.findIndex((record) => record.id === input.id);
+  if (index < 0) throw new Error("Field evidence manifest was not found.");
+  const existing = records[index];
+  if (existing.verificationState !== "unverified") {
+    return { status: "already_reviewed" as const, evidence: existing };
+  }
+  const evidence: FieldEvidenceManifest = {
+    ...existing,
+    verificationState: input.decision,
+    reviewedAt: new Date().toISOString(),
+    reviewedBy: input.reviewer,
+    reviewReason: input.reason,
+  };
+  records[index] = evidence;
+  writeStore(records);
+  return { status: "reviewed" as const, evidence };
 }

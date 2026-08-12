@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { getJurisdictionPolicy } from "@/lib/nigeria-jurisdiction-policy";
 import { trpc } from "@/lib/trpc";
 
 type StakeholderView = "federal" | "state" | "builder";
@@ -127,6 +128,7 @@ export default function PermitsScreen() {
   const [exceptionMetric, setExceptionMetric] = useState<"escalatedCount" | "reassignmentCount" | "avgHoursToAssignment">("escalatedCount");
   const [stakeholderView, setStakeholderView] = useState<StakeholderView>("federal");
   const [selectedJurisdiction, setSelectedJurisdiction] = useState<NigerianJurisdiction>("all");
+  const selectedPolicy = getJurisdictionPolicy(selectedJurisdiction);
 
   const filteredQueues = useMemo(() => {
     const queues = platform?.approvalQueues ?? [];
@@ -224,6 +226,7 @@ export default function PermitsScreen() {
             <Text className="text-sm font-semibold text-foreground">Local operating control</Text>
             <Text className="mt-2 text-xs leading-5 text-muted">Cases are grouped by local scenario labels and still require configured government systems, signed evidence, and authorized agency review before any land, planning, mining, petroleum, or corridor decision is official.</Text>
           </View>
+          {selectedPolicy ? <View className="mt-4 rounded-2xl border border-primary bg-primary/5 p-4"><Text className="text-sm font-semibold text-foreground">{selectedPolicy.label} · {selectedPolicy.slaHours}h local SLA target</Text><Text className="mt-2 text-xs leading-5 text-muted">{selectedPolicy.disclaimer}</Text><View className="mt-3 gap-2">{selectedPolicy.checklist.map((item, index) => <Text key={item} className="text-xs text-foreground">{index + 1}. {item}</Text>)}</View></View> : null}
         </View>
 
         <View className="flex-row flex-wrap gap-3">

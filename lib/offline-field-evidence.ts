@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { createTRPCClient } from "./trpc";
+import type { OfflineFieldAttachment } from "./offline-field-attachments";
 
 export type OfflineFieldEvidenceDraft = {
   id: string;
@@ -13,6 +14,7 @@ export type OfflineFieldEvidenceDraft = {
   latitude: number | null;
   longitude: number | null;
   attachmentCount: number;
+  attachments: OfflineFieldAttachment[];
   verificationState: "unverified";
   queuedAt: string;
   attempts: number;
