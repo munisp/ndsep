@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import { router } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -151,6 +152,11 @@ export default function OfflinePaymentsScreen() {
                 <Text className={`text-[10px] ${bulkMode ? "text-primary font-semibold" : "text-muted"}`}>Bulk Mode</Text>
               </View>
             </Pressable>
+            <Pressable onPress={() => router.push("/qr-scanner" as any)}>
+              <View className="rounded-full px-3 py-1 border border-border">
+                <Text className="text-[10px] text-muted">QR Scan</Text>
+              </View>
+            </Pressable>
             {(["pending_review", "approved", "rejected", "all"] as const).map((f) => (
               <Pressable key={f} onPress={() => setFilter(f)}>
                 <View className={`rounded-full px-3 py-1 border ${filter === f ? "border-primary bg-primary/10" : "border-border"}`}>
@@ -267,6 +273,24 @@ export default function OfflinePaymentsScreen() {
                   </View>
                 </Pressable>
               </View>
+              <Pressable onPress={async () => {
+                const selected = payments.filter((p) => selectedIds.has(p.id));
+                if (selected.length === 0) return;
+                const header = "id,reference,amount,description,method,status,marked_at\n";
+                const rows = selected.map((p) => `${p.id},${p.referenceNumber},${p.amount},${p.description},${p.method},${p.status},${p.markedAt}`).join("\n");
+                const csv = header + rows;
+                if (Platform.OS === "web") {
+                  Alert.alert("CSV Export", `${selected.length} records ready.\n\n${csv.slice(0, 300)}`);
+                  return;
+                }
+                const path = `${FileSystem.cacheDirectory}offline_payments_${Date.now()}.csv`;
+                await FileSystem.writeAsStringAsync(path, csv);
+                await Share.share({ url: path, title: "Offline payments export" });
+              }} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                <View className="rounded-xl border border-muted px-3 py-2">
+                  <Text className="text-center text-[10px] font-semibold text-muted">Export Selected as CSV</Text>
+                </View>
+              </Pressable>
             </View>
           )}
           </View>

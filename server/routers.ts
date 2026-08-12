@@ -119,6 +119,46 @@ export const appRouter = router({
     .input(z.object({ filter: z.enum(["pending_review", "approved", "rejected"]).optional() }).optional())
     .query(({ input }) => listOfflinePayments(input?.filter)),
 
+  listPaymentNotifications: publicProcedure
+    .input(z.object({ applicantId: z.string() }))
+    .query(({ input }) => {
+      const fs = require("fs");
+      const path = require("path");
+      const notifPath = path.join(__dirname, "data", "payment-notifications.json");
+      try {
+        if (fs.existsSync(notifPath)) {
+          const all = JSON.parse(fs.readFileSync(notifPath, "utf-8"));
+          return all.filter((n: any) => n.applicantId === input.applicantId);
+        }
+      } catch {}
+      return [];
+    }),
+
+  markPaymentNotificationRead: publicProcedure
+    .input(z.object({ notificationId: z.string() }))
+    .mutation(({ input }) => {
+      const fs = require("fs");
+      const path = require("path");
+      const notifPath = path.join(__dirname, "data", "payment-notifications.json");
+      try {
+        if (fs.existsSync(notifPath)) {
+          const all = JSON.parse(fs.readFileSync(notifPath, "utf-8"));
+          const notif = all.find((n: any) => n.id === input.notificationId);
+          if (notif) { notif.read = true; fs.writeFileSync(notifPath, JSON.stringify(all, null, 2)); }
+          return { success: true };
+        }
+      } catch {}
+      return { success: false };
+    }),
+
+  lookupPaymentByReference: publicProcedure
+    .input(z.object({ referenceNumber: z.string() }))
+    .query(({ input }) => {
+      const payments = listOfflinePayments();
+      const found = payments.find((p) => p.referenceNumber === input.referenceNumber);
+      return found ?? null;
+    }),
+
   reviewOfflinePayment: adminProcedure
     .input(z.object({
       id: z.string(),
