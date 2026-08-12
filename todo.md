@@ -220,3 +220,7 @@
 - [x] Add rename, delete, and local team-sharing controls for saved supervisor presets
 - [x] Add clearly visible escalated badges to overdue field-manifest alerts
 - [x] Add regression coverage for acknowledgement lifecycle and preset management
+- [ ] Add escalation ownership and handoff-date tracking in management acknowledgement workflow
+- [ ] Add shared supervisor preset import validation and compatible local import flow
+- [ ] Add local management escalation trend and resolution-time analytics visualization
+- [ ] Add regression coverage for accountability, preset validation, and escalation analytics
