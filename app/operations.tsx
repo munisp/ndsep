@@ -16,6 +16,7 @@ export default function OperationsScreen() {
   const integrationStatus = trpc.integrationSettings.status.useQuery();
   const digests = trpc.permitting.listSupervisorDigests.useQuery();
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [supervisorNames, setSupervisorNames] = useState<Record<string, string>>({});
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
   const reviewMutation = trpc.fieldEvidence.review.useMutation({
     onSuccess: async (result) => {
@@ -23,6 +24,13 @@ export default function OperationsScreen() {
       setReviewMessage(result.status === "reviewed" ? `Manifest ${result.evidence.id} was ${result.evidence.verificationState}.` : "This manifest was already reviewed.");
     },
     onError: (error) => setReviewMessage(error.message || "Review requires a configured administrator session."),
+  });
+  const assignmentMutation = trpc.fieldEvidence.assign.useMutation({
+    onSuccess: async (result) => {
+      await fieldEvidence.refetch();
+      setReviewMessage(result.status === "assigned" ? `Supervisor assigned; review target is ${new Date(result.evidence.reviewDueAt ?? Date.now()).toLocaleString()}.` : "This manifest was already reviewed and cannot be reassigned.");
+    },
+    onError: (error) => setReviewMessage(error.message || "Assignment requires a configured administrator session."),
   });
   const evidence = fieldEvidence.data ?? [];
   const providers = providerHealth.data ?? [];
@@ -37,6 +45,14 @@ export default function OperationsScreen() {
     }
     reviewMutation.mutate({ id, decision, reason });
   }
+  function submitAssignment(id: string) {
+    const supervisor = supervisorNames[id]?.trim() ?? "";
+    if (supervisor.length < 3) {
+      setReviewMessage("Enter the assigned supervisor name or identifier.");
+      return;
+    }
+    assignmentMutation.mutate({ id, supervisor });
+  }
 
   return (
     <ScreenContainer className="bg-background">
@@ -50,12 +66,13 @@ export default function OperationsScreen() {
           <Metric label="Supervisor digests" value={String(digests.data?.length ?? 0)} detail="Current agency backlog digests available to operational supervisors." />
         </View>
 
-        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Evidence review queue</Text><Text className="mt-2 text-sm text-muted">Every field observation is intentionally recorded as unverified. Reconciliation proves delivery only; it does not confirm a land, identity, or permit claim. Approve or reject controls require a configured administrator session.</Text>{reviewMessage ? <Text className="mt-3 text-xs leading-4 text-muted">{reviewMessage}</Text> : null}<View className="mt-4 gap-3">{evidence.slice(0, 5).map((item) => <View key={item.id} className={`rounded-2xl border p-4 ${item.verificationState === "unverified" ? "border-warning bg-warning/5" : item.verificationState === "approved" ? "border-success bg-success/5" : "border-error bg-error/5"}`}><Text className="text-sm font-semibold text-foreground">{item.observationType.replace(/_/g, " ")} · {item.verificationState}</Text><Text className="mt-1 text-xs text-muted">Mission {item.missionId} · Parcel {item.parcelId} · {item.attachments.length} attachment{item.attachments.length === 1 ? "" : "s"}</Text><Text className="mt-2 text-xs leading-4 text-muted">{item.notes}</Text>{item.verificationState === "unverified" ? <><TextInput value={reviewNotes[item.id] ?? ""} onChangeText={(value) => setReviewNotes((current) => ({ ...current, [item.id]: value }))} placeholder="Required administrator review reason" placeholderTextColor="#94A3B8" multiline className="mt-3 min-h-[72px] rounded-xl border border-border bg-background px-3 py-2 text-foreground" /><View className="mt-3 flex-row gap-3"><Pressable onPress={() => submitReview(item.id, "approved")} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl bg-success px-3 py-3"><Text className="text-center font-semibold text-white">Approve</Text></View></Pressable><Pressable onPress={() => submitReview(item.id, "rejected")} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl bg-error px-3 py-3"><Text className="text-center font-semibold text-white">Reject</Text></View></Pressable></View></> : <Text className="mt-3 text-xs text-muted">Reviewed by {item.reviewedBy ?? "administrator"} · {item.reviewReason ?? "No reason recorded"}</Text>}</View>)}{evidence.length === 0 ? <Text className="text-sm text-muted">No reconciled field evidence manifests are currently recorded.</Text> : null}</View></View>
+        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Evidence review queue</Text><Text className="mt-2 text-sm text-muted">Every field observation is intentionally recorded as unverified. Reconciliation proves delivery only; it does not confirm a land, identity, or permit claim. Approve, reject, and assignment controls require a configured administrator session.</Text>{reviewMessage ? <Text className="mt-3 text-xs leading-4 text-muted">{reviewMessage}</Text> : null}<View className="mt-4 gap-3">{evidence.slice(0, 5).map((item) => <View key={item.id} className={`rounded-2xl border p-4 ${item.verificationState === "unverified" ? "border-warning bg-warning/5" : item.verificationState === "approved" ? "border-success bg-success/5" : "border-error bg-error/5"}`}><Text className="text-sm font-semibold text-foreground">{item.observationType.replace(/_/g, " ")} · {item.verificationState}</Text><Text className="mt-1 text-xs text-muted">Mission {item.missionId} · Parcel {item.parcelId} · {item.attachments.length} attachment{item.attachments.length === 1 ? "" : "s"}</Text><Text className="mt-2 text-xs leading-4 text-muted">{item.notes}</Text>{item.verificationState === "unverified" ? <><TextInput value={supervisorNames[item.id] ?? ""} onChangeText={(value) => setSupervisorNames((current) => ({ ...current, [item.id]: value }))} placeholder="Assign supervisor name or identifier" placeholderTextColor="#94A3B8" className="mt-3 rounded-xl border border-border bg-background px-3 py-2 text-foreground" /><Pressable onPress={() => submitAssignment(item.id)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}><View className="mt-2 rounded-xl border border-border bg-background px-3 py-3"><Text className="text-center font-semibold text-foreground">Assign supervisor · 48h review target</Text></View></Pressable>{item.assignedSupervisor ? <Text className={`mt-2 text-xs font-semibold ${item.reviewDueAt && new Date(item.reviewDueAt).getTime() < Date.now() ? "text-error" : "text-warning"}`}>Assigned to {item.assignedSupervisor} · due {item.reviewDueAt ? new Date(item.reviewDueAt).toLocaleString() : "unavailable"}</Text> : null}<TextInput value={reviewNotes[item.id] ?? ""} onChangeText={(value) => setReviewNotes((current) => ({ ...current, [item.id]: value }))} placeholder="Required administrator review reason" placeholderTextColor="#94A3B8" multiline className="mt-3 min-h-[72px] rounded-xl border border-border bg-background px-3 py-2 text-foreground" /><View className="mt-3 flex-row gap-3"><Pressable onPress={() => submitReview(item.id, "approved")} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl bg-success px-3 py-3"><Text className="text-center font-semibold text-white">Approve</Text></View></Pressable><Pressable onPress={() => submitReview(item.id, "rejected")} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl bg-error px-3 py-3"><Text className="text-center font-semibold text-white">Reject</Text></View></Pressable></View></> : <Text className="mt-3 text-xs text-muted">Reviewed by {item.reviewedBy ?? "administrator"} · {item.reviewReason ?? "No reason recorded"}</Text>}</View>)}{evidence.length === 0 ? <Text className="text-sm text-muted">No reconciled field evidence manifests are currently recorded.</Text> : null}</View></View>
 
         <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">External verification posture</Text><View className="mt-4 gap-3">{providers.map((provider) => <View key={provider.provider} className="rounded-2xl border border-border bg-background p-4"><Text className="text-sm font-semibold text-foreground">{provider.provider.replace(/_/g, " ")}</Text><Text className={`mt-1 text-xs font-semibold ${provider.state === "ready" ? "text-success" : "text-warning"}`}>{provider.state === "ready" ? "Available" : "Unavailable"}</Text><Text className="mt-1 text-xs leading-4 text-muted">{provider.reason ?? "Configured provider; final outcomes still require authorized review."}</Text></View>)}</View></View>
 
         <Link href={"/audit-verify" as never} asChild><View className="rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open audit package verification</Text></View></Link>
         <Link href={"/integration-settings" as never} asChild><View className="rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open integration settings</Text></View></Link>
+        <Link href={"/sla-policies" as never} asChild><View className="rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Manage local SLA policy versions</Text></View></Link>
       </ScrollView>
     </ScreenContainer>
   );

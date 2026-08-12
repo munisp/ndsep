@@ -201,3 +201,7 @@
 - [x] Add supervisor approve/reject review workflow for reconciled field evidence manifests
 - [x] Add configurable Nigeria jurisdiction permit checklists and local SLA tracking rules
 - [x] Add regression coverage for evidence attachments, supervisor decisions, and jurisdiction policy calculations
+- [x] Add attachment thumbnails and local file-size enforcement for offline field evidence
+- [x] Add supervisor assignment and review-turnaround timers for field manifests
+- [x] Add authorized local SLA policy editing with version history and audit trail
+- [x] Add regression coverage for attachment limits, assignment timers, and policy versions

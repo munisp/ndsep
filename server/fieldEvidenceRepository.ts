@@ -28,6 +28,9 @@ export type FieldEvidenceManifest = {
   reviewedAt: string | null;
   reviewedBy: string | null;
   reviewReason: string | null;
+  assignedSupervisor: string | null;
+  assignedAt: string | null;
+  reviewDueAt: string | null;
 };
 
 const STORE_PATH = path.join(process.cwd(), "server", "data", "field-evidence.json");
@@ -50,11 +53,11 @@ export function listFieldEvidence(missionId?: string) {
   return (missionId ? records.filter((record) => record.missionId === missionId) : records).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
 }
 
-export function recordFieldEvidence(input: Omit<FieldEvidenceManifest, "recordedAt" | "reviewedAt" | "reviewedBy" | "reviewReason">) {
+export function recordFieldEvidence(input: Omit<FieldEvidenceManifest, "recordedAt" | "reviewedAt" | "reviewedBy" | "reviewReason" | "assignedSupervisor" | "assignedAt" | "reviewDueAt">) {
   const records = readStore();
   const existing = records.find((record) => record.id === input.id);
   if (existing) return { status: "duplicate" as const, evidence: existing };
-  const evidence: FieldEvidenceManifest = { ...input, attachmentCount: input.attachments.length, recordedAt: new Date().toISOString(), reviewedAt: null, reviewedBy: null, reviewReason: null };
+  const evidence: FieldEvidenceManifest = { ...input, attachmentCount: input.attachments.length, recordedAt: new Date().toISOString(), reviewedAt: null, reviewedBy: null, reviewReason: null, assignedSupervisor: null, assignedAt: null, reviewDueAt: null };
   records.unshift(evidence);
   writeStore(records);
   return { status: "recorded" as const, evidence };
@@ -78,4 +81,17 @@ export function reviewFieldEvidence(input: { id: string; decision: "approved" | 
   records[index] = evidence;
   writeStore(records);
   return { status: "reviewed" as const, evidence };
+}
+
+export function assignFieldEvidenceSupervisor(input: { id: string; supervisor: string; assignedBy: string }) {
+  const records = readStore();
+  const index = records.findIndex((record) => record.id === input.id);
+  if (index < 0) throw new Error("Field evidence manifest was not found.");
+  const existing = records[index];
+  if (existing.verificationState !== "unverified") return { status: "already_reviewed" as const, evidence: existing };
+  const assignedAt = new Date().toISOString();
+  const evidence: FieldEvidenceManifest = { ...existing, assignedSupervisor: input.supervisor, assignedAt, reviewDueAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString() };
+  records[index] = evidence;
+  writeStore(records);
+  return { status: "assigned" as const, evidence };
 }

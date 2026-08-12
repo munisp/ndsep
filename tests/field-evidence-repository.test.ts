@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "../server/fieldEvidenceRepository";
+import { assignFieldEvidenceSupervisor, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "../server/fieldEvidenceRepository";
 
 const storePath = path.join(process.cwd(), "server", "data", "field-evidence.json");
 
@@ -30,6 +30,7 @@ describe("field evidence repository", () => {
 
     expect(recordFieldEvidence(input)).toMatchObject({ status: "recorded", evidence: { verificationState: "unverified", origin: "offline_queue", attachmentCount: 1 } });
     expect(recordFieldEvidence(input)).toMatchObject({ status: "duplicate" });
+    expect(assignFieldEvidenceSupervisor({ id: input.id, supervisor: "supervisor-001", assignedBy: "admin-subject" })).toMatchObject({ status: "assigned", evidence: { assignedSupervisor: "supervisor-001" } });
     expect(reviewFieldEvidence({ id: input.id, decision: "approved", reviewer: "admin-subject", reason: "Boundary photo and note are internally consistent." })).toMatchObject({ status: "reviewed", evidence: { verificationState: "approved", reviewedBy: "admin-subject" } });
     expect(reviewFieldEvidence({ id: input.id, decision: "rejected", reviewer: "admin-subject", reason: "Should not overwrite the first review." })).toMatchObject({ status: "already_reviewed", evidence: { verificationState: "approved" } });
     expect(listFieldEvidence("mission-lagos-001")).toHaveLength(1);

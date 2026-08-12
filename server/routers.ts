@@ -60,7 +60,8 @@ import {
 } from "./permittingPlatformRepository";
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
-import { listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
+import { assignFieldEvidenceSupervisor, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
+import { listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -161,6 +162,15 @@ export const appRouter = router({
     review: adminProcedure
       .input(z.object({ id: z.string().min(8), decision: z.enum(["approved", "rejected"]), reason: z.string().min(3).max(2000) }))
       .mutation(({ ctx, input }) => reviewFieldEvidence({ ...input, reviewer: ctx.user.openId })),
+    assign: adminProcedure
+      .input(z.object({ id: z.string().min(8), supervisor: z.string().min(3).max(200) }))
+      .mutation(({ ctx, input }) => assignFieldEvidenceSupervisor({ ...input, assignedBy: ctx.user.openId })),
+  }),
+  localPolicy: router({
+    list: publicProcedure.query(() => listLocalPolicies()),
+    update: adminProcedure
+      .input(z.object({ jurisdiction: z.enum(["lagos", "fct", "kano", "ogun", "rivers"]), slaHours: z.number().int().min(1).max(720), checklist: z.array(z.string().min(3).max(300)).min(1).max(12), reason: z.string().min(3).max(1000) }))
+      .mutation(({ ctx, input }) => updateLocalPolicy({ ...input, updatedBy: ctx.user.openId })),
   }),
   trust: router({
     providerHealth: publicProcedure.query(() => getProviderHealth()),

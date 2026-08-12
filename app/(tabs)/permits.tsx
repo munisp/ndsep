@@ -116,6 +116,7 @@ export default function PermitsScreen() {
   const queueAnalyticsQuery = trpc.permitting.listQueueAnalytics.useQuery();
   const reminderQuery = trpc.permitting.listReminderQueue.useQuery({ role: activeAgencyUserQuery.data?.role });
   const supervisorAnalyticsQuery = trpc.permitting.listSupervisorExceptionAnalytics.useQuery();
+  const localPolicyQuery = trpc.localPolicy.list.useQuery();
 
   const platform = platformQuery.data;
   const activeAgencyUser = activeAgencyUserQuery.data;
@@ -128,7 +129,7 @@ export default function PermitsScreen() {
   const [exceptionMetric, setExceptionMetric] = useState<"escalatedCount" | "reassignmentCount" | "avgHoursToAssignment">("escalatedCount");
   const [stakeholderView, setStakeholderView] = useState<StakeholderView>("federal");
   const [selectedJurisdiction, setSelectedJurisdiction] = useState<NigerianJurisdiction>("all");
-  const selectedPolicy = getJurisdictionPolicy(selectedJurisdiction);
+  const selectedPolicy = selectedJurisdiction === "all" ? null : localPolicyQuery.data?.find((policy) => policy.jurisdiction === selectedJurisdiction) ?? getJurisdictionPolicy(selectedJurisdiction);
 
   const filteredQueues = useMemo(() => {
     const queues = platform?.approvalQueues ?? [];
