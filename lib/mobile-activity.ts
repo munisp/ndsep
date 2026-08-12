@@ -44,8 +44,11 @@ export type ActivityAiInsight = {
   priorityScore: number;
   rationale: string;
   analyzedAt: string;
-  model: string;
+  model: string | null;
   interactionWeight: number;
+  provenance: "model" | "rule_based" | "unavailable";
+  availability: "available" | "unavailable";
+  reason: string | null;
 };
 
 export type ActivityGeofenceContext = {
@@ -174,15 +177,6 @@ export const defaultActivityFeed: ActivityRecord[] = [
     parcelId: 6,
     parcelNumber: "LG-EPE-2026-006",
     route: "/(tabs)/field",
-    aiInsight: {
-      summary: "Low-risk field evidence remains active for parcel LG-EPE-2026-006 and should stay visible for field continuity.",
-      priorityLevel: "medium",
-      priorityScore: 68,
-      rationale: "Unread field work with parcel context should stay near the top until a field officer advances the mission.",
-      analyzedAt: "2026-07-20T03:05:00Z",
-      model: "seeded-mobile-analysis",
-      interactionWeight: 0.58,
-    },
   }),
   normalizeRecord({
     id: "activity-seed-2",
@@ -197,17 +191,8 @@ export const defaultActivityFeed: ActivityRecord[] = [
     route: "/onboarding",
     action: {
       kind: "approve_kyc",
-      label: "Approve KYC document",
+      label: "Request KYC review",
       onboardingDocumentId: "kyc-seed-11",
-    },
-    aiInsight: {
-      summary: "Onboarding remains blocked because liveness verification is incomplete for a parcel-linked business profile.",
-      priorityLevel: "high",
-      priorityScore: 88,
-      rationale: "Unread onboarding work with an approval action and warning tone deserves faster review.",
-      analyzedAt: "2026-07-20T02:10:00Z",
-      model: "seeded-mobile-analysis",
-      interactionWeight: 0.74,
     },
   }),
   normalizeRecord({
@@ -225,15 +210,6 @@ export const defaultActivityFeed: ActivityRecord[] = [
       kind: "approve_legal",
       label: "Approve legal workflow",
       legalWorkflowId: "cofo-epe-6",
-    },
-    aiInsight: {
-      summary: "The Certificate of Occupancy registration trail is preserved and can be reviewed as supporting context.",
-      priorityLevel: "low",
-      priorityScore: 42,
-      rationale: "This alert is already read and reflects a successful legal milestone rather than a blocking exception.",
-      analyzedAt: "2026-07-20T01:15:00Z",
-      model: "seeded-mobile-analysis",
-      interactionWeight: 0.31,
     },
   }),
 ];

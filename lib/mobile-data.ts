@@ -26,9 +26,9 @@ export type MissionRecord = {
 
 export type IdentityStatus = "verified" | "pending" | "failed";
 export type OnboardingStatus = "draft" | "in_review" | "verified" | "needs_attention";
-export type KybDocumentStatus = "pending" | "verified" | "rejected" | "requires_review";
-export type KybEngine = "paddleocr" | "vlm" | "docling" | "tesseract_fallback" | "manual";
-export type LivenessStatus = "pending" | "verified" | "failed";
+export type KybDocumentStatus = "pending" | "verified" | "rejected" | "requires_review" | "unavailable";
+export type KybEngine = "paddleocr" | "vlm" | "docling" | "tesseract_fallback" | "vision_llm" | "manual";
+export type LivenessStatus = "pending" | "verified" | "failed" | "requires_review" | "unavailable";
 
 export type OnboardingChecklistItem = {
   key: string;
@@ -44,6 +44,8 @@ export type IdentityDocumentRecord = {
   extractedSummary?: string;
   confidence?: number;
   engine?: KybEngine;
+  analysisProvenance?: "model_assisted" | "manual_review" | "unavailable";
+  analysisReason?: string | null;
   uploadedAt: string;
 };
 
@@ -56,6 +58,8 @@ export type BusinessDocumentRecord = {
   engine?: KybEngine;
   confidence?: number | null;
   extractedSummary?: string | null;
+  analysisProvenance?: "model_assisted" | "manual_review" | "unavailable";
+  analysisReason?: string | null;
   uploadedAt: string;
 };
 
@@ -89,6 +93,8 @@ export type LivenessSessionRecord = {
   failureReason?: string | null;
   createdAt: string;
   verifiedAt: string | null;
+  verificationMethod?: "challenge_video" | "single_image_screening" | "unavailable";
+  availabilityReason?: string | null;
 };
 
 export type OnboardingRecord = {
@@ -147,6 +153,9 @@ export type ParcelGeofenceSubscription = {
   enabled: boolean;
   lastTriggeredAt: string | null;
   lastTransition: "enter" | "exit" | null;
+  runtimeStatus?: "unknown" | "active" | "configured_only" | "permission_denied" | "unsupported" | "failed";
+  runtimeReason?: string | null;
+  runtimeCheckedAt?: string | null;
 };
 
 export type NotificationPreferences = {

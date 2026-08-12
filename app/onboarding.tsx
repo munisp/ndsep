@@ -63,7 +63,7 @@ export default function OnboardingScreen() {
     if (!permission?.granted) {
       const status = await requestPermission();
       if (!status.granted) {
-        Alert.alert("Camera permission required", "Allow camera access to complete liveness verification.");
+        Alert.alert("Camera permission required", "Allow camera access to run the available single-image screening step.");
         return;
       }
     }
@@ -87,11 +87,11 @@ export default function OnboardingScreen() {
         sessionId: livenessSessionId,
         mimeType: "image/jpeg",
         base64Data,
-        framesAnalyzed: 5,
+        framesAnalyzed: 1,
       });
       setCaptureOpen(false);
     } catch (error) {
-      Alert.alert("Liveness verification failed", error instanceof Error ? error.message : "Please try again.");
+      Alert.alert("Liveness screening failed", error instanceof Error ? error.message : "Please try again.");
     }
   }
 
@@ -125,7 +125,7 @@ export default function OnboardingScreen() {
         <View>
           <Text className="text-3xl font-bold text-foreground">Stakeholder onboarding</Text>
           <Text className="mt-2 text-sm leading-5 text-muted">
-            Complete KYC, KYB, OCR-backed document checks, and liveness verification in one native workflow.
+            Complete KYC, KYB, model-assisted document screening, and explicitly scoped liveness review in one native workflow.
           </Text>
         </View>
 
@@ -167,7 +167,7 @@ export default function OnboardingScreen() {
 
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Document intelligence</Text>
-          <Text className="mt-2 text-sm text-muted">Capture or select clear images for OCR-backed screening and evidence extraction.</Text>
+          <Text className="mt-2 text-sm text-muted">Capture or select clear images for model-assisted screening and evidence extraction. Automated screening never verifies identity, registry authority, or document authenticity by itself.</Text>
           <View className="mt-4 gap-3">
             <Pressable onPress={() => pickDocument("identity", "National Identification Slip")}>
               <View className="rounded-2xl border border-border bg-background px-4 py-4">
@@ -185,23 +185,25 @@ export default function OnboardingScreen() {
             {bundle.onboarding.identityDocuments.map((document) => (
               <View key={document.id} className="rounded-2xl border border-border bg-background p-4">
                 <Text className="font-semibold text-foreground">{document.type}</Text>
-                <Text className="mt-1 text-sm text-muted">Status: {document.status} · Engine: {document.engine ?? "manual"}</Text>
+                <Text className="mt-1 text-sm text-muted">Status: {document.status} · Engine: {document.engine ?? "manual"} · {document.analysisProvenance ?? "manual_review"}</Text>
                 <Text className="mt-1 text-sm text-muted">Confidence: {document.confidence ?? 0}%</Text>
+                {document.analysisReason ? <Text className="mt-1 text-xs text-warning">{document.analysisReason}</Text> : null}
               </View>
             ))}
             {bundle.onboarding.businessProfile.documents.map((document) => (
               <View key={document.id} className="rounded-2xl border border-border bg-background p-4">
                 <Text className="font-semibold text-foreground">{document.type}</Text>
-                <Text className="mt-1 text-sm text-muted">Status: {document.status} · Engine: {document.engine ?? "manual"}</Text>
+                <Text className="mt-1 text-sm text-muted">Status: {document.status} · Engine: {document.engine ?? "manual"} · {document.analysisProvenance ?? "manual_review"}</Text>
                 <Text className="mt-1 text-sm text-muted">Confidence: {document.confidence ?? 0}%</Text>
+                {document.analysisReason ? <Text className="mt-1 text-xs text-warning">{document.analysisReason}</Text> : null}
               </View>
             ))}
           </View>
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">
-          <Text className="text-lg font-semibold text-foreground">Liveness verification</Text>
-          <Text className="mt-2 text-sm text-muted">Use the front camera to complete the blink-turn-smile screening step.</Text>
+          <Text className="text-lg font-semibold text-foreground">Liveness screening</Text>
+          <Text className="mt-2 text-sm text-muted">This build captures one still image only. It cannot complete or verify a blink-turn-smile liveness challenge; use it only to route the case to an authorized review process.</Text>
           <Text className="mt-2 text-sm text-muted">Current status: {bundle.onboarding.livenessStatus}</Text>
 
           {captureOpen ? (
@@ -215,7 +217,7 @@ export default function OnboardingScreen() {
                 </Pressable>
                 <Pressable onPress={captureLiveness} style={{ flex: 1, opacity: completeLiveness.isPending ? 0.7 : 1 }}>
                   <View className="rounded-2xl bg-foreground px-4 py-4">
-                    <Text className="text-center font-semibold text-background">Capture selfie</Text>
+                    <Text className="text-center font-semibold text-background">Capture single-image screening</Text>
                   </View>
                 </Pressable>
               </View>
@@ -223,7 +225,7 @@ export default function OnboardingScreen() {
           ) : (
             <Pressable onPress={openLivenessCapture} style={{ opacity: startLiveness.isPending ? 0.7 : 1 }}>
               <View className="mt-4 rounded-2xl bg-foreground px-4 py-4">
-                <Text className="text-center font-semibold text-background">Start liveness check</Text>
+                <Text className="text-center font-semibold text-background">Start liveness screening</Text>
               </View>
             </Pressable>
           )}
@@ -231,8 +233,10 @@ export default function OnboardingScreen() {
           {bundle.onboarding.latestLivenessSession ? (
             <View className="mt-4 rounded-2xl border border-border bg-background p-4">
               <Text className="font-semibold text-foreground">Latest liveness session</Text>
+              <Text className="mt-1 text-sm text-muted">Status: {bundle.onboarding.latestLivenessSession.status} · Method: {bundle.onboarding.latestLivenessSession.verificationMethod ?? "unavailable"}</Text>
               <Text className="mt-1 text-sm text-muted">Confidence: {bundle.onboarding.latestLivenessSession.confidence}%</Text>
               <Text className="mt-1 text-sm text-muted">Motion: {bundle.onboarding.latestLivenessSession.motionScore}% · Face quality: {bundle.onboarding.latestLivenessSession.faceQualityScore}%</Text>
+              {bundle.onboarding.latestLivenessSession.availabilityReason ? <Text className="mt-1 text-xs text-warning">{bundle.onboarding.latestLivenessSession.availabilityReason}</Text> : null}
             </View>
           ) : null}
         </View>

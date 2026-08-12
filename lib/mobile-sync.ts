@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BusinessProfileRecord, GeofenceTransition, MobilePlatformBundle, NotificationPreferences, ParcelMuteDuration } from "@/lib/mobile-data";
 import { cloneSeedBundle } from "@/lib/mobile-data";
 import { registerFieldSyncBackgroundTask } from "@/lib/background-sync";
-import { syncParcelGeofences } from "@/lib/mobile-geofencing";
+import { syncParcelGeofences, type GeofenceRuntimeResult } from "@/lib/mobile-geofencing";
 import { buildActivityInteractionProfile, prependActivity, updateActivityInsight, type ActivityRecord } from "@/lib/mobile-activity";
 import { ensureNotificationPermissions, scheduleFieldUpdateNotification } from "@/lib/mobile-notifications";
 import { getQueuedFieldMutations, queueMissionStatusMutation, replayQueuedFieldMutations } from "@/lib/mobile-sync-replay";
@@ -30,6 +30,12 @@ export function useMobilePlatformBundle() {
   const [cachedBundle, setCachedBundle] = useState<MobilePlatformBundle | null>(null);
   const [cacheLoaded, setCacheLoaded] = useState(false);
   const [queuedMutations, setQueuedMutations] = useState(0);
+  const [geofenceRuntime, setGeofenceRuntime] = useState<GeofenceRuntimeResult>({
+    status: "configured_only",
+    reason: "Parcel geofence registration has not yet run on this device.",
+    activeRegionCount: 0,
+    checkedAt: new Date().toISOString(),
+  });
 
   useEffect(() => {
     loadCachedBundle()
@@ -96,7 +102,24 @@ export function useMobilePlatformBundle() {
   }, [cachedBundle, liveQuery.data, queuedMutations]);
 
   useEffect(() => {
-    syncParcelGeofences(bundle).catch(() => undefined);
+    let cancelled = false;
+    syncParcelGeofences(bundle)
+      .then((result) => {
+        if (!cancelled) setGeofenceRuntime(result);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setGeofenceRuntime({
+            status: "failed",
+            reason: `Unexpected parcel geofence sync failure: ${error instanceof Error ? error.message : "unknown error"}`,
+            activeRegionCount: 0,
+            checkedAt: new Date().toISOString(),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [bundle]);
 
   const rawMissionStatusMutation = trpc.sync.updateMissionStatus.useMutation({
@@ -242,8 +265,8 @@ export function useMobilePlatformBundle() {
     const parcel = bundle.parcels.find((item) => item.id === input.parcelId);
     const geofence = result.geofenceSubscriptions.find((item) => item.parcelId === input.parcelId);
     await prependActivity({
-      title: geofence?.enabled ? "Parcel geofence updated" : "Parcel geofence paused",
-      description: `${parcel?.parcelNumber ?? `Parcel ${input.parcelId}`} geofence alerts now use ${geofence?.radiusMeters ?? input.radiusMeters ?? 150}m monitoring with ${geofence?.transition ?? input.transition ?? "both"} transitions.`,
+      title: geofence?.enabled ? "Parcel geofence preference saved" : "Parcel geofence paused",
+      description: `${parcel?.parcelNumber ?? `Parcel ${input.parcelId}`} is configured for ${geofence?.radiusMeters ?? input.radiusMeters ?? 150}m ${geofence?.transition ?? input.transition ?? "both"} transitions. Device monitoring is reported separately and is not assumed active from this preference alone.`,
       category: "geospatial",
       tone: geofence?.enabled ? "info" : "warning",
       route: "/parcel/[id]",
@@ -287,6 +310,9 @@ export function useMobilePlatformBundle() {
           analyzedAt: new Date().toISOString(),
           model: analysis.model,
           interactionWeight: analysis.interactionWeight,
+          provenance: analysis.provenance,
+          availability: analysis.availability,
+          reason: analysis.reason,
         }),
       ),
     );
@@ -300,6 +326,7 @@ export function useMobilePlatformBundle() {
     isLoading: liveQuery.isLoading && !cachedBundle,
     isRefetching: liveQuery.isRefetching,
     hasLiveConnection: Boolean(liveQuery.data),
+    geofenceRuntime,
     refresh: liveQuery.refetch,
     updateMissionStatus,
     updateNotificationPreferences,
@@ -321,15 +348,15 @@ export function useMobilePlatformBundle() {
       ...completeLiveness,
       mutateAsync: async (...args: Parameters<typeof completeLiveness.mutateAsync>) => {
         const result = await completeLiveness.mutateAsync(...args);
-        await prependActivity({ title: "Liveness review completed", description: `The most recent liveness session finished with status ${result.analysis.status}.`, category: "onboarding", tone: result.analysis.status === "verified" ? "success" : "warning", route: "/onboarding" });
+        await prependActivity({ title: "Liveness screening completed", description: `The most recent liveness session finished with status ${result.analysis.status}. No single-image screening is treated as verified liveness.`, category: "onboarding", tone: "warning", route: "/onboarding" });
         await scheduleFieldUpdateNotification({ title: "Liveness review updated", body: `Liveness session finished with status ${result.analysis.status}.`, category: "onboarding" });
         return result;
       },
     },
     approveIdentityDocument: async (documentId: string) => {
       const result = await approveIdentityDocument.mutateAsync({ documentId });
-      await prependActivity({ title: "KYC document approved", description: `${result.document.type} was approved directly from the mobile inbox.`, category: "onboarding", tone: "success", route: "/onboarding" });
-      await scheduleFieldUpdateNotification({ title: "KYC document approved", body: `${result.document.type} was approved from the mobile inbox.`, category: "onboarding" });
+      await prependActivity({ title: "KYC manual review requested", description: `${result.document.type} was routed for manual review from the mobile inbox. No automated or inbox action verified the identity document.`, category: "onboarding", tone: "warning", route: "/onboarding" });
+      await scheduleFieldUpdateNotification({ title: "KYC review requested", body: `${result.document.type} requires an authorized manual verification decision.`, category: "onboarding" });
       return result;
     },
     advanceLegalWorkflow: {

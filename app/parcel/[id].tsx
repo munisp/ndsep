@@ -26,7 +26,7 @@ function SelectionChip({ label, active, onPress }: { label: string; active: bool
 
 export default function ParcelDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { bundle, toggleParcelSubscription, updateParcelGeofence } = useMobilePlatformBundle();
+  const { bundle, toggleParcelSubscription, updateParcelGeofence, geofenceRuntime } = useMobilePlatformBundle();
 
   const parcelId = Number(id ?? bundle.parcels[0]?.id ?? 0);
   const parcel = bundle.parcels.find((item) => item.id === parcelId) ?? bundle.parcels[0];
@@ -104,8 +104,16 @@ export default function ParcelDetailScreen() {
           </Text>
           <Text className="mt-3 text-sm text-muted">
             {geofenceEnabled
-              ? `Geofence active · ${geofence?.radiusMeters ?? 150}m radius · ${geofence?.transition ?? "both"} transitions`
+              ? `Geofence preference saved · ${geofence?.radiusMeters ?? 150}m radius · ${geofence?.transition ?? "both"} transitions`
               : "Geofence paused for this parcel"}
+          </Text>
+          <Text className={`mt-2 text-xs ${geofenceRuntime.status === "active" ? "text-success" : "text-warning"}`}>
+            Device monitoring: {geofenceRuntime.status.replace(/_/g, " ")}
+            {geofenceRuntime.status === "active"
+              ? ` · ${geofenceRuntime.activeRegionCount} registered region${geofenceRuntime.activeRegionCount === 1 ? "" : "s"}`
+              : geofenceRuntime.reason
+                ? ` · ${geofenceRuntime.reason}`
+                : ""}
           </Text>
           <Text className="mt-2 text-xs text-muted">
             {geofence?.lastTriggeredAt
@@ -115,7 +123,7 @@ export default function ParcelDetailScreen() {
           <Pressable onPress={() => void handleToggleGeofence()} disabled={!isFollowed} style={({ pressed }) => [{ opacity: pressed || !isFollowed ? 0.7 : 1 }]}> 
             <View className={`mt-4 rounded-2xl px-4 py-4 ${geofenceEnabled ? "bg-foreground" : "border border-border bg-background"}`}>
               <Text className={`text-center font-semibold ${geofenceEnabled ? "text-background" : "text-foreground"}`}>
-                {geofenceEnabled ? "Pause geofence alerts" : "Enable geofence alerts"}
+                {geofenceEnabled ? "Pause geofence preference" : "Save geofence preference"}
               </Text>
             </View>
           </Pressable>

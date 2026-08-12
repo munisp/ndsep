@@ -79,15 +79,18 @@ export default function AuditVerifyScreen() {
 
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Published verification key</Text>
-          <Text className="mt-3 text-sm text-muted">Key ID: {verificationKeyQuery.data?.keyId ?? "loading"}</Text>
+          <Text className={`mt-3 text-sm font-semibold ${verificationKeyQuery.data?.available ? "text-success" : "text-warning"}`}>{verificationKeyQuery.data?.available ? "Configured verification key" : "Verification unavailable"}</Text>
+          <Text className="mt-2 text-sm text-muted">Key ID: {verificationKeyQuery.data?.keyId ?? "not configured"}</Text>
           <Text className="mt-1 text-sm text-muted">Algorithm: {verificationKeyQuery.data?.algorithm ?? "loading"}</Text>
+          <Text className="mt-2 text-xs text-warning">{verificationKeyQuery.data?.reason ?? ""}</Text>
           <Text className="mt-3 text-xs text-foreground">{verificationKeyQuery.data?.publicKeyPem ?? "Public key unavailable."}</Text>
         </View>
 
         {verification ? (
           <View className="rounded-3xl border border-border bg-surface p-5">
             <Text className="text-lg font-semibold text-foreground">Verification result</Text>
-            <Text className={`mt-3 text-base font-semibold ${verification.valid ? "text-success" : "text-error"}`}>{verification.valid ? "Valid package" : "Package validation failed"}</Text>
+            <Text className={`mt-3 text-base font-semibold ${verification.valid ? "text-success" : "text-error"}`}>{verification.valid ? "Valid package" : verification.availability === "unavailable" ? "Verification unavailable" : "Package validation failed"}</Text>
+            {verification.reason ? <Text className="mt-2 text-sm text-warning">{verification.reason}</Text> : null}
             <Text className="mt-3 text-sm text-muted">Hash matches: {verification.hashMatches ? "Yes" : "No"}</Text>
             <Text className="mt-1 text-sm text-muted">Signature matches: {verification.signatureMatches ? "Yes" : "No"}</Text>
             <Text className="mt-1 text-sm text-muted">Matches latest server package: {verification.matchesLatestPackage ? "Yes" : "No"}</Text>

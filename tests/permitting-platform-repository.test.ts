@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -36,6 +37,14 @@ const UPLOAD_DIR = path.join(process.cwd(), "server", "uploads");
 
 describe("permitting platform repository", () => {
   beforeEach(() => {
+    const keyPair = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    });
+    process.env.AUDIT_PRIVATE_KEY = keyPair.privateKey;
+    process.env.AUDIT_PUBLIC_KEY = keyPair.publicKey;
+    process.env.AUDIT_PUBLIC_KEY_ID = "test-audit-rsa-key";
     fs.rmSync(STORE_PATH, { force: true });
     fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -165,6 +174,38 @@ describe("permitting platform repository", () => {
     expect(verification.hashMatches).toBe(true);
     expect(verification.signatureMatches).toBe(true);
     expect(verification.matchesLatestPackage).toBe(true);
+    expect(verification.availability).toBe("available");
+  });
+
+  it("fails closed instead of generating a transient audit signing key", () => {
+    delete process.env.AUDIT_PRIVATE_KEY;
+    delete process.env.AUDIT_PUBLIC_KEY;
+    delete process.env.AUDIT_PUBLIC_KEY_ID;
+    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+    expect(exported.packageMetadata?.signingStatus).toBe("unavailable");
+    expect(exported.packageMetadata?.signature).toBe("");
+    const verification = verifyAuditPackage({
+      caseId: "permit-mining-001",
+      fileName: exported.fileName,
+      content: exported.content,
+      sha256: exported.packageMetadata!.sha256,
+      signature: "not-a-real-signature",
+    });
+    expect(verification.valid).toBe(false);
+    expect(verification.availability).toBe("unavailable");
+  });
+
+  it("rejects tampered audit content even when a signing key is configured", () => {
+    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+    const verification = verifyAuditPackage({
+      caseId: "permit-mining-001",
+      fileName: exported.fileName,
+      content: `${exported.content}\nTampered row`,
+      sha256: exported.packageMetadata!.sha256,
+      signature: exported.packageMetadata!.signature,
+    });
+    expect(verification.valid).toBe(false);
+    expect(verification.hashMatches).toBe(false);
   });
 
   it("allows planning supervisors to override auto-assigned reviewers", () => {
@@ -258,6 +299,12 @@ describe("permitting platform repository", () => {
     const companyField = result.caseRecord.formSections.flatMap((section) => section.fields).find((field) => field.key === "company_name");
     expect(companyField?.value).toBeTruthy();
     expect(result.extraction?.documentName).toBe("mining-intake.txt");
+    expect(result.extraction?.status).toBe("requires_review");
+    expect(["model", "heuristic"]).toContain(result.extraction?.provenance);
+    if (result.extraction?.provenance === "heuristic") {
+      expect(result.extraction.confidence).toBeNull();
+      expect(result.caseRecord.formSections.flatMap((section) => section.fields).find((field) => field.key === "company_name")?.source).toBe("heuristic");
+    }
   });
 
   it("stores uploaded permit documents and extracts fields from portable file uploads", async () => {
@@ -273,5 +320,7 @@ describe("permitting platform repository", () => {
     expect(upload.caseRecord.uploadedDocuments?.length).toBeGreaterThan(0);
     expect(upload.extraction?.populatedKeys.length).toBeGreaterThan(0);
     expect(upload.caseRecord.auditHistory?.some((event) => event.type === "document_upload")).toBe(true);
+    expect(upload.extraction?.status).toBe("requires_review");
+    expect(upload.uploadedDocument.extractionStatus).toBe("requires_review");
   });
 });

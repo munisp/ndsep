@@ -527,10 +527,11 @@ export default function PermitDetailScreen() {
             </View>
             {record.lastAiExtraction ? (
               <View className="rounded-2xl border border-border bg-background p-4">
-                <Text className="text-sm font-semibold text-foreground">Last AI extraction</Text>
-                <Text className="mt-2 text-sm text-muted">{record.lastAiExtraction.documentName} · {record.lastAiExtraction.model}</Text>
-                <Text className="mt-1 text-xs text-muted">Source: {record.lastAiExtraction.sourceType ?? "text"} · Confidence: {record.lastAiExtraction.confidence ?? 0}</Text>
+                <Text className="text-sm font-semibold text-foreground">Last document extraction</Text>
+                <Text className="mt-2 text-sm text-muted">{record.lastAiExtraction.documentName} · {record.lastAiExtraction.model ?? "model unavailable"}</Text>
+                <Text className="mt-1 text-xs text-muted">Source: {record.lastAiExtraction.sourceType ?? "text"} · Provenance: {record.lastAiExtraction.provenance ?? "unavailable"} · Status: {record.lastAiExtraction.status ?? "requires_review"} · Confidence: {record.lastAiExtraction.confidence ?? "not available"}</Text>
                 <Text className="mt-1 text-xs text-muted">Populated: {record.lastAiExtraction.populatedKeys.join(", ") || "No matching fields yet"}</Text>
+                <Text className="mt-1 text-xs text-warning">{record.lastAiExtraction.reason ?? "Extracted values require reviewer confirmation before any permit decision."}</Text>
               </View>
             ) : null}
           </SectionCard>

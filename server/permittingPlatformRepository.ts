@@ -350,7 +350,11 @@ function getFieldMap(record: PermitCaseRecord) {
   return record.formSections.flatMap((section) => section.fields).map((field) => field.key);
 }
 
-function applyExtractedFields(record: PermitCaseRecord, extracted: Array<{ key: string; value: string }>) {
+function applyExtractedFields(
+  record: PermitCaseRecord,
+  extracted: Array<{ key: string; value: string }>,
+  provenance: "model" | "heuristic" | "unavailable",
+) {
   const populatedKeys: string[] = [];
   record.formSections = record.formSections.map((section) => ({
     ...section,
@@ -358,7 +362,7 @@ function applyExtractedFields(record: PermitCaseRecord, extracted: Array<{ key: 
       const matched = extracted.find((item) => item.key === field.key);
       if (!matched?.value) return inferFieldPermissions(record, field);
       populatedKeys.push(field.key);
-      return inferFieldPermissions(record, { ...field, value: matched.value, source: "ai" });
+      return inferFieldPermissions(record, { ...field, value: matched.value, source: provenance === "heuristic" ? "heuristic" : "ai" });
     }),
   }));
   return populatedKeys;
@@ -404,10 +408,20 @@ function heuristicExtraction(record: PermitCaseRecord, documentText: string) {
 }
 
 async function runStructuredExtraction(record: PermitCaseRecord, documentText: string) {
-  let model = "heuristic-fallback";
+  let model: string | null = null;
   try {
     const models = await listLLMModels();
-    model = models.data.find((item) => item.id.includes("llama"))?.id ?? models.data[0]?.id ?? "portable-model";
+    model = models.data.find((item) => item.id.includes("llama"))?.id ?? models.data[0]?.id ?? null;
+    if (!model) {
+      return {
+        extracted: heuristicExtraction(record, documentText),
+        model: null,
+        confidence: null,
+        provenance: "heuristic" as const,
+        status: "requires_review" as const,
+        reason: "No structured extraction model is configured. Values were derived only from visible label-pattern rules.",
+      };
+    }
     const response = await Promise.race([
       invokeLLM({
         model,
@@ -453,13 +467,19 @@ async function runStructuredExtraction(record: PermitCaseRecord, documentText: s
     return {
       extracted: Array.isArray(parsed.extracted) ? parsed.extracted : [],
       model,
-      confidence: Number(parsed.confidence) || 0,
+      confidence: Math.max(0, Math.min(100, Number(parsed.confidence) || 0)),
+      provenance: "model" as const,
+      status: "requires_review" as const,
+      reason: "Model-assisted extraction requires reviewer confirmation before any permit decision.",
     };
-  } catch {
+  } catch (error) {
     return {
       extracted: heuristicExtraction(record, documentText),
       model,
-      confidence: 52,
+      confidence: null,
+      provenance: "heuristic" as const,
+      status: "requires_review" as const,
+      reason: `Structured extraction failed: ${error instanceof Error ? error.message : "unknown error"}. Values were derived only from visible label-pattern rules.`,
     };
   }
 }
@@ -468,16 +488,22 @@ async function extractTextFromUpload(input: { mimeType: string; buffer: Buffer }
   if (input.mimeType.includes("pdf")) {
     try {
       const pdfParse = (pdfParseModule as unknown as { default?: (buffer: Buffer) => Promise<{ text?: string }> }).default;
-      const parsed = pdfParse ? await pdfParse(input.buffer) : { text: input.buffer.toString("utf8") };
-      return { text: parsed.text?.trim() || "", sourceType: "pdf" as const };
-    } catch {
-      return { text: input.buffer.toString("utf8"), sourceType: "pdf" as const };
+      if (!pdfParse) {
+        return { text: "", sourceType: "pdf" as const, status: "unavailable" as const, reason: "No PDF parser is available; binary bytes were not treated as extracted text." };
+      }
+      const parsed = await pdfParse(input.buffer);
+      const text = parsed.text?.trim() || "";
+      return text
+        ? { text, sourceType: "pdf" as const, status: "processed" as const, reason: null }
+        : { text: "", sourceType: "pdf" as const, status: "requires_review" as const, reason: "The PDF yielded no extractable text and requires an OCR-capable review path." };
+    } catch (error) {
+      return { text: "", sourceType: "pdf" as const, status: "unavailable" as const, reason: `PDF parsing failed: ${error instanceof Error ? error.message : "unknown error"}. Binary bytes were not treated as document text.` };
     }
   }
   if (input.mimeType.startsWith("image/")) {
-    return { text: "", sourceType: "image" as const };
+    return { text: "", sourceType: "image" as const, status: "pending" as const, reason: null };
   }
-  return { text: input.buffer.toString("utf8"), sourceType: "text" as const };
+  return { text: input.buffer.toString("utf8"), sourceType: "text" as const, status: "processed" as const, reason: null };
 }
 
 function buildFieldPairsFromVisionResult(result: Awaited<ReturnType<typeof analyzeDocumentImage>>) {
@@ -514,59 +540,58 @@ function serializeAuditAsCsv(record: PermitCaseRecord) {
   return [header, ...rows].join("\n");
 }
 
-const FALLBACK_AUDIT_KEYPAIR = crypto.generateKeyPairSync("rsa", {
-  modulusLength: 2048,
-  publicKeyEncoding: { type: "spki", format: "pem" },
-  privateKeyEncoding: { type: "pkcs8", format: "pem" },
-});
-
-function getAuditPrivateKey() {
-  return process.env.AUDIT_PRIVATE_KEY?.replace(/\\n/g, "\n") || FALLBACK_AUDIT_KEYPAIR.privateKey;
-}
-
-function getAuditPublicKey() {
-  const explicit = process.env.AUDIT_PUBLIC_KEY?.replace(/\\n/g, "\n");
-  if (explicit) return explicit;
-  return FALLBACK_AUDIT_KEYPAIR.publicKey;
-}
-
-function getAuditPublicKeyId() {
-  return process.env.AUDIT_PUBLIC_KEY_ID || "portable-audit-rsa-key";
+function getAuditSigningConfiguration() {
+  const privateKey = process.env.AUDIT_PRIVATE_KEY?.replace(/\\n/g, "\n") || null;
+  const publicKey = process.env.AUDIT_PUBLIC_KEY?.replace(/\\n/g, "\n") || null;
+  const keyId = process.env.AUDIT_PUBLIC_KEY_ID || null;
+  if (!privateKey || !publicKey || !keyId) {
+    return {
+      available: false as const,
+      privateKey: null,
+      publicKey: null,
+      keyId: null,
+      reason: "Audit signing is unavailable because AUDIT_PRIVATE_KEY, AUDIT_PUBLIC_KEY, and AUDIT_PUBLIC_KEY_ID must all be configured. No transient signing key was generated.",
+    };
+  }
+  return { available: true as const, privateKey, publicKey, keyId, reason: null };
 }
 
 function buildSigningKeyRegistry(): AuditSigningKeyRecord[] {
+  const config = getAuditSigningConfiguration();
+  if (!config.available) return [];
   const activeKey: AuditSigningKeyRecord = {
-    keyId: getAuditPublicKeyId(),
+    keyId: config.keyId,
     algorithm: "RSA-SHA256",
-    publicKeyPem: getAuditPublicKey(),
-    createdAt: "2026-07-20T00:00:00Z",
+    publicKeyPem: config.publicKey,
+    createdAt: new Date().toISOString(),
     active: true,
   };
-  const revokedKey: AuditSigningKeyRecord = {
-    keyId: `${getAuditPublicKeyId()}-revoked-2026q1`,
-    algorithm: "RSA-SHA256",
-    publicKeyPem: getAuditPublicKey(),
-    createdAt: "2026-01-10T00:00:00Z",
-    active: false,
-    revokedAt: "2026-05-01T00:00:00Z",
-    revocationReason: "Quarterly rotation after regulator certificate rollover.",
-  };
-  return [activeKey, revokedKey];
+  return [activeKey];
 }
 
 function signAuditContent(content: string) {
+  const config = getAuditSigningConfiguration();
   const sha256 = crypto.createHash("sha256").update(content).digest("hex");
-  const signature = crypto.sign("RSA-SHA256", Buffer.from(sha256, "utf8"), getAuditPrivateKey()).toString("base64");
-  return { sha256, signature, algorithm: "RSA-SHA256", publicKeyId: getAuditPublicKeyId() };
+  if (!config.available) {
+    return { sha256, signature: "", algorithm: "RSA-SHA256", publicKeyId: null, signingStatus: "unavailable" as const, reason: config.reason };
+  }
+  const signature = crypto.sign("RSA-SHA256", Buffer.from(sha256, "utf8"), config.privateKey).toString("base64");
+  return { sha256, signature, algorithm: "RSA-SHA256", publicKeyId: config.keyId, signingStatus: "configured" as const, reason: null };
 }
 
 function verifySignedAuditContent(input: { content: string; sha256: string; signature: string }) {
+  const config = getAuditSigningConfiguration();
   const recalculatedHash = crypto.createHash("sha256").update(input.content).digest("hex");
-  const signatureMatches = crypto.verify("RSA-SHA256", Buffer.from(recalculatedHash, "utf8"), getAuditPublicKey(), Buffer.from(input.signature, "base64"));
+  if (!config.available) {
+    return { hashMatches: recalculatedHash === input.sha256, signatureMatches: false, recalculatedHash, availability: "unavailable" as const, reason: config.reason };
+  }
+  const signatureMatches = crypto.verify("RSA-SHA256", Buffer.from(recalculatedHash, "utf8"), config.publicKey, Buffer.from(input.signature, "base64"));
   return {
     hashMatches: recalculatedHash === input.sha256,
     signatureMatches,
     recalculatedHash,
+    availability: "available" as const,
+    reason: null,
   };
 }
 
@@ -603,7 +628,7 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
   const store = getPermittingPlatform();
   const record = getRecordOrThrow(store, input.caseId);
   const content = input.format === "csv" ? serializeAuditAsCsv(record) : serializeAuditAsMarkdown(record);
-  const { sha256, signature, algorithm, publicKeyId } = signAuditContent(content);
+  const { sha256, signature, algorithm, publicKeyId, signingStatus, reason } = signAuditContent(content);
   const fileName = `${record.id}-audit-history.${input.format === "csv" ? "csv" : "md"}`;
   const generatedAt = new Date().toISOString();
   record.latestAuditPackage = {
@@ -612,19 +637,26 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
     fileName,
     sha256,
     signature,
-    signedBy: "portable-audit-signer",
+    signedBy: signingStatus === "configured" ? "configured-audit-signer" : "unavailable",
     algorithm,
-    publicKeyId,
-    verifierHint: "Verify by recomputing the SHA-256 hash of the exported file and validating the RSA-SHA256 signature with the published audit verification key.",
+    publicKeyId: publicKeyId ?? undefined,
+    signingStatus,
+    verifierHint:
+      signingStatus === "configured"
+        ? "Verify by recomputing the SHA-256 hash of the exported file and validating the RSA-SHA256 signature with the published audit verification key."
+        : `This export is unsigned and cannot be independently verified. ${reason}`,
   };
   appendCustodyEvent(record, {
     packageType: "audit",
     packageRef: fileName,
     occurredAt: generatedAt,
-    actor: "portable-audit-signer",
+    actor: signingStatus === "configured" ? "configured-audit-signer" : "system",
     role: "system",
     action: "generated",
-    summary: `Audit package ${fileName} generated with signing key ${publicKeyId}.`,
+    summary:
+      signingStatus === "configured"
+        ? `Audit package ${fileName} generated with signing key ${publicKeyId}.`
+        : `Audit export ${fileName} generated without a signature because audit key configuration is unavailable.`,
   });
   writeStore(store);
     return {
@@ -636,11 +668,14 @@ export function exportPermitAuditHistory(input: { caseId: string; format: "markd
 }
 
 export function getAuditVerificationKey() {
+  const config = getAuditSigningConfiguration();
   return {
-    keyId: getAuditPublicKeyId(),
+    available: config.available,
+    keyId: config.keyId,
     algorithm: "RSA-SHA256",
-    publicKeyPem: getAuditPublicKey(),
+    publicKeyPem: config.publicKey,
     registry: buildSigningKeyRegistry(),
+    reason: config.reason,
   };
 }
 
@@ -663,13 +698,16 @@ export function verifyAuditPackage(input: {
       actor: "external verifier",
       role: "system",
       action: "verified",
-      summary: `Audit package ${input.fileName} verified with key ${getAuditPublicKeyId()} and result ${verification.hashMatches && verification.signatureMatches ? "valid" : "invalid"}.`,
+      summary:
+        verification.availability === "available"
+          ? `Audit package ${input.fileName} verification result: ${verification.hashMatches && verification.signatureMatches ? "valid" : "invalid"}.`
+          : `Audit package ${input.fileName} could not be independently verified because audit key configuration is unavailable.`,
     });
     writeStore(platform);
   }
   return {
     fileName: input.fileName,
-    valid: verification.hashMatches && verification.signatureMatches,
+    valid: verification.availability === "available" && verification.hashMatches && verification.signatureMatches,
     hashMatches: verification.hashMatches,
     signatureMatches: verification.signatureMatches,
     recalculatedHash: verification.recalculatedHash,
@@ -677,6 +715,8 @@ export function verifyAuditPackage(input: {
     linkedCaseId: linkedCase?.id ?? null,
     verificationKey: getAuditVerificationKey(),
     keyRegistry: platform.signingKeys ?? buildSigningKeyRegistry(),
+    availability: verification.availability,
+    reason: verification.reason,
   };
 }
 
@@ -928,22 +968,26 @@ export async function extractPermitDocumentToForm(input: { caseId: string; docum
   const store = getPermittingPlatform();
   const record = getRecordOrThrow(store, input.caseId);
   const result = await runStructuredExtraction(record, input.documentText);
-  const populatedKeys = applyExtractedFields(record, result.extracted);
-  record.lastAiExtraction = {
+  const populatedKeys = applyExtractedFields(record, result.extracted, result.provenance);
+  const extraction = {
     documentName: input.documentName,
     extractedAt: new Date().toISOString(),
     model: result.model,
     populatedKeys,
-    sourceType: "text",
+    sourceType: "text" as const,
     confidence: result.confidence,
+    provenance: result.provenance,
+    status: result.status,
+    reason: result.reason,
   };
-  record.updatedAt = record.lastAiExtraction.extractedAt;
+  record.lastAiExtraction = extraction;
+  record.updatedAt = extraction.extractedAt;
   appendAuditEvent(record, {
-    createdAt: record.lastAiExtraction.extractedAt,
+    createdAt: extraction.extractedAt,
     actor: "system",
     role: "system",
     type: "ai_extraction",
-    summary: `Text extraction populated ${populatedKeys.length} fields from ${input.documentName}.`,
+    summary: `${result.provenance === "model" ? "Model-assisted" : "Rule-based"} text extraction populated ${populatedKeys.length} fields from ${input.documentName}; reviewer confirmation is required.`,
   });
   writeStore(store);
   return { caseRecord: record, extraction: record.lastAiExtraction };
@@ -963,8 +1007,11 @@ export async function uploadPermitDocumentAndExtract(input: {
   const extractedSource = await extractTextFromUpload({ mimeType: input.mimeType, buffer });
 
   let extracted: Array<{ key: string; value: string }> = [];
-  let model = "heuristic-fallback";
-  let confidence = 45;
+  let model: string | null = null;
+  let confidence: number | null = null;
+  let provenance: "model" | "heuristic" | "unavailable" = "unavailable";
+  let extractionStatus: "processed" | "requires_review" | "unavailable" | "failed" = extractedSource.status === "unavailable" ? "unavailable" : "requires_review";
+  let extractionReason: string | null = extractedSource.reason;
 
   if (extractedSource.sourceType === "image") {
     const analysis = await analyzeDocumentImage({
@@ -974,25 +1021,32 @@ export async function uploadPermitDocumentAndExtract(input: {
       documentType: `${record.sector}-permit`,
     });
     extracted = buildFieldPairsFromVisionResult(analysis);
-    model = analysis.engine ?? "vision-analysis";
+    model = analysis.model;
     confidence = analysis.confidence;
-    if (!extracted.length && analysis.summary) {
+    provenance = analysis.provenance === "model_assisted" ? "model" : "unavailable";
+    extractionStatus = analysis.availability === "available" ? "requires_review" : "unavailable";
+    extractionReason = analysis.reason;
+    if (!extracted.length && analysis.availability === "available" && analysis.summary) {
       const fallback = await runStructuredExtraction(record, analysis.summary);
       extracted = fallback.extracted;
       model = fallback.model;
-      confidence = Math.max(confidence, fallback.confidence);
+      confidence = fallback.confidence;
+      provenance = fallback.provenance;
+      extractionStatus = fallback.status;
+      extractionReason = fallback.reason;
     }
-  } else {
+  } else if (extractedSource.status !== "unavailable") {
     const structured = await runStructuredExtraction(record, extractedSource.text);
     extracted = structured.extracted;
     model = structured.model;
     confidence = structured.confidence;
+    provenance = structured.provenance;
+    extractionStatus = structured.status;
+    extractionReason = structured.reason;
   }
 
-  if (!extracted.length && extractedSource.text) extracted = heuristicExtraction(record, extractedSource.text);
-
   const uploadedAt = new Date().toISOString();
-  const populatedKeys = applyExtractedFields(record, extracted);
+  const populatedKeys = applyExtractedFields(record, extracted, provenance);
   const uploadedDocument = {
     id: `doc-${Date.now()}`,
     fileName: input.fileName,
@@ -1001,8 +1055,13 @@ export async function uploadPermitDocumentAndExtract(input: {
     publicUrl: uploaded.url,
     uploadedAt,
     uploadedByRole: input.uploadedByRole,
-    extractedTextPreview: extractedSource.sourceType === "image" ? `Vision-assisted extraction for ${input.fileName}` : extractedSource.text.slice(0, 320),
-    extractionStatus: "processed" as const,
+    extractedTextPreview:
+      extractedSource.sourceType === "image"
+        ? extractionStatus === "unavailable"
+          ? extractionReason || `Automated image analysis is unavailable for ${input.fileName}.`
+          : `Model-assisted image screening for ${input.fileName}; reviewer confirmation is required.`
+        : extractedSource.text.slice(0, 320) || extractionReason || "No extractable text was produced.",
+    extractionStatus,
   };
   record.uploadedDocuments = record.uploadedDocuments ?? [];
   record.uploadedDocuments.unshift(uploadedDocument);
@@ -1013,6 +1072,9 @@ export async function uploadPermitDocumentAndExtract(input: {
     populatedKeys,
     sourceType: extractedSource.sourceType,
     confidence,
+    provenance,
+    status: extractionStatus,
+    reason: extractionReason,
   };
   record.updatedAt = uploadedAt;
   appendAuditEvent(record, {
@@ -1020,14 +1082,19 @@ export async function uploadPermitDocumentAndExtract(input: {
     actor: input.uploadedByRole,
     role: input.uploadedByRole,
     type: "document_upload",
-    summary: `Uploaded ${input.fileName} for extraction with ${populatedKeys.length} populated fields.`,
+    summary: `Uploaded ${input.fileName}; extraction status is ${extractionStatus} with ${populatedKeys.length} populated fields.`,
   });
   appendAuditEvent(record, {
     createdAt: uploadedAt,
     actor: "system",
     role: "system",
     type: "ai_extraction",
-    summary: `AI extraction completed for ${input.fileName} with confidence ${confidence}.`,
+    summary:
+      provenance === "model"
+        ? `Model-assisted extraction completed for ${input.fileName}; reviewer confirmation is required.`
+        : provenance === "heuristic"
+          ? `Rule-based extraction completed for ${input.fileName}; this is not an AI-verified result and requires reviewer confirmation.`
+          : `Automated extraction was unavailable for ${input.fileName}; no verified result was produced.`,
   });
   writeStore(store);
   return { caseRecord: record, extraction: record.lastAiExtraction, uploadedDocument };

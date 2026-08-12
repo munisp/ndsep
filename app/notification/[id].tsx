@@ -108,7 +108,7 @@ export default function NotificationDetailScreen() {
                 <Text className="mt-2 text-sm leading-5 text-white/85">{item.aiInsight?.summary ?? item.description}</Text>
                 <Text className="mt-3 text-xs text-white/80">
                   Priority {item.aiInsight?.priorityLevel ?? "pending"}
-                  {item.aiInsight ? ` · Score ${item.aiInsight.priorityScore}` : " · AI analysis pending"}
+                  {item.aiInsight ? ` · Score ${item.aiInsight.priorityScore} · ${item.aiInsight.provenance === "model" ? "model-assisted" : "rule-based; model unavailable"}` : " · model analysis pending"}
                 </Text>
               </View>
 
@@ -118,7 +118,12 @@ export default function NotificationDetailScreen() {
                 <Text className="mt-3 text-sm text-muted">Parcel: {item.parcelNumber ?? "Not parcel-bound"}</Text>
                 <Text className="mt-2 text-sm text-muted">Received: {new Date(item.timestamp).toLocaleString()}</Text>
                 <Text className="mt-2 text-sm text-muted">Status: {item.dismissedAt ? "Dismissed from inbox" : item.unread ? "Unread" : "Reviewed"}</Text>
-                {item.aiInsight ? <Text className="mt-2 text-sm text-muted">AI rationale: {item.aiInsight.rationale}</Text> : null}
+                {item.aiInsight ? (
+                  <>
+                    <Text className="mt-2 text-sm text-muted">{item.aiInsight.provenance === "model" ? "Model rationale" : "Rule-based rationale"}: {item.aiInsight.rationale}</Text>
+                    {item.aiInsight.reason ? <Text className="mt-2 text-xs text-warning">Analysis availability: {item.aiInsight.reason}</Text> : null}
+                  </>
+                ) : null}
                 {item.geofenceContext ? (
                   <Text className="mt-2 text-sm text-muted">
                     Geofence: {item.geofenceContext.transition} within {item.geofenceContext.radiusMeters}m at {new Date(item.geofenceContext.triggeredAt).toLocaleString()}

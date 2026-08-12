@@ -3,7 +3,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { cloneSeedBundle } from "../lib/mobile-data";
-import { getMobilePlatformBundle, reconcileParcelGeofenceReplay, updateLegalWorkflowStatus, updateMissionStatus, updateParcelGeofencePreference } from "../server/mobilePlatformRepository";
+import { approveIdentityDocument, completeLivenessSession, getMobilePlatformBundle, reconcileParcelGeofenceReplay, startLivenessSession, updateLegalWorkflowStatus, updateMissionStatus, updateParcelGeofencePreference } from "../server/mobilePlatformRepository";
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
 const STORE_PATH = path.join(DATA_DIR, "mobile-platform-store.json");
@@ -39,10 +39,35 @@ describe("mobile platform repository", () => {
     expect(bundle.syncMeta.pendingMutations).toBeGreaterThan(0);
   });
 
-  it("assigns a registration number when a legal workflow is registered", () => {
-    const workflow = updateLegalWorkflowStatus({ workflowId: "roo-amac-11", status: "registered", reviewedBy: "Mobile Registry Supervisor" });
-    expect(workflow.registrationNumber).toBeTruthy();
+  it("requires an official registry reference before recording an unregistered workflow as registered", () => {
+    expect(() => updateLegalWorkflowStatus({ workflowId: "roo-amac-11", status: "registered", reviewedBy: "Mobile Registry Supervisor" })).toThrow("official registry reference");
+    const workflow = updateLegalWorkflowStatus({ workflowId: "roo-amac-11", status: "registered", reviewedBy: "Mobile Registry Supervisor", registryReference: "FCT-ROO-2026-0011" });
+    expect(workflow.registrationNumber).toBe("FCT-ROO-2026-0011");
     expect(workflow.timeline.find((item) => item.key === "registered")?.completed).toBe(true);
+  });
+
+  it("does not allow a single-image session to mark liveness as verified", () => {
+    const session = startLivenessSession();
+    expect(() =>
+      completeLivenessSession({
+        sessionId: session.sessionId,
+        status: "verified",
+        framesAnalyzed: 1,
+        motionScore: 99,
+        faceQualityScore: 99,
+        faceMatchScore: 99,
+        confidence: 99,
+        spoofDetected: false,
+        verificationMethod: "single_image_screening",
+      }),
+    ).toThrow("challenge-video");
+  });
+
+  it("routes inbox KYC actions to manual review rather than silently verifying the document", () => {
+    const result = approveIdentityDocument({ documentId: "kyc-seed-11" });
+    expect(result.document.status).toBe("requires_review");
+    expect(result.document.analysisProvenance).toBe("manual_review");
+    expect(result.document.analysisReason).toContain("does not verify");
   });
 
   it("persists parcel geofence subscription changes through the notification preference store", () => {

@@ -54,7 +54,7 @@ export type PermitFormFieldRecord = {
   value: string;
   required: boolean;
   fieldType: "text" | "textarea" | "number" | "date";
-  source: "manual" | "ai";
+  source: "manual" | "ai" | "heuristic";
   viewableBy?: AgencyRole[];
   editableBy?: AgencyRole[];
 };
@@ -112,6 +112,7 @@ export type PermitAuditPackageRecord = {
   algorithm?: string;
   publicKeyId?: string;
   verifierHint: string;
+  signingStatus?: "configured" | "unavailable";
 };
 
 export type AuditSigningKeyRecord = {
@@ -150,10 +151,13 @@ export type PermitReminderRecord = {
 export type AIExtractionResultRecord = {
   documentName: string;
   extractedAt: string;
-  model: string;
+  model: string | null;
   populatedKeys: string[];
   sourceType?: "text" | "image" | "pdf";
-  confidence?: number;
+  confidence?: number | null;
+  provenance?: "model" | "heuristic" | "unavailable";
+  status?: "processed" | "requires_review" | "unavailable" | "failed";
+  reason?: string | null;
 };
 
 export type PermitUploadedDocumentRecord = {
@@ -165,7 +169,7 @@ export type PermitUploadedDocumentRecord = {
   uploadedAt: string;
   uploadedByRole: AgencyRole;
   extractedTextPreview: string;
-  extractionStatus: "pending" | "processed" | "failed";
+  extractionStatus: "pending" | "processed" | "requires_review" | "unavailable" | "failed";
 };
 
 export type ApprovalQueueRecord = {

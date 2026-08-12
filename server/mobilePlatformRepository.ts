@@ -34,6 +34,10 @@ type DocumentAnalysisResult = {
   status: KybDocumentStatus;
   extractedFields: Record<string, string>;
   needsAttention: boolean;
+  model: string | null;
+  provenance: "model_assisted" | "unavailable";
+  availability: "available" | "unavailable";
+  reason: string | null;
 };
 
 type NotificationInteractionProfileInput = {
@@ -67,7 +71,10 @@ type NotificationAnalysisResult = {
   priorityScore: number;
   rationale: string;
   interactionWeight: number;
-  model: string;
+  model: string | null;
+  provenance: "model" | "rule_based" | "unavailable";
+  availability: "available" | "unavailable";
+  reason: string | null;
 };
 
 const DATA_DIR = path.join(process.cwd(), "server", "data");
@@ -212,22 +219,24 @@ function queueMutation(store: StoredBundle, mutation: SyncMutation) {
 async function pickVisionModel() {
   try {
     const { data } = await listLLMModels();
-    return data.find((model) => model.id === "gpt-5-mini")?.id ?? data.find((model) => model.id === "gemini-3-flash-preview")?.id ?? data[0]?.id ?? "gpt-5-mini";
-  } catch {
-    return "gpt-5-mini";
+    const model = data.find((item) => item.id === "gpt-5-mini")?.id ?? data.find((item) => item.id === "gemini-3-flash-preview")?.id ?? data[0]?.id ?? null;
+    return { model, reason: model ? null : "No vision-capable model is configured." };
+  } catch (error) {
+    return { model: null, reason: `Model catalog unavailable: ${error instanceof Error ? error.message : "unknown error"}` };
   }
 }
 
 async function pickNotificationAnalysisModel() {
   try {
     const { data } = await listLLMModels();
-    return data.find((model) => model.id === "gpt-5-mini")?.id ?? data.find((model) => model.id === "claude-haiku-4-5")?.id ?? data[0]?.id ?? "gpt-5-mini";
-  } catch {
-    return "gpt-5-mini";
+    const model = data.find((item) => item.id === "gpt-5-mini")?.id ?? data.find((item) => item.id === "claude-haiku-4-5")?.id ?? data[0]?.id ?? null;
+    return { model, reason: model ? null : "No notification-analysis model is configured." };
+  } catch (error) {
+    return { model: null, reason: `Model catalog unavailable: ${error instanceof Error ? error.message : "unknown error"}` };
   }
 }
 
-function fallbackNotificationAnalysis(item: NotificationAnalysisInput, profile: NotificationInteractionProfileInput): NotificationAnalysisResult {
+function fallbackNotificationAnalysis(item: NotificationAnalysisInput, profile: NotificationInteractionProfileInput, reason: string): NotificationAnalysisResult {
   const opens = profile.openedByCategory[item.category] ?? 0;
   const actions = profile.actionedByCategory[item.category] ?? 0;
   const dismisses = profile.dismissedByCategory[item.category] ?? 0;
@@ -244,12 +253,15 @@ function fallbackNotificationAnalysis(item: NotificationAnalysisInput, profile: 
   const rationale = `${item.category} alerts receive ${opens > dismisses ? "strong" : "moderate"} attention from recent user behavior, so this item is ranked ${priorityLevel}.`;
   return {
     id: item.id,
-    summary,
+    summary: `Rule-based summary: ${summary}`,
     priorityLevel,
     priorityScore,
-    rationale,
+    rationale: `${rationale} Automated model analysis is unavailable; this rank is deterministic and requires operator judgment.`,
     interactionWeight: Number(interactionWeight.toFixed(2)),
-    model: "deterministic-fallback",
+    model: null,
+    provenance: "rule_based",
+    availability: "unavailable",
+    reason,
   };
 }
 
@@ -258,13 +270,16 @@ export async function analyzeNotificationActivities(input: {
   interactionProfile: NotificationInteractionProfileInput;
 }) {
   if (input.activities.length === 0) return [] as NotificationAnalysisResult[];
-  const model = await pickNotificationAnalysisModel();
+  const modelChoice = await pickNotificationAnalysisModel();
 
   return Promise.all(
     input.activities.map(async (item) => {
+      if (!modelChoice.model) {
+        return fallbackNotificationAnalysis(item, input.interactionProfile, modelChoice.reason ?? "Model analysis is unavailable.");
+      }
       try {
         const response = await invokeLLM({
-          model,
+          model: modelChoice.model,
           messages: [
             {
               role: "system",
@@ -313,21 +328,16 @@ export async function analyzeNotificationActivities(input: {
           priorityScore: Math.max(0, Math.min(100, Math.round(Number(parsed.priorityScore) || 0))),
           rationale: String(parsed.rationale ?? "AI analysis completed for this alert."),
           interactionWeight: Math.max(0, Math.min(1, Number(parsed.interactionWeight) || 0)),
-          model,
+          model: modelChoice.model,
+          provenance: "model",
+          availability: "available",
+          reason: null,
         } satisfies NotificationAnalysisResult;
-      } catch {
-        return fallbackNotificationAnalysis(item, input.interactionProfile);
+      } catch (error) {
+        return fallbackNotificationAnalysis(item, input.interactionProfile, `Model analysis failed: ${error instanceof Error ? error.message : "unknown error"}`);
       }
     }),
   );
-}
-
-function inferEngineFromMime(mimeType: string, documentType: string): BusinessDocumentRecord["engine"] {
-  const lowered = `${mimeType} ${documentType}`.toLowerCase();
-  if (lowered.includes("pdf") || lowered.includes("incorporation")) return "docling";
-  if (lowered.includes("passport") || lowered.includes("id") || lowered.includes("nin")) return "vlm";
-  if (lowered.includes("image")) return "paddleocr";
-  return "manual";
 }
 
 export async function analyzeDocumentImage(input: {
@@ -336,12 +346,25 @@ export async function analyzeDocumentImage(input: {
   base64Data: string;
   documentType: string;
 }): Promise<DocumentAnalysisResult> {
-  const model = await pickVisionModel();
-  const engine = inferEngineFromMime(input.mimeType, input.documentType);
+  const modelChoice = await pickVisionModel();
+  const unavailable = (reason: string): DocumentAnalysisResult => ({
+    engine: "vision_llm",
+    confidence: 0,
+    summary: "Automated document screening is unavailable. The file was not verified and requires an authorized manual review.",
+    status: "unavailable",
+    extractedFields: {},
+    needsAttention: true,
+    model: null,
+    provenance: "unavailable",
+    availability: "unavailable",
+    reason,
+  });
+  if (!modelChoice.model) return unavailable(modelChoice.reason ?? "No vision model is configured.");
   const dataUrl = `data:${input.mimeType};base64,${input.base64Data}`;
 
-  const response = await invokeLLM({
-    model,
+  try {
+    const response = await invokeLLM({
+    model: modelChoice.model,
     messages: [
       {
         role: "system",
@@ -387,28 +410,51 @@ export async function analyzeDocumentImage(input: {
       },
     },
     maxTokens: 1200,
-  });
+    });
 
-  const content = response.choices[0]?.message.content;
-  const parsed = typeof content === "string" ? JSON.parse(content) : JSON.parse((content?.[0] as { text?: string })?.text ?? "{}");
-  const confidence = Math.max(0, Math.min(100, Math.round(Number(parsed.confidence) || 0)));
+    const content = response.choices[0]?.message.content;
+    const parsed = typeof content === "string" ? JSON.parse(content) : JSON.parse((content?.[0] as { text?: string })?.text ?? "{}");
+    const confidence = Math.max(0, Math.min(100, Math.round(Number(parsed.confidence) || 0)));
 
-  return {
-    engine,
-    confidence,
-    summary: parsed.summary,
-    status: confidence >= 86 && !parsed.needsAttention ? "verified" : confidence >= 65 ? "requires_review" : "rejected",
-    extractedFields: parsed.extractedFields,
-    needsAttention: Boolean(parsed.needsAttention),
-  };
+    return {
+      engine: "vision_llm",
+      confidence,
+      summary: String(parsed.summary || "Model-assisted screening completed. An authorized reviewer must validate the document."),
+      status: "requires_review",
+      extractedFields: Object.entries(parsed.extractedFields ?? {}).reduce<Record<string, string>>((fields, [key, value]) => {
+        if (typeof value === "string" && value.trim().length > 0) fields[key] = value.trim();
+        return fields;
+      }, {}),
+      needsAttention: true,
+      model: modelChoice.model,
+      provenance: "model_assisted",
+      availability: "available",
+      reason: "Automated image analysis is assistive only and cannot verify KYC/KYB identity or registry authority.",
+    };
+  } catch (error) {
+    return unavailable(`Model document screening failed: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
 }
 
 export async function analyzeLivenessSelfie(input: { base64Data: string; mimeType: string }) {
-  const model = await pickVisionModel();
+  const modelChoice = await pickVisionModel();
+  const unavailable = (reason: string) => ({
+    motionScore: 0,
+    faceQualityScore: 0,
+    faceMatchScore: 0,
+    confidence: 0,
+    spoofDetected: false,
+    notes: "Liveness was not verified because the automated screening service is unavailable.",
+    status: "unavailable" as const,
+    verificationMethod: "unavailable" as const,
+    availabilityReason: reason,
+  });
+  if (!modelChoice.model) return unavailable(modelChoice.reason ?? "No vision model is configured.");
   const dataUrl = `data:${input.mimeType};base64,${input.base64Data}`;
 
-  const response = await invokeLLM({
-    model,
+  try {
+    const response = await invokeLLM({
+    model: modelChoice.model,
     messages: [
       {
         role: "system",
@@ -443,24 +489,29 @@ export async function analyzeLivenessSelfie(input: { base64Data: string; mimeTyp
       },
     },
     maxTokens: 900,
-  });
+    });
 
-  const content = response.choices[0]?.message.content;
-  const parsed = typeof content === "string" ? JSON.parse(content) : JSON.parse((content?.[0] as { text?: string })?.text ?? "{}");
-  const motionScore = Math.max(0, Math.min(100, Math.round(Number(parsed.motionScore) || 0)));
-  const faceQualityScore = Math.max(0, Math.min(100, Math.round(Number(parsed.faceQualityScore) || 0)));
-  const faceMatchScore = Math.max(0, Math.min(100, Math.round(Number(parsed.faceMatchScore) || 0)));
-  const confidence = Math.round(motionScore * 0.35 + faceQualityScore * 0.3 + faceMatchScore * 0.35);
+    const content = response.choices[0]?.message.content;
+    const parsed = typeof content === "string" ? JSON.parse(content) : JSON.parse((content?.[0] as { text?: string })?.text ?? "{}");
+    const motionScore = Math.max(0, Math.min(100, Math.round(Number(parsed.motionScore) || 0)));
+    const faceQualityScore = Math.max(0, Math.min(100, Math.round(Number(parsed.faceQualityScore) || 0)));
+    const faceMatchScore = Math.max(0, Math.min(100, Math.round(Number(parsed.faceMatchScore) || 0)));
+    const confidence = Math.round(motionScore * 0.35 + faceQualityScore * 0.3 + faceMatchScore * 0.35);
 
-  return {
-    motionScore,
-    faceQualityScore,
-    faceMatchScore,
-    confidence,
-    spoofDetected: Boolean(parsed.spoofDetected),
-    notes: String(parsed.notes || ""),
-    status: !parsed.spoofDetected && confidence >= 70 ? "verified" : "failed",
-  } as const;
+    return {
+      motionScore,
+      faceQualityScore,
+      faceMatchScore,
+      confidence,
+      spoofDetected: Boolean(parsed.spoofDetected),
+      notes: `${String(parsed.notes || "")}${parsed.spoofDetected ? "" : " Single-image screening cannot verify a blink-turn-smile challenge; capture challenge video and complete authorized review."}`.trim(),
+      status: "requires_review" as const,
+      verificationMethod: "single_image_screening" as const,
+      availabilityReason: "A single still image cannot prove liveness or complete a multi-step motion challenge.",
+    };
+  } catch (error) {
+    return unavailable(`Model liveness screening failed: ${error instanceof Error ? error.message : "unknown error"}`);
+  }
 }
 
 export function getMobilePlatformBundle() {
@@ -719,10 +770,16 @@ export function completeLivenessSession(input: {
   confidence: number;
   spoofDetected: boolean;
   failureReason?: string | null;
+  verificationMethod?: LivenessSessionRecord["verificationMethod"];
+  availabilityReason?: string | null;
 }) {
   const store = readStore();
   if (!store.onboarding.latestLivenessSession || store.onboarding.latestLivenessSession.sessionId !== input.sessionId) {
     throw new Error("Liveness session not found");
+  }
+
+  if (input.status === "verified" && input.verificationMethod !== "challenge_video") {
+    throw new Error("Liveness cannot be marked verified without a completed challenge-video verification method.");
   }
 
   store.onboarding.latestLivenessSession = {
@@ -736,6 +793,8 @@ export function completeLivenessSession(input: {
     spoofDetected: input.spoofDetected,
     failureReason: input.failureReason ?? null,
     verifiedAt: input.status === "verified" ? new Date().toISOString() : null,
+    verificationMethod: input.verificationMethod ?? "unavailable",
+    availabilityReason: input.availabilityReason ?? null,
   };
   store.onboarding.livenessStatus = input.status;
   refreshReadiness(store);
@@ -749,9 +808,9 @@ export function approveIdentityDocument(input: { documentId: string }) {
   const document = store.onboarding.identityDocuments.find((item) => item.id === input.documentId);
   if (!document) throw new Error("Identity document not found");
 
-  document.status = "verified";
-  document.confidence = Math.max(document.confidence ?? 88, 88);
-  document.extractedSummary = document.extractedSummary ?? "Approved from mobile inbox review.";
+  document.status = "requires_review";
+  document.analysisProvenance = "manual_review";
+  document.analysisReason = "A manual review was requested from the inbox. This action does not verify identity, NIN, BVN, CAC, TIN, or document authenticity.";
   queueMutation(store, { type: "onboarding_document", recordId: document.id, queuedAt: new Date().toISOString() });
   refreshReadiness(store);
   store.syncMeta = buildSyncMeta(store, "live");
@@ -771,6 +830,7 @@ export function updateLegalWorkflowStatus(input: {
   workflowId: string;
   status: LegalWorkflowStatus;
   reviewedBy?: string | null;
+  registryReference?: string | null;
 }) {
   const store = readStore();
   const workflow = store.legalWorkflows.find((item) => item.id === input.workflowId);
@@ -791,9 +851,11 @@ export function updateLegalWorkflowStatus(input: {
             ? "Registry Archive"
             : workflow.assignedDesk;
 
-  if (input.status === "registered" && !workflow.registrationNumber) {
-    const stateCode = workflow.type === "Certificate of Occupancy" ? "COFO" : workflow.type === "Right of Occupancy" ? "ROO" : "GC";
-    workflow.registrationNumber = `${stateCode}-${String(workflow.parcelId).padStart(4, "0")}-${new Date().getFullYear()}-${Math.floor(1000 + workflow.parcelId)}`;
+  if (input.status === "registered" && !input.registryReference && !workflow.registrationNumber) {
+    throw new Error("An official registry reference is required before a legal workflow can be recorded as registered.");
+  }
+  if (input.status === "registered" && input.registryReference) {
+    workflow.registrationNumber = input.registryReference;
   }
 
   purgeResolvedMutes(store);

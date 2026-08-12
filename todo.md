@@ -158,3 +158,9 @@
 - [x] FCT-specific parcel dataset and administrative boundary layers in the interactive web map
 - [x] Kano-specific parcel dataset and administrative boundary layers in the interactive web map
 - [x] State switcher and layer controls for Lagos, FCT, and Kano map views
+- [x] Create a high-level, auditable record of user-requested platform work without exposing internal instructions
+- [x] Audit all high-risk server and mobile code paths for silent mockware and plausible-looking simulated outputs
+- [x] Add explicit provenance, availability, confidence, and degraded-state handling for AI and document analysis outputs
+- [x] Ensure liveness, signature verification, parsing, notification analysis, and geofence registration never report unsupported results as verified
+- [x] Add regression tests that fail when unavailable, heuristic, seeded, or simulated behavior is presented as production output
+- [x] Publish an evidence-based silent-mockware findings report with verified remaining limitations

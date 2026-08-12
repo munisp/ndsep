@@ -10,10 +10,18 @@ import { queueGeofenceEventMutation, replayQueuedFieldMutations } from "@/lib/mo
 
 export const PARCEL_GEOFENCE_TASK = "idlr_pts_mobile.parcel_geofence";
 
+export type GeofenceRuntimeResult = {
+  status: "active" | "configured_only" | "permission_denied" | "unsupported" | "failed";
+  reason: string | null;
+  activeRegionCount: number;
+  checkedAt: string;
+};
+
 if (Platform.OS !== "web") {
   try {
     TaskManager.defineTask(PARCEL_GEOFENCE_TASK, async ({ data, error }) => {
       if (error) {
+        console.warn("[Geofence] Background task error:", error.message);
         return;
       }
 
@@ -90,7 +98,14 @@ if (Platform.OS !== "web") {
           radiusMeters,
         },
       });
-      await replayQueuedFieldMutations().catch(() => undefined);
+      await replayQueuedFieldMutations().catch(async (replayError) => {
+        await appendActivityAudit(activityId, {
+          kind: "preference_synced",
+          label: "Replay pending",
+          actor: "system",
+          detail: `The geofence event remains queued because replay failed: ${replayError instanceof Error ? replayError.message : "unknown error"}.`,
+        });
+      });
 
       await scheduleFieldUpdateNotification({
         title,
@@ -119,7 +134,15 @@ export async function ensureGeofencePermissions() {
 }
 
 export async function syncParcelGeofences(bundle: MobilePlatformBundle) {
-  if (Platform.OS === "web") return false;
+  const checkedAt = new Date().toISOString();
+  if (Platform.OS === "web") {
+    return {
+      status: "unsupported" as const,
+      reason: "Background parcel geofencing is unavailable in the web runtime.",
+      activeRegionCount: 0,
+      checkedAt,
+    };
+  }
 
   const { notificationPreferences, parcels } = bundle;
   const activeSubscriptions = notificationPreferences.geofenceSubscriptions
@@ -143,12 +166,41 @@ export async function syncParcelGeofences(bundle: MobilePlatformBundle) {
     if (alreadyStarted) {
       await Location.stopGeofencingAsync(PARCEL_GEOFENCE_TASK);
     }
-    return false;
+    return {
+      status: "configured_only" as const,
+      reason: "No enabled parcel geofence subscriptions are currently eligible for device registration.",
+      activeRegionCount: 0,
+      checkedAt,
+    };
   }
 
-  const granted = await ensureGeofencePermissions();
-  if (!granted) return false;
+  try {
+    const granted = await ensureGeofencePermissions();
+    if (!granted) {
+      return {
+        status: "permission_denied" as const,
+        reason: "Foreground and background location permission are required before parcel monitoring can start.",
+        activeRegionCount: 0,
+        checkedAt,
+      };
+    }
 
-  await Location.startGeofencingAsync(PARCEL_GEOFENCE_TASK, activeSubscriptions);
-  return true;
+    await Location.startGeofencingAsync(PARCEL_GEOFENCE_TASK, activeSubscriptions);
+    const active = await Location.hasStartedGeofencingAsync(PARCEL_GEOFENCE_TASK);
+    return active
+      ? { status: "active" as const, reason: null, activeRegionCount: activeSubscriptions.length, checkedAt }
+      : {
+          status: "failed" as const,
+          reason: "The device did not confirm that the parcel geofence task started.",
+          activeRegionCount: 0,
+          checkedAt,
+        };
+  } catch (error) {
+    return {
+      status: "failed" as const,
+      reason: `Parcel geofence registration failed: ${error instanceof Error ? error.message : "unknown error"}`,
+      activeRegionCount: 0,
+      checkedAt,
+    };
+  }
 }

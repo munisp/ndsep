@@ -188,7 +188,7 @@ function SwipeActivityCard({
           {item.parcelNumber ? <Text className="mt-2 text-xs font-medium text-primary">Parcel {item.parcelNumber}</Text> : null}
           {item.aiInsight ? (
             <Text className="mt-2 text-xs text-muted">
-              Priority {item.aiInsight.priorityLevel} · Score {item.aiInsight.priorityScore}
+              Priority {item.aiInsight.priorityLevel} · Score {item.aiInsight.priorityScore} · {item.aiInsight.provenance === "model" ? "Model-assisted" : "Rule-based; model unavailable"}
             </Text>
           ) : null}
         </View>
@@ -260,7 +260,7 @@ export default function NotificationsScreen() {
   const pendingInsightIds = useMemo(
     () =>
       items
-        .filter((item) => !item.dismissedAt && (!item.aiInsight || item.aiInsight.model === "seeded-mobile-analysis" || item.aiInsight.model === "deterministic-fallback"))
+        .filter((item) => !item.dismissedAt && !item.aiInsight)
         .slice(0, 6)
         .map((item) => item.id)
         .join("|"),
@@ -341,7 +341,7 @@ export default function NotificationsScreen() {
           <Text className="mt-2 text-sm leading-5 text-white/85">
             {unreadCount} unread · Sync source: {bundle.syncMeta.source} · Pending mutations: {bundle.syncMeta.pendingMutations}
           </Text>
-          <Text className="mt-2 text-xs text-white/80">{isAnalyzingInsights ? "AI is refreshing summaries and priority order for visible alerts." : "AI summaries and priority ranking stay aligned with recent inbox behavior."}</Text>
+          <Text className="mt-2 text-xs text-white/80">{isAnalyzingInsights ? "Model-assisted summaries are being requested for visible alerts." : "When model analysis is unavailable, the inbox shows a clearly labeled rule-based rank rather than an AI result."}</Text>
           <Link href={"/notifications-preferences" as never} asChild>
             <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
               <View className="mt-4 rounded-2xl bg-white/10 px-4 py-3">

@@ -8,6 +8,10 @@ describe("mobile activity layer", () => {
     expect(defaultActivityFeed[0]?.auditHistory[0]?.kind).toBe("created");
   });
 
+  it("does not ship seeded alerts with fabricated AI summaries or priority scores", () => {
+    expect(defaultActivityFeed.every((item) => !item.aiInsight)).toBe(true);
+  });
+
   it("builds an interaction profile across categories", () => {
     const profile = buildActivityInteractionProfile([
       {

@@ -78,10 +78,12 @@ const businessProfileSchema = z.object({
       type: z.string(),
       fileName: z.string(),
       documentUrl: z.string().nullable().optional(),
-      status: z.enum(["pending", "verified", "rejected", "requires_review"]),
-      engine: z.enum(["paddleocr", "vlm", "docling", "tesseract_fallback", "manual"]).optional(),
+      status: z.enum(["pending", "verified", "rejected", "requires_review", "unavailable"]),
+      engine: z.enum(["paddleocr", "vlm", "docling", "tesseract_fallback", "vision_llm", "manual"]).optional(),
       confidence: z.number().nullable().optional(),
       extractedSummary: z.string().nullable().optional(),
+      analysisProvenance: z.enum(["model_assisted", "manual_review", "unavailable"]).optional(),
+      analysisReason: z.string().nullable().optional(),
       uploadedAt: z.string(),
     }),
   ),
@@ -432,6 +434,8 @@ export const appRouter = router({
           extractedSummary: analysis.summary,
           confidence: analysis.confidence,
           engine: analysis.engine,
+          analysisProvenance: analysis.provenance,
+          analysisReason: analysis.reason,
           uploadedAt: new Date().toISOString(),
         });
 
@@ -461,6 +465,8 @@ export const appRouter = router({
           engine: analysis.engine,
           confidence: analysis.confidence,
           extractedSummary: analysis.summary,
+          analysisProvenance: analysis.provenance,
+          analysisReason: analysis.reason,
           uploadedAt: new Date().toISOString(),
         });
 
@@ -495,7 +501,9 @@ export const appRouter = router({
           faceMatchScore: analysis.faceMatchScore,
           confidence: analysis.confidence,
           spoofDetected: analysis.spoofDetected,
-          failureReason: analysis.status === "failed" ? analysis.notes || "low_confidence" : null,
+          failureReason: analysis.status === "unavailable" ? analysis.notes || "service_unavailable" : null,
+          verificationMethod: analysis.verificationMethod,
+          availabilityReason: analysis.availabilityReason,
         });
 
         return {
@@ -514,6 +522,7 @@ export const appRouter = router({
           workflowId: z.string(),
           status: z.enum(["draft", "pending_review", "approved", "signed", "registered", "rejected"]),
           reviewedBy: z.string().nullable().optional(),
+          registryReference: z.string().min(3).nullable().optional(),
         }),
       )
       .mutation(({ input }) => updateLegalWorkflowStatus(input)),
