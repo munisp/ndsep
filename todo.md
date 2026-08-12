@@ -186,3 +186,7 @@
 - [ ] Securely save approved CAC bridge endpoint and token through Integration Settings
 - [x] Run explicit test-only Keycloak and Docling staging workflow and record non-production evidence
 - [x] Preserve unconfigured encryption, bootstrap-administrator, NIMC, and CAC defaults until approved values are supplied
+- [ ] Collect and validate approved real staging credentials for encryption, administration, Keycloak, Docling, NIMC, and CAC
+- [ ] Configure and validate real staging provider integrations without emulator fallback
+- [ ] Preserve real staging verification evidence with secrets redacted
+- [ ] Defer real staging activation until approved provider values are supplied through secure configuration
