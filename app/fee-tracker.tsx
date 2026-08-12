@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, Text, View, Platform } from "react-native";
+import { Alert, Pressable, ScrollView, Text, View, Platform } from "react-native";
 import { router } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -8,12 +8,12 @@ import { NIGERIA_FEE_SCHEDULE, formatNaira, type FeeCategory } from "@/lib/payme
 export default function FeeTrackerScreen() {
   /** C of O Application Progress Timeline */
   const cofOStages = [
-    { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15", tooltip: "Submit completed application form with parcel details and supporting documents to the State Land Bureau.", actionBadge: null },
-    { id: "fee_payment", label: "Application Fee Payment", status: "current" as const, date: null, tooltip: "Pay the prescribed application processing fee via approved payment channels.", actionBadge: "Payment Required" },
-    { id: "survey", label: "Survey & Demarcation", status: "pending" as const, date: null, tooltip: "Licensed surveyor conducts physical boundary survey and produces a survey plan.", actionBadge: "Upload Survey Plan" },
-    { id: "review", label: "State Land Bureau Review", status: "pending" as const, date: null, tooltip: "Land Bureau officers verify documentation, confirm no encumbrances, and prepare recommendation.", actionBadge: null },
-    { id: "consent", label: "Governor's Consent", status: "pending" as const, date: null, tooltip: "The State Governor (or delegate) reviews and grants formal consent for the land allocation.", actionBadge: null },
-    { id: "issuance", label: "C of O Issuance", status: "pending" as const, date: null, tooltip: "Certificate of Occupancy is printed, signed, and issued to the applicant.", actionBadge: "Collect Document" },
+    { id: "application", label: "Application Submitted", status: "complete" as const, date: "2026-07-15", tooltip: "Submit completed application form with parcel details and supporting documents to the State Land Bureau.", actionBadge: null, actionRoute: null },
+    { id: "fee_payment", label: "Application Fee Payment", status: "current" as const, date: null, tooltip: "Pay the prescribed application processing fee via approved payment channels.", actionBadge: "Payment Required", actionRoute: "/checkout" as const },
+    { id: "survey", label: "Survey & Demarcation", status: "pending" as const, date: null, tooltip: "Licensed surveyor conducts physical boundary survey and produces a survey plan.", actionBadge: "Upload Survey Plan", actionRoute: "/onboarding" as const },
+    { id: "review", label: "State Land Bureau Review", status: "pending" as const, date: null, tooltip: "Land Bureau officers verify documentation, confirm no encumbrances, and prepare recommendation.", actionBadge: null, actionRoute: null },
+    { id: "consent", label: "Governor's Consent", status: "pending" as const, date: null, tooltip: "The State Governor (or delegate) reviews and grants formal consent for the land allocation.", actionBadge: null, actionRoute: null },
+    { id: "issuance", label: "C of O Issuance", status: "pending" as const, date: null, tooltip: "Certificate of Occupancy is printed, signed, and issued to the applicant.", actionBadge: "Collect Document", actionRoute: null },
   ];
 
   const completedStages = cofOStages.filter((s) => s.status === "complete").length;
@@ -73,9 +73,21 @@ export default function FeeTrackerScreen() {
                     {stage.status === "current" && <Text className="text-[10px] text-primary mt-0.5">← Action required</Text>}
                     {"tooltip" in stage && <Text className="text-[10px] text-muted mt-0.5">{(stage as any).tooltip}</Text>}
                     {(stage as any).actionBadge && (
-                      <View className="mt-1 self-start rounded-full border border-warning bg-warning/10 px-2 py-0.5">
-                        <Text className="text-[9px] font-bold text-warning">{(stage as any).actionBadge}</Text>
-                      </View>
+                      <Pressable
+                        onPress={() => {
+                          const route = (stage as any).actionRoute;
+                          if (route) {
+                            router.push({ pathname: route });
+                          } else {
+                            Alert.alert("Action Required", `"${(stage as any).actionBadge}" — this action will be available when the relevant stage is reached.`);
+                          }
+                        }}
+                        style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}
+                      >
+                        <View className="mt-1 self-start flex-row items-center rounded-full border border-warning bg-warning/10 px-2 py-0.5">
+                          <Text className="text-[9px] font-bold text-warning">{(stage as any).actionBadge} →</Text>
+                        </View>
+                      </Pressable>
                     )}
                   </View>
                 </View>

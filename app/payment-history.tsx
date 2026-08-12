@@ -46,8 +46,26 @@ export default function PaymentHistoryScreen() {
   function retryPayment(record: PaymentRecord) {
     Alert.alert(
       "Retry Payment",
-      `Payment gateway is not connected. In production, this would re-initiate the ${formatNaira(record.amount)} payment for "${record.description}" through the configured gateway.\n\nRef: ${record.referenceNumber}`,
-      [{ text: "OK" }]
+      `Are you sure you want to retry this payment?\n\nAmount: ${formatNaira(record.amount)}\nFee: ${record.description}\nRef: ${record.referenceNumber}\n\nNote: Payment gateway is not connected. No real transaction will occur.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Confirm Retry", style: "destructive", onPress: () => {
+          Alert.alert("Gateway Unavailable", "Payment gateway is not configured. In production, this would re-initiate the transaction through Paystack or Flutterwave.");
+        }},
+      ]
+    );
+  }
+
+  function markPaidOffline(record: PaymentRecord) {
+    Alert.alert(
+      "Mark as Paid Offline",
+      `Mark this transaction as paid via cash or bank transfer?\n\nAmount: ${formatNaira(record.amount)}\nRef: ${record.referenceNumber}\n\n⚠ This does NOT verify the payment. It creates an unverified record that requires manual confirmation by an administrator.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Mark as Paid (Unverified)", onPress: () => {
+          Alert.alert("Marked as Paid (Unverified)", "This payment has been marked as paid offline. An administrator must manually verify and reconcile this transaction before it is considered confirmed.");
+        }},
+      ]
     );
   }
 
@@ -202,6 +220,13 @@ export default function PaymentHistoryScreen() {
                       <Pressable onPress={() => retryPayment(selectedReceipt)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
                         <View className="rounded-xl border border-primary px-4 py-4">
                           <Text className="text-center font-semibold text-primary">Retry Payment</Text>
+                        </View>
+                      </Pressable>
+                    )}
+                    {(selectedReceipt.status === "pending_gateway" || selectedReceipt.status === "failed") && (
+                      <Pressable onPress={() => markPaidOffline(selectedReceipt)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                        <View className="rounded-xl border border-muted px-4 py-3">
+                          <Text className="text-center text-xs font-semibold text-muted">Mark as Paid Offline (Cash/Transfer)</Text>
                         </View>
                       </Pressable>
                     )}
