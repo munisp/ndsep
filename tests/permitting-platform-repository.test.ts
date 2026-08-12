@@ -125,9 +125,9 @@ describe("permitting platform repository", () => {
     expect(criticalCase?.auditHistory?.some((event) => event.type === "assignment")).toBe(true);
   });
 
-  it("exposes markdown and csv audit-history exports", () => {
-    const markdown = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "markdown" });
-    const csv = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+  it("exposes markdown and csv audit-history exports", async () => {
+    const markdown = await exportPermitAuditHistory({ caseId: "permit-mining-001", format: "markdown" });
+    const csv = await exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
     expect(markdown.fileName.endsWith(".md")).toBe(true);
     expect(markdown.content).toContain("Audit history");
     expect(csv.fileName.endsWith(".csv")).toBe(true);
@@ -161,8 +161,8 @@ describe("permitting platform repository", () => {
     expect(revoked.revocationReason).toContain("Compromised workstation");
   });
 
-  it("verifies signed audit packages against exported content", () => {
-    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+  it("verifies signed audit packages against exported content", async () => {
+    const exported = await exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
     const verification = verifyAuditPackage({
       caseId: "permit-mining-001",
       fileName: exported.fileName,
@@ -177,11 +177,11 @@ describe("permitting platform repository", () => {
     expect(verification.availability).toBe("available");
   });
 
-  it("fails closed instead of generating a transient audit signing key", () => {
+  it("fails closed instead of generating a transient audit signing key", async () => {
     delete process.env.AUDIT_PRIVATE_KEY;
     delete process.env.AUDIT_PUBLIC_KEY;
     delete process.env.AUDIT_PUBLIC_KEY_ID;
-    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+    const exported = await exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
     expect(exported.packageMetadata?.signingStatus).toBe("unavailable");
     expect(exported.packageMetadata?.signature).toBe("");
     const verification = verifyAuditPackage({
@@ -195,8 +195,8 @@ describe("permitting platform repository", () => {
     expect(verification.availability).toBe("unavailable");
   });
 
-  it("rejects tampered audit content even when a signing key is configured", () => {
-    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+  it("rejects tampered audit content even when a signing key is configured", async () => {
+    const exported = await exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
     const verification = verifyAuditPackage({
       caseId: "permit-mining-001",
       fileName: exported.fileName,
@@ -233,8 +233,8 @@ describe("permitting platform repository", () => {
     expect(supervisorMetrics.some((item) => item.escalatedCount >= 0 && item.reassignmentCount >= 0)).toBe(true);
   });
 
-  it("records a chain-of-custody timeline for signed audit package generation and verification", () => {
-    const exported = exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
+  it("records a chain-of-custody timeline for signed audit package generation and verification", async () => {
+    const exported = await exportPermitAuditHistory({ caseId: "permit-mining-001", format: "csv" });
     verifyAuditPackage({
       caseId: "permit-mining-001",
       fileName: exported.fileName,

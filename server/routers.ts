@@ -3,7 +3,8 @@ import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { COOKIE_NAME } from "../shared/const";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { enterpriseProcedure, publicProcedure, router } from "./_core/trpc";
+import { assertEnterpriseRole, type EnterpriseAgencyRole } from "./_core/enterpriseAuth";
 import {
   analyzeDocumentImage,
   analyzeLivenessSelfie,
@@ -57,6 +58,7 @@ import {
   verifyAuditPackage,
   advancePermitHandoff,
 } from "./permittingPlatformRepository";
+import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -82,7 +84,7 @@ const businessProfileSchema = z.object({
       engine: z.enum(["paddleocr", "vlm", "docling", "tesseract_fallback", "vision_llm", "manual"]).optional(),
       confidence: z.number().nullable().optional(),
       extractedSummary: z.string().nullable().optional(),
-      analysisProvenance: z.enum(["model_assisted", "manual_review", "unavailable"]).optional(),
+      analysisProvenance: z.enum(["model_assisted", "document_intelligence", "manual_review", "unavailable"]).optional(),
       analysisReason: z.string().nullable().optional(),
       uploadedAt: z.string(),
     }),
@@ -125,6 +127,27 @@ export const appRouter = router({
         }),
       )
       .mutation(({ input }) => updateMissionStatus(input)),
+  }),
+  trust: router({
+    providerHealth: publicProcedure.query(() => getProviderHealth()),
+    verifyNationalIdentity: enterpriseProcedure
+      .input(z.object({ nin: z.string().min(11), legalName: z.string().nullable().optional(), dateOfBirth: z.string().nullable().optional() }))
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]);
+        return verifyNationalIdentity(input);
+      }),
+    verifyBusinessRegistration: enterpriseProcedure
+      .input(z.object({ rcNumber: z.string().min(3), companyName: z.string().nullable().optional() }))
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]);
+        return verifyBusinessRegistration(input);
+      }),
+    verifyRegistryTitle: enterpriseProcedure
+      .input(z.object({ state: z.string().min(2), registryReference: z.string().min(3), parcelNumber: z.string().nullable().optional() }))
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["planning_supervisor"]);
+        return verifyRegistryTitle(input);
+      }),
   }),
   notifications: router({
     getPreferences: publicProcedure.query(() => getMobilePlatformBundle().notificationPreferences),
@@ -257,9 +280,12 @@ export const appRouter = router({
     listAgencies: publicProcedure.query(() => listAgencies()),
     listAgencyUsers: publicProcedure.query(() => listAgencyUsers()),
     getActiveAgencyUser: publicProcedure.query(() => getActiveAgencyUser()),
-    setActiveAgencyUser: publicProcedure
+    setActiveAgencyUser: enterpriseProcedure
       .input(z.object({ userId: z.string() }))
-      .mutation(({ input }) => setActiveAgencyUser(input)),
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["planning_supervisor"]);
+        return setActiveAgencyUser(input);
+      }),
     listApprovalQueues: publicProcedure
       .input(
         z
@@ -274,7 +300,7 @@ export const appRouter = router({
     listMiddleware: publicProcedure.query(() => listMiddlewareComponents()),
     listServices: publicProcedure.query(() => listServiceTopology()),
     listParity: publicProcedure.query(() => listParityState()),
-    updateCaseStage: publicProcedure
+    updateCaseStage: enterpriseProcedure
       .input(
         z.object({
           caseId: z.string(),
@@ -291,8 +317,11 @@ export const appRouter = router({
           ]),
         }),
       )
-      .mutation(({ input }) => updatePermitCaseStage(input)),
-    updateFormSections: publicProcedure
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]);
+        return updatePermitCaseStage(input);
+      }),
+    updateFormSections: enterpriseProcedure
       .input(
         z.object({
           caseId: z.string(),
@@ -310,15 +339,19 @@ export const appRouter = router({
                   value: z.string(),
                   required: z.boolean(),
                   fieldType: z.enum(["text", "textarea", "number", "date"]),
-                  source: z.enum(["manual", "ai"]),
+                  source: z.enum(["manual", "ai", "heuristic"]),
                 }),
               ),
             }),
           ),
         }),
       )
-      .mutation(({ input }) => updatePermitFormSections(input)),
-    addReviewNote: publicProcedure
+      .mutation(({ ctx, input }) => {
+        const actorRole = (input.actorRole ?? ctx.enterprise.agencyRoles[0]) as EnterpriseAgencyRole;
+        assertEnterpriseRole(ctx.enterprise, [actorRole]);
+        return updatePermitFormSections({ ...input, actorRole });
+      }),
+    addReviewNote: enterpriseProcedure
       .input(
         z.object({
           caseId: z.string(),
@@ -329,8 +362,17 @@ export const appRouter = router({
           note: z.string().min(3),
         }),
       )
-      .mutation(({ input }) => appendPermitReviewNote(input)),
-    extractDocumentToForm: publicProcedure
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]);
+        const role = ctx.enterprise.agencyRoles[0];
+        return appendPermitReviewNote({
+          ...input,
+          author: ctx.user?.name ?? ctx.enterprise.subject,
+          role,
+          agencyId: ctx.enterprise.agencyId,
+        });
+      }),
+    extractDocumentToForm: enterpriseProcedure
       .input(
         z.object({
           caseId: z.string(),
@@ -338,8 +380,11 @@ export const appRouter = router({
           documentText: z.string().min(20),
         }),
       )
-      .mutation(({ input }) => extractPermitDocumentToForm(input)),
-    uploadDocumentAndExtract: publicProcedure
+      .mutation(async ({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]);
+        return extractPermitDocumentToForm(input);
+      }),
+    uploadDocumentAndExtract: enterpriseProcedure
       .input(
         z.object({
           caseId: z.string(),
@@ -349,7 +394,11 @@ export const appRouter = router({
           uploadedByRole: z.enum(["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]),
         }),
       )
-      .mutation(({ input }) => uploadPermitDocumentAndExtract(input)),
+      .mutation(async ({ ctx, input }) => {
+        const role = ctx.enterprise.agencyRoles[0];
+        assertEnterpriseRole(ctx.enterprise, [role]);
+        return uploadPermitDocumentAndExtract({ ...input, uploadedByRole: role });
+      }),
     exportAuditHistory: publicProcedure
       .input(
         z.object({
@@ -358,7 +407,7 @@ export const appRouter = router({
         }),
       )
       .query(({ input }) => exportPermitAuditHistory(input)),
-    overrideAssignment: publicProcedure
+    overrideAssignment: enterpriseProcedure
       .input(
         z.object({
           caseId: z.string(),
@@ -368,8 +417,11 @@ export const appRouter = router({
           reason: z.string().min(3),
         }),
       )
-      .mutation(({ input }) => overridePermitAssignment(input)),
-    advanceHandoff: publicProcedure
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["planning_supervisor"]);
+        return overridePermitAssignment({ ...input, actorName: ctx.user?.name ?? ctx.enterprise.subject, actorRole: "planning_supervisor" });
+      }),
+    advanceHandoff: enterpriseProcedure
       .input(
         z.object({
           caseId: z.string(),
@@ -380,7 +432,11 @@ export const appRouter = router({
           note: z.string().min(3),
         }),
       )
-      .mutation(({ input }) => advancePermitHandoff(input)),
+      .mutation(({ ctx, input }) => {
+        const role = input.actorRole;
+        assertEnterpriseRole(ctx.enterprise, [role]);
+        return advancePermitHandoff({ ...input, actorName: ctx.user?.name ?? ctx.enterprise.subject });
+      }),
     verifyAuditPackage: publicProcedure
       .input(
         z.object({
@@ -394,7 +450,7 @@ export const appRouter = router({
       .mutation(({ input }) => verifyAuditPackage(input)),
     getAuditVerificationKey: publicProcedure.query(() => getAuditVerificationKey()),
     listSigningKeys: publicProcedure.query(() => listSigningKeys()),
-    revokeSigningKey: publicProcedure
+    revokeSigningKey: enterpriseProcedure
       .input(
         z.object({
           keyId: z.string(),
@@ -402,7 +458,10 @@ export const appRouter = router({
           actorName: z.string(),
         }),
       )
-      .mutation(({ input }) => revokeSigningKey(input)),
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["planning_supervisor"]);
+        return revokeSigningKey({ ...input, actorName: ctx.user?.name ?? ctx.enterprise.subject });
+      }),
     getCustodyTimeline: publicProcedure
       .input(z.object({ caseId: z.string() }))
       .query(({ input }) => getPermitCustodyTimeline(input.caseId)),
@@ -512,11 +571,14 @@ export const appRouter = router({
           onboarding: getMobilePlatformBundle().onboarding,
         };
       }),
-    approveIdentityDocument: publicProcedure.input(z.object({ documentId: z.string() })).mutation(({ input }) => approveIdentityDocument(input)),
+    approveIdentityDocument: enterpriseProcedure.input(z.object({ documentId: z.string() })).mutation(({ ctx, input }) => {
+      assertEnterpriseRole(ctx.enterprise, ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]);
+      return approveIdentityDocument(input);
+    }),
   }),
   legal: router({
     list: publicProcedure.query(() => listLegalWorkflows()),
-    advance: publicProcedure
+    advance: enterpriseProcedure
       .input(
         z.object({
           workflowId: z.string(),
@@ -525,15 +587,21 @@ export const appRouter = router({
           registryReference: z.string().min(3).nullable().optional(),
         }),
       )
-      .mutation(({ input }) => updateLegalWorkflowStatus(input)),
-    approveFromInbox: publicProcedure
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["planning_supervisor"]);
+        return updateLegalWorkflowStatus({ ...input, reviewedBy: ctx.user?.name ?? ctx.enterprise.subject });
+      }),
+    approveFromInbox: enterpriseProcedure
       .input(
         z.object({
           workflowId: z.string(),
           reviewedBy: z.string().nullable().optional(),
         }),
       )
-      .mutation(({ input }) => updateLegalWorkflowStatus({ workflowId: input.workflowId, status: "approved", reviewedBy: input.reviewedBy })),
+      .mutation(({ ctx, input }) => {
+        assertEnterpriseRole(ctx.enterprise, ["planning_supervisor"]);
+        return updateLegalWorkflowStatus({ workflowId: input.workflowId, status: "approved", reviewedBy: ctx.user?.name ?? ctx.enterprise.subject });
+      }),
   }),
 });
 

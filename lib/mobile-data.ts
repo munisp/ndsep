@@ -44,7 +44,7 @@ export type IdentityDocumentRecord = {
   extractedSummary?: string;
   confidence?: number;
   engine?: KybEngine;
-  analysisProvenance?: "model_assisted" | "manual_review" | "unavailable";
+  analysisProvenance?: "model_assisted" | "document_intelligence" | "manual_review" | "unavailable";
   analysisReason?: string | null;
   uploadedAt: string;
 };
@@ -58,7 +58,7 @@ export type BusinessDocumentRecord = {
   engine?: KybEngine;
   confidence?: number | null;
   extractedSummary?: string | null;
-  analysisProvenance?: "model_assisted" | "manual_review" | "unavailable";
+  analysisProvenance?: "model_assisted" | "document_intelligence" | "manual_review" | "unavailable";
   analysisReason?: string | null;
   uploadedAt: string;
 };
@@ -93,7 +93,7 @@ export type LivenessSessionRecord = {
   failureReason?: string | null;
   createdAt: string;
   verifiedAt: string | null;
-  verificationMethod?: "challenge_video" | "single_image_screening" | "unavailable";
+  verificationMethod?: "challenge_video" | "single_image_screening" | "provider_liveness_image" | "unavailable";
   availabilityReason?: string | null;
 };
 

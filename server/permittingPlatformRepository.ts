@@ -541,19 +541,28 @@ function serializeAuditAsCsv(record: PermitCaseRecord) {
 }
 
 function getAuditSigningConfiguration() {
+  const mode = process.env.AUDIT_SIGNING_MODE === "service" ? "service" : "pem";
   const privateKey = process.env.AUDIT_PRIVATE_KEY?.replace(/\\n/g, "\n") || null;
   const publicKey = process.env.AUDIT_PUBLIC_KEY?.replace(/\\n/g, "\n") || null;
   const keyId = process.env.AUDIT_PUBLIC_KEY_ID || null;
-  if (!privateKey || !publicKey || !keyId) {
+  const serviceUrl = process.env.AUDIT_SIGNING_SERVICE_URL?.replace(/\/+$/, "") || null;
+  const serviceToken = process.env.AUDIT_SIGNING_SERVICE_TOKEN || null;
+  if (!publicKey || !keyId || (mode === "pem" && !privateKey) || (mode === "service" && (!serviceUrl || !serviceToken))) {
     return {
       available: false as const,
+      mode,
       privateKey: null,
       publicKey: null,
       keyId: null,
-      reason: "Audit signing is unavailable because AUDIT_PRIVATE_KEY, AUDIT_PUBLIC_KEY, and AUDIT_PUBLIC_KEY_ID must all be configured. No transient signing key was generated.",
+      serviceUrl: null,
+      serviceToken: null,
+      reason:
+        mode === "service"
+          ? "External audit signing is unavailable because AUDIT_SIGNING_SERVICE_URL, AUDIT_SIGNING_SERVICE_TOKEN, AUDIT_PUBLIC_KEY, and AUDIT_PUBLIC_KEY_ID must all be configured."
+          : "Audit signing is unavailable because AUDIT_PRIVATE_KEY, AUDIT_PUBLIC_KEY, and AUDIT_PUBLIC_KEY_ID must all be configured. No transient signing key was generated.",
     };
   }
-  return { available: true as const, privateKey, publicKey, keyId, reason: null };
+  return { available: true as const, mode, privateKey, publicKey, keyId, serviceUrl, serviceToken, reason: null };
 }
 
 function buildSigningKeyRegistry(): AuditSigningKeyRecord[] {
@@ -569,14 +578,74 @@ function buildSigningKeyRegistry(): AuditSigningKeyRecord[] {
   return [activeKey];
 }
 
-function signAuditContent(content: string) {
+async function signAuditContent(content: string) {
   const config = getAuditSigningConfiguration();
   const sha256 = crypto.createHash("sha256").update(content).digest("hex");
   if (!config.available) {
     return { sha256, signature: "", algorithm: "RSA-SHA256", publicKeyId: null, signingStatus: "unavailable" as const, reason: config.reason };
   }
-  const signature = crypto.sign("RSA-SHA256", Buffer.from(sha256, "utf8"), config.privateKey).toString("base64");
-  return { sha256, signature, algorithm: "RSA-SHA256", publicKeyId: config.keyId, signingStatus: "configured" as const, reason: null };
+  try {
+    if (config.mode === "service") {
+      const response = await fetch(`${config.serviceUrl}/v1/signatures`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.serviceToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ digest: sha256, algorithm: "RSA-SHA256", keyId: config.keyId }),
+      });
+      if (!response.ok) {
+        return {
+          sha256,
+          signature: "",
+          algorithm: "RSA-SHA256",
+          publicKeyId: config.keyId,
+          signingStatus: "unavailable" as const,
+          reason: `External audit signing service returned HTTP ${response.status}; no local-key fallback was used.`,
+        };
+      }
+      const payload = (await response.json()) as { signature?: unknown; keyId?: unknown; algorithm?: unknown };
+      if (typeof payload.signature !== "string" || payload.signature.length < 32) {
+        return {
+          sha256,
+          signature: "",
+          algorithm: "RSA-SHA256",
+          publicKeyId: config.keyId,
+          signingStatus: "unavailable" as const,
+          reason: "External audit signing service returned no usable signature; no local-key fallback was used.",
+        };
+      }
+      return {
+        sha256,
+        signature: payload.signature,
+        algorithm: payload.algorithm === "RSA-SHA256" ? payload.algorithm : "RSA-SHA256",
+        publicKeyId: typeof payload.keyId === "string" ? payload.keyId : config.keyId,
+        signingStatus: "configured" as const,
+        reason: null,
+      };
+    }
+    if (!config.privateKey) {
+      return {
+        sha256,
+        signature: "",
+        algorithm: "RSA-SHA256",
+        publicKeyId: config.keyId,
+        signingStatus: "unavailable" as const,
+        reason: "PEM audit signing key material is unavailable; no substitute signing key was generated.",
+      };
+    }
+    const signature = crypto.sign("RSA-SHA256", Buffer.from(sha256, "utf8"), config.privateKey).toString("base64");
+    return { sha256, signature, algorithm: "RSA-SHA256", publicKeyId: config.keyId, signingStatus: "configured" as const, reason: null };
+  } catch (error) {
+    return {
+      sha256,
+      signature: "",
+      algorithm: "RSA-SHA256",
+      publicKeyId: config.keyId,
+      signingStatus: "unavailable" as const,
+      reason: `External audit signing request failed: ${error instanceof Error ? error.message : "unknown error"}. No local-key fallback was used.`,
+    };
+  }
 }
 
 function verifySignedAuditContent(input: { content: string; sha256: string; signature: string }) {
@@ -624,11 +693,11 @@ export function getPermitCaseForRole(input: { caseId: string; role: AgencyRole }
   };
 }
 
-export function exportPermitAuditHistory(input: { caseId: string; format: "markdown" | "csv" }) {
+export async function exportPermitAuditHistory(input: { caseId: string; format: "markdown" | "csv" }) {
   const store = getPermittingPlatform();
   const record = getRecordOrThrow(store, input.caseId);
   const content = input.format === "csv" ? serializeAuditAsCsv(record) : serializeAuditAsMarkdown(record);
-  const { sha256, signature, algorithm, publicKeyId, signingStatus, reason } = signAuditContent(content);
+  const { sha256, signature, algorithm, publicKeyId, signingStatus, reason } = await signAuditContent(content);
   const fileName = `${record.id}-audit-history.${input.format === "csv" ? "csv" : "md"}`;
   const generatedAt = new Date().toISOString();
   record.latestAuditPackage = {

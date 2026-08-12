@@ -27,6 +27,23 @@ const requireUser = t.middleware(async (opts) => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
+export const enterpriseProcedure = protectedProcedure.use(
+  t.middleware(async (opts) => {
+    if (!opts.ctx.enterprise) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "Enterprise authorization is not configured for this session. Use a validated OIDC token containing agency_id and agency_roles claims.",
+      });
+    }
+    return opts.next({
+      ctx: {
+        ...opts.ctx,
+        enterprise: opts.ctx.enterprise,
+      },
+    });
+  }),
+);
+
 export const adminProcedure = t.procedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;

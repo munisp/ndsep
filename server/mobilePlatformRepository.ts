@@ -16,6 +16,7 @@ import {
   cloneSeedBundle,
 } from "../lib/mobile-data";
 import { invokeLLM, listLLMModels } from "./_core/llm";
+import { convertWithDocling, verifyDojahLiveness } from "./trustProviders";
 
 type SyncMutation = {
   type: "mission_status" | "onboarding_document" | "liveness" | "legal_status" | "notification_preference";
@@ -35,7 +36,7 @@ type DocumentAnalysisResult = {
   extractedFields: Record<string, string>;
   needsAttention: boolean;
   model: string | null;
-  provenance: "model_assisted" | "unavailable";
+  provenance: "model_assisted" | "document_intelligence" | "unavailable";
   availability: "available" | "unavailable";
   reason: string | null;
 };
@@ -346,6 +347,35 @@ export async function analyzeDocumentImage(input: {
   base64Data: string;
   documentType: string;
 }): Promise<DocumentAnalysisResult> {
+  const docling = await convertWithDocling(input);
+  if (docling.state === "ready") {
+    return {
+      engine: "docling",
+      confidence: 0,
+      summary: `Docling converted ${docling.value.text.length.toLocaleString()} characters from ${input.fileName}. No identity, business, or registry claim is verified by document conversion alone.`,
+      status: "requires_review",
+      extractedFields: {},
+      needsAttention: true,
+      model: null,
+      provenance: "document_intelligence",
+      availability: "available",
+      reason: "Docling document intelligence completed conversion. An authorized reviewer must compare the original document and independently validate all extracted claims.",
+    };
+  }
+  if (docling.state === "failed") {
+    return {
+      engine: "docling",
+      confidence: 0,
+      summary: "Document intelligence failed. No fallback parser or model output was substituted.",
+      status: "unavailable",
+      extractedFields: {},
+      needsAttention: true,
+      model: null,
+      provenance: "unavailable",
+      availability: "unavailable",
+      reason: docling.reason,
+    };
+  }
   const modelChoice = await pickVisionModel();
   const unavailable = (reason: string): DocumentAnalysisResult => ({
     engine: "vision_llm",
@@ -437,6 +467,36 @@ export async function analyzeDocumentImage(input: {
 }
 
 export async function analyzeLivenessSelfie(input: { base64Data: string; mimeType: string }) {
+  const provider = await verifyDojahLiveness({ base64Data: input.base64Data });
+  if (provider.state === "ready") {
+    const probability = provider.value.probability ?? 0;
+    return {
+      motionScore: 0,
+      faceQualityScore: 0,
+      faceMatchScore: 0,
+      confidence: probability,
+      spoofDetected: !provider.value.passed,
+      notes: provider.value.passed
+        ? "The configured liveness provider reported an image liveness pass. This is not an identity match, a NIN validation, or a completed multi-step video challenge; authorized review remains required."
+        : "The configured liveness provider reported a liveness failure. Do not approve onboarding from this capture.",
+      status: provider.value.passed ? ("requires_review" as const) : ("failed" as const),
+      verificationMethod: "provider_liveness_image" as const,
+      availabilityReason: "Provider-backed image liveness response. Identity and registry verification remain separate required controls.",
+    };
+  }
+  if (provider.state === "failed") {
+    return {
+      motionScore: 0,
+      faceQualityScore: 0,
+      faceMatchScore: 0,
+      confidence: 0,
+      spoofDetected: false,
+      notes: "Liveness was not verified because the configured provider failed. No model fallback was substituted.",
+      status: "unavailable" as const,
+      verificationMethod: "unavailable" as const,
+      availabilityReason: provider.reason,
+    };
+  }
   const modelChoice = await pickVisionModel();
   const unavailable = (reason: string) => ({
     motionScore: 0,

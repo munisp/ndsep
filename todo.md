@@ -164,3 +164,10 @@
 - [x] Ensure liveness, signature verification, parsing, notification analysis, and geofence registration never report unsupported results as verified
 - [x] Add regression tests that fail when unavailable, heuristic, seeded, or simulated behavior is presented as production output
 - [x] Publish an evidence-based silent-mockware findings report with verified remaining limitations
+- [x] Define configuration-backed provider contracts for real KYC/KYB, liveness, document intelligence, official registry verification, and audit-key custody
+- [x] Add enterprise agency authorization boundaries for trust-sensitive workflow mutations
+- [x] Implement fail-closed provider adapters for document intelligence, liveness, KYC/KYB, and official registry checks
+- [x] Add provider configuration validation, health reporting, and audit provenance to the platform
+- [x] Add tests for unconfigured, failed, and authorized provider execution paths
+- [x] Produce provider onboarding and deployment requirements for the external services that cannot be truthfully simulated
+- [x] Present and preserve unconfigured fail-closed provider defaults until approved production credentials are supplied

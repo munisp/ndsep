@@ -24,4 +24,11 @@ export const ENV = {
   objectStorageAccessKey: process.env.S3_ACCESS_KEY_ID ?? process.env.OBJECT_STORAGE_ACCESS_KEY ?? "",
   objectStorageSecretKey: process.env.S3_SECRET_ACCESS_KEY ?? process.env.OBJECT_STORAGE_SECRET_KEY ?? "",
   publicStorageBaseUrl: process.env.PUBLIC_STORAGE_BASE_URL ?? "",
+  oidcIssuer: process.env.OIDC_ISSUER ?? "",
+  oidcAudience: process.env.OIDC_AUDIENCE ?? "",
+  oidcJwksUrl: process.env.OIDC_JWKS_URL ?? "",
+  oidcAgencyIdClaim: process.env.OIDC_AGENCY_ID_CLAIM ?? "agency_id",
+  oidcAgencyRolesClaim: process.env.OIDC_AGENCY_ROLES_CLAIM ?? "agency_roles",
+  allowLocalEnterpriseAuth: process.env.ALLOW_LOCAL_ENTERPRISE_AUTH === "true",
+  enterpriseAuthRequired: process.env.ENTERPRISE_AUTH_REQUIRED === "true" || process.env.NODE_ENV === "production",
 };

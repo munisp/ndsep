@@ -1,9 +1,9 @@
-import { ForbiddenError } from "../../shared/_core/errors.js";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
-import { SignJWT, jwtVerify } from "jose";
+import { createRemoteJWKSet, SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
+import { type EnterpriseAgencyRole, type EnterprisePrincipal, isEnterpriseAgencyRole } from "./enterpriseAuth";
 import { ENV } from "./env";
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -20,6 +20,18 @@ export type SessionPayload = {
 const ONE_YEAR_MS = 1000 * 60 * 60 * 24 * 365;
 const COOKIE_NAME = "idlr_pts_session";
 
+function resolveClaim(payload: Record<string, unknown>, path: string) {
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (!current || typeof current !== "object") return undefined;
+    return (current as Record<string, unknown>)[segment];
+  }, payload);
+}
+
+function toAgencyRoles(value: unknown): EnterpriseAgencyRole[] {
+  const candidates = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[ ,]+/) : [];
+  return candidates.filter(isEnterpriseAgencyRole);
+}
+
 class SDKServer {
   private parseCookies(cookieHeader: string | undefined) {
     if (!cookieHeader) {
@@ -31,6 +43,45 @@ class SDKServer {
 
   private getSessionSecret() {
     return new TextEncoder().encode(ENV.cookieSecret);
+  }
+
+  private getExternalJwks() {
+    if (!ENV.oidcJwksUrl) return null;
+    return createRemoteJWKSet(new URL(ENV.oidcJwksUrl));
+  }
+
+  private async verifyEnterpriseToken(token: string): Promise<{ identity: SessionPayload; principal: EnterprisePrincipal } | null> {
+    if (!ENV.oidcIssuer || !ENV.oidcAudience || !ENV.oidcJwksUrl) return null;
+    const jwks = this.getExternalJwks();
+    if (!jwks) return null;
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: ENV.oidcIssuer,
+      audience: ENV.oidcAudience,
+    });
+    const claims = payload as Record<string, unknown>;
+    const subject = typeof claims.sub === "string" ? claims.sub : null;
+    const agencyId = resolveClaim(claims, ENV.oidcAgencyIdClaim);
+    const agencyRoles = toAgencyRoles(resolveClaim(claims, ENV.oidcAgencyRolesClaim));
+    if (!subject || typeof agencyId !== "string" || !agencyId || agencyRoles.length === 0) return null;
+
+    const email = typeof claims.email === "string" ? claims.email : null;
+    const name = typeof claims.name === "string" ? claims.name : email ?? subject;
+    return {
+      identity: {
+        openId: `${ENV.oidcIssuer}:${subject}`.slice(0, 63),
+        appId: ENV.appId,
+        name,
+        email,
+        role: agencyRoles.includes("planning_supervisor") ? "admin" : "user",
+      },
+      principal: {
+        subject,
+        issuer: ENV.oidcIssuer,
+        agencyId,
+        agencyRoles,
+        authMethod: "oidc",
+      },
+    };
   }
 
   normalizeIdentity(input: {
@@ -97,9 +148,7 @@ class SDKServer {
         audience: ENV.authAudience,
       });
       const { openId, appId, name, email, role } = payload as Record<string, unknown>;
-      if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
-        return null;
-      }
+      if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) return null;
       return {
         openId,
         appId,
@@ -121,11 +170,10 @@ class SDKServer {
 
     const cookies = this.parseCookies(req.headers.cookie);
     const sessionCookie = token || cookies.get(COOKIE_NAME);
-    const session = await this.verifySession(sessionCookie);
+    const external = token ? await this.verifyEnterpriseToken(token).catch(() => null) : null;
+    const session = external?.identity ?? (await this.verifySession(sessionCookie));
 
-    if (!session) {
-      throw ForbiddenError("Invalid session");
-    }
+    if (!session) throw new Error("Invalid session");
 
     const signedInAt = new Date();
     let user = await db.getUserByOpenId(session.openId);
@@ -134,29 +182,39 @@ class SDKServer {
         openId: session.openId,
         name: session.name,
         email: session.email ?? null,
-        loginMethod: "local-jwt",
+        loginMethod: external ? "oidc" : "local-jwt",
         role: session.role === "admin" ? "admin" : "user",
         lastSignedIn: signedInAt,
       });
       user = await db.getUserByOpenId(session.openId);
     }
 
-    if (!user) {
-      throw ForbiddenError("User not found");
-    }
+    if (!user) throw new Error("User not found");
 
     await db.upsertUser({
       openId: user.openId,
       name: user.name,
       email: user.email,
-      loginMethod: user.loginMethod ?? "local-jwt",
+      loginMethod: external ? "oidc" : user.loginMethod ?? "local-jwt",
       role: user.role,
       lastSignedIn: signedInAt,
     });
 
+    const localPrincipal: EnterprisePrincipal | undefined =
+      !external && ENV.allowLocalEnterpriseAuth && session.role === "admin"
+        ? {
+            subject: session.openId,
+            issuer: "local-development",
+            agencyId: "local-development-agency",
+            agencyRoles: ["planning_supervisor"],
+            authMethod: "local_development",
+          }
+        : undefined;
+
     return {
       ...user,
       role: user.role ?? "user",
+      enterprise: external?.principal ?? localPrincipal,
     } as AuthenticatedUser;
   }
 }
@@ -164,6 +222,7 @@ class SDKServer {
 export type AuthenticatedUser = User & {
   taskUid?: string;
   isCron?: boolean;
+  enterprise?: EnterprisePrincipal;
 };
 
 export { COOKIE_NAME, ONE_YEAR_MS };
