@@ -47,8 +47,10 @@ export const enterpriseProcedure = protectedProcedure.use(
 export const adminProcedure = t.procedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
+    const bootstrapAdministrator = process.env.INITIAL_ADMIN_OPEN_ID?.trim();
+    const isBootstrapAdministrator = Boolean(bootstrapAdministrator && ctx.user?.openId === bootstrapAdministrator);
 
-    if (!ctx.user || ctx.user.role !== "admin") {
+    if (!ctx.user || (ctx.user.role !== "admin" && !isBootstrapAdministrator)) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 

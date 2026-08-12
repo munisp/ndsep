@@ -55,8 +55,11 @@ describe("integration settings and development emulators", () => {
     process.env.ENABLE_DEVELOPMENT_PROVIDER_EMULATORS = "true";
     await withEmulatorServer(async (baseUrl) => {
       const discovery = await fetch(`${baseUrl}/api/dev-emulators/keycloak/.well-known/openid-configuration`);
-      const document = await fetch(`${baseUrl}/api/dev-emulators/docling/v1/convert/source`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ file_sources: [{ filename: "sample.pdf", base64_string: "dGVzdA==" }] }) });
+      const token = await fetch(`${baseUrl}/api/dev-emulators/keycloak/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ audience: "idlr-pts-staging", agency_role: "planning_supervisor" }) });
+      const accessToken = (await token.json() as { access_token: string }).access_token;
+      const document = await fetch(`${baseUrl}/api/dev-emulators/docling/v1/convert/source`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ file_sources: [{ filename: "sample.pdf", base64_string: "dGVzdA==" }] }) });
       await expect(discovery.json()).resolves.toMatchObject({ emulator: true, productionUseProhibited: true });
+      expect(token.status).toBe(200);
       await expect(document.json()).resolves.toMatchObject({ emulator: true, productionUseProhibited: true, documents: [{ emulator: true, verified: false }] });
     });
   });

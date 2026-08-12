@@ -181,3 +181,8 @@
 - [x] Add development-only Keycloak and Docling emulators that are explicit, non-production, and non-verifying
 - [x] Add availability-aware controls, disabled actions, and user-friendly provider failure messages
 - [x] Add regression coverage for settings access control, test-emulator labelling, and unavailable-service UX behavior
+- [ ] Configure server-side integration-settings encryption key and initial administrator access policy
+- [ ] Securely save approved NIMC bridge endpoint and token through Integration Settings
+- [ ] Securely save approved CAC bridge endpoint and token through Integration Settings
+- [x] Run explicit test-only Keycloak and Docling staging workflow and record non-production evidence
+- [x] Preserve unconfigured encryption, bootstrap-administrator, NIMC, and CAC defaults until approved values are supplied
