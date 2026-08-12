@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Modal, Pressable, ScrollView, Text, View, Platform, Alert } from "react-native";
+import { useState, useMemo } from "react";
+import { Modal, Pressable, ScrollView, Text, TextInput, View, Platform, Alert, Keyboard } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
@@ -26,9 +26,30 @@ const STATUS_LABELS: Record<PaymentStatus, { label: string; color: string }> = {
 export default function PaymentHistoryScreen() {
   const [filter, setFilter] = useState<"all" | PaymentStatus>("all");
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "highest" | "lowest">("newest");
-  const filtered = (filter === "all" ? DEMO_HISTORY : DEMO_HISTORY.filter((p) => p.status === filter))
-    .sort((a, b) => sortBy === "newest" ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() : sortBy === "oldest" ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : sortBy === "highest" ? b.amount - a.amount : a.amount - b.amount);
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedReceipt, setSelectedReceipt] = useState<PaymentRecord | null>(null);
+
+  const filtered = useMemo(() => {
+    let results = filter === "all" ? DEMO_HISTORY : DEMO_HISTORY.filter((p) => p.status === filter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      results = results.filter((p) =>
+        p.referenceNumber.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        formatNaira(p.amount).includes(q) ||
+        String(p.amount).includes(q)
+      );
+    }
+    return results.sort((a, b) => sortBy === "newest" ? new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() : sortBy === "oldest" ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : sortBy === "highest" ? b.amount - a.amount : a.amount - b.amount);
+  }, [filter, sortBy, searchQuery]);
+
+  function retryPayment(record: PaymentRecord) {
+    Alert.alert(
+      "Retry Payment",
+      `Payment gateway is not connected. In production, this would re-initiate the ${formatNaira(record.amount)} payment for "${record.description}" through the configured gateway.\n\nRef: ${record.referenceNumber}`,
+      [{ text: "OK" }]
+    );
+  }
 
   async function downloadReceiptPdf(record: PaymentRecord) {
     const content = [
@@ -77,6 +98,24 @@ export default function PaymentHistoryScreen() {
           <View className="rounded-2xl border border-warning bg-warning/5 p-4">
             <Text className="text-xs font-bold text-warning">⚠ NO GATEWAY CONNECTED</Text>
             <Text className="mt-1 text-xs text-muted">All records below are pending real payment gateway verification. No money has been collected or transferred.</Text>
+          </View>
+
+          <View className="flex-row items-center rounded-xl border border-border bg-surface px-3 py-2">
+            <Text className="text-sm mr-2">🔍</Text>
+            <TextInput
+              className="flex-1 text-sm text-foreground"
+              placeholder="Search by reference or amount…"
+              placeholderTextColor="#9BA1A6"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+              onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            {searchQuery.length > 0 && (
+              <Pressable onPress={() => setSearchQuery("")}>
+                <Text className="text-xs text-muted ml-2">✕</Text>
+              </Pressable>
+            )}
           </View>
 
           <View className="flex-row flex-wrap gap-2 mb-2">
@@ -159,6 +198,13 @@ export default function PaymentHistoryScreen() {
                         <Text className="text-center font-semibold text-background">Download Receipt</Text>
                       </View>
                     </Pressable>
+                    {(selectedReceipt.status === "failed" || selectedReceipt.status === "pending_gateway") && (
+                      <Pressable onPress={() => retryPayment(selectedReceipt)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
+                        <View className="rounded-xl border border-primary px-4 py-4">
+                          <Text className="text-center font-semibold text-primary">Retry Payment</Text>
+                        </View>
+                      </Pressable>
+                    )}
                     <Pressable onPress={() => setSelectedReceipt(null)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
                       <View className="px-4 py-3">
                         <Text className="text-center font-semibold text-muted">Close</Text>
