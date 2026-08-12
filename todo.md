@@ -228,3 +228,25 @@
 - [ ] Add file-based shared supervisor preset import with compatibility validation
 - [ ] Add weekly local escalation resolution-time snapshot analytics
 - [ ] Add regression coverage for modal accountability edits, preset import, and weekly snapshots
+- [ ] Implement file-picker import with validation errors for shared supervisor presets
+- [ ] Add acknowledgement update success toast feedback
+- [ ] Render weekly local escalation resolution-time snapshot analytics
+- [ ] Add regression coverage for import errors, success toast, and weekly analytics
+- [ ] Run a clean audit of all session-era implementation claims against current source, compilation, tests, and runtime health
+- [ ] Fix every confirmed regression or unimplemented claim found in the audit
+- [ ] Publish an evidence-backed inventory of tested, local-only, untested, and externally validated functionality
+- [ ] Implement shared-preset file-picker import UI with strict local payload validation and visible errors
+- [ ] Implement acknowledgement success toast and weekly local escalation snapshot UI
+- [ ] Add comprehensive deterministic real-path test coverage for implemented local workflows
+- [ ] Re-run source review, TypeScript compilation, and full regression evidence before completion claims
+- [x] Wire and verify the visible shared-preset Import button and file-picker flow
+- [ ] Verify weekly snapshot and acknowledgement toast render in dashboard UI
+- [ ] Run deterministic end-to-end local dashboard workflow validation with explicit external-service exclusions
+- [ ] Repair visible Import button access to the shared-preset file picker
+- [ ] Validate supervisor dashboard local paths and document all remaining non-local or untested boundaries
+- [ ] Complete pending shared-preset import UI, weekly resolution snapshot, and acknowledgement success feedback
+- [ ] Validate delivered claims through source review, compilation, and behavioral tests before reporting completion
+- [ ] Add file-picker import and validation for shared supervisor filter presets
+- [ ] Add weekly escalation resolution-time snapshot to management analytics
+- [ ] Add acknowledgement update success toast feedback
+- [ ] Add regression coverage for import validation, weekly snapshots, and acknowledgement success feedback
