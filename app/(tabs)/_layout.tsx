@@ -22,7 +22,6 @@ export default function TabLayout() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [unreadCount, setUnreadCount] = useState(0);
-  const [paymentUnread, setPaymentUnread] = useState(0);
   const bottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, 8);
   const tabBarHeight = 60 + bottomPadding;
 
@@ -33,7 +32,7 @@ export default function TabLayout() {
 
     refreshUnread();
     const unsubscribe = subscribeActivityFeed(refreshUnread);
-    const checkPaymentUnread = async () => { try { const url = `/api/trpc/listPaymentNotifications?input=${encodeURIComponent(JSON.stringify({ applicantId: "demo-user" }))}`; const res = await fetch(url); const json = await res.json(); setPaymentUnread((json?.result?.data ?? []).filter((n: any) => !n.read).length); } catch {} }; checkPaymentUnread(); const paymentInterval = setInterval(checkPaymentUnread, 30000); return () => { unsubscribe(); clearInterval(paymentInterval); };
+    return unsubscribe;
   }, []);
 
   return (
@@ -99,7 +98,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => (
             <View>
               <IconSymbol size={24} name="person.crop.circle.fill" color={color} />
-              <InboxBadge count={unreadCount + paymentUnread} />
+              <InboxBadge count={unreadCount} />
             </View>
           ),
         }}

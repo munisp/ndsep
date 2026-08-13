@@ -19,6 +19,7 @@ export default function ProfileScreen() {
   const { bundle, hasLiveConnection } = useMobilePlatformBundle();
   const utils = trpc.useUtils();
   const platformQuery = trpc.permitting.getPlatform.useQuery();
+  const paymentAlerts = trpc.paymentOperations.myAlerts.useQuery(undefined, { retry: false });
   const activeAgencyUserQuery = trpc.permitting.getActiveAgencyUser.useQuery();
   const setActiveAgencyUserMutation = trpc.permitting.setActiveAgencyUser.useMutation({
     onSuccess: async () => {
@@ -32,6 +33,7 @@ export default function ProfileScreen() {
   const activeAgencyUser = activeAgencyUserQuery.data;
   const queueIds = new Set(activeAgencyUser?.queueIds ?? []);
   const visibleQueues = (platform?.approvalQueues ?? []).filter((queue) => queueIds.has(queue.id));
+  const unreadPaymentAlerts = paymentAlerts.data?.filter((alert) => !alert.readAt).length ?? 0;
 
   return (
     <ScreenContainer className="bg-background">
@@ -109,6 +111,20 @@ export default function ProfileScreen() {
             <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-4">
               <Text className="text-center font-semibold text-foreground">Open onboarding workflow</Text>
             </View>
+          </Link>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <View className="flex-row items-center justify-between gap-3">
+            <View className="flex-1">
+              <Text className="text-lg font-semibold text-foreground">Payment Alerts</Text>
+              <Text className="mt-2 text-sm leading-5 text-muted">Review approval or rejection alerts for your submitted offline-payment declarations. Payment decisions are not bank or gateway settlement confirmations.</Text>
+            </View>
+            {paymentAlerts.data ? <View className={`rounded-full px-3 py-2 ${unreadPaymentAlerts ? "bg-primary/10" : "bg-background"}`}><Text className={`text-xs font-bold ${unreadPaymentAlerts ? "text-primary" : "text-muted"}`}>{unreadPaymentAlerts} unread</Text></View> : null}
+          </View>
+          {paymentAlerts.isError ? <Text className="mt-3 text-xs leading-4 text-warning">Sign in to access account-specific payment alerts. No financial notification data is shown without an authenticated session.</Text> : null}
+          <Link href={"/payment-notifications" as never} asChild>
+            <View className="mt-4 rounded-2xl border border-primary bg-background px-4 py-4"><Text className="text-center font-semibold text-primary">Open payment alerts</Text></View>
           </Link>
         </View>
 

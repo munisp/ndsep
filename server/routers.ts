@@ -3,13 +3,8 @@ import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { COOKIE_NAME } from "../shared/const";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, enterpriseProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, enterpriseProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { assertEnterpriseRole, type EnterpriseAgencyRole } from "./_core/enterpriseAuth";
-import {
-  listOfflinePayments,
-  markPaymentOffline,
-  reviewOfflinePayment,
-} from "./offlinePaymentRepository";
 import {
   analyzeDocumentImage,
   analyzeLivenessSelfie,
@@ -67,6 +62,7 @@ import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, 
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
 import { acknowledgeFieldEvidenceEscalation, assignFieldEvidenceSupervisor, escalateFieldEvidence, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
+import { getOfflinePaymentSummary, listPaymentAlerts, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, reviewOfflinePayment, submitOfflinePayment, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -101,72 +97,6 @@ const businessProfileSchema = z.object({
 
 export const appRouter = router({
   system: systemRouter,
-
-  // --- Offline Payment Management ---
-  markPaymentOffline: publicProcedure
-    .input(z.object({
-      referenceNumber: z.string(),
-      amount: z.number(),
-      currency: z.string().default("NGN"),
-      feeCategory: z.string(),
-      description: z.string(),
-      method: z.enum(["cash", "bank_transfer", "other"]),
-      applicantId: z.string(),
-    }))
-    .mutation(({ input }) => markPaymentOffline(input)),
-
-  listOfflinePayments: adminProcedure
-    .input(z.object({ filter: z.enum(["pending_review", "approved", "rejected"]).optional() }).optional())
-    .query(({ input }) => listOfflinePayments(input?.filter)),
-
-  listPaymentNotifications: publicProcedure
-    .input(z.object({ applicantId: z.string() }))
-    .query(({ input }) => {
-      const fs = require("fs");
-      const path = require("path");
-      const notifPath = path.join(__dirname, "data", "payment-notifications.json");
-      try {
-        if (fs.existsSync(notifPath)) {
-          const all = JSON.parse(fs.readFileSync(notifPath, "utf-8"));
-          return all.filter((n: any) => n.applicantId === input.applicantId);
-        }
-      } catch {}
-      return [];
-    }),
-
-  markPaymentNotificationRead: publicProcedure
-    .input(z.object({ notificationId: z.string() }))
-    .mutation(({ input }) => {
-      const fs = require("fs");
-      const path = require("path");
-      const notifPath = path.join(__dirname, "data", "payment-notifications.json");
-      try {
-        if (fs.existsSync(notifPath)) {
-          const all = JSON.parse(fs.readFileSync(notifPath, "utf-8"));
-          const notif = all.find((n: any) => n.id === input.notificationId);
-          if (notif) { notif.read = true; fs.writeFileSync(notifPath, JSON.stringify(all, null, 2)); }
-          return { success: true };
-        }
-      } catch {}
-      return { success: false };
-    }),
-
-  lookupPaymentByReference: publicProcedure
-    .input(z.object({ referenceNumber: z.string() }))
-    .query(({ input }) => {
-      const payments = listOfflinePayments();
-      const found = payments.find((p) => p.referenceNumber === input.referenceNumber);
-      return found ?? null;
-    }),
-
-  reviewOfflinePayment: adminProcedure
-    .input(z.object({
-      id: z.string(),
-      decision: z.enum(["approved", "rejected"]),
-      reviewedBy: z.string(),
-      note: z.string(),
-    }))
-    .mutation(({ input }) => reviewOfflinePayment(input.id, input.decision, input.reviewedBy, input.note)),
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -245,6 +175,20 @@ export const appRouter = router({
     update: adminProcedure
       .input(z.object({ jurisdiction: z.enum(["lagos", "fct", "kano", "ogun", "rivers"]), slaHours: z.number().int().min(1).max(720), checklist: z.array(z.string().min(3).max(300)).min(1).max(12), reason: z.string().min(3).max(1000) }))
       .mutation(({ ctx, input }) => updateLocalPolicy({ ...input, updatedBy: ctx.user.openId })),
+  }),
+  paymentOperations: router({
+    submitOfflinePayment: protectedProcedure
+      .input(z.object({ reference: z.string().min(3).max(120), amountKobo: z.number().int().positive(), service: z.string().min(3).max(200), evidenceDescription: z.string().min(3).max(2000) }))
+      .mutation(({ ctx, input }) => submitOfflinePayment({ ...input, applicantOpenId: ctx.user.openId, applicantName: ctx.user.name ?? null })),
+    myAlerts: protectedProcedure.query(({ ctx }) => listPaymentAlerts(ctx.user.openId)),
+    markAlertRead: protectedProcedure.input(z.object({ alertId: z.string().min(8) })).mutation(({ ctx, input }) => markPaymentAlertRead({ applicantOpenId: ctx.user.openId, alertId: input.alertId })),
+    pendingSummary: adminProcedure.query(() => getOfflinePaymentSummary()),
+    listPending: adminProcedure.query(() => listPendingOfflinePayments()),
+    review: adminProcedure
+      .input(z.object({ paymentId: z.string().min(8), decision: z.enum(["approved", "rejected"]), reason: z.string().min(3).max(2000) }))
+      .mutation(({ ctx, input }) => reviewOfflinePayment({ ...input, reviewerOpenId: ctx.user.openId })),
+    verifyReceiptAndLog: adminProcedure.input(z.object({ reference: z.string().min(3).max(500) })).mutation(({ ctx, input }) => verifyReceiptAndRecordScan({ ...input, scannedBy: ctx.user.openId })),
+    scanHistory: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(25) })).query(({ ctx, input }) => listReceiptScanHistory(ctx.user.openId, input.limit)),
   }),
   trust: router({
     providerHealth: publicProcedure.query(() => getProviderHealth()),

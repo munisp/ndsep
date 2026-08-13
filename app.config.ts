@@ -90,7 +90,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow $(PRODUCT_NAME) to capture identity and liveness evidence.",
+        cameraPermission: "Allow $(PRODUCT_NAME) to capture identity, field, and payment receipt evidence.",
         microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone when recording onboarding evidence.",
         recordAudioAndroid: false,
       },

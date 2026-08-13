@@ -253,3 +253,8 @@
 - [ ] Add weekly escalation resolution-time snapshot to management analytics
 - [ ] Add acknowledgement update success toast feedback
 - [ ] Add regression coverage for import validation, weekly snapshots, and acknowledgement success feedback
+- [x] Establish offline-payment records and notification routes required by the current mobile source state
+- [x] Add a Payment Alerts section in Profile linking to the payment notifications inbox
+- [x] Add persistent verified-receipt scan history to the administrator QR scanner
+- [x] Add a pending offline-payment count widget to the operations dashboard
+- [x] Add deterministic tests for payment alerts, receipt scan history, and pending-payment totals

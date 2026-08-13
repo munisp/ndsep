@@ -1,138 +1,77 @@
-import { useState, useCallback } from "react";
-import { Alert, Platform, Pressable, Text, View } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { router } from "expo-router";
+import { useState } from "react";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { CameraView, type BarcodeScanningResult, useCameraPermissions } from "expo-camera";
+import { useIsFocused } from "@react-navigation/native";
+import * as Haptics from "expo-haptics";
 
 import { ScreenContainer } from "@/components/screen-container";
-import { formatNaira } from "@/lib/payment-domain";
+import { trpc } from "@/lib/trpc";
 
-const API_BASE = "/api/trpc";
+function normaliseReference(value: string) {
+  try {
+    const parsed = JSON.parse(value) as { reference?: unknown };
+    if (typeof parsed.reference === "string") return parsed.reference.trim();
+  } catch {
+    // Receipt QR payloads may intentionally contain the plain reference string.
+  }
+  return value.trim();
+}
 
-export default function QRScannerScreen() {
+function ScanOutcomeBadge({ outcome }: { outcome: "approved" | "pending_review" | "rejected" | "not_found" }) {
+  const state = outcome === "approved" ? "success" : outcome === "pending_review" ? "warning" : "error";
+  const label = outcome === "approved" ? "Approved" : outcome === "pending_review" ? "Pending review" : outcome === "rejected" ? "Rejected" : "Not found";
+  return <View className={`rounded-full px-2 py-1 ${state === "success" ? "bg-success/10" : state === "warning" ? "bg-warning/10" : "bg-error/10"}`}><Text className={`text-[10px] font-bold uppercase ${state === "success" ? "text-success" : state === "warning" ? "text-warning" : "text-error"}`}>{label}</Text></View>;
+}
+
+export default function QrScannerScreen() {
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  const [lookupError, setLookupError] = useState<string | null>(null);
-  const [torchOn, setTorchOn] = useState(false);
+  const isFocused = useIsFocused();
+  const [torchEnabled, setTorchEnabled] = useState(false);
+  const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const verifyReceipt = trpc.paymentOperations.verifyReceiptAndLog.useMutation();
+  const history = trpc.paymentOperations.scanHistory.useQuery({ limit: 25 }, { retry: false });
+  const scanningEnabled = Boolean(permission?.granted && isFocused && !verifyReceipt.isPending);
 
-  async function handleBarCodeScanned({ data }: { data: string }) {
-    if (scanned) return;
-    setScanned(true);
-    setLookupError(null);
-
-    // Expected format: IDLR-PTS:<reference_number>
-    const ref = data.startsWith("IDLR-PTS:") ? data.slice(9) : data;
-
+  async function onBarcodeScanned(result: BarcodeScanningResult) {
+    if (verifyReceipt.isPending) return;
+    const reference = normaliseReference(result.data);
+    if (reference.length < 3) {
+      setResultMessage("The scanned QR code did not contain a usable payment reference.");
+      return;
+    }
+    setResultMessage("Checking receipt against the offline-payment review record…");
     try {
-      const url = `${API_BASE}/lookupPaymentByReference?input=${encodeURIComponent(JSON.stringify({ referenceNumber: ref }))}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      const payment = json?.result?.data;
-      if (payment) {
-        setResult(payment);
-      } else {
-        setLookupError(`No offline payment found for reference: ${ref}`);
-      }
-    } catch {
-      setLookupError("Failed to look up payment. Check network connection.");
+      const verified = await verifyReceipt.mutateAsync({ reference });
+      const label = verified.scan.outcome === "approved" ? "Receipt record approved by administrator." : verified.scan.outcome === "pending_review" ? "Receipt found, but it is still awaiting administrator review." : verified.scan.outcome === "rejected" ? "Receipt record was rejected by administrator review." : "No offline-payment record matches this reference.";
+      setResultMessage(label);
+      if (Platform.OS !== "web") await Haptics.notificationAsync(verified.scan.outcome === "approved" ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
+      await history.refetch();
+    } catch (error) {
+      setResultMessage(error instanceof Error ? error.message : "Receipt verification could not be completed.");
+      if (Platform.OS !== "web") await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   }
 
-  if (Platform.OS === "web") {
-    return (
-      <ScreenContainer className="p-6">
-        <View className="flex-1 items-center justify-center gap-4">
-          <Text className="text-3xl">📷</Text>
-          <Text className="text-lg font-bold text-foreground">QR Scanner</Text>
-          <Text className="text-sm text-muted text-center">Camera-based QR scanning is available on native iOS and Android devices. Use the web payment history search to look up references manually.</Text>
-          <Pressable onPress={() => router.back()} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
-            <View className="rounded-xl border border-primary px-6 py-3 mt-4">
-              <Text className="text-center font-semibold text-primary">Return</Text>
-            </View>
-          </Pressable>
-        </View>
-      </ScreenContainer>
-    );
-  }
+  if (!permission) return <ScreenContainer className="items-center justify-center bg-background"><Text className="text-muted">Checking camera permission…</Text></ScreenContainer>;
 
-  if (!permission?.granted) {
-    return (
-      <ScreenContainer className="p-6">
-        <View className="flex-1 items-center justify-center gap-4">
-          <Text className="text-3xl">📷</Text>
-          <Text className="text-lg font-bold text-foreground">Camera Permission Required</Text>
-          <Text className="text-sm text-muted text-center">Grant camera access to scan payment receipt QR codes.</Text>
-          <Pressable onPress={requestPermission} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
-            <View className="rounded-xl bg-primary px-6 py-3 mt-4">
-              <Text className="text-center font-semibold text-white">Grant Permission</Text>
-            </View>
-          </Pressable>
-        </View>
-      </ScreenContainer>
-    );
+  if (!permission.granted) {
+    return <ScreenContainer className="items-center justify-center bg-background p-6"><View className="rounded-3xl border border-border bg-surface p-6"><Text className="text-xl font-bold text-foreground">Camera access required</Text><Text className="mt-2 text-sm leading-5 text-muted">Receipt verification scans a QR code using the device camera. The camera is not opened until permission is granted.</Text><Pressable onPress={() => void requestPermission()} style={({ pressed }) => [{ opacity: pressed ? 0.78 : 1 }]}><View className="mt-5 rounded-2xl bg-primary px-4 py-4"><Text className="text-center font-semibold text-white">Grant camera access</Text></View></Pressable></View></ScreenContainer>;
   }
 
   return (
-    <ScreenContainer edges={["top", "left", "right", "bottom"]}>
-      <View className="flex-1">
-        {!scanned && (
-          <CameraView
-            style={{ flex: 1 }}
-            enableTorch={torchOn}
-            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-            onBarcodeScanned={handleBarCodeScanned}
-          >
-            <View className="flex-1 items-center justify-center">
-              <View className="w-64 h-64 border-2 border-white/50 rounded-3xl" />
-              <Text className="text-white text-sm mt-4">Align QR code within the frame</Text>
-              <Pressable onPress={() => setTorchOn(!torchOn)} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1, marginTop: 20 }]}>
-                <View className={`rounded-full px-5 py-2 ${torchOn ? "bg-warning" : "bg-white/20"}`}>
-                  <Text className={`text-sm font-semibold ${torchOn ? "text-black" : "text-white"}`}>
-                    {torchOn ? "🔦 Light ON" : "🔦 Light OFF"}
-                  </Text>
-                </View>
-              </Pressable>
-            </View>
-          </CameraView>
-        )}
+    <ScreenContainer className="bg-background">
+      <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
+        <View className="rounded-[28px] bg-surface p-5"><Text className="text-sm text-muted">Administrator receipt verification</Text><Text className="mt-2 text-3xl font-bold text-foreground">Scan payment receipt</Text><Text className="mt-2 text-sm leading-5 text-muted">This reads the QR reference, checks the administrator-reviewed offline-payment record, and records the lookup in your staff scan history. It does not validate bank settlement or gateway processing.</Text></View>
 
-        {scanned && (
-          <View className="flex-1 p-6 justify-center gap-4">
-            {result && (
-              <View className="rounded-2xl border border-border bg-surface p-5 gap-3">
-                <Text className="text-lg font-bold text-foreground">Payment Found</Text>
-                <View className="flex-row justify-between"><Text className="text-xs text-muted">Reference</Text><Text className="text-xs font-semibold text-foreground">{result.referenceNumber}</Text></View>
-                <View className="flex-row justify-between"><Text className="text-xs text-muted">Amount</Text><Text className="text-sm font-bold text-foreground">{formatNaira(result.amount)}</Text></View>
-                <View className="flex-row justify-between"><Text className="text-xs text-muted">Description</Text><Text className="text-xs text-foreground">{result.description}</Text></View>
-                <View className="flex-row justify-between"><Text className="text-xs text-muted">Method</Text><Text className="text-xs text-foreground">{result.method}</Text></View>
-                <View className="flex-row justify-between"><Text className="text-xs text-muted">Status</Text><Text className={`text-xs font-bold ${result.status === "approved" ? "text-success" : result.status === "rejected" ? "text-error" : "text-warning"}`}>{result.status}</Text></View>
-                <View className="flex-row justify-between"><Text className="text-xs text-muted">Gateway Verified</Text><Text className="text-xs font-bold text-error">No</Text></View>
-                <View className="mt-2 rounded-xl border border-warning bg-warning/5 p-2">
-                  <Text className="text-[10px] text-warning">⚠ This is an offline payment record. It has NOT been verified by any payment gateway.</Text>
-                </View>
-              </View>
-            )}
+        <View className="overflow-hidden rounded-3xl border border-border bg-black" style={{ height: 300 }}>
+          {scanningEnabled ? <CameraView style={{ flex: 1 }} facing="back" enableTorch={torchEnabled} barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={onBarcodeScanned} /> : <View className="flex-1 items-center justify-center bg-surface px-5"><Text className="text-center text-sm text-muted">{verifyReceipt.isPending ? "Verifying the scanned receipt…" : "Scanner is paused while this page is not active."}</Text></View>}
+          <View style={{ position: "absolute", right: 14, bottom: 14 }}><Pressable onPress={() => setTorchEnabled((current) => !current)} disabled={!scanningEnabled} style={({ pressed }) => [{ opacity: pressed || !scanningEnabled ? 0.65 : 1 }]}><View className="rounded-full bg-black/70 px-4 py-3"><Text className="font-semibold text-white">{torchEnabled ? "Torch on" : "Torch off"}</Text></View></Pressable></View>
+        </View>
 
-            {lookupError && (
-              <View className="rounded-2xl border border-error bg-error/5 p-5">
-                <Text className="text-sm font-semibold text-error">Not Found</Text>
-                <Text className="text-xs text-muted mt-2">{lookupError}</Text>
-              </View>
-            )}
+        {resultMessage ? <View className={`rounded-2xl border p-4 ${verifyReceipt.isError ? "border-error bg-error/5" : "border-primary bg-primary/5"}`}><Text className="text-sm leading-5 text-foreground">{resultMessage}</Text></View> : null}
 
-            <Pressable onPress={() => { setScanned(false); setResult(null); setLookupError(null); }} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
-              <View className="rounded-xl bg-primary px-6 py-3">
-                <Text className="text-center font-semibold text-white">Scan Another</Text>
-              </View>
-            </Pressable>
-            <Pressable onPress={() => router.back()} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
-              <View className="px-4 py-3">
-                <Text className="text-center font-semibold text-muted">Return</Text>
-              </View>
-            </Pressable>
-          </View>
-        )}
-      </View>
+        <View className="rounded-3xl border border-border bg-surface p-5"><View className="flex-row items-center justify-between"><View><Text className="text-lg font-semibold text-foreground">Recent receipt scans</Text><Text className="mt-1 text-sm text-muted">Stored against your administrator account.</Text></View><Pressable onPress={() => void history.refetch()} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}><Text className="text-sm font-semibold text-primary">Refresh</Text></Pressable></View>{history.isError ? <View className="mt-4 rounded-2xl border border-warning bg-warning/5 p-4"><Text className="text-sm font-semibold text-warning">Administrator session required</Text><Text className="mt-2 text-xs leading-4 text-muted">Receipt verification history is not exposed without an authorised administrator session.</Text></View> : history.isLoading ? <Text className="mt-4 text-sm text-muted">Loading scan history…</Text> : history.data?.length ? <View className="mt-4 gap-3">{history.data.map((scan) => <View key={scan.id} className="rounded-2xl border border-border bg-background p-4"><View className="flex-row items-center justify-between gap-3"><Text className="flex-1 text-sm font-semibold text-foreground" numberOfLines={1}>{scan.reference}</Text><ScanOutcomeBadge outcome={scan.outcome} /></View><Text className="mt-2 text-xs text-muted">Scanned {new Date(scan.scannedAt).toLocaleString()}</Text></View>)}</View> : <View className="mt-4 rounded-2xl border border-border bg-background p-4"><Text className="text-sm font-semibold text-foreground">No scan history yet</Text><Text className="mt-2 text-xs leading-4 text-muted">Verified, pending, rejected, and not-found receipt lookups will be recorded here after a staff member scans a QR receipt.</Text></View>}</View>
+      </ScrollView>
     </ScreenContainer>
   );
 }
