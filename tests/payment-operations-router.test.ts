@@ -62,5 +62,11 @@ describe("payment operation routes", () => {
     const scan = await administrator.paymentOperations.verifyReceiptAndLog({ reference: "lag-coo-2026-001" });
     expect(scan.scan.outcome).toBe("approved");
     expect((await administrator.paymentOperations.scanHistory({ limit: 25 }))[0]?.reference).toBe("LAG-COO-2026-001");
+    await expect(applicant.paymentOperations.auditEvents({ limit: 25 })).rejects.toThrow();
+    const auditEvents = await administrator.paymentOperations.auditEvents({ aggregateType: "payment", limit: 25 });
+    expect(auditEvents.some((event) => event.eventType === "offline_payment_approved")).toBe(true);
+    const exported = await administrator.paymentOperations.exportAuditEvents({ aggregateType: "payment" });
+    expect(exported.csv).toContain("offline_payment_approved");
+    expect(exported.rowCount).toBeGreaterThan(0);
   });
 });

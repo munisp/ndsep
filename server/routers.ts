@@ -62,7 +62,7 @@ import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, 
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
 import { acknowledgeFieldEvidenceEscalation, assignFieldEvidenceSupervisor, escalateFieldEvidence, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
-import { getOfflinePaymentSummary, listPaymentAlerts, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, reviewOfflinePayment, submitOfflinePayment, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
+import { getOfflinePaymentSummary, listPaymentAlerts, listPaymentAuditEvents, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, recordPaymentAuditExport, reviewOfflinePayment, submitOfflinePayment, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -189,6 +189,19 @@ export const appRouter = router({
       .mutation(({ ctx, input }) => reviewOfflinePayment({ ...input, reviewerOpenId: ctx.user.openId })),
     verifyReceiptAndLog: adminProcedure.input(z.object({ reference: z.string().min(3).max(500) })).mutation(({ ctx, input }) => verifyReceiptAndRecordScan({ ...input, scannedBy: ctx.user.openId })),
     scanHistory: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(25) })).query(({ ctx, input }) => listReceiptScanHistory(ctx.user.openId, input.limit)),
+    auditEvents: adminProcedure
+      .input(z.object({ aggregateType: z.string().min(1).max(80).nullable().optional(), eventType: z.string().min(1).max(120).nullable().optional(), actorOpenId: z.string().min(1).max(255).nullable().optional(), from: z.string().datetime().nullable().optional(), to: z.string().datetime().nullable().optional(), limit: z.number().int().min(1).max(500).default(100) }))
+      .query(({ input }) => listPaymentAuditEvents(input)),
+    exportAuditEvents: adminProcedure
+      .input(z.object({ aggregateType: z.string().min(1).max(80).nullable().optional(), eventType: z.string().min(1).max(120).nullable().optional(), actorOpenId: z.string().min(1).max(255).nullable().optional(), from: z.string().datetime().nullable().optional(), to: z.string().datetime().nullable().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        const events = await listPaymentAuditEvents({ ...input, limit: 500 });
+        const escape = (value: string | number | null) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+        const header = "event_id,aggregate_type,aggregate_id,sequence_number,event_type,actor_open_id,occurred_at,previous_event_hash,event_hash,payload_json";
+        const rows = events.map((event) => [event.eventId, event.aggregateType, event.aggregateId, event.sequenceNumber, event.eventType, event.actorOpenId, event.occurredAt, event.previousEventHash, event.eventHash, JSON.stringify(event.payload)].map(escape).join(","));
+        const exported = await recordPaymentAuditExport({ actorOpenId: ctx.user.openId, filter: input, rowCount: events.length });
+        return { filename: `payment-audit-events-${exported.occurredAt.slice(0, 10)}.csv`, csv: [header, ...rows].join("\n"), rowCount: events.length, exportedAt: exported.occurredAt };
+      }),
   }),
   trust: router({
     providerHealth: publicProcedure.query(() => getProviderHealth()),

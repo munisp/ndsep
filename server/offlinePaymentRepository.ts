@@ -3,8 +3,10 @@ import { Pool, type PoolClient } from "pg";
 
 import { runPaymentAuditMigrations } from "./paymentAuditMigrations";
 
-export type OfflinePaymentStatus = "pending_review" | "approved" | "rejected";
-export type ReceiptScanOutcome = "approved" | "pending_review" | "rejected" | "not_found";
+export type OfflinePaymentStatus = "pending_review" | "awaiting_second_approval" | "approved" | "rejected";
+export type ReceiptScanOutcome = OfflinePaymentStatus | "not_found";
+export type GatewayProvider = "paystack" | "flutterwave";
+export type GatewayReconciliationState = "unavailable" | "unmatched" | "matched" | "mismatch";
 
 export type OfflinePaymentRecord = {
   id: string;
@@ -16,37 +18,35 @@ export type OfflinePaymentRecord = {
   service: string;
   evidenceDescription: string;
   status: OfflinePaymentStatus;
+  dualControlRequired: boolean;
+  firstApprovedAt: string | null;
+  firstApprovedBy: string | null;
+  firstApprovalReason: string | null;
+  gatewayReconciliationState: GatewayReconciliationState;
+  gatewayProvider: GatewayProvider | null;
+  gatewayEventId: string | null;
+  gatewayReconciledAt: string | null;
   submittedAt: string;
   reviewedAt: string | null;
   reviewedBy: string | null;
   reviewReason: string | null;
 };
 
-export type PaymentAlert = {
-  id: string;
-  applicantOpenId: string;
-  paymentId: string;
-  type: "offline_payment_approved" | "offline_payment_rejected";
-  title: string;
-  body: string;
-  createdAt: string;
-  readAt: string | null;
-};
+export type PaymentAlert = { id: string; applicantOpenId: string; paymentId: string; type: "offline_payment_approved" | "offline_payment_rejected"; title: string; body: string; createdAt: string; readAt: string | null };
+export type ReceiptScanRecord = { id: string; scannedBy: string; reference: string; paymentId: string | null; outcome: ReceiptScanOutcome; scannedAt: string };
+export type PaymentAuditEvent = { eventId: string; aggregateType: string; aggregateId: string; sequenceNumber: number; eventType: string; actorOpenId: string | null; payload: Record<string, unknown>; occurredAt: string; previousEventHash: string | null; eventHash: string };
+export type PaymentAuditFilter = { aggregateType?: string | null; eventType?: string | null; actorOpenId?: string | null; from?: string | null; to?: string | null; limit?: number };
+export type GatewayWebhookResult = { state: "processed" | "duplicate"; provider: GatewayProvider; eventId: string; reconciliationState: "ignored" | "unmatched_reference" | "matched" | "mismatch"; paymentId: string | null };
 
-export type ReceiptScanRecord = {
-  id: string;
-  scannedBy: string;
-  reference: string;
-  paymentId: string | null;
-  outcome: ReceiptScanOutcome;
-  scannedAt: string;
-};
+export class GatewayWebhookUnavailableError extends Error { constructor() { super("Gateway reconciliation is unavailable because no signature secret is configured for this provider."); } }
+export class GatewayWebhookSignatureError extends Error { constructor() { super("Gateway webhook signature validation failed."); } }
 
 type PaymentRow = {
-  id: string; applicant_open_id: string; applicant_name: string | null; reference: string; amount_kobo: string | number; currency: "NGN"; service: string; evidence_description: string; status: OfflinePaymentStatus; submitted_at: Date; reviewed_at: Date | null; reviewed_by: string | null; review_reason: string | null;
+  id: string; applicant_open_id: string; applicant_name: string | null; reference: string; amount_kobo: string | number; currency: "NGN"; service: string; evidence_description: string; status: OfflinePaymentStatus; dual_control_required: boolean; first_approved_at: Date | null; first_approved_by: string | null; first_approval_reason: string | null; gateway_reconciliation_state: GatewayReconciliationState; gateway_provider: GatewayProvider | null; gateway_event_id: string | null; gateway_reconciled_at: Date | null; submitted_at: Date; reviewed_at: Date | null; reviewed_by: string | null; review_reason: string | null;
 };
 type AlertRow = { id: string; applicant_open_id: string; payment_id: string; type: PaymentAlert["type"]; title: string; body: string; created_at: Date; read_at: Date | null };
 type ScanRow = { id: string; scanned_by: string; reference: string; payment_id: string | null; outcome: ReceiptScanOutcome; scanned_at: Date };
+type AuditRow = { event_id: string; aggregate_type: string; aggregate_id: string; sequence_number: string | number; event_type: string; actor_open_id: string | null; payload: Record<string, unknown>; occurred_at: Date; previous_event_hash: string | null; event_hash: string };
 
 const pools = new Map<string, Pool>();
 const migrations = new Map<string, Promise<void>>();
@@ -57,43 +57,23 @@ function paymentAuditUrl() {
   if (process.env.NODE_ENV === "production") throw new Error("Payment operations are unavailable: PAYMENT_AUDIT_POSTGRES_URL is required in production.");
   return "postgresql://ubuntu@/idlr_payment?host=/var/run/postgresql";
 }
-
-function poolFor(url: string) {
-  let pool = pools.get(url);
-  if (!pool) {
-    pool = new Pool({ connectionString: url, max: 5, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 3_000, application_name: "idlr-pts-payment-audit" });
-    pools.set(url, pool);
-  }
-  return pool;
+function highValueThresholdKobo() {
+  const candidate = Number.parseInt(process.env.PAYMENT_DUAL_CONTROL_THRESHOLD_KOBO ?? "50000000", 10);
+  return Number.isSafeInteger(candidate) && candidate > 0 ? candidate : 50_000_000;
 }
-
-async function readyPool() {
-  const url = paymentAuditUrl();
-  const pool = poolFor(url);
-  let migration = migrations.get(url);
-  if (!migration) {
-    migration = runPaymentAuditMigrations(pool);
-    migrations.set(url, migration);
-  }
-  try {
-    await migration;
-    return pool;
-  } catch (error) {
-    migrations.delete(url);
-    const message = error instanceof Error ? error.message : "unknown PostgreSQL error";
-    throw new Error(`Payment operations are unavailable because the PostgreSQL audit store could not be initialized: ${message}`);
-  }
-}
+function poolFor(url: string) { let pool = pools.get(url); if (!pool) { pool = new Pool({ connectionString: url, max: 5, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 3_000, application_name: "idlr-pts-payment-audit" }); pools.set(url, pool); } return pool; }
+async function readyPool() { const url = paymentAuditUrl(); const pool = poolFor(url); let migration = migrations.get(url); if (!migration) { migration = runPaymentAuditMigrations(pool); migrations.set(url, migration); } try { await migration; return pool; } catch (error) { migrations.delete(url); const message = error instanceof Error ? error.message : "unknown PostgreSQL error"; throw new Error(`Payment operations are unavailable because the PostgreSQL audit store could not be initialized: ${message}`); } }
 
 function mapPayment(row: PaymentRow): OfflinePaymentRecord {
-  return { id: row.id, applicantOpenId: row.applicant_open_id, applicantName: row.applicant_name, reference: row.reference, amountKobo: Number(row.amount_kobo), currency: row.currency, service: row.service, evidenceDescription: row.evidence_description, status: row.status, submittedAt: row.submitted_at.toISOString(), reviewedAt: row.reviewed_at?.toISOString() ?? null, reviewedBy: row.reviewed_by, reviewReason: row.review_reason };
+  return { id: row.id, applicantOpenId: row.applicant_open_id, applicantName: row.applicant_name, reference: row.reference, amountKobo: Number(row.amount_kobo), currency: row.currency, service: row.service, evidenceDescription: row.evidence_description, status: row.status, dualControlRequired: row.dual_control_required, firstApprovedAt: row.first_approved_at?.toISOString() ?? null, firstApprovedBy: row.first_approved_by, firstApprovalReason: row.first_approval_reason, gatewayReconciliationState: row.gateway_reconciliation_state, gatewayProvider: row.gateway_provider, gatewayEventId: row.gateway_event_id, gatewayReconciledAt: row.gateway_reconciled_at?.toISOString() ?? null, submittedAt: row.submitted_at.toISOString(), reviewedAt: row.reviewed_at?.toISOString() ?? null, reviewedBy: row.reviewed_by, reviewReason: row.review_reason };
 }
 function mapAlert(row: AlertRow): PaymentAlert { return { id: row.id, applicantOpenId: row.applicant_open_id, paymentId: row.payment_id, type: row.type, title: row.title, body: row.body, createdAt: row.created_at.toISOString(), readAt: row.read_at?.toISOString() ?? null }; }
 function mapScan(row: ScanRow): ReceiptScanRecord { return { id: row.id, scannedBy: row.scanned_by, reference: row.reference, paymentId: row.payment_id, outcome: row.outcome, scannedAt: row.scanned_at.toISOString() }; }
+function mapAudit(row: AuditRow): PaymentAuditEvent { return { eventId: row.event_id, aggregateType: row.aggregate_type, aggregateId: row.aggregate_id, sequenceNumber: Number(row.sequence_number), eventType: row.event_type, actorOpenId: row.actor_open_id, payload: row.payload, occurredAt: row.occurred_at.toISOString(), previousEventHash: row.previous_event_hash, eventHash: row.event_hash }; }
 function normaliseReference(value: string) { return value.trim().toUpperCase(); }
 function hashEvent(input: { aggregateType: string; aggregateId: string; sequence: number; eventType: string; occurredAt: string; previousHash: string | null; data: Record<string, unknown> }) { return crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex"); }
 
-async function appendEvent(client: PoolClient, input: { aggregateType: "payment" | "alert" | "receipt_scan"; aggregateId: string; eventType: string; actorOpenId: string | null; occurredAt: string; data: Record<string, unknown> }) {
+async function appendEvent(client: PoolClient, input: { aggregateType: "payment" | "alert" | "receipt_scan" | "gateway_webhook" | "payment_audit_export"; aggregateId: string; eventType: string; actorOpenId: string | null; occurredAt: string; data: Record<string, unknown> }) {
   const prior = await client.query<{ sequence_number: string; event_hash: string }>("SELECT sequence_number, event_hash FROM payment_audit_events WHERE aggregate_type = $1 AND aggregate_id = $2 ORDER BY sequence_number DESC LIMIT 1 FOR UPDATE", [input.aggregateType, input.aggregateId]);
   const sequence = prior.rowCount ? Number(prior.rows[0]!.sequence_number) + 1 : 1;
   const previousHash = prior.rowCount ? prior.rows[0]!.event_hash : null;
@@ -101,110 +81,99 @@ async function appendEvent(client: PoolClient, input: { aggregateType: "payment"
   const eventHash = hashEvent({ aggregateType: input.aggregateType, aggregateId: input.aggregateId, sequence, eventType: input.eventType, occurredAt: input.occurredAt, previousHash, data: input.data });
   await client.query("INSERT INTO payment_audit_events (event_id, aggregate_type, aggregate_id, sequence_number, event_type, actor_open_id, payload, occurred_at, previous_event_hash, event_hash) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7::jsonb,$8::timestamptz,$9,$10)", [eventId, input.aggregateType, input.aggregateId, sequence, input.eventType, input.actorOpenId, JSON.stringify(input.data), input.occurredAt, previousHash, eventHash]);
 }
-
-async function transaction<T>(operation: (client: PoolClient) => Promise<T>) {
-  const pool = await readyPool();
-  const client = await pool.connect();
-  try { await client.query("BEGIN"); const result = await operation(client); await client.query("COMMIT"); return result; }
-  catch (error) { await client.query("ROLLBACK"); throw error; }
-  finally { client.release(); }
-}
+async function transaction<T>(operation: (client: PoolClient) => Promise<T>) { const pool = await readyPool(); const client = await pool.connect(); try { await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE"); const result = await operation(client); await client.query("COMMIT"); return result; } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); } }
 
 export async function submitOfflinePayment(input: { applicantOpenId: string; applicantName: string | null; reference: string; amountKobo: number; service: string; evidenceDescription: string }) {
   const reference = normaliseReference(input.reference);
   if (!reference) throw new Error("A bank-transfer or cash-deposit reference is required.");
-  const paymentId = crypto.randomUUID();
-  const submittedAt = new Date().toISOString();
+  const paymentId = crypto.randomUUID(); const submittedAt = new Date().toISOString(); const dualControlRequired = input.amountKobo >= highValueThresholdKobo();
   return transaction(async (client) => {
     const duplicate = await client.query("SELECT 1 FROM offline_payment_records WHERE reference = $1", [reference]);
     if (duplicate.rowCount) throw new Error("That payment reference has already been submitted for review.");
-    const inserted = await client.query<PaymentRow>("INSERT INTO offline_payment_records (id, applicant_open_id, applicant_name, reference, amount_kobo, currency, service, evidence_description, status, submitted_at) VALUES ($1::uuid,$2,$3,$4,$5,'NGN',$6,$7,'pending_review',$8::timestamptz) RETURNING *", [paymentId, input.applicantOpenId, input.applicantName, reference, input.amountKobo, input.service.trim(), input.evidenceDescription.trim(), submittedAt]);
-    await appendEvent(client, { aggregateType: "payment", aggregateId: paymentId, eventType: "offline_payment_submitted", actorOpenId: input.applicantOpenId, occurredAt: submittedAt, data: { reference, amountKobo: input.amountKobo, currency: "NGN", service: input.service.trim() } });
+    const inserted = await client.query<PaymentRow>("INSERT INTO offline_payment_records (id, applicant_open_id, applicant_name, reference, amount_kobo, currency, service, evidence_description, status, dual_control_required, submitted_at) VALUES ($1::uuid,$2,$3,$4,$5,'NGN',$6,$7,'pending_review',$8,$9::timestamptz) RETURNING *", [paymentId, input.applicantOpenId, input.applicantName, reference, input.amountKobo, input.service.trim(), input.evidenceDescription.trim(), dualControlRequired, submittedAt]);
+    await appendEvent(client, { aggregateType: "payment", aggregateId: paymentId, eventType: "offline_payment_submitted", actorOpenId: input.applicantOpenId, occurredAt: submittedAt, data: { reference, amountKobo: input.amountKobo, currency: "NGN", service: input.service.trim(), dualControlRequired, dualControlThresholdKobo: highValueThresholdKobo() } });
     return mapPayment(inserted.rows[0]!);
   });
 }
 
-export async function listPendingOfflinePayments() {
-  const pool = await readyPool();
-  const result = await pool.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE status = 'pending_review' ORDER BY submitted_at DESC");
-  return result.rows.map(mapPayment);
+export async function listPendingOfflinePayments() { const pool = await readyPool(); const result = await pool.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE status IN ('pending_review', 'awaiting_second_approval') ORDER BY submitted_at DESC"); return result.rows.map(mapPayment); }
+export async function getOfflinePaymentSummary() {
+  const pool = await readyPool(); const result = await pool.query<{ status: OfflinePaymentStatus; count: string }>("SELECT status, COUNT(*)::text AS count FROM offline_payment_records GROUP BY status"); const counts = new Map(result.rows.map((row) => [row.status, Number(row.count)]));
+  const pendingCount = counts.get("pending_review") ?? 0; const awaitingSecondApprovalCount = counts.get("awaiting_second_approval") ?? 0; const approvedCount = counts.get("approved") ?? 0; const rejectedCount = counts.get("rejected") ?? 0;
+  return { pendingCount, awaitingSecondApprovalCount, approvedCount, rejectedCount, totalCount: pendingCount + awaitingSecondApprovalCount + approvedCount + rejectedCount, highValueThresholdKobo: highValueThresholdKobo() };
 }
 
-export async function getOfflinePaymentSummary() {
-  const pool = await readyPool();
-  const result = await pool.query<{ status: OfflinePaymentStatus; count: string }>("SELECT status, COUNT(*)::text AS count FROM offline_payment_records GROUP BY status");
-  const counts = new Map(result.rows.map((row) => [row.status, Number(row.count)]));
-  const pendingCount = counts.get("pending_review") ?? 0;
-  const approvedCount = counts.get("approved") ?? 0;
-  const rejectedCount = counts.get("rejected") ?? 0;
-  return { pendingCount, approvedCount, rejectedCount, totalCount: pendingCount + approvedCount + rejectedCount };
+async function createDecisionAlert(client: PoolClient, payment: PaymentRow, paymentId: string, decision: "approved" | "rejected", reviewerOpenId: string, reason: string, reviewedAt: string) {
+  const alertId = crypto.randomUUID(); const approved = decision === "approved"; const title = approved ? "Offline payment approved" : "Offline payment requires attention"; const body = approved ? `Your ${payment.service} payment declaration (${payment.reference}) was approved after administrator review.` : `Your ${payment.service} payment declaration (${payment.reference}) was rejected: ${reason}`;
+  await client.query("INSERT INTO payment_alerts (id, applicant_open_id, payment_id, type, title, body, created_at) VALUES ($1::uuid,$2,$3::uuid,$4,$5,$6,$7::timestamptz)", [alertId, payment.applicant_open_id, paymentId, approved ? "offline_payment_approved" : "offline_payment_rejected", title, body, reviewedAt]);
+  await appendEvent(client, { aggregateType: "alert", aggregateId: alertId, eventType: "payment_alert_created", actorOpenId: reviewerOpenId, occurredAt: reviewedAt, data: { paymentId, type: approved ? "offline_payment_approved" : "offline_payment_rejected" } });
 }
 
 export async function reviewOfflinePayment(input: { paymentId: string; decision: "approved" | "rejected"; reviewerOpenId: string; reason: string }) {
   return transaction(async (client) => {
-    const existing = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE id = $1::uuid FOR UPDATE", [input.paymentId]);
-    const payment = existing.rows[0];
+    const existing = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE id = $1::uuid FOR UPDATE", [input.paymentId]); const payment = existing.rows[0];
     if (!payment) throw new Error("The offline payment record no longer exists.");
-    if (payment.status !== "pending_review") throw new Error("Only payment records awaiting review can be decided.");
-    const reviewedAt = new Date().toISOString();
-    const reason = input.reason.trim();
-    const updated = await client.query<PaymentRow>("UPDATE offline_payment_records SET status = $2, reviewed_at = $3::timestamptz, reviewed_by = $4, review_reason = $5, version = version + 1, updated_at = now() WHERE id = $1::uuid AND status = 'pending_review' RETURNING *", [input.paymentId, input.decision, reviewedAt, input.reviewerOpenId, reason]);
+    if (payment.status !== "pending_review" && payment.status !== "awaiting_second_approval") throw new Error("Only payment records awaiting an authorised review can be decided.");
+    const reviewedAt = new Date().toISOString(); const reason = input.reason.trim(); if (reason.length < 3) throw new Error("A concise review reason is required.");
+    if (input.decision === "approved" && payment.status === "pending_review" && payment.dual_control_required) {
+      const staged = await client.query<PaymentRow>("UPDATE offline_payment_records SET status = 'awaiting_second_approval', first_approved_at = $2::timestamptz, first_approved_by = $3, first_approval_reason = $4, version = version + 1, updated_at = now() WHERE id = $1::uuid AND status = 'pending_review' RETURNING *", [input.paymentId, reviewedAt, input.reviewerOpenId, reason]);
+      if (!staged.rowCount) throw new Error("The payment record changed before the first approval could be applied. Refresh and try again.");
+      await appendEvent(client, { aggregateType: "payment", aggregateId: input.paymentId, eventType: "offline_payment_first_approval", actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { reason, dualControlRequired: true } });
+      return mapPayment(staged.rows[0]!);
+    }
+    if (input.decision === "approved" && payment.status === "awaiting_second_approval" && payment.first_approved_by === input.reviewerOpenId) throw new Error("A second administrator who did not provide the first approval must approve this high-value payment.");
+    const updated = await client.query<PaymentRow>("UPDATE offline_payment_records SET status = $2, reviewed_at = $3::timestamptz, reviewed_by = $4, review_reason = $5, version = version + 1, updated_at = now() WHERE id = $1::uuid AND status IN ('pending_review', 'awaiting_second_approval') RETURNING *", [input.paymentId, input.decision, reviewedAt, input.reviewerOpenId, reason]);
     if (!updated.rowCount) throw new Error("The payment record changed before this review could be applied. Refresh and try again.");
-    await appendEvent(client, { aggregateType: "payment", aggregateId: input.paymentId, eventType: `offline_payment_${input.decision}`, actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { reason } });
-    const alertId = crypto.randomUUID();
-    const approved = input.decision === "approved";
-    const title = approved ? "Offline payment approved" : "Offline payment requires attention";
-    const body = approved ? `Your ${payment.service} payment declaration (${payment.reference}) was approved after administrator review.` : `Your ${payment.service} payment declaration (${payment.reference}) was rejected: ${reason}`;
-    await client.query("INSERT INTO payment_alerts (id, applicant_open_id, payment_id, type, title, body, created_at) VALUES ($1::uuid,$2,$3::uuid,$4,$5,$6,$7::timestamptz)", [alertId, payment.applicant_open_id, input.paymentId, approved ? "offline_payment_approved" : "offline_payment_rejected", title, body, reviewedAt]);
-    await appendEvent(client, { aggregateType: "alert", aggregateId: alertId, eventType: "payment_alert_created", actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { paymentId: input.paymentId, type: approved ? "offline_payment_approved" : "offline_payment_rejected" } });
+    await appendEvent(client, { aggregateType: "payment", aggregateId: input.paymentId, eventType: input.decision === "approved" && payment.status === "awaiting_second_approval" ? "offline_payment_second_approval" : `offline_payment_${input.decision}`, actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { reason, firstApprovedBy: payment.first_approved_by } });
+    await createDecisionAlert(client, payment, input.paymentId, input.decision, input.reviewerOpenId, reason, reviewedAt);
     return mapPayment(updated.rows[0]!);
   });
 }
 
-export async function listPaymentAlerts(applicantOpenId: string) {
-  const pool = await readyPool();
-  const result = await pool.query<AlertRow>("SELECT * FROM payment_alerts WHERE applicant_open_id = $1 ORDER BY created_at DESC", [applicantOpenId]);
-  return result.rows.map(mapAlert);
-}
-
-export async function markPaymentAlertRead(input: { applicantOpenId: string; alertId: string }) {
-  return transaction(async (client) => {
-    const existing = await client.query<AlertRow>("SELECT * FROM payment_alerts WHERE id = $1::uuid AND applicant_open_id = $2 FOR UPDATE", [input.alertId, input.applicantOpenId]);
-    const alert = existing.rows[0];
-    if (!alert) throw new Error("The payment alert was not found for this account.");
-    if (alert.read_at) return mapAlert(alert);
-    const readAt = new Date().toISOString();
-    const updated = await client.query<AlertRow>("UPDATE payment_alerts SET read_at = $2::timestamptz WHERE id = $1::uuid RETURNING *", [input.alertId, readAt]);
-    await appendEvent(client, { aggregateType: "alert", aggregateId: input.alertId, eventType: "payment_alert_read", actorOpenId: input.applicantOpenId, occurredAt: readAt, data: { paymentId: alert.payment_id } });
-    return mapAlert(updated.rows[0]!);
-  });
-}
+export async function listPaymentAlerts(applicantOpenId: string) { const pool = await readyPool(); const result = await pool.query<AlertRow>("SELECT * FROM payment_alerts WHERE applicant_open_id = $1 ORDER BY created_at DESC", [applicantOpenId]); return result.rows.map(mapAlert); }
+export async function markPaymentAlertRead(input: { applicantOpenId: string; alertId: string }) { return transaction(async (client) => { const existing = await client.query<AlertRow>("SELECT * FROM payment_alerts WHERE id = $1::uuid AND applicant_open_id = $2 FOR UPDATE", [input.alertId, input.applicantOpenId]); const alert = existing.rows[0]; if (!alert) throw new Error("The payment alert was not found for this account."); if (alert.read_at) return mapAlert(alert); const readAt = new Date().toISOString(); const updated = await client.query<AlertRow>("UPDATE payment_alerts SET read_at = $2::timestamptz WHERE id = $1::uuid RETURNING *", [input.alertId, readAt]); await appendEvent(client, { aggregateType: "alert", aggregateId: input.alertId, eventType: "payment_alert_read", actorOpenId: input.applicantOpenId, occurredAt: readAt, data: { paymentId: alert.payment_id } }); return mapAlert(updated.rows[0]!); }); }
 
 export async function verifyReceiptAndRecordScan(input: { reference: string; scannedBy: string }) {
-  const reference = normaliseReference(input.reference);
-  if (!reference) throw new Error("The receipt QR code did not contain a payment reference.");
+  const reference = normaliseReference(input.reference); if (!reference) throw new Error("The receipt QR code did not contain a payment reference.");
+  return transaction(async (client) => { const found = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE reference = $1", [reference]); const payment = found.rows[0] ?? null; const outcome: ReceiptScanOutcome = !payment ? "not_found" : payment.status; const scanId = crypto.randomUUID(); const scannedAt = new Date().toISOString(); const scan = await client.query<ScanRow>("INSERT INTO payment_receipt_scans (id, scanned_by, reference, payment_id, outcome, scanned_at) VALUES ($1::uuid,$2,$3,$4::uuid,$5,$6::timestamptz) RETURNING *", [scanId, input.scannedBy, reference, payment?.id ?? null, outcome, scannedAt]); await appendEvent(client, { aggregateType: "receipt_scan", aggregateId: scanId, eventType: "receipt_scanned", actorOpenId: input.scannedBy, occurredAt: scannedAt, data: { reference, paymentId: payment?.id ?? null, outcome } }); return { scan: mapScan(scan.rows[0]!), payment: payment ? mapPayment(payment) : null }; });
+}
+export async function listReceiptScanHistory(scannedBy: string, limit = 25) { const pool = await readyPool(); const safeLimit = Math.max(1, Math.min(limit, 100)); const result = await pool.query<ScanRow>("SELECT * FROM payment_receipt_scans WHERE scanned_by = $1 ORDER BY scanned_at DESC LIMIT $2", [scannedBy, safeLimit]); return result.rows.map(mapScan); }
+
+function gatewaySecret(provider: GatewayProvider) { const secret = provider === "paystack" ? process.env.PAYSTACK_WEBHOOK_SECRET?.trim() : process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH?.trim(); if (!secret) throw new GatewayWebhookUnavailableError(); return secret; }
+function safeSignatureEqual(expected: string, supplied: string) { const expectedBytes = Buffer.from(expected); const suppliedBytes = Buffer.from(supplied); return expectedBytes.length === suppliedBytes.length && crypto.timingSafeEqual(expectedBytes, suppliedBytes); }
+function verifyGatewaySignature(provider: GatewayProvider, rawBody: string, suppliedSignature: string) { const secret = gatewaySecret(provider); const expected = provider === "paystack" ? crypto.createHmac("sha512", secret).update(rawBody).digest("hex") : crypto.createHmac("sha256", secret).update(rawBody).digest("base64"); if (!safeSignatureEqual(expected, suppliedSignature)) throw new GatewayWebhookSignatureError(); }
+function getPayloadObject(rawBody: string) { try { const parsed = JSON.parse(rawBody) as unknown; if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid"); return parsed as { id?: unknown; event?: unknown; type?: unknown; timestamp?: unknown; data?: Record<string, unknown> }; } catch { throw new Error("Gateway webhook payload is not valid JSON."); } }
+function asText(value: unknown) { return typeof value === "string" && value.trim() ? value.trim() : null; }
+function numberValue(value: unknown) { const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN; return Number.isFinite(parsed) ? parsed : null; }
+
+export async function reconcileGatewayWebhook(input: { provider: GatewayProvider; rawBody: string; signature: string }) {
+  verifyGatewaySignature(input.provider, input.rawBody, input.signature); const payload = getPayloadObject(input.rawBody); const data = payload.data ?? {}; const eventType = asText(input.provider === "paystack" ? payload.event : payload.type) ?? "unknown"; const reference = normaliseReference(asText(input.provider === "paystack" ? data.reference : (data.tx_ref ?? data.reference)) ?? "");
+  const providerEventId = asText(payload.id) ?? asText(data.id) ?? (reference && eventType !== "unknown" ? `${eventType}:${reference}:${asText(payload.timestamp) ?? asText(data.paid_at) ?? "undated"}` : null); if (!providerEventId) throw new Error("Gateway webhook payload did not include a stable event identifier.");
+  const success = input.provider === "paystack" ? eventType === "charge.success" : eventType === "charge.completed" && ["succeeded", "successful"].includes((asText(data.status) ?? "").toLowerCase()); const receivedAt = new Date().toISOString(); const payloadHash = crypto.createHash("sha256").update(input.rawBody).digest("hex");
   return transaction(async (client) => {
-    const found = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE reference = $1", [reference]);
-    const payment = found.rows[0] ?? null;
-    const outcome: ReceiptScanOutcome = !payment ? "not_found" : payment.status;
-    const scanId = crypto.randomUUID();
-    const scannedAt = new Date().toISOString();
-    const scan = await client.query<ScanRow>("INSERT INTO payment_receipt_scans (id, scanned_by, reference, payment_id, outcome, scanned_at) VALUES ($1::uuid,$2,$3,$4::uuid,$5,$6::timestamptz) RETURNING *", [scanId, input.scannedBy, reference, payment?.id ?? null, outcome, scannedAt]);
-    await appendEvent(client, { aggregateType: "receipt_scan", aggregateId: scanId, eventType: "receipt_scanned", actorOpenId: input.scannedBy, occurredAt: scannedAt, data: { reference, paymentId: payment?.id ?? null, outcome } });
-    return { scan: mapScan(scan.rows[0]!), payment: payment ? { id: payment.id, reference: payment.reference, service: payment.service, amountKobo: Number(payment.amount_kobo), currency: payment.currency, status: payment.status, submittedAt: payment.submitted_at.toISOString(), reviewedAt: payment.reviewed_at?.toISOString() ?? null } : null };
+    const deliveryId = crypto.randomUUID(); const delivery = await client.query<{ id: string }>("INSERT INTO payment_gateway_webhook_deliveries (id, provider, gateway_event_id, event_type, reference, payload_sha256, signature_algorithm, reconciliation_state, received_at) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,'ignored',$8::timestamptz) ON CONFLICT (provider, gateway_event_id) DO NOTHING RETURNING id", [deliveryId, input.provider, providerEventId, eventType, reference || null, payloadHash, input.provider === "paystack" ? "HMAC-SHA512" : "HMAC-SHA256", receivedAt]);
+    if (!delivery.rowCount) return { state: "duplicate", provider: input.provider, eventId: providerEventId, reconciliationState: "ignored", paymentId: null } satisfies GatewayWebhookResult;
+    let reconciliationState: GatewayWebhookResult["reconciliationState"] = "ignored"; let paymentId: string | null = null;
+    if (success && reference) {
+      const paymentResult = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE reference = $1 FOR UPDATE", [reference]); const payment = paymentResult.rows[0] ?? null; const amount = numberValue(data.amount); const amountKobo = amount === null ? null : input.provider === "paystack" ? Math.round(amount) : Math.round(amount * 100);
+      if (!payment) reconciliationState = "unmatched_reference";
+      else if (amountKobo !== Number(payment.amount_kobo) || payment.currency !== "NGN") { reconciliationState = "mismatch"; paymentId = payment.id; await client.query("UPDATE offline_payment_records SET gateway_reconciliation_state = 'mismatch', gateway_provider = $2, gateway_event_id = $3, gateway_reconciled_at = $4::timestamptz, updated_at = now() WHERE id = $1::uuid", [payment.id, input.provider, providerEventId, receivedAt]); }
+      else { reconciliationState = "matched"; paymentId = payment.id; await client.query("UPDATE offline_payment_records SET gateway_reconciliation_state = 'matched', gateway_provider = $2, gateway_event_id = $3, gateway_reconciled_at = $4::timestamptz, updated_at = now() WHERE id = $1::uuid", [payment.id, input.provider, providerEventId, receivedAt]); }
+    }
+    await client.query("UPDATE payment_gateway_webhook_deliveries SET reconciliation_state = $2, payment_id = $3::uuid WHERE id = $1::uuid", [deliveryId, reconciliationState, paymentId]);
+    await appendEvent(client, { aggregateType: "gateway_webhook", aggregateId: deliveryId, eventType: "gateway_webhook_received", actorOpenId: null, occurredAt: receivedAt, data: { provider: input.provider, providerEventId, eventType, reference: reference || null, payloadSha256: payloadHash, reconciliationState } });
+    if (paymentId) await appendEvent(client, { aggregateType: "payment", aggregateId: paymentId, eventType: reconciliationState === "matched" ? "gateway_reconciliation_matched" : "gateway_reconciliation_mismatch", actorOpenId: null, occurredAt: receivedAt, data: { provider: input.provider, providerEventId, payloadSha256: payloadHash, reconciliationState } });
+    return { state: "processed", provider: input.provider, eventId: providerEventId, reconciliationState, paymentId } satisfies GatewayWebhookResult;
   });
 }
 
-export async function listReceiptScanHistory(scannedBy: string, limit = 25) {
-  const pool = await readyPool();
-  const safeLimit = Math.max(1, Math.min(limit, 100));
-  const result = await pool.query<ScanRow>("SELECT * FROM payment_receipt_scans WHERE scanned_by = $1 ORDER BY scanned_at DESC LIMIT $2", [scannedBy, safeLimit]);
-  return result.rows.map(mapScan);
+export async function listPaymentAuditEvents(filter: PaymentAuditFilter = {}) {
+  const pool = await readyPool(); const clauses: string[] = []; const values: unknown[] = [];
+  const add = (fragment: string, value: unknown) => { values.push(value); clauses.push(fragment.replace("?", `$${values.length}`)); };
+  if (filter.aggregateType) add("aggregate_type = ?", filter.aggregateType); if (filter.eventType) add("event_type = ?", filter.eventType); if (filter.actorOpenId) add("actor_open_id = ?", filter.actorOpenId); if (filter.from) add("occurred_at >= ?::timestamptz", filter.from); if (filter.to) add("occurred_at <= ?::timestamptz", filter.to);
+  const limit = Math.max(1, Math.min(filter.limit ?? 100, 500)); values.push(limit); const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const result = await pool.query<AuditRow>(`SELECT * FROM payment_audit_events ${where} ORDER BY occurred_at DESC, aggregate_type DESC, sequence_number DESC LIMIT $${values.length}`, values); return result.rows.map(mapAudit);
 }
+export async function recordPaymentAuditExport(input: { actorOpenId: string; filter: PaymentAuditFilter; rowCount: number }) { return transaction(async (client) => { const exportId = crypto.randomUUID(); const occurredAt = new Date().toISOString(); await appendEvent(client, { aggregateType: "payment_audit_export", aggregateId: exportId, eventType: "payment_audit_events_exported", actorOpenId: input.actorOpenId, occurredAt, data: { filter: { aggregateType: input.filter.aggregateType ?? null, eventType: input.filter.eventType ?? null, actorOpenId: input.filter.actorOpenId ?? null, from: input.filter.from ?? null, to: input.filter.to ?? null }, rowCount: input.rowCount } }); return { exportId, occurredAt }; }); }
 
-export async function resetPaymentAuditForTests() {
-  const url = paymentAuditUrl();
-  if (!url.includes("idlr_payment_test")) throw new Error("Payment audit reset is only permitted for the dedicated test database.");
-  const pool = await readyPool();
-  await pool.query("TRUNCATE TABLE payment_audit_events, payment_receipt_scans, payment_alerts, offline_payment_records RESTART IDENTITY CASCADE");
-}
+export async function resetPaymentAuditForTests() { const url = paymentAuditUrl(); if (!url.includes("idlr_payment_test")) throw new Error("Payment audit reset is only permitted for the dedicated test database."); const pool = await readyPool(); await pool.query("TRUNCATE TABLE payment_audit_events, payment_gateway_webhook_deliveries, payment_receipt_scans, payment_alerts, offline_payment_records RESTART IDENTITY CASCADE"); }

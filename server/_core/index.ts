@@ -8,6 +8,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { registerDevelopmentProviderEmulators } from "../developmentProviderEmulators";
+import { GatewayWebhookSignatureError, GatewayWebhookUnavailableError, reconcileGatewayWebhook, type GatewayProvider } from "../offlinePaymentRepository";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -51,6 +52,24 @@ async function startServer() {
       return;
     }
     next();
+  });
+
+  app.post("/api/gateway-webhooks/:provider", express.raw({ type: "application/json", limit: "1mb" }), async (req, res) => {
+    const provider = req.params.provider;
+    if (provider !== "paystack" && provider !== "flutterwave") { res.status(404).json({ error: "Unsupported payment gateway." }); return; }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) { res.status(400).json({ error: "A raw JSON webhook payload is required." }); return; }
+    const signatureHeader = provider === "paystack" ? "x-paystack-signature" : "flutterwave-signature";
+    const signature = req.header(signatureHeader);
+    if (!signature) { res.status(401).json({ error: "Webhook signature is required." }); return; }
+    try {
+      const result = await reconcileGatewayWebhook({ provider: provider as GatewayProvider, rawBody: req.body.toString("utf8"), signature });
+      res.status(200).json({ accepted: true, duplicate: result.state === "duplicate", reconciliationState: result.reconciliationState });
+    } catch (error) {
+      if (error instanceof GatewayWebhookUnavailableError) { res.status(503).json({ error: "Gateway reconciliation is not configured." }); return; }
+      if (error instanceof GatewayWebhookSignatureError) { res.status(401).json({ error: "Webhook signature validation failed." }); return; }
+      const message = error instanceof Error ? error.message : "Webhook processing failed.";
+      res.status(400).json({ error: message });
+    }
   });
 
   app.use(express.json({ limit: "50mb" }));

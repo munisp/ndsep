@@ -120,6 +120,40 @@ const PAYMENT_AUDIT_DDL = [
        CREATE TRIGGER payment_audit_events_immutable BEFORE UPDATE OR DELETE ON payment_audit_events FOR EACH ROW EXECUTE FUNCTION reject_payment_audit_event_mutation();
      END IF;
    END $$`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS dual_control_required boolean NOT NULL DEFAULT true`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS first_approved_at timestamptz NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS first_approved_by text NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS first_approval_reason text NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_reconciliation_state text NOT NULL DEFAULT 'unavailable'`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_provider text NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_event_id text NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_reconciled_at timestamptz NULL`,
+  `ALTER TABLE offline_payment_records DROP CONSTRAINT IF EXISTS offline_payment_records_status_check`,
+  `ALTER TABLE offline_payment_records DROP CONSTRAINT IF EXISTS offline_payment_records_check`,
+  `ALTER TABLE offline_payment_records ADD CONSTRAINT offline_payment_records_status_check CHECK (
+      status IN ('pending_review', 'awaiting_second_approval', 'approved', 'rejected') AND
+      gateway_reconciliation_state IN ('unavailable', 'unmatched', 'matched', 'mismatch') AND
+      ((status = 'pending_review' AND reviewed_at IS NULL AND reviewed_by IS NULL AND review_reason IS NULL AND first_approved_at IS NULL AND first_approved_by IS NULL AND first_approval_reason IS NULL) OR
+       (status = 'awaiting_second_approval' AND dual_control_required = true AND reviewed_at IS NULL AND reviewed_by IS NULL AND review_reason IS NULL AND first_approved_at IS NOT NULL AND first_approved_by IS NOT NULL AND first_approval_reason IS NOT NULL) OR
+       (status IN ('approved', 'rejected') AND reviewed_at IS NOT NULL AND reviewed_by IS NOT NULL AND review_reason IS NOT NULL))
+    )`,
+  `CREATE INDEX IF NOT EXISTS offline_payment_records_dual_control_idx ON offline_payment_records (submitted_at DESC) WHERE status = 'awaiting_second_approval'`,
+  `CREATE TABLE IF NOT EXISTS payment_gateway_webhook_deliveries (
+      id uuid PRIMARY KEY,
+      provider text NOT NULL CHECK (provider IN ('paystack', 'flutterwave')),
+      gateway_event_id text NOT NULL,
+      event_type text NOT NULL,
+      reference text NULL,
+      payload_sha256 char(64) NOT NULL,
+      signature_algorithm text NOT NULL,
+      reconciliation_state text NOT NULL CHECK (reconciliation_state IN ('ignored', 'unmatched_reference', 'matched', 'mismatch')),
+      payment_id uuid NULL REFERENCES offline_payment_records(id),
+      received_at timestamptz NOT NULL,
+      CONSTRAINT payment_gateway_webhook_deliveries_provider_event_unique UNIQUE (provider, gateway_event_id)
+    )`,
+  `CREATE INDEX IF NOT EXISTS payment_gateway_webhook_deliveries_received_idx ON payment_gateway_webhook_deliveries (received_at DESC)`,
+  `ALTER TABLE payment_audit_events DROP CONSTRAINT IF EXISTS payment_audit_events_aggregate_type_check`,
+  `ALTER TABLE payment_audit_events ADD CONSTRAINT payment_audit_events_aggregate_type_check CHECK (aggregate_type IN ('payment', 'alert', 'receipt_scan', 'migration', 'gateway_webhook', 'payment_audit_export'))`,
 ];
 
 async function appendLegacyEvent(client: PoolClient, input: { aggregateType: "payment" | "alert" | "receipt_scan" | "migration"; aggregateId: string; eventType: string; actorOpenId: string | null; occurredAt: string; payload: Record<string, unknown> }) {
@@ -169,9 +203,10 @@ async function importLegacyJsonStore(client: PoolClient) {
 }
 
 export async function runPaymentAuditMigrations(pool: Pool) {
-  for (const statement of PAYMENT_AUDIT_DDL) await pool.query(statement);
   const client = await pool.connect();
   try {
+    await client.query("SELECT pg_advisory_lock(734209113)");
+    for (const statement of PAYMENT_AUDIT_DDL) await client.query(statement);
     await client.query("BEGIN");
     await importLegacyJsonStore(client);
     await client.query("COMMIT");
@@ -179,6 +214,7 @@ export async function runPaymentAuditMigrations(pool: Pool) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
+    await client.query("SELECT pg_advisory_unlock(734209113)").catch(() => undefined);
     client.release();
   }
 }

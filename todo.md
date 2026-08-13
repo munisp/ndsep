@@ -263,3 +263,8 @@
 - [x] Add QR receipt scan success and error sounds with native haptic feedback
 - [x] Add regression tests for payment database events, review decisions, and scan feedback mapping
 - [x] Install and configure a local PostgreSQL service for the development payment audit database
+- [x] Add signature-verified, idempotent gateway webhook reconciliation with fail-closed configuration
+- [x] Add dual-control high-value payment approval policy and administrator decision workflow
+- [x] Add filtered, exportable administrator dashboard for append-only payment audit events
+- [x] Add regression tests for webhook integrity, dual-control separation, and audit-event export
+- [x] Maintain default-unavailable gateway reconciliation until a real provider signature secret is securely configured

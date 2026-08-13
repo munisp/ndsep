@@ -22,9 +22,9 @@ function normaliseReference(value: string) {
   return value.trim();
 }
 
-function ScanOutcomeBadge({ outcome }: { outcome: "approved" | "pending_review" | "rejected" | "not_found" }) {
-  const state = outcome === "approved" ? "success" : outcome === "pending_review" ? "warning" : "error";
-  const label = outcome === "approved" ? "Approved" : outcome === "pending_review" ? "Pending review" : outcome === "rejected" ? "Rejected" : "Not found";
+function ScanOutcomeBadge({ outcome }: { outcome: "approved" | "pending_review" | "awaiting_second_approval" | "rejected" | "not_found" }) {
+  const state = outcome === "approved" ? "success" : outcome === "pending_review" || outcome === "awaiting_second_approval" ? "warning" : "error";
+  const label = outcome === "approved" ? "Approved" : outcome === "pending_review" ? "Pending review" : outcome === "awaiting_second_approval" ? "Second approval required" : outcome === "rejected" ? "Rejected" : "Not found";
   return <View className={`rounded-full px-2 py-1 ${state === "success" ? "bg-success/10" : state === "warning" ? "bg-warning/10" : "bg-error/10"}`}><Text className={`text-[10px] font-bold uppercase ${state === "success" ? "text-success" : state === "warning" ? "text-warning" : "text-error"}`}>{label}</Text></View>;
 }
 
