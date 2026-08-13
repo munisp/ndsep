@@ -196,6 +196,13 @@
       "when": 1774096114935,
       "tag": "0027_mobile_push_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786637530000,
+      "tag": "0028_api_usage_log_fk_index",
+      "breakpoints": true
     }
   ]
 }

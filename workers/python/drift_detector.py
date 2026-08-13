@@ -45,7 +45,7 @@ score_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=48))
 
 
 def get_db():
-    dsn = os.environ.get("WORKER_DATABASE_URL") or os.environ.get("WORKER_DATABASE_URL", os.environ.get("DATABASE_URL")
+    dsn = os.environ.get("WORKER_DATABASE_URL") or os.environ.get("DATABASE_URL")
     if not dsn:
         raise RuntimeError("No DATABASE_URL set")
     conn = psycopg2.connect(dsn)

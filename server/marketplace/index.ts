@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS api_usage_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_api_usage_created ON api_usage_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_api_usage_log_api_key_id_fk ON api_usage_log (api_key_id);
 `;
 
 export async function initMarketplace(): Promise<void> {

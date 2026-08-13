@@ -44,7 +44,7 @@ const CRITICAL_COLUMNS = [
   ["public_compliance_registry", "is_published"],
 ] as const;
 
-const EXPECTED_MIGRATION_COUNT = 28;
+const EXPECTED_MIGRATION_COUNT = 29;
 const MINIMUM_TABLE_COUNT = 153;
 const MINIMUM_FOREIGN_KEY_COUNT = 83;
 
