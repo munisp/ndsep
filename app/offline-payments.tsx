@@ -1,0 +1,31 @@
+import { useState } from "react";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+
+import { ScreenContainer } from "@/components/screen-container";
+import { trpc } from "@/lib/trpc";
+
+function formatNaira(amountKobo: number) { return new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 2 }).format(amountKobo / 100); }
+
+export default function OfflinePaymentsReviewScreen() {
+  const pending = trpc.paymentOperations.listPending.useQuery(undefined, { retry: false });
+  const summary = trpc.paymentOperations.pendingSummary.useQuery(undefined, { retry: false });
+  const utils = trpc.useUtils();
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState<string | null>(null);
+  const review = trpc.paymentOperations.review.useMutation({
+    onSuccess: async (payment) => {
+      await Promise.all([pending.refetch(), summary.refetch(), utils.paymentOperations.scanHistory.invalidate(), utils.paymentOperations.myAlerts.invalidate()]);
+      setMessage(`${payment.reference} was ${payment.status === "approved" ? "approved" : "rejected"}. The applicant has an account-scoped in-app alert; no bank settlement claim was created.`);
+      setReasons((current) => ({ ...current, [payment.id]: "" }));
+    },
+    onError: (error) => setMessage(error.message || "The administrator decision could not be applied."),
+  });
+
+  function decide(paymentId: string, decision: "approved" | "rejected") {
+    const reason = reasons[paymentId]?.trim() ?? "";
+    if (reason.length < 3) { setMessage("Record a concise administrator review reason before deciding an offline payment declaration."); return; }
+    review.mutate({ paymentId, decision, reason });
+  }
+
+  return <ScreenContainer className="bg-background"><ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled"><View className="rounded-[28px] bg-surface p-5"><Text className="text-sm text-muted">Administrator payment review</Text><Text className="mt-2 text-3xl font-bold text-foreground">Offline payment queue</Text><Text className="mt-2 text-sm leading-5 text-muted">Every decision is transactionally recorded with an append-only PostgreSQL audit event. Approval confirms only this administrative review decision, not a payment-gateway settlement.</Text></View><View className="rounded-2xl border border-border bg-surface p-4"><Text className="text-xs uppercase tracking-wide text-muted">Pending declarations</Text><Text className="mt-1 text-3xl font-bold text-warning">{summary.data?.pendingCount ?? "—"}</Text>{summary.isError ? <Text className="mt-2 text-xs text-warning">Administrator access is required; no payment records are exposed.</Text> : null}</View>{message ? <View className={`rounded-2xl border p-4 ${review.isError ? "border-error bg-error/5" : "border-primary bg-primary/5"}`}><Text className="text-sm leading-5 text-foreground">{message}</Text></View> : null}{pending.isError ? <View className="rounded-3xl border border-warning bg-warning/5 p-5"><Text className="font-semibold text-warning">Review queue unavailable</Text><Text className="mt-2 text-sm leading-5 text-muted">Sign in with an administrator account and confirm that the payment audit database is configured.</Text></View> : pending.isLoading ? <Text className="text-sm text-muted">Loading payment declarations…</Text> : pending.data?.length ? pending.data.map((payment) => <View key={payment.id} className="rounded-3xl border border-border bg-surface p-5"><View className="flex-row items-start justify-between gap-4"><View className="flex-1"><Text className="text-base font-semibold text-foreground">{payment.reference}</Text><Text className="mt-1 text-sm text-muted">{payment.service}</Text></View><Text className="text-base font-bold text-foreground">{formatNaira(payment.amountKobo)}</Text></View><Text className="mt-3 text-xs leading-5 text-muted">Applicant: {payment.applicantName ?? "Account holder"} · Submitted {new Date(payment.submittedAt).toLocaleString()}</Text><Text className="mt-3 text-sm leading-5 text-foreground">Evidence: {payment.evidenceDescription}</Text><TextInput value={reasons[payment.id] ?? ""} onChangeText={(value) => setReasons((current) => ({ ...current, [payment.id]: value }))} placeholder="Required administrator review reason" placeholderTextColor="#94A3B8" multiline className="mt-4 min-h-[88px] rounded-xl border border-border bg-background px-3 py-3 text-foreground" /><View className="mt-3 flex-row gap-3"><Pressable onPress={() => decide(payment.id, "approved")} disabled={review.isPending} style={({ pressed }) => [{ flex: 1, opacity: pressed || review.isPending ? 0.7 : 1 }]}><View className="rounded-xl bg-success px-3 py-3"><Text className="text-center font-semibold text-white">Approve review</Text></View></Pressable><Pressable onPress={() => decide(payment.id, "rejected")} disabled={review.isPending} style={({ pressed }) => [{ flex: 1, opacity: pressed || review.isPending ? 0.7 : 1 }]}><View className="rounded-xl bg-error px-3 py-3"><Text className="text-center font-semibold text-white">Reject review</Text></View></Pressable></View></View>) : <View className="rounded-3xl border border-border bg-surface p-5"><Text className="font-semibold text-foreground">No offline payments await review</Text><Text className="mt-2 text-sm leading-5 text-muted">New applicant declarations will appear here only after they are submitted through the protected payment route.</Text></View>}</ScrollView></ScreenContainer>;
+}

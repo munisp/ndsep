@@ -126,6 +126,9 @@ export default function ProfileScreen() {
           <Link href={"/payment-notifications" as never} asChild>
             <View className="mt-4 rounded-2xl border border-primary bg-background px-4 py-4"><Text className="text-center font-semibold text-primary">Open payment alerts</Text></View>
           </Link>
+          <Link href={"/offline-payment" as never} asChild>
+            <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Declare an offline payment</Text></View>
+          </Link>
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">

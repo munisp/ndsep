@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { TrpcContext } from "../server/_core/context";
 import { appRouter } from "../server/routers";
+import { resetPaymentAuditForTests } from "../server/offlinePaymentRepository";
 
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "idlr-payment-router-"));
 const storePath = path.join(temporaryDirectory, "offline-payments.json");
 process.env.PAYMENT_OPERATIONS_STORE_PATH = storePath;
+process.env.PAYMENT_AUDIT_POSTGRES_URL = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
 
 function contextFor(openId: string, role: "user" | "admin"): TrpcContext {
   return {
@@ -28,8 +30,14 @@ function contextFor(openId: string, role: "user" | "admin"): TrpcContext {
   };
 }
 
-beforeEach(() => fs.rmSync(storePath, { force: true }));
-afterEach(() => fs.rmSync(storePath, { force: true }));
+beforeEach(async () => {
+  fs.rmSync(storePath, { force: true });
+  await resetPaymentAuditForTests();
+});
+afterEach(async () => {
+  fs.rmSync(storePath, { force: true });
+  await resetPaymentAuditForTests();
+});
 
 describe("payment operation routes", () => {
   it("keeps applicant alerts account-scoped while allowing only an administrator to review and scan a receipt", async () => {

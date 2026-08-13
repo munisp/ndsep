@@ -258,3 +258,8 @@
 - [x] Add persistent verified-receipt scan history to the administrator QR scanner
 - [x] Add a pending offline-payment count widget to the operations dashboard
 - [x] Add deterministic tests for payment alerts, receipt scan history, and pending-payment totals
+- [x] Replace the local JSON payment audit store with PostgreSQL payment and append-only audit-event tables
+- [x] Wire applicant offline-payment submission and administrator payment-review screens to protected payment routes
+- [x] Add QR receipt scan success and error sounds with native haptic feedback
+- [x] Add regression tests for payment database events, review decisions, and scan feedback mapping
+- [x] Install and configure a local PostgreSQL service for the development payment audit database

@@ -15,13 +15,20 @@ import {
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "idlr-payment-"));
 const storePath = path.join(temporaryDirectory, "offline-payments.json");
 process.env.PAYMENT_OPERATIONS_STORE_PATH = storePath;
+process.env.PAYMENT_AUDIT_POSTGRES_URL = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
 
-beforeEach(() => fs.rmSync(storePath, { force: true }));
-afterEach(() => fs.rmSync(storePath, { force: true }));
+beforeEach(async () => {
+  const { resetPaymentAuditForTests } = await import("../server/offlinePaymentRepository");
+  await resetPaymentAuditForTests();
+});
+afterEach(async () => {
+  const { resetPaymentAuditForTests } = await import("../server/offlinePaymentRepository");
+  await resetPaymentAuditForTests();
+});
 
 describe("offline payment operations", () => {
-  it("counts pending records, records receipt checks, and notifies the owner only after an authorised decision", () => {
-    const payment = submitOfflinePayment({
+  it("counts pending records, records receipt checks, and notifies the owner only after an authorised decision", async () => {
+    const payment = await submitOfflinePayment({
       applicantOpenId: "applicant-1",
       applicantName: "Amina Musa",
       reference: "ng-2026-001",
@@ -30,15 +37,15 @@ describe("offline payment operations", () => {
       evidenceDescription: "Bank transfer advice submitted for administrator review.",
     });
 
-    expect(getOfflinePaymentSummary()).toMatchObject({ pendingCount: 1, approvedCount: 0, rejectedCount: 0, totalCount: 1 });
-    expect(verifyReceiptAndRecordScan({ reference: "NG-2026-001", scannedBy: "admin-1" }).scan.outcome).toBe("pending_review");
-    expect(listPaymentAlerts("applicant-1")).toHaveLength(0);
+    await expect(getOfflinePaymentSummary()).resolves.toMatchObject({ pendingCount: 1, approvedCount: 0, rejectedCount: 0, totalCount: 1 });
+    await expect(verifyReceiptAndRecordScan({ reference: "NG-2026-001", scannedBy: "admin-1" })).resolves.toMatchObject({ scan: { outcome: "pending_review" } });
+    await expect(listPaymentAlerts("applicant-1")).resolves.toHaveLength(0);
 
-    reviewOfflinePayment({ paymentId: payment.id, decision: "approved", reviewerOpenId: "admin-1", reason: "Transfer evidence reconciled against the review record." });
+    await reviewOfflinePayment({ paymentId: payment.id, decision: "approved", reviewerOpenId: "admin-1", reason: "Transfer evidence reconciled against the review record." });
 
-    expect(getOfflinePaymentSummary()).toMatchObject({ pendingCount: 0, approvedCount: 1, rejectedCount: 0, totalCount: 1 });
-    expect(verifyReceiptAndRecordScan({ reference: "ng-2026-001", scannedBy: "admin-1" }).scan.outcome).toBe("approved");
-    expect(listPaymentAlerts("applicant-1")).toHaveLength(1);
-    expect(listReceiptScanHistory("admin-1")).toHaveLength(2);
+    await expect(getOfflinePaymentSummary()).resolves.toMatchObject({ pendingCount: 0, approvedCount: 1, rejectedCount: 0, totalCount: 1 });
+    await expect(verifyReceiptAndRecordScan({ reference: "ng-2026-001", scannedBy: "admin-1" })).resolves.toMatchObject({ scan: { outcome: "approved" } });
+    await expect(listPaymentAlerts("applicant-1")).resolves.toHaveLength(1);
+    await expect(listReceiptScanHistory("admin-1")).resolves.toHaveLength(2);
   });
 });

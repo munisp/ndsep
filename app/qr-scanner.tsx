@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { CameraView, type BarcodeScanningResult, useCameraPermissions } from "expo-camera";
 import { useIsFocused } from "@react-navigation/native";
 import * as Haptics from "expo-haptics";
+import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
+import { paymentScanFeedback } from "@/lib/payment-scan-feedback";
+
+const successSound = require("../assets/audio/receipt-scan-success.wav");
+const errorSound = require("../assets/audio/receipt-scan-error.wav");
 
 function normaliseReference(value: string) {
   try {
@@ -28,15 +33,31 @@ export default function QrScannerScreen() {
   const isFocused = useIsFocused();
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const successPlayer = useAudioPlayer(successSound);
+  const errorPlayer = useAudioPlayer(errorSound);
   const verifyReceipt = trpc.paymentOperations.verifyReceiptAndLog.useMutation();
   const history = trpc.paymentOperations.scanHistory.useQuery({ limit: 25 }, { retry: false });
   const scanningEnabled = Boolean(permission?.granted && isFocused && !verifyReceipt.isPending);
+
+  useEffect(() => { if (Platform.OS !== "web") void setAudioModeAsync({ playsInSilentMode: true }); }, []);
+
+  async function giveScanFeedback(kind: "success" | "error") {
+    try {
+      const player = kind === "success" ? successPlayer : errorPlayer;
+      player.seekTo(0);
+      player.play();
+    } catch {
+      // Audio feedback is non-authoritative UI feedback; the verified result remains visible.
+    }
+    if (Platform.OS !== "web") await Haptics.notificationAsync(kind === "success" ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error);
+  }
 
   async function onBarcodeScanned(result: BarcodeScanningResult) {
     if (verifyReceipt.isPending) return;
     const reference = normaliseReference(result.data);
     if (reference.length < 3) {
       setResultMessage("The scanned QR code did not contain a usable payment reference.");
+      await giveScanFeedback("error");
       return;
     }
     setResultMessage("Checking receipt against the offline-payment review record…");
@@ -44,11 +65,11 @@ export default function QrScannerScreen() {
       const verified = await verifyReceipt.mutateAsync({ reference });
       const label = verified.scan.outcome === "approved" ? "Receipt record approved by administrator." : verified.scan.outcome === "pending_review" ? "Receipt found, but it is still awaiting administrator review." : verified.scan.outcome === "rejected" ? "Receipt record was rejected by administrator review." : "No offline-payment record matches this reference.";
       setResultMessage(label);
-      if (Platform.OS !== "web") await Haptics.notificationAsync(verified.scan.outcome === "approved" ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
+      await giveScanFeedback(paymentScanFeedback(verified.scan.outcome));
       await history.refetch();
     } catch (error) {
       setResultMessage(error instanceof Error ? error.message : "Receipt verification could not be completed.");
-      if (Platform.OS !== "web") await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      await giveScanFeedback("error");
     }
   }
 
