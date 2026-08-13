@@ -24,12 +24,7 @@ import { logger } from "./logger";
 const PERMIFY_URL = process.env.PERMIFY_URL ?? "http://localhost:3476";
 const PERMIFY_TENANT = process.env.PERMIFY_TENANT ?? "ndsep";
 
-export type PermifyAction =
-  | "issue_penalty"
-  | "issue_certificate"
-  | "approve_transfer"
-  | "access_pcap"
-  | "assign_role";
+export type PermifyAction = string;
 
 interface CheckResult {
   can: "RESULT_ALLOWED" | "RESULT_DENIED" | "RESULT_UNKNOWN";
@@ -37,7 +32,8 @@ interface CheckResult {
 
 /**
  * Check if a user is allowed to perform `action` on `resourceType:resourceId`.
- * Falls back to ALLOWED when Permify is unreachable (dev/test environments).
+ * Denies access when Permify is unavailable, returns an error, or cannot make
+ * an authoritative decision. Authorization must fail closed in every runtime.
  */
 export async function permifyCheck(
   subjectId: string | number,
@@ -64,17 +60,15 @@ export async function permifyCheck(
     );
 
     if (!res.ok) {
-      // Permify returned an error — fail open in dev, fail closed in prod
-      if (process.env.NODE_ENV === "production") return false;
-      return true;
+      logger.warn({ status: res.status }, "[permify] Permission check returned an error");
+      return false;
     }
 
     const data: CheckResult = await res.json();
     return data.can === "RESULT_ALLOWED";
-  } catch {
-    // Permify unreachable — fail open in dev, fail closed in prod
-    if (process.env.NODE_ENV === "production") return false;
-    return true;
+  } catch (error) {
+    logger.warn({ err: error }, "[permify] Permission check failed");
+    return false;
   }
 }
 
@@ -122,7 +116,7 @@ export async function permifyWriteRelationship(
       ],
     };
 
-    await fetch(
+    const response = await fetch(
       `${PERMIFY_URL}/v1/tenants/${PERMIFY_TENANT}/relationships/write`,
       {
         method: "POST",
@@ -131,9 +125,10 @@ export async function permifyWriteRelationship(
         signal: AbortSignal.timeout(2000),
       }
     );
-  } catch {
-    // Non-critical — log but don't throw
-    logger.warn("[permify] Failed to write relationship tuple");
+    if (!response.ok) throw new Error(`Permify relationship write failed with HTTP ${response.status}`);
+  } catch (error) {
+    logger.error({ err: error }, "[permify] Failed to write relationship tuple");
+    throw error;
   }
 }
 

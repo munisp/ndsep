@@ -1,81 +1,65 @@
 -- ============================================================
 -- NDSEP Performance Indexes Migration
--- Adds indexes for frequently queried columns across all tables
+-- Creates an index only when its target table and column exist. This keeps
+-- historical migrations executable while the canonical reconciliation creates
+-- later-introduced tables and their matching indexes.
 -- ============================================================
-
--- Organizations
-CREATE INDEX IF NOT EXISTS idx_organizations_sector ON organizations(sector);
-CREATE INDEX IF NOT EXISTS idx_organizations_status ON organizations(status);
-CREATE INDEX IF NOT EXISTS idx_organizations_compliance_score ON organizations(compliance_score);
-CREATE INDEX IF NOT EXISTS idx_organizations_created_at ON organizations(created_at);
-
--- Users
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
-
--- Audit logs
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_resource_type ON audit_logs(resource_type);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
-
--- Citizen requests (DSAR)
-CREATE INDEX IF NOT EXISTS idx_citizen_requests_status ON citizen_requests(status);
-CREATE INDEX IF NOT EXISTS idx_citizen_requests_org_id ON citizen_requests(organization_id);
-CREATE INDEX IF NOT EXISTS idx_citizen_requests_submitted_at ON citizen_requests(submitted_at);
-
--- Breach incidents
-CREATE INDEX IF NOT EXISTS idx_breach_incidents_org_id ON breach_incidents(organization_id);
-CREATE INDEX IF NOT EXISTS idx_breach_incidents_severity ON breach_incidents(breach_incident_severity);
-CREATE INDEX IF NOT EXISTS idx_breach_incidents_status ON breach_incidents(breach_incident_status);
-
--- Compliance violations
-CREATE INDEX IF NOT EXISTS idx_violations_org_id ON violations(organization_id);
-CREATE INDEX IF NOT EXISTS idx_violations_status ON violations(status);
-CREATE INDEX IF NOT EXISTS idx_violations_severity ON violations(severity);
-
--- Financial penalties
-CREATE INDEX IF NOT EXISTS idx_financial_penalties_org_id ON financial_penalties(organization_id);
-CREATE INDEX IF NOT EXISTS idx_financial_penalties_status ON financial_penalties(status);
-
--- Enforcement actions
-CREATE INDEX IF NOT EXISTS idx_enforcement_actions_org_id ON enforcement_actions(organization_id);
-CREATE INDEX IF NOT EXISTS idx_enforcement_actions_status ON enforcement_actions(status);
-
--- DPCO audit engagements
-CREATE INDEX IF NOT EXISTS idx_dpco_audit_engagements_dpco_org_id ON dpco_audit_engagements(dpco_org_id);
-CREATE INDEX IF NOT EXISTS idx_dpco_audit_engagements_stage ON dpco_audit_engagements(current_stage);
-
--- DPCO clients
-CREATE INDEX IF NOT EXISTS idx_dpco_clients_dpco_org_id ON dpco_clients(dpco_org_id);
-CREATE INDEX IF NOT EXISTS idx_dpco_clients_status ON dpco_clients(status);
-
--- Portal submissions
-CREATE INDEX IF NOT EXISTS idx_portal_submissions_status ON portal_submissions(status);
-CREATE INDEX IF NOT EXISTS idx_portal_submissions_created_at ON portal_submissions(created_at);
-
--- Security alerts
-CREATE INDEX IF NOT EXISTS idx_security_alerts_severity ON security_alerts(severity);
-CREATE INDEX IF NOT EXISTS idx_security_alerts_created_at ON security_alerts(created_at);
-
--- Network events
-CREATE INDEX IF NOT EXISTS idx_network_events_event_type ON network_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_network_events_created_at ON network_events(created_at);
-
--- DPO appointments
-CREATE INDEX IF NOT EXISTS idx_dpo_appointments_org_id ON dpo_appointments(organization_id);
-
--- Compliance audit returns
-CREATE INDEX IF NOT EXISTS idx_compliance_audit_returns_org_id ON compliance_audit_returns(org_id);
-CREATE INDEX IF NOT EXISTS idx_compliance_audit_returns_status ON compliance_audit_returns(status);
-
--- Consent records
-CREATE INDEX IF NOT EXISTS idx_consent_records_org_id ON consent_records(organization_id);
-CREATE INDEX IF NOT EXISTS idx_consent_records_status ON consent_records(consent_status);
-
--- Transfer instruments
-CREATE INDEX IF NOT EXISTS idx_transfer_instruments_org_id ON transfer_instruments(organization_id);
-
--- DPIA records
-CREATE INDEX IF NOT EXISTS idx_dpia_records_org_id ON dpia_records(organization_id);
-CREATE INDEX IF NOT EXISTS idx_dpia_records_status ON dpia_records(status);
+DO $$
+DECLARE
+  spec record;
+BEGIN
+  FOR spec IN
+    SELECT * FROM (VALUES
+      ('idx_organizations_sector', 'organizations', 'sector'),
+      ('idx_organizations_status', 'organizations', 'status'),
+      ('idx_organizations_compliance_score', 'organizations', 'compliance_score'),
+      ('idx_organizations_created_at', 'organizations', 'created_at'),
+      ('idx_users_role', 'users', 'role'),
+      ('idx_users_created_at', 'users', 'created_at'),
+      ('idx_audit_logs_user_id', 'audit_logs', 'user_id'),
+      ('idx_audit_logs_action', 'audit_logs', 'action'),
+      ('idx_audit_logs_resource_type', 'audit_logs', 'resource_type'),
+      ('idx_audit_logs_created_at', 'audit_logs', 'created_at'),
+      ('idx_citizen_requests_status', 'citizen_requests', 'status'),
+      ('idx_citizen_requests_org_id', 'citizen_requests', 'organization_id'),
+      ('idx_citizen_requests_submitted_at', 'citizen_requests', 'submitted_at'),
+      ('idx_breach_incidents_org_id', 'breach_incidents', 'organization_id'),
+      ('idx_breach_incidents_severity', 'breach_incidents', 'breach_incident_severity'),
+      ('idx_breach_incidents_status', 'breach_incidents', 'breach_incident_status'),
+      ('idx_violations_org_id', 'violations', 'organization_id'),
+      ('idx_violations_status', 'violations', 'status'),
+      ('idx_violations_severity', 'violations', 'severity'),
+      ('idx_financial_penalties_org_id', 'financial_penalties', 'organization_id'),
+      ('idx_financial_penalties_status', 'financial_penalties', 'status'),
+      ('idx_enforcement_actions_org_id', 'enforcement_actions', 'organization_id'),
+      ('idx_enforcement_actions_status', 'enforcement_actions', 'status'),
+      ('idx_dpco_audit_engagements_dpco_org_id', 'dpco_audit_engagements', 'dpco_org_id'),
+      ('idx_dpco_audit_engagements_stage', 'dpco_audit_engagements', 'current_stage'),
+      ('idx_dpco_clients_dpco_org_id', 'dpco_clients', 'dpco_org_id'),
+      ('idx_dpco_clients_status', 'dpco_clients', 'status'),
+      ('idx_portal_submissions_status', 'portal_submissions', 'status'),
+      ('idx_portal_submissions_created_at', 'portal_submissions', 'created_at'),
+      ('idx_security_alerts_severity', 'security_alerts', 'severity'),
+      ('idx_security_alerts_created_at', 'security_alerts', 'created_at'),
+      ('idx_network_events_event_type', 'network_events', 'event_type'),
+      ('idx_network_events_created_at', 'network_events', 'created_at'),
+      ('idx_dpo_appointments_org_id', 'dpo_appointments', 'organization_id'),
+      ('idx_compliance_audit_returns_org_id', 'compliance_audit_returns', 'org_id'),
+      ('idx_compliance_audit_returns_status', 'compliance_audit_returns', 'status'),
+      ('idx_consent_records_org_id', 'consent_records', 'organization_id'),
+      ('idx_consent_records_status', 'consent_records', 'consent_status'),
+      ('idx_transfer_instruments_org_id', 'transfer_instruments', 'organization_id'),
+      ('idx_dpia_records_org_id', 'dpia_records', 'organization_id'),
+      ('idx_dpia_records_status', 'dpia_records', 'status')
+    ) AS targets(index_name, table_name, column_name)
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = spec.table_name
+        AND column_name = spec.column_name
+    ) THEN
+      EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON public.%I (%I)', spec.index_name, spec.table_name, spec.column_name);
+    END IF;
+  END LOOP;
+END $$;

@@ -10,6 +10,7 @@ volumes:
   kafka_data:
   temporal_data:
   keycloak_data:
+  tigerbeetle_data:
 
 services:
 
@@ -26,7 +27,9 @@ services:
     networks: [ndsep-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ndsep"]
-      interval: 10s timeout: 5s retries: 5
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -36,7 +39,9 @@ services:
     networks: [ndsep-net]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s timeout: 3s retries: 5
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -61,7 +66,9 @@ services:
     networks: [ndsep-net]
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 30s timeout: 10s retries: 5
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   keycloak:
     image: quay.io/keycloak/keycloak:23.0
@@ -172,6 +179,22 @@ services:
     depends_on: [temporal, kafka]
     networks: [ndsep-net]
 
+  tigerbeetle-init:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    command: ["format", "--cluster=0", "--replica=0", "--replica-count=1", "/data/0_0.tigerbeetle"]
+    volumes: [tigerbeetle_data:/data]
+    networks: [ndsep-net]
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    command: ["start", "--addresses=0.0.0.0:3000", "/data/0_0.tigerbeetle"]
+    ports: ["3000:3000"]
+    volumes: [tigerbeetle_data:/data]
+    depends_on:
+      tigerbeetle-init:
+        condition: service_completed_successfully
+    networks: [ndsep-net]
+
   tigerbeetle-ledger:
     build:
       context: ./go
@@ -180,9 +203,9 @@ services:
     ports: ["8240:8240"]
     environment:
       PORT: "8240"
-      KAFKA_BROKERS: kafka:29092
-      REDIS_ADDR: redis:6379
-    depends_on: [kafka, redis]
+      TIGERBEETLE_CLUSTER_ID: "0"
+      TIGERBEETLE_ADDRESSES: tigerbeetle:3000
+    depends_on: [tigerbeetle]
     networks: [ndsep-net]
 
   # ── Python Microservices ────────────────────────────────────────────────────

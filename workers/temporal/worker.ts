@@ -41,7 +41,8 @@ export const temporalConfig = {
 
 /**
  * Start the Temporal worker.
- * Dynamically imports @temporalio/worker — if not installed, logs and exits.
+ * Dynamically imports @temporalio/worker. Missing runtime dependencies are a
+ * startup failure because the platform must not claim workflows are running.
  */
 export async function startTemporalWorker(): Promise<void> {
   logger.info(
@@ -55,12 +56,8 @@ export async function startTemporalWorker(): Promise<void> {
     const mod = await import("@temporalio/worker");
     Worker = mod.Worker;
     NativeConnection = mod.NativeConnection;
-  } catch {
-    logger.warn(
-      "[Temporal] @temporalio/worker not installed — worker cannot start. " +
-      "Install with: pnpm add @temporalio/worker @temporalio/workflow @temporalio/activity"
-    );
-    return;
+  } catch (error) {
+    throw new Error(`@temporalio/worker is required to start Temporal workflows: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const connectionOptions: Record<string, unknown> = { address: TEMPORAL_ADDRESS };
@@ -82,24 +79,26 @@ export async function startTemporalWorker(): Promise<void> {
     connectionOptions as Parameters<typeof NativeConnection.connect>[0]
   );
 
-  const worker = await Worker.create({
-    workflowsPath: require.resolve("./workflows"),
-    taskQueue: temporalConfig.taskQueues.accreditation,
-    connection,
-    namespace: TEMPORAL_NAMESPACE,
-  });
+  const [accreditationActivities, breachActivities] = await Promise.all([
+    import("./activities/accreditation"),
+    import("./activities/breachNotification"),
+  ]);
+  const workflowsPath = require.resolve("./workflows");
+  const workers = await Promise.all([
+    Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.accreditation, connection, namespace: TEMPORAL_NAMESPACE, activities: accreditationActivities }),
+    Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.breach, connection, namespace: TEMPORAL_NAMESPACE, activities: breachActivities }),
+  ]);
 
   logger.info(
-    { taskQueue: temporalConfig.taskQueues.accreditation, namespace: TEMPORAL_NAMESPACE },
-    "[Temporal] Worker started — listening for tasks"
+    { taskQueues: [temporalConfig.taskQueues.accreditation, temporalConfig.taskQueues.breach], namespace: TEMPORAL_NAMESPACE },
+    "[Temporal] Workers started — listening for durable workflow tasks"
   );
-
-  await worker.run();
+  await Promise.all(workers.map((worker) => worker.run()));
 }
 
 /**
  * Temporal client helper for starting workflows.
- * Dynamically imports @temporalio/client — returns null if unavailable.
+ * Dynamically imports @temporalio/client and rejects when the server cannot be reached.
  */
 export async function getTemporalClient() {
   try {
@@ -124,29 +123,21 @@ export async function getTemporalClient() {
       connectionOptions as Parameters<typeof Connection.connect>[0]
     );
     return new Client({ connection, namespace: TEMPORAL_NAMESPACE });
-  } catch {
-    logger.warn("[Temporal] Client unavailable — workflows will not be orchestrated");
-    return null;
+  } catch (error) {
+    throw new Error(`Temporal client is unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 /**
  * Start an accreditation workflow.
- * Gracefully degrades when Temporal is not available.
+ * Rejects when Temporal is not available.
  */
 export async function startAccreditationWorkflow(params: {
   applicationId: number;
   dpcoOrgId: number;
   applicantEmail: string;
-}): Promise<{ workflowId: string | null }> {
+}): Promise<{ workflowId: string }> {
   const client = await getTemporalClient();
-  if (!client) {
-    logger.info(
-      { applicationId: params.applicationId },
-      "[Temporal] Client unavailable — accreditation workflow not started"
-    );
-    return { workflowId: null };
-  }
 
   const workflowId = `accreditation-${params.applicationId}`;
   const handle = await client.workflow.start("accreditationWorkflow", {
@@ -164,7 +155,7 @@ export async function startAccreditationWorkflow(params: {
 
 /**
  * Start a breach notification workflow.
- * Gracefully degrades when Temporal is not available.
+ * Rejects when Temporal is not available.
  */
 export async function startBreachNotificationWorkflow(params: {
   breachId: number;
@@ -173,15 +164,8 @@ export async function startBreachNotificationWorkflow(params: {
   ceoEmail: string;
   severity: "low" | "medium" | "high" | "critical";
   estimatedAffectedRecords: number;
-}): Promise<{ workflowId: string | null }> {
+}): Promise<{ workflowId: string }> {
   const client = await getTemporalClient();
-  if (!client) {
-    logger.info(
-      { breachId: params.breachId },
-      "[Temporal] Client unavailable — breach notification workflow not started"
-    );
-    return { workflowId: null };
-  }
 
   const workflowId = `breach-notification-${params.breachId}`;
   const handle = await client.workflow.start("breachNotificationWorkflow", {

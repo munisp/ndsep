@@ -88,18 +88,14 @@ export async function recordFinancialTransaction(
   penaltyId: string,
   description?: string,
 ): Promise<void> {
-  try {
-    const { tigerbeetleResilience } = await import("./resilience");
-    await tigerbeetleResilience(() => createTigerBeetleTransaction({
-      type,
-      amountUsd,
-      orgId,
-      penaltyId,
-      description,
-    }));
-  } catch (e) {
-    logger.warn({ err: (e as Error).message }, `[TigerBeetle] recordFinancialTransaction failed (non-fatal)`);
-  }
+  const { tigerbeetleResilience } = await import("./resilience");
+  await tigerbeetleResilience(() => createTigerBeetleTransaction({
+    type,
+    amountUsd,
+    orgId,
+    penaltyId,
+    description,
+  }));
 }
 
 // ─── Temporal Workflow ────────────────────────────────────────────────────────
@@ -109,11 +105,7 @@ export async function triggerWorkflow(
   input: Record<string, unknown>,
   taskQueue = "ndsep-main",
 ): Promise<void> {
-  try {
-    await temporalResilience(() => startWorkflow(workflowType, { workflowId, input, taskQueue }));
-  } catch (e) {
-    logger.warn({ err: (e as Error).message }, `[Temporal] triggerWorkflow ${workflowType} failed (non-fatal)`);
-  }
+  await temporalResilience(() => startWorkflow(workflowType, { workflowId, input, taskQueue }));
 }
 
 // ─── Permify RBAC ─────────────────────────────────────────────────────────────

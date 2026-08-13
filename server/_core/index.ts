@@ -60,6 +60,7 @@ import { logger } from "../logger";
 import { validateEnvironment } from "../envValidation";
 import { initReadReplica, closeReadReplica, isReplicaAvailable } from "../readReplica";
 import { verifyMigrations } from "../migrationVerifier";
+import { applyDatabaseMigrations } from "../dbMigrations";
 import { regenerateSession, generateSessionNonce } from "../sessionSecurity";
 import { traceMiddleware } from "../telemetry";
 import { initWebhookSystem, deliverWebhookEvent } from "../webhookSystem";
@@ -1280,12 +1281,17 @@ async function startServer() {
     logger.warn({ preferredPort, port }, "Preferred port busy, using alternate");
   }
 
-  // ── Eager DB initialization (ensures _pool is set before any request handler runs) ──
-  try {
-    await getDb();
-    logger.info("[DB] Pool initialized successfully");
-  } catch (err) {
-    logger.warn({ err }, "[DB] Pool initialization failed — running without database");
+  // ── Database migration and initialization gate ─────────────────────────────
+  // The platform must never accept traffic with a partial schema. Test suites can
+  // opt out only with an explicit test-only switch.
+  const skipDatabaseGate = process.env.NODE_ENV === "test" && process.env.SKIP_DATABASE_MIGRATIONS === "true";
+  if (!skipDatabaseGate) {
+    await applyDatabaseMigrations();
+    const database = await getDb();
+    if (!database || !getPool()) throw new Error("Database initialization failed after migrations");
+    logger.info("[DB] Migrations applied and pool initialized successfully");
+  } else {
+    logger.warn("[DB] Explicit test-only migration gate bypass enabled");
   }
 
   initWebSocketServer(server);
@@ -1305,18 +1311,13 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Webhook system init failed — webhooks disabled");
   }
 
-  if (process.env.NODE_ENV !== "test") {
-    try {
-      const report = await verifyMigrations();
-      if (report.passed) {
-        logger.info({ checks: report.checks.length, durationMs: report.duration }, "[Startup] Migration verification passed");
-      } else {
-        const failures = report.checks.filter(c => c.status === "fail");
-        logger.error({ failures }, "[Startup] Migration verification FAILED — %d checks failed", failures.length);
-      }
-    } catch (err) {
-      logger.warn({ err }, "[Startup] Migration verification skipped — database not available");
+  if (!skipDatabaseGate) {
+    const report = await verifyMigrations();
+    if (!report.passed) {
+      const failures = report.checks.filter(c => c.status === "fail");
+      throw new Error(`Database migration verification failed: ${failures.map((failure) => failure.name).join(", ")}`);
     }
+    logger.info({ checks: report.checks.length, durationMs: report.duration }, "[Startup] Migration verification passed");
   }
 
   // ── Initialize next-generation modules ──

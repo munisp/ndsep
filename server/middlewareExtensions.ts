@@ -4,6 +4,8 @@
  * All calls are fire-and-forget with graceful degradation (never block the tRPC response)
  */
 
+import { permifyCheck as checkPermifyPermission } from "./permify";
+
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
 const DAPR_BRIDGE_URL = process.env.DAPR_BRIDGE_URL || "http://localhost:8150";
@@ -196,18 +198,7 @@ export async function permifyCheck(
   permission: string,
   subjectId: string
 ): Promise<boolean> {
-  try {
-    const resp = await fetch(`${PERMIFY_SYNC_URL}/permissions/check`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entityType, entityId, permission, subjectId }),
-      signal: AbortSignal.timeout(2000),
-    });
-    const data = await resp.json() as { allowed: boolean };
-    return data.allowed;
-  } catch {
-    return true; // Fail open in degraded mode
-  }
+  return checkPermifyPermission(subjectId, permission, entityType, entityId);
 }
 
 /** Write a Permify relationship */

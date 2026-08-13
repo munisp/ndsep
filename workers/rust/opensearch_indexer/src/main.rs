@@ -174,30 +174,39 @@ async fn index_document(
     }
 
     match http_req.send().await {
-        Ok(resp) => {
+        Ok(resp) if resp.status().is_success() => {
             INDEX_COUNTER.inc();
             state.index_count.fetch_add(1, Ordering::Relaxed);
-            let status = resp.status();
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
             Json(serde_json::json!({
-                "success": status.is_success(),
+                "success": true,
                 "id": doc_id,
                 "index": req.index,
                 "result": body,
             }))
             .into_response()
         }
-        Err(e) => {
+        Ok(resp) => {
             ERROR_COUNTER.inc();
-            tracing::warn!("OpenSearch index degraded: {}", e);
-            // Graceful degradation — return success with degraded flag
-            Json(serde_json::json!({
-                "success": true,
-                "degraded": true,
+            let status = resp.status();
+            let detail = resp.text().await.unwrap_or_default();
+            tracing::error!("OpenSearch rejected index write with HTTP {}: {}", status, detail);
+            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
+                "success": false,
                 "id": doc_id,
                 "index": req.index,
-            }))
-            .into_response()
+                "error": format!("OpenSearch returned HTTP {}", status),
+            }))).into_response()
+        }
+        Err(error) => {
+            ERROR_COUNTER.inc();
+            tracing::error!("OpenSearch index request failed: {}", error);
+            (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+                "success": false,
+                "id": doc_id,
+                "index": req.index,
+                "error": "OpenSearch is unavailable",
+            }))).into_response()
         }
     }
 }

@@ -1,3 +1,29 @@
+# Worker overlay. Apply this file with the environment-specific primary stack;
+# it intentionally references shared infrastructure services declared there.
+
+x-resource-defaults: &resource-defaults
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 512M
+      reservations:
+        cpus: "0.10"
+        memory: 128M
+x-default-restart: &default-restart
+  restart: unless-stopped
+x-hc-defaults: &hc-defaults
+  interval: 30s
+  timeout: 5s
+  retries: 3
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
 # ─── Additional Go Workers ────────────────────────────────────────────────────
   anomaly-alert-dispatcher:
     <<: *resource-defaults
@@ -7,7 +33,6 @@
       args:
         CMD: anomaly_alert_dispatcher
     container_name: ndsep-anomaly-alert-dispatcher
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -33,7 +58,6 @@
       args:
         CMD: apisix_manager
     container_name: ndsep-apisix-manager
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:-http://apisix:9180}
@@ -57,7 +81,6 @@
       args:
         CMD: arkime_pcap
     container_name: ndsep-arkime-pcap
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -81,7 +104,6 @@
       args:
         CMD: bgp_live_monitor
     container_name: ndsep-bgp-live-monitor
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -105,7 +127,6 @@
       args:
         CMD: car_pdf_generator
     container_name: ndsep-car-pdf-generator
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       S3_BUCKET: ${S3_BUCKET:-ndsep-reports}
@@ -129,7 +150,6 @@
       args:
         CMD: citizen_sla_tracker
     container_name: ndsep-citizen-sla-tracker
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -153,7 +173,6 @@
       args:
         CMD: compliance_engine
     container_name: ndsep-compliance-engine
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -177,7 +196,6 @@
       args:
         CMD: compliance_rescorer
     container_name: ndsep-compliance-rescorer
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -200,7 +218,6 @@
       args:
         CMD: dapr_bridge
     container_name: ndsep-dapr-bridge
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       DAPR_HTTP_PORT: ${DAPR_HTTP_PORT:-3500}
@@ -223,7 +240,6 @@
       args:
         CMD: discovery_agent
     container_name: ndsep-discovery-agent
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -247,7 +263,6 @@
       args:
         CMD: dpi_engine
     container_name: ndsep-dpi-engine
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -270,7 +285,6 @@
       args:
         CMD: falkordb_kg_worker
     container_name: ndsep-falkordb-kg-worker
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       FALKORDB_URL: ${FALKORDB_URL:-redis://falkordb:6379}
@@ -293,7 +307,6 @@
       args:
         CMD: fluvio_relay
     container_name: ndsep-fluvio-relay
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       FLUVIO_ENDPOINT: ${FLUVIO_ENDPOINT:-localhost:9003}
@@ -317,7 +330,6 @@
       args:
         CMD: gitops_sync
     container_name: ndsep-gitops-sync
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       GITOPS_REPO_URL: ${GITOPS_REPO_URL:-https://github.com/nitda-ng/ndsep-policies}
@@ -341,7 +353,6 @@
       args:
         CMD: kafka_monitor
     container_name: ndsep-kafka-monitor
-    <<: *default-restart
     environment:
       KAFKA_BROKERS: kafka:9092
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
@@ -364,7 +375,6 @@
       args:
         CMD: kyverno_policy
     container_name: ndsep-kyverno-policy
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KYVERNO_URL: ${KYVERNO_URL:-http://kyverno:9443}
@@ -387,7 +397,6 @@
       args:
         CMD: middleware_bridge
     container_name: ndsep-middleware-bridge
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -413,7 +422,6 @@
       args:
         CMD: mojaloop_adapter
     container_name: ndsep-mojaloop-adapter
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       MOJALOOP_HUB_URL: ${MOJALOOP_HUB_URL:-http://mojaloop-hub:3001}
@@ -437,7 +445,6 @@
       args:
         CMD: ndsep_agent
     container_name: ndsep-agent-worker
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -461,7 +468,6 @@
       args:
         CMD: netbox_ipam
     container_name: ndsep-netbox-ipam
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       NETBOX_URL: ${NETBOX_URL:-http://netbox:8080}
@@ -485,7 +491,6 @@
       args:
         CMD: nmap_scanner
     container_name: ndsep-nmap-scanner
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -508,7 +513,6 @@
       args:
         CMD: policy_evaluator
     container_name: ndsep-policy-evaluator
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       OPA_URL: ${OPA_URL:-http://opa:8181}
@@ -532,7 +536,6 @@
       args:
         CMD: prometheus_exporter
     container_name: ndsep-prometheus-exporter
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       PORT: "8162"
@@ -554,7 +557,6 @@
       args:
         CMD: rag_orchestrator
     container_name: ndsep-rag-orchestrator
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
@@ -578,7 +580,6 @@
       args:
         CMD: ranger_policy
     container_name: ndsep-ranger-policy
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       RANGER_URL: ${RANGER_URL:-http://ranger:6080}
@@ -603,7 +604,6 @@
       args:
         CMD: rss_webhook_server
     container_name: ndsep-rss-webhook-server
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -626,7 +626,6 @@
       args:
         CMD: webhook_delivery
     container_name: ndsep-webhook-delivery
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
@@ -650,7 +649,6 @@
       args:
         CMD: dpco_api_gateway
     container_name: ndsep-dpco-api-gateway
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
@@ -674,7 +672,6 @@
       args:
         CMD: dpco_audit_service
     container_name: ndsep-dpco-audit-service
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -697,7 +694,6 @@
       args:
         CMD: dpco_registry_service
     container_name: ndsep-dpco-registry-service
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       PORT: "8202"
@@ -719,7 +715,6 @@
       args:
         CMD: dpco_verification_service
     container_name: ndsep-dpco-verification-service
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       PORT: "8203"
@@ -741,7 +736,6 @@
       args:
         CMD: event_bus
     container_name: ndsep-event-bus
-    <<: *default-restart
     environment:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
@@ -764,7 +758,6 @@
       args:
         CMD: iam_service
     container_name: ndsep-iam-service
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:8080}
@@ -788,7 +781,6 @@
       args:
         CMD: tigerbeetle_ledger
     container_name: ndsep-tigerbeetle-ledger-service
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
@@ -811,7 +803,6 @@
       args:
         CMD: workflow_engine
     container_name: ndsep-workflow-engine
-    <<: *default-restart
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       TEMPORAL_HOST: temporal:7233
@@ -836,7 +827,6 @@
       context: ./workers/rust/bgp_validator
       dockerfile: Dockerfile
     container_name: ndsep-bgp-validator
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -857,7 +847,6 @@
       context: ./workers/rust/evidence_signer
       dockerfile: Dockerfile
     container_name: ndsep-evidence-signer
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       SIGNING_KEY: ${EVIDENCE_SIGNING_KEY:-ndsep-evidence-signing-key-change-in-prod}
@@ -878,7 +867,6 @@
       context: ./workers/rust/financial_ledger
       dockerfile: Dockerfile
     container_name: ndsep-financial-ledger
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
@@ -899,7 +887,6 @@
       context: ./workers/rust/keycloak_validator
       dockerfile: Dockerfile
     container_name: ndsep-keycloak-validator
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:8080}
@@ -921,7 +908,6 @@
       context: ./workers/rust/lakehouse_ingest
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-ingest
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -944,7 +930,6 @@
       context: ./workers/rust/lakehouse_writer
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-writer
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
@@ -966,7 +951,6 @@
       context: ./workers/rust/middleware_cache
       dockerfile: Dockerfile
     container_name: ndsep-middleware-cache
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
@@ -987,7 +971,6 @@
       context: ./workers/rust/opensearch_indexer
       dockerfile: Dockerfile
     container_name: ndsep-opensearch-indexer
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -1009,7 +992,6 @@
       context: ./workers/rust/portability_exporter
       dockerfile: Dockerfile
     container_name: ndsep-portability-exporter
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
@@ -1031,7 +1013,6 @@
       context: ./workers/rust/residency_enforcer
       dockerfile: Dockerfile
     container_name: ndsep-residency-enforcer
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -1052,7 +1033,6 @@
       context: ./workers/rust/sla_tracker
       dockerfile: Dockerfile
     container_name: ndsep-sla-tracker
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
@@ -1073,7 +1053,6 @@
       context: ./workers/rust/tigerbeetle_ledger
       dockerfile: Dockerfile
     container_name: ndsep-tigerbeetle-ledger-rust
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
@@ -1094,7 +1073,6 @@
       context: ./workers/rust/vector_cache
       dockerfile: Dockerfile
     container_name: ndsep-vector-cache
-    <<: *default-restart
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
@@ -1115,7 +1093,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-ai-governance-scorer
-    <<: *default-restart
     command: ["python3", "/app/ai_governance_scorer.py"]
     volumes:
       - ./workers/python:/app
@@ -1133,7 +1110,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-compliance-analytics-py
-    <<: *default-restart
     command: ["python3", "/app/compliance_analytics.py"]
     volumes:
       - ./workers/python:/app
@@ -1151,7 +1127,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-dpia-engine
-    <<: *default-restart
     command: ["python3", "/app/dpia_engine.py"]
     volumes:
       - ./workers/python:/app
@@ -1169,7 +1144,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-dpo-report-engine
-    <<: *default-restart
     command: ["python3", "/app/dpo_report_engine.py"]
     volumes:
       - ./workers/python:/app
@@ -1187,7 +1161,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-dsar-deadline-tracker
-    <<: *default-restart
     command: ["python3", "/app/dsar_deadline_tracker.py"]
     volumes:
       - ./workers/python:/app
@@ -1205,7 +1178,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-ml-feature-store
-    <<: *default-restart
     command: ["python3", "/app/ml_feature_store.py"]
     volumes:
       - ./workers/python:/app
@@ -1226,7 +1198,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-permify-rbac-sync
-    <<: *default-restart
     command: ["python3", "/app/permify_rbac_sync.py"]
     volumes:
       - ./workers/python:/app
@@ -1245,7 +1216,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-ropa-generator
-    <<: *default-restart
     command: ["python3", "/app/ropa_generator.py"]
     volumes:
       - ./workers/python:/app
@@ -1263,7 +1233,6 @@
     <<: *resource-defaults
     image: python:3.11-slim
     container_name: ndsep-sector-benchmarking-py
-    <<: *default-restart
     command: ["python3", "/app/sector_benchmarking.py"]
     volumes:
       - ./workers/python:/app
@@ -1276,3 +1245,7 @@
         condition: service_healthy
     networks:
       - ndsep-internal
+
+networks:
+  ndsep-internal:
+    name: ndsep-internal

@@ -24,6 +24,7 @@ function PageLoader() {
 }
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const ComponentShowcase = lazy(() => import("./pages/ComponentShowcase"));
 const DiscoveryEngine = lazy(() => import("./pages/DiscoveryEngine"));
 const DataCatalog = lazy(() => import("./pages/DataCatalog"));
 const ComplianceEngine = lazy(() => import("./pages/ComplianceEngine"));
@@ -262,6 +263,7 @@ function Router() {
         <Route path="/discovery" component={DiscoveryEngine} />
         <Route path="/catalog" component={DataCatalog} />
         <Route path="/compliance" component={ComplianceEngine} />
+        <Route path="/violations" component={ComplianceEngine} />
         <Route path="/siem" component={SiemAudit} />
         <Route path="/network" component={NetworkDPI} />
         <Route path="/financial" component={FinancialEnforcement} />
@@ -273,6 +275,7 @@ function Router() {
         <Route path="/roles" component={RoleManagement} />
         <Route path="/workers" component={WorkerProcesses} />
         <Route path="/bgp" component={BgpRoutes} />
+        <Route path="/bgp-routes" component={BgpRoutes} />
         <Route path="/network-intelligence" component={NetworkIntelligencePage} />
         <Route path="/noc" component={NocDashboard} />
         <Route path="/noc-agent" component={NocAgentDashboard} />
@@ -296,6 +299,7 @@ function Router() {
         <Route path="/verify" component={CertificateVerify} />
         <Route path="/api-docs" component={ApiDocs} />
         <Route path="/audit-log" component={AuditLogViewer} />
+        <Route path="/components" component={ComponentShowcase} />
         <Route path="/policy-templates" component={PolicyTemplates} />
         <Route path="/ai-governance" component={AiGovernance} />
         <Route path="/evidence" component={EvidencePackages} />
@@ -309,6 +313,7 @@ function Router() {
         <Route path="/frameworks" component={FrameworkDashboard} />
         <Route path="/my-org" component={MyOrg} />
         <Route path="/enforcement-cases" component={EnforcementCases} />
+        <Route path="/enforcement" component={EnforcementCases} />
         <Route path="/settings/notifications" component={NotificationSettings} />
         <Route path="/settings/alerting" component={AlertingSettings} />
         <Route path="/settings/cert-rotation" component={CertificateRotation} />
@@ -335,6 +340,8 @@ function Router() {
         <Route path="/dcpmi" component={DcpmiThresholds} />
         {/* DPCO Stakeholder Portal */}
         <Route path="/dpco" component={DpcoPortal} />
+        <Route path="/dpco/team" component={DpcoPortal} />
+        <Route path="/dpco/training" component={StaffTraining} />
         <Route path="/dpco/registry" component={DpcoRegistry} />
         <Route path="/dpco/clients" component={DpcoClients} />
         <Route path="/dpco/verification" component={DpcoVerification} />
@@ -348,13 +355,16 @@ function Router() {
         <Route path="/dpco/policy" component={DpcoPolicyHub} />
         <Route path="/dpco/renewal" component={DpcoRenewal} />
         <Route path="/dpco/ai-tools" component={DpcoAiTools} />
-        <Route path="/dpco/scorecard" component={DpcoPerformanceScorecard} />
+        <Route path="/dpco/performance-scorecard" component={DpcoPerformanceScorecard} />
         <Route path="/dpco-brochure" component={DpcoBrochure} />
         <Route path="/admin/revenue" component={AdminRevenue} />
         <Route path="/admin/registrations" component={AdminRegistrations} />
         <Route path="/admin/settings" component={AdminPlatformSettings} />
+        <Route path="/admin" component={AdminPlatformSettings} />
         <Route path="/admin/accreditation" component={AdminAccreditation} />
+        <Route path="/accreditation" component={AccreditationWorkflow} />
         <Route path="/dsar" component={DsarPublicPortal} />
+        <Route path="/dsar-portal" component={DsarPublicPortal} />
         <Route path="/dpia-wizard" component={DpiaWizard} />
         <Route path="/ai-governance-scoring" component={AiGovernanceScoring} />
         <Route path="/sector-benchmarking" component={SectorBenchmarking} />
@@ -364,8 +374,10 @@ function Router() {
         <Route path="/developer" component={OpenApiPortal} />
         {/* Banking Services */}
         <Route path="/banking" component={BankingDashboard} />
+        <Route path="/banking/institutions" component={BankingDashboard} />
         <Route path="/banking/kyc" component={KycManagement} />
         <Route path="/banking/aml" component={AmlCases} />
+        <Route path="/aml-cases" component={AmlCases} />
         <Route path="/banking/watchlist" component={WatchlistScreening} />
         <Route path="/banking/payments" component={PaymentsMonitor} />
         <Route path="/banking/swift" component={SwiftTransactions} />
@@ -381,8 +393,9 @@ function Router() {
         <Route path="/fintech" component={FintechDashboard} />
         {/* Operations & Admin */}
         <Route path="/cross-sector-alerts" component={CrossSectorAlerts} />
+        <Route path="/alerts" component={CrossSectorAlerts} />
         <Route path="/sla-timers" component={SlaTimers} />
-        <Route path="/admin/users" component={AdminUserManagement} />
+        <Route path="/admin/user-access" component={AdminUserManagement} />
         <Route path="/admin/system-health" component={SystemHealthDashboard} />
         <Route path="/breach-incidents" component={BreachIncidentCenter} />
         <Route path="/consent-records-legacy" component={ConsentRecordManager} />
@@ -392,6 +405,7 @@ function Router() {
         <Route path="/risk-scorecard-legacy" component={RiskScorecard} />
         <Route path="/article-40-tracker" component={Article40Tracker} />
         <Route path="/advanced-analytics" component={AdvancedAnalytics} />
+        <Route path="/analytics" component={AdvancedAnalytics} />
         <Route path="/notifications" component={NotificationCenter} />
         <Route path="/compliance-calendar" component={ComplianceCalendar} />
         {/* Production Feature Sprint — Phase 3 */}
@@ -418,13 +432,16 @@ function Router() {
         <Route path="/trends" component={ComplianceTrend} />
         {/* Phase 9 — Security Audit, Multi-Org Trends, DSAR Lifecycle, User Mgmt, Audit Export, NIP, Platform Stats */}
         <Route path="/security-audit" component={SecurityAuditDashboard} />
+        <Route path="/security" component={SecurityAuditDashboard} />
         <Route path="/trend-compare" component={MultiOrgTrendCompare} />
         <Route path="/dsar-lifecycle" component={DSARLifecycle} />
+        <Route path="/dsar-tracker" component={DSARLifecycle} />
         <Route path="/admin/users" component={UserManagement} />
         <Route path="/audit-export" component={AuditExport} />
         <Route path="/nip-reconciliation" component={NIPReconciliation} />
         <Route path="/platform-stats" component={PlatformStats} />
         <Route path="/ai/hub" component={AIMLHub} />
+        <Route path="/ai-hub" component={AIMLHub} />
         <Route path="/ai/model-registry" component={ModelRegistry} />
         <Route path="/ai/art-dashboard" component={ARTDashboard} />
         <Route path="/ai/feature-store" component={FeatureStorePage} />
@@ -436,7 +453,7 @@ function Router() {
         <Route path="/certificates" component={CertificateLifecycle} />
               <Route path="/sector-benchmarks" component={SectorBenchmarkDashboard} />
               <Route path="/fine-payments" component={FinePaymentGateway} />
-              <Route path="/compliance-calendar" component={ComplianceCalendarPage} />
+              <Route path="/p11/compliance-calendar" component={ComplianceCalendarPage} />
               <Route path="/sbom" component={SBOMViewer} />
         <Route path="/data-pipeline" component={DataPipeline} />
         <Route path="/data-lineage" component={DataLineage} />
@@ -453,7 +470,7 @@ function Router() {
         <Route path="/ndpa-fines" component={FinePayments} />
         {/* Phase 13 — Consent, DPO, Notifications, Penalty, Public Registry, Risk, Residency, Rate Limit, Bulk DSAR, Whistleblower, Cross-Border, Reporting */}
         <Route path="/consent-records" component={Phase13ConsentRecords} />
-        <Route path="/dpo-registry" component={Phase13DpoRegistry} />
+        <Route path="/p13/dpo-registry" component={Phase13DpoRegistry} />
         <Route path="/notification-center" component={Phase13NotificationCenter} />
         <Route path="/penalty-calculator" component={Phase13PenaltyCalculator} />
         <Route path="/penalty-dashboard" component={PenaltyDashboard} />

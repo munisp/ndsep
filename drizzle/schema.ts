@@ -1,7 +1,9 @@
 import {
   bigint,
   boolean,
+  date,
   integer,
+  inet,
   jsonb,
   numeric,
   pgEnum,
@@ -2936,3 +2938,144 @@ export const sectorComplianceEvents = pgTable("sector_compliance_events", {
 export type SectorComplianceEvent = typeof sectorComplianceEvents.$inferSelect;
 export type InsertSectorComplianceEvent = typeof sectorComplianceEvents.$inferInsert;
 
+// ─── Phase 13 Runtime Contracts ──────────────────────────────────────────────
+// These declarations mirror the raw-SQL tRPC procedures and migration 0025.
+
+export const analyticsSnapshots = pgTable("analytics_snapshots", {
+  id: serial("id").primaryKey(),
+  metricName: text("metric_name").notNull(),
+  dimension: text("dimension"),
+  dimensionValue: text("dimension_value"),
+  metricValue: numeric("metric_value", { precision: 20, scale: 4 }).notNull().default("0"),
+  snapshotDate: date("snapshot_date").notNull().defaultNow(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const article40Codes = pgTable("article40_codes", {
+  id: serial("id").primaryKey(),
+  codeName: text("code_name").notNull(),
+  sector: text("sector").notNull(),
+  description: text("description"),
+  submittedBy: text("submitted_by"),
+  documentUrl: text("document_url"),
+  status: text("status").notNull().default("draft"),
+  approvedBy: text("approved_by"),
+  approvalDate: date("approval_date"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const complianceCalendarEvents = pgTable("compliance_calendar_events", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  eventType: text("event_type").notNull(),
+  dueDate: date("due_date").notNull(),
+  priority: text("priority").notNull().default("medium"),
+  description: text("description"),
+  assignedTo: text("assigned_to"),
+  reminderDays: integer("reminder_days").notNull().default(14),
+  orgId: integer("org_id").references(() => organizations.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("pending"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const consentRecordsV2 = pgTable("consent_records_v2", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").references(() => organizations.id, { onDelete: "set null" }),
+  dataSubjectId: text("data_subject_id").notNull(),
+  dataSubjectEmail: text("data_subject_email"),
+  purpose: text("purpose").notNull(),
+  legalBasis: text("legal_basis").notNull().default("consent"),
+  dataCategories: jsonb("data_categories").$type<string[]>().notNull().default([]),
+  thirdPartySharing: boolean("third_party_sharing").notNull().default(false),
+  thirdParties: jsonb("third_parties").$type<string[]>().notNull().default([]),
+  consentGiven: boolean("consent_given").notNull().default(true),
+  status: text("status").notNull().default("active"),
+  withdrawalDate: timestamp("withdrawal_date", { withTimezone: true }),
+  expiryDate: timestamp("expiry_date", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const notificationInbox = pgTable("notification_inbox", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
+  notificationType: text("notification_type").notNull(),
+  priority: text("priority").notNull().default("normal"),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  isRead: boolean("is_read").notNull().default(false),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  actionUrl: text("action_url"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const publicComplianceRegistry = pgTable("public_compliance_registry", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull().unique().references(() => organizations.id, { onDelete: "cascade" }),
+  orgName: text("org_name").notNull(),
+  registrationNumber: text("registration_number"),
+  sector: text("sector"),
+  complianceStatus: text("compliance_status").notNull().default("pending"),
+  complianceScore: numeric("compliance_score", { precision: 5, scale: 2 }).notNull().default("0"),
+  lastAssessmentDate: date("last_assessment_date"),
+  isPublished: boolean("is_published").notNull().default(false),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const apiRateLimitStats = pgTable("api_rate_limit_stats", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  endpoint: text("endpoint").notNull(),
+  clientIp: inet("client_ip"),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  requestsCount: integer("requests_count").notNull().default(0),
+  blockedCount: integer("blocked_count").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const whistleblowerCases = pgTable("whistleblower_cases", {
+  id: serial("id").primaryKey(),
+  caseReference: text("case_reference").notNull().unique(),
+  organizationId: integer("organization_id").references(() => organizations.id, { onDelete: "set null" }),
+  description: text("description").notNull(),
+  category: text("category"),
+  severity: text("severity").notNull().default("medium"),
+  status: text("status").notNull().default("new"),
+  assignedTo: text("assigned_to"),
+  investigationNotes: text("investigation_notes"),
+  resolution: text("resolution"),
+  openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const penaltyCalculations = pgTable("penalty_calculations", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").references(() => organizations.id, { onDelete: "set null" }),
+  orgId: integer("org_id").references(() => organizations.id, { onDelete: "set null" }),
+  orgName: text("org_name"),
+  violationType: text("violation_type"),
+  violationDate: date("violation_date"),
+  annualTurnover: numeric("annual_turnover", { precision: 20, scale: 2 }),
+  basePenalty: numeric("base_penalty", { precision: 20, scale: 2 }),
+  finalPenalty: numeric("final_penalty", { precision: 20, scale: 2 }),
+  aggravatingFactors: jsonb("aggravating_factors").$type<string[]>().notNull().default([]),
+  mitigatingFactors: jsonb("mitigating_factors").$type<string[]>().notNull().default([]),
+  aggravatingMultiplier: numeric("aggravating_multiplier", { precision: 8, scale: 4 }).notNull().default("1"),
+  mitigatingReduction: numeric("mitigating_reduction", { precision: 8, scale: 4 }).notNull().default("0"),
+  penaltyCap: numeric("penalty_cap", { precision: 20, scale: 2 }),
+  calculationBasis: text("calculation_basis"),
+  status: text("status").notNull().default("draft"),
+  calculatedBy: text("calculated_by"),
+  approvedBy: text("approved_by"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

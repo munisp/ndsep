@@ -5,8 +5,8 @@ NDSEP llama.cpp Native Inference Engine
 Direct llama.cpp integration for local LLM inference when Ollama is unavailable.
 Uses llama-cpp-python bindings to load GGUF models and run inference natively.
 
-This serves as a fallback path:
-  Ollama (preferred) → llama.cpp native (this) → rule-based fallback
+This service exposes local CPU inference only when a configured GGUF model has
+loaded successfully. It never substitutes a rule-based or fabricated response.
 
 Technology: Python · llama-cpp-python · Flask
 Port: 8204
@@ -167,6 +167,9 @@ class LlamaCppHandler(BaseHTTPRequestHandler):
             return {}
         return json.loads(self.rfile.read(length))
 
+    def _send_inference_result(self, result: dict):
+        self._send_json(result, 503 if result.get("error") else 200)
+
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -177,7 +180,7 @@ class LlamaCppHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._send_json({
-                "status": "healthy" if _model_loaded else "degraded",
+                "status": "healthy" if _model_loaded else "unhealthy",
                 "service": "llamacpp-inference",
                 "version": "1.0.0",
                 "model": _model_name,
@@ -188,7 +191,7 @@ class LlamaCppHandler(BaseHTTPRequestHandler):
                 "total_requests": _total_requests,
                 "total_tokens": _total_tokens,
                 "uptime_seconds": int(time.time() - _start_time),
-            })
+            }, 200 if _model_loaded else 503)
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -201,7 +204,7 @@ class LlamaCppHandler(BaseHTTPRequestHandler):
             max_tokens = body.get("max_tokens", MAX_TOKENS)
             temperature = body.get("temperature", TEMPERATURE)
             result = generate(prompt, system, max_tokens, temperature)
-            self._send_json(result)
+            self._send_inference_result(result)
 
         elif self.path == "/compliance-qa":
             question = body.get("question", "")
@@ -210,7 +213,7 @@ class LlamaCppHandler(BaseHTTPRequestHandler):
             if context:
                 prompt = f"Context:\n{context}\n\n{prompt}"
             result = generate(prompt, COMPLIANCE_SYSTEM_PROMPT)
-            self._send_json(result)
+            self._send_inference_result(result)
 
         elif self.path == "/classify":
             text = body.get("text", "")
@@ -219,13 +222,13 @@ class LlamaCppHandler(BaseHTTPRequestHandler):
 Categories: data_breach, consent_violation, cross_border_transfer, retention_violation.
 Respond ONLY with JSON: {{"severity": "...", "category": "...", "ndpa_section": "...", "recommended_action": "..."}}"""
             result = generate(prompt, system)
-            self._send_json(result)
+            self._send_inference_result(result)
 
         elif self.path == "/summarize":
             document = body.get("document", body.get("text", ""))
             prompt = f"Summarize the following compliance document into key obligations, risks, and recommended actions:\n\n{document[:3000]}"
             result = generate(prompt, "You are a compliance document summarizer. Be concise, use bullet points.")
-            self._send_json(result)
+            self._send_inference_result(result)
 
         else:
             self._send_json({"error": "endpoint not found"}, 404)

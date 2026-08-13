@@ -3,9 +3,8 @@ import { logger } from "./logger";
  * TigerBeetle HTTP Client
  * ─────────────────────────────────────────────────────────────────────────────
  * Wraps the TigerBeetle HTTP proxy (port 8240) that is spawned by the
- * tigerbeetle_ledger Go orchestration service.  All calls are fire-and-forget
- * safe — if the proxy is unreachable the function logs and returns null rather
- * than throwing, so callers never need try/catch.
+ * tigerbeetle_ledger Go orchestration service. Financial state is durable only
+ * after TigerBeetle acknowledges it; proxy failures are propagated to callers.
  *
  * Double-entry semantics:
  *   - Every penalty creates two ledger entries: DEBIT (org liability) + CREDIT (NDSEP revenue)
@@ -55,7 +54,7 @@ export interface TbBalance {
 
 /**
  * Create a double-entry ledger transaction in TigerBeetle.
- * Gracefully degrades if the proxy is unreachable.
+ * Throws when the durable TigerBeetle proxy rejects or cannot accept the transaction.
  */
 export async function createTigerBeetleTransaction(tx: TbTransaction): Promise<TbTransactionResult> {
   try {
@@ -76,39 +75,32 @@ export async function createTigerBeetleTransaction(tx: TbTransaction): Promise<T
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      logger.warn(`[TigerBeetle] Transaction failed HTTP ${res.status}: ${body}`);
-      return { success: false, error: `HTTP ${res.status}: ${body}`, degraded: true };
+      throw new Error(`TigerBeetle proxy rejected transaction with HTTP ${res.status}: ${body}`);
     }
     const data = await res.json();
     tbTransactions++;
     return { success: true, transactionId: data.transaction_id, ledgerEntryId: data.ledger_entry_id };
   } catch (err: unknown) {
-    // Graceful degradation — TigerBeetle proxy not running in dev
-    const errObj = err as Record<string, unknown>;
-    if ((err instanceof Error && err.name === "TimeoutError") || errObj?.code === "ECONNREFUSED" || (errObj?.cause as Record<string, unknown>)?.code === "ECONNREFUSED") {
-      tbDegraded++;
-      logger.info("[TigerBeetle] Proxy unreachable — ledger entry skipped (graceful degradation)");
-      return { success: false, error: "TigerBeetle proxy unreachable", degraded: true };
-    }
     tbErrors++;
     const errMsg = err instanceof Error ? err.message : String(err);
-    logger.error({ err: errMsg }, "[TigerBeetle] Unexpected error");
-    return { success: false, error: errMsg || "Unknown error", degraded: true };
+    logger.error({ err: errMsg }, "[TigerBeetle] Durable transaction failed");
+    throw err instanceof Error ? err : new Error(errMsg);
   }
 }
 
 /**
  * Get the ledger balance for an organisation.
  */
-export async function getTigerBeetleBalance(orgId: string): Promise<TbBalance | null> {
+export async function getTigerBeetleBalance(orgId: string): Promise<TbBalance> {
   try {
     const res = await fetch(`${TB_BASE}/balance/${encodeURIComponent(orgId)}`, {
       signal: AbortSignal.timeout(TB_TIMEOUT_MS),
     });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
+    if (!res.ok) throw new Error(`TigerBeetle balance lookup failed with HTTP ${res.status}`);
+    return await res.json() as TbBalance;
+  } catch (error) {
+    tbErrors++;
+    throw error;
   }
 }
 
@@ -137,21 +129,14 @@ export function tigerbeetleMetrics() {
 }
 
 /**
- * Smoke-test: create a zero-amount test transaction and verify it round-trips.
+ * Smoke-test: verify the TigerBeetle proxy health without writing a test ledger event.
  */
 export async function tigerBeetleSmokeTest(): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
   const start = Date.now();
-  const result = await createTigerBeetleTransaction({
-    orgId: "smoke-test",
-    penaltyId: "smoke-test-0",
-    amountUsd: 0,
-    type: "penalty",
-    description: "smoke test — safe to ignore",
-    issuedBy: "system",
-  });
-  const latencyMs = Date.now() - start;
-  if (result.degraded) {
-    return { ok: false, latencyMs, error: result.error };
+  try {
+    const ok = await isTigerBeetleHealthy();
+    return { ok, latencyMs: Date.now() - start, ...(ok ? {} : { error: "TigerBeetle proxy is unavailable" }) };
+  } catch (error) {
+    return { ok: false, latencyMs: Date.now() - start, error: error instanceof Error ? error.message : String(error) };
   }
-  return { ok: result.success, latencyMs, error: result.error };
 }

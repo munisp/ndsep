@@ -24,7 +24,6 @@ import os
 import sys
 import json
 import time
-import random
 import logging
 import hashlib
 from datetime import datetime, timedelta
@@ -77,43 +76,48 @@ PEP_TITLES = [
     'admiral', 'chief justice', 'attorney general', 'comptroller'
 ]
 
-# ─── BVN Verification (NIBSS API Simulation) ──────────────────────────────────
+# ─── Authoritative BVN and NIN Verification ───────────────────────────────────
+
+NIBSS_BVN_API_URL = os.getenv("NIBSS_BVN_API_URL", "").rstrip("/")
+NIBSS_BVN_API_KEY = os.getenv("NIBSS_BVN_API_KEY", "")
+NIMC_NIN_API_URL = os.getenv("NIMC_NIN_API_URL", "").rstrip("/")
+NIMC_NIN_API_KEY = os.getenv("NIMC_NIN_API_KEY", "")
+
+
+def _verify_identity(endpoint: str, api_key: str, payload: Dict[str, str], identity_type: str) -> Tuple[bool, float, str]:
+    if not endpoint or not api_key:
+        logger.error("%s verification is not configured", identity_type)
+        return False, 0.0, f"{identity_type}_VERIFICATION_UNAVAILABLE"
+    try:
+        import urllib.request
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if response.status < 200 or response.status >= 300:
+                return False, 0.0, f"{identity_type}_VERIFICATION_REJECTED"
+            result = json.loads(response.read())
+        verified = result.get("verified") is True or result.get("status") in {"verified", "VERIFIED", "match"}
+        confidence = float(result.get("confidence", result.get("match_score", 0.0)) or 0.0)
+        return verified, confidence if verified else 0.0, f"{identity_type}_{'VERIFIED' if verified else 'NOT_VERIFIED'}"
+    except Exception as error:
+        logger.error("%s verification failed: %s", identity_type, error)
+        return False, 0.0, f"{identity_type}_VERIFICATION_UNAVAILABLE"
+
 
 def verify_bvn(bvn: str, name: str, dob: str) -> Tuple[bool, float, str]:
-    """
-    Simulate NIBSS BVN verification API.
-    Returns: (verified, confidence_score, message)
-    """
-    if not bvn or len(bvn) != 11:
+    if not bvn or len(bvn) != 11 or not bvn.isdigit():
         return False, 0.0, "INVALID_BVN: must be 11 digits"
-    
-    if not bvn.isdigit():
-        return False, 0.0, "INVALID_BVN: must contain only digits"
-    
-    # Simulate API call with 95% success rate
-    if random.random() < 0.95:
-        confidence = random.uniform(85.0, 99.5)
-        return True, confidence, "BVN_VERIFIED"
-    else:
-        return False, 0.0, "BVN_NOT_FOUND"
+    return _verify_identity(NIBSS_BVN_API_URL, NIBSS_BVN_API_KEY, {"bvn": bvn, "name": name, "date_of_birth": dob}, "BVN")
+
 
 def verify_nin(nin: str, name: str) -> Tuple[bool, float, str]:
-    """
-    Simulate NIMC NIN verification API.
-    Returns: (verified, confidence_score, message)
-    """
-    if not nin or len(nin) != 11:
+    if not nin or len(nin) != 11 or not nin.isdigit():
         return False, 0.0, "INVALID_NIN: must be 11 digits"
-    
-    if not nin.isdigit():
-        return False, 0.0, "INVALID_NIN: must contain only digits"
-    
-    # Simulate NIMC API
-    if random.random() < 0.93:
-        confidence = random.uniform(80.0, 98.0)
-        return True, confidence, "NIN_VERIFIED"
-    else:
-        return False, 0.0, "NIN_NOT_FOUND"
+    return _verify_identity(NIMC_NIN_API_URL, NIMC_NIN_API_KEY, {"nin": nin, "name": name}, "NIN")
 
 # ─── Document Analysis ────────────────────────────────────────────────────────
 
@@ -126,13 +130,17 @@ def analyze_document(doc_type: str, doc_url: str, selfie_url: str = "") -> Dict:
     import urllib.request
     import base64
 
-    liveness_url = os.environ.get("LIVENESS_SERVICE_URL", "http://localhost:8150")
+    liveness_url = os.environ.get("LIVENESS_SERVICE_URL", "").rstrip("/")
+    document_analysis_url = os.environ.get("DOCUMENT_ANALYSIS_SERVICE_URL", "").rstrip("/")
     face_match_score = 0.0
     liveness_score = 0.0
-    anti_spoof_real = True
+    anti_spoof_real = False
+    document_result: Dict = {}
 
-    # Attempt real face matching via liveness service
+    # Authoritative face matching, liveness, and document analysis are required.
     try:
+        if not liveness_url or not document_analysis_url or not selfie_url or not doc_url:
+            raise RuntimeError("LIVENESS_SERVICE_URL, DOCUMENT_ANALYSIS_SERVICE_URL, doc_url, and selfie_url are required")
         if selfie_url and doc_url:
             # Load images and encode as base64
             doc_b64 = _url_to_base64(doc_url)
@@ -165,24 +173,34 @@ def analyze_document(doc_type: str, doc_url: str, selfie_url: str = "") -> Dict:
                     liv_result = json.loads(resp2.read())
                     liveness_score = liv_result.get("liveness_score", 0.0)
                     anti_spoof = liv_result.get("anti_spoof", {})
-                    anti_spoof_real = anti_spoof.get("is_real", True)
+                    anti_spoof_real = anti_spoof.get("is_real", False) is True
 
                 logger.info(f"Liveness service: face_match={face_match_score:.1f}, "
                            f"liveness={liveness_score:.1f}, real={anti_spoof_real}")
+                analysis_payload = json.dumps({"document": doc_b64, "document_type": doc_type}).encode()
+                analysis_request = urllib.request.Request(
+                    f"{document_analysis_url}/api/document/analyze", data=analysis_payload,
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+                with urllib.request.urlopen(analysis_request, timeout=30) as response:
+                    document_result = json.loads(response.read())
+            else:
+                raise RuntimeError("Document or selfie content could not be loaded")
     except Exception as e:
-        logger.warning(f"Liveness service unavailable, using document analysis fallback: {e}")
-        face_match_score = 0.0
-        liveness_score = 0.0
+        logger.error(f"Authoritative document/liveness analysis failed: {e}")
+        return {
+            'authenticity_score': 0.0, 'face_match_score': 0.0, 'liveness_score': 0.0,
+            'anti_spoof_real': False, 'checks': {'verification_service_available': False},
+            'overall_valid': False, 'error': 'DOCUMENT_VERIFICATION_UNAVAILABLE',
+        }
 
-    # Document-level authenticity checks
-    authenticity_score = random.uniform(80.0, 99.0)  # Document format/security features
-
+    authenticity_score = float(document_result.get("authenticity_score", 0.0) or 0.0)
     checks = {
-        'format_valid': authenticity_score > 60,
-        'security_features_present': authenticity_score > 70,
-        'not_expired': random.random() > 0.05,
-        'no_tampering_detected': authenticity_score > 65,
-        'face_match': face_match_score if face_match_score > 0 else authenticity_score * 0.9,
+        'format_valid': document_result.get('format_valid') is True,
+        'security_features_present': document_result.get('security_features_present') is True,
+        'not_expired': document_result.get('not_expired') is True,
+        'no_tampering_detected': document_result.get('no_tampering_detected') is True,
+        'face_match': face_match_score,
         'liveness_score': liveness_score,
         'anti_spoof_real': anti_spoof_real,
     }

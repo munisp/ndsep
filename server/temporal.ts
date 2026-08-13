@@ -2,8 +2,8 @@
  * NDSEP Temporal Client — Cloud-Aware
  *
  * Supports both self-hosted Temporal (Docker Compose) and Temporal Cloud.
- * Gracefully degrades to HTTP-based fallback when the Temporal SDK is
- * unavailable or the broker is unreachable.
+ * Requires the official Temporal SDK and a reachable Temporal cluster. Workflow
+ * starts fail explicitly when either prerequisite is unavailable.
  *
  * Environment variables:
  *   TEMPORAL_ADDRESS      gRPC address (default: localhost:7233)
@@ -109,7 +109,7 @@ async function loadTemporalSdk(): Promise<boolean> {
     );
   } catch {
     _sdkAvailable = false;
-    logger.warn("[Temporal] @temporalio/client not installed — using HTTP fallback");
+    logger.error("[Temporal] @temporalio/client is not installed; workflow starts are unavailable");
   }
   return _sdkAvailable;
 }
@@ -162,8 +162,8 @@ async function getTemporalClient(): Promise<any> {
     );
     return _client;
   } catch (err) {
-    logger.warn({ err, address: TEMPORAL_ADDRESS }, "[Temporal] Could not connect — graceful degradation");
-    return null;
+    logger.error({ err, address: TEMPORAL_ADDRESS }, "[Temporal] Could not connect");
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 
@@ -225,8 +225,7 @@ async function httpFallbackStart(options: WorkflowStartOptions): Promise<Workflo
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Start (or signal-with-start) a Temporal workflow.
- * Falls back to HTTP API if the gRPC SDK is unavailable.
+ * Start a Temporal workflow through the official gRPC SDK.
  */
 export async function startWorkflow(
   workflowType: string,
@@ -234,8 +233,10 @@ export async function startWorkflow(
 ): Promise<WorkflowStartResult> {
   const client = await getTemporalClient();
 
-  if (client) {
-    try {
+  if (!client) {
+    throw new Error("Temporal SDK is unavailable; workflow start cannot be acknowledged");
+  }
+  try {
       const handle = await client.workflow.start(workflowType, {
         workflowId: options.workflowId,
         taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
@@ -258,20 +259,8 @@ export async function startWorkflow(
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       logger.error({ err, workflowId: options.workflowId }, "[Temporal] Failed to start workflow via SDK");
-      return {
-        ok: false,
-        workflowId: options.workflowId,
-        namespace: TEMPORAL_NAMESPACE,
-        taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
-        address: TEMPORAL_ADDRESS,
-        isCloud: IS_TEMPORAL_CLOUD,
-        error,
-      };
+      throw new Error(`Temporal workflow ${options.workflowId} was not started: ${error}`);
     }
-  }
-
-  // SDK not available — use HTTP fallback
-  return httpFallbackStart({ ...options, workflowType });
 }
 
 /**

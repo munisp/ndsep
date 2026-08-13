@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure, publicProcedure, exportProcedure, deleteProcedure, approveProcedure} from "../_core/trpc";
-import { getDb } from "../db";
+import { getDb, getPool } from "../db";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { ENV } from "../_core/env";
@@ -12,20 +12,16 @@ import { autoDecryptRows } from "../encryptionMiddleware";
 import { logger } from "../logger";
 
 // ── Helper: execute raw SQL ───────────────────────────────────────────────────
-async function exec(rawSql: string, params?: unknown[]): Promise<Record<string, unknown>[]> {
-  if (params && params.length > 0) {
-    const pg = await import("pg");
-    const { getPgSslConfig: getSsl } = await import("../dbSslConfig");
-    const pool = new pg.Pool({ connectionString: process.env.LOCAL_DATABASE_URL, ssl: getSsl() });
-    try {
-      const pgResult = await pool.query(rawSql, params);
-      return autoDecryptRows(rawSql, (pgResult.rows ?? []) as Record<string, unknown>[]);
-    } finally {
-      await pool.end();
-    }
+async function exec(rawSql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
+  if (params.length > 0) {
+    const pool = getPool();
+    if (!pool) throw new Error("Database pool is unavailable");
+    const pgResult = await pool.query(rawSql, params);
+    return autoDecryptRows(rawSql, (pgResult.rows ?? []) as Record<string, unknown>[]);
   }
+
   const db = await getDb();
-  if (!db) return [];
+  if (!db) throw new Error("Database connection is unavailable");
   const result = await db.execute(sql.raw(rawSql));
   const rows = (result as unknown as { rows?: unknown[] }).rows ?? (result as unknown as unknown[]);
   return autoDecryptRows(rawSql, (rows ?? []) as Record<string, unknown>[]);
@@ -410,7 +406,7 @@ export const retentionEnforcementRouter = router({
       const overdue = await exec(`SELECT rp.*, o.name as org_name, o.sector FROM retention_policies rp LEFT JOIN organizations o ON rp.organization_id = o.id WHERE rp.next_review_date < NOW() AND rp.status = 'active' LIMIT ${ENV.rescoringBatchSize}`);
       if (!input.dryRun) {
         for (const policy of overdue) {
-          await exec(`UPDATE retention_policies SET status = 'overdue', last_enforced_at = NOW() WHERE id = ${policy.id}`);
+          await exec(`UPDATE retention_policies SET status = 'overdue', last_enforced_at = NOW() WHERE id = $1`, [policy.id]);
         }
       }
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "production_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
@@ -433,7 +429,7 @@ export const certVerificationRouter = router({
   verify: publicProcedure
     .input(z.object({ certNumber: z.string() }))
     .query(async ({ input }) => {
-      const rows = await exec(`SELECT cc.*, o.name as org_name, o.sector, o.registration_number FROM compliance_certificates cc LEFT JOIN organizations o ON cc.organization_id = o.id WHERE cc.cert_number = '${input.certNumber}' LIMIT 1`);
+      const rows = await exec(`SELECT cc.*, o.name as org_name, o.sector, o.registration_number FROM compliance_certificates cc LEFT JOIN organizations o ON cc.organization_id = o.id WHERE cc.cert_number = $1 LIMIT 1`, [input.certNumber]);
       if (!rows.length) return { valid: false, message: "Certificate not found" };
       const cert = rows[0];
       const isExpired = new Date(String(cert.expires_at)) < new Date();
@@ -445,7 +441,7 @@ export const certVerificationRouter = router({
     .mutation(async ({ input, ctx }) => {
       const certNumber = `NDSEP-${input.certType.toUpperCase()}-${Date.now()}-${input.orgId}`;
       const expiresAt = new Date(Date.now() + ENV.certValidityDays * 86400000).toISOString();
-      await exec(`INSERT INTO compliance_certificates (cert_number, organization_id, cert_type, issued_by, issued_at, expires_at, status, notes) VALUES ('${certNumber}', ${input.orgId}, '${input.certType}', ${ctx.user.id}, NOW(), '${expiresAt}', 'active', '${input.notes ?? ""}')`);
+      await exec(`INSERT INTO compliance_certificates (cert_number, organization_id, cert_type, issued_by, issued_at, expires_at, status, notes) VALUES ($1, $2, $3, $4, NOW(), $5, 'active', $6)`, [certNumber, input.orgId, input.certType, ctx.user.id, expiresAt, input.notes ?? ""]);
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "production_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { certNumber, expiresAt, verifyUrl: `${ENV.certVerifyBaseUrl}/${certNumber}` };
     }),
@@ -453,9 +449,10 @@ export const certVerificationRouter = router({
   list: protectedProcedure
     .input(z.object({ orgId: z.number().optional(), limit: z.number().int().min(1).max(200).default(50) }))
     .query(async ({ input }) => {
-      const orgFilter = input.orgId ? `WHERE cc.organization_id = ${input.orgId}` : "";
-      const rows = await exec(`SELECT cc.*, o.name as org_name FROM compliance_certificates cc LEFT JOIN organizations o ON cc.organization_id = o.id ${orgFilter} ORDER BY cc.issued_at DESC LIMIT ${input.limit}`);
-      return rows;
+      if (input.orgId) {
+        return exec(`SELECT cc.*, o.name as org_name FROM compliance_certificates cc LEFT JOIN organizations o ON cc.organization_id = o.id WHERE cc.organization_id = $1 ORDER BY cc.issued_at DESC LIMIT $2`, [input.orgId, input.limit]);
+      }
+      return exec(`SELECT cc.*, o.name as org_name FROM compliance_certificates cc LEFT JOIN organizations o ON cc.organization_id = o.id ORDER BY cc.issued_at DESC LIMIT $1`, [input.limit]);
     }),
 });
 
@@ -464,16 +461,17 @@ export const complianceRescoringRouter = router({
   runBatch: protectedProcedure
     .input(z.object({ sector: z.string().optional(), limit: z.number().int().min(1).max(200).default(50) }))
     .mutation(async ({ input }) => {
-      const sectorFilter = input.sector ? `AND sector = '${input.sector}'` : "";
-      const orgs = await exec(`SELECT id, name, sector, compliance_score FROM organizations WHERE 1=1 ${sectorFilter} ORDER BY updated_at ASC LIMIT ${input.limit}`);
+      const orgs = input.sector
+        ? await exec(`SELECT id, name, sector, compliance_score FROM organizations WHERE sector = $1 ORDER BY updated_at ASC LIMIT $2`, [input.sector, input.limit])
+        : await exec(`SELECT id, name, sector, compliance_score FROM organizations ORDER BY updated_at ASC LIMIT $1`, [input.limit]);
       let updated = 0;
       for (const org of orgs) {
         const orgId = parseInt(String(org.id));
-        const breaches = await exec(`SELECT COUNT(*) as cnt FROM breach_incidents WHERE organization_id = ${orgId} AND reported_at > NOW() - INTERVAL '6 months'`);
+        const breaches = await exec(`SELECT COUNT(*) as cnt FROM breach_incidents WHERE organization_id = $1 AND reported_at > NOW() - INTERVAL '6 months'`, [orgId]);
         const breachPenalty = Math.min(parseInt(String(breaches[0]?.cnt ?? 0)) * 5, 25);
         const baseScore = parseFloat(String(org.compliance_score ?? 50));
         const newScore = Math.max(0, Math.min(100, baseScore - breachPenalty)); // deterministic — no random jitter
-        await exec(`UPDATE organizations SET compliance_score = ${newScore.toFixed(1)}, updated_at = NOW() WHERE id = ${orgId}`);
+        await exec(`UPDATE organizations SET compliance_score = $1, updated_at = NOW() WHERE id = $2`, [newScore, orgId]);
         updated++;
       }
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "production_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
@@ -483,7 +481,7 @@ export const complianceRescoringRouter = router({
   getHistory: protectedProcedure
     .input(z.object({ orgId: z.number(), limit: z.number().default(30) }))
     .query(async ({ input }) => {
-      const rows = await exec(`SELECT * FROM compliance_score_history WHERE organization_id = ${input.orgId} ORDER BY scored_at DESC LIMIT ${input.limit}`);
+      const rows = await exec(`SELECT * FROM compliance_score_history WHERE organization_id = $1 ORDER BY scored_at DESC LIMIT $2`, [input.orgId, input.limit]);
       return rows;
     }),
 });

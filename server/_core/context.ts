@@ -14,25 +14,29 @@ export type TrpcContext = {
  * Try to authenticate via Keycloak Bearer token.
  * Returns a User record (upserted into the DB) or null.
  */
-async function tryKeycloakAuth(authHeader: string | undefined): Promise<User | null> {
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  const token = authHeader.slice(7);
+type KeycloakAuthResult = { attempted: boolean; user: User | null };
+
+async function tryKeycloakAuth(authHeader: string | undefined): Promise<KeycloakAuthResult> {
+  if (!authHeader) return { attempted: false, user: null };
+  if (!authHeader.startsWith("Bearer ")) return { attempted: true, user: null };
+
+  const token = authHeader.slice(7).trim();
+  if (!token) return { attempted: true, user: null };
   try {
     const kcUser = await verifyKeycloakToken(token);
-    if (!kcUser) return null;
-    // Map to NDSEP platform role
+    if (!kcUser) return { attempted: true, user: null };
+
     const role = mapKeycloakRoleToNdsep(kcUser);
-    // Upsert the user in our DB using Keycloak sub as openId
     await upsertUser({
       openId: `kc:${kcUser.sub}`,
       name: kcUser.name ?? kcUser.username,
       email: kcUser.email ?? null,
       role,
     });
-    const user = await getUserByOpenId(`kc:${kcUser.sub}`);
-    return user ?? null;
+    return { attempted: true, user: (await getUserByOpenId(`kc:${kcUser.sub}`)) ?? null };
   } catch {
-    return null;
+    // A bearer-authentication failure must not fall through to cookie auth.
+    return { attempted: true, user: null };
   }
 }
 
@@ -42,11 +46,11 @@ export async function createContext(
   let user: User | null = null;
 
   // 1. Try Keycloak SSO (Authorization: Bearer <jwt>)
-  const kcUser = await tryKeycloakAuth(opts.req.headers.authorization);
-  if (kcUser) {
-    user = kcUser;
+  const keycloakAuth = await tryKeycloakAuth(opts.req.headers.authorization);
+  if (keycloakAuth.attempted) {
+    user = keycloakAuth.user;
   } else {
-    // 2. Fall back to Manus OAuth session cookie
+    // 2. Fall back to Manus OAuth only when no bearer credential was supplied.
     try {
       user = await sdk.authenticateRequest(opts.req);
     } catch {

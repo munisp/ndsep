@@ -1521,6 +1521,7 @@ dependencies = [
  "axum",
  "chrono",
  "env_logger",
+ "lazy_static",
  "log",
  "rand 0.8.5",
  "reqwest 0.12.28",

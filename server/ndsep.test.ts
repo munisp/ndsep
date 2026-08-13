@@ -1,4 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+
+vi.mock("./middlewareIntegration", () => ({
+  checkPermission: vi.fn().mockResolvedValue(true),
+}));
+
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 

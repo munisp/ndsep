@@ -5,6 +5,13 @@
 import { describe, it, expect, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
 
+// Mock the authoritative authorization decision explicitly for isolated router behavior tests.
+vi.mock("./middlewareIntegration", () => ({
+  checkPermission: vi.fn().mockResolvedValue(true),
+  emitMutationEvent: vi.fn().mockResolvedValue(undefined),
+  EVENTS: { COMPLIANCE_SCORE_UPDATED: "compliance.score.updated" },
+}));
+
 // Mock pg pool — return { count: "0" } so COUNT(*) queries don't crash
 vi.mock("pg", () => {
   const mockPool = {

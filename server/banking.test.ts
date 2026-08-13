@@ -13,6 +13,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { TrpcContext } from "./_core/context";
 
 // ── Stub pg.Pool before importing the router ──────────────────────────────────
+vi.mock("./middlewareIntegration", () => ({
+  checkPermission: vi.fn().mockResolvedValue(true),
+  emitMutationEvent: vi.fn().mockResolvedValue(undefined),
+  EVENTS: { COMPLIANCE_SCORE_UPDATED: "compliance.score.updated" },
+}));
+
 vi.mock("pg", () => {
   const mockPool = {
     query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
