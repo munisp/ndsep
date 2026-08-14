@@ -60,7 +60,7 @@ export const ENV = {
   // Set APISIX_ADMIN_KEY to the APISIX admin API key (X-API-KEY header).
   // Set APISIX_GATEWAY_URL to the APISIX proxy base URL for routing.
   apisixAdminUrl: process.env.APISIX_ADMIN_URL ?? "http://localhost:9180",
-  apisixAdminKey: process.env.APISIX_ADMIN_KEY ?? "CHANGE_ME_IN_PRODUCTION",
+  apisixAdminKey: process.env.APISIX_ADMIN_KEY ?? "",
   apisixGatewayUrl: process.env.APISIX_GATEWAY_URL ?? "http://localhost:9080",
   apisixEnabled: process.env.APISIX_ENABLED !== "false",
 
