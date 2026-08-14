@@ -171,10 +171,11 @@ describe("Watchlist screener Python fallback", () => {
     expect(src).toContain("FUZZY_MATCH_THRESHOLD");
   });
 
-  it("handles psycopg2 ImportError gracefully", () => {
+  it("fails closed when psycopg2 is unavailable", () => {
     const src = readFile("workers/python/watchlist_screener_fallback.py");
     expect(src).toContain("ImportError");
-    expect(src).toContain("mock mode");
+    expect(src).toContain("authoritative watchlist screening is unavailable");
+    expect(src).not.toContain("running in mock mode");
   });
 });
 
