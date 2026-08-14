@@ -60,7 +60,7 @@ var (
 	tigerbeetleURL      = getenv("TIGERBEETLE_SERVICE_URL", "http://localhost:8240")
 	tigerbeetleEnabled  = getenv("TIGERBEETLE_ENABLED", "true") == "true"
 	apisixAdminURL      = getenv("APISIX_ADMIN_URL", "http://localhost:9180")
-	apisixAdminKey      = getenv("APISIX_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
+	apisixAdminKey      = os.Getenv("APISIX_ADMIN_KEY")
 	apisixEnabled       = getenv("APISIX_ENABLED", "true") == "true"
 	selfURL             = fmt.Sprintf("http://localhost:%s", getenv("PORT", "8310"))
 )
