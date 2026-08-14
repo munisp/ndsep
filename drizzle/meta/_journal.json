@@ -217,6 +217,13 @@
       "when": 1786640000000,
       "tag": "0030_dpco_audit_service_records",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786640100000,
+      "tag": "0031_dpco_registry_service_records",
+      "breakpoints": true
     }
   ]
 }

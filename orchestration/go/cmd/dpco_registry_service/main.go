@@ -11,17 +11,19 @@
 //   - Graceful degradation on all middleware failures
 //
 // Endpoints:
-//   GET  /health                          — service health + middleware status
-//   GET  /api/dpco/registry               — list all DPCOs (Redis-cached)
-//   GET  /api/dpco/registry/{id}          — get single DPCO (Dapr state)
-//   POST /api/dpco/registry               — register/update DPCO + TigerBeetle fee
-//   POST /api/dpco/registry/{id}/renew    — renew licence + fee ledger entry
-//   POST /api/dpco/registry/{id}/suspend  — suspend licence + Kafka event
-//   GET  /metrics                         — operational metrics
+//
+//	GET  /health                          — service health + middleware status
+//	GET  /api/dpco/registry               — list all DPCOs (Redis-cached)
+//	GET  /api/dpco/registry/{id}          — get single DPCO (Dapr state)
+//	POST /api/dpco/registry               — register/update DPCO + TigerBeetle fee
+//	POST /api/dpco/registry/{id}/renew    — renew licence + fee ledger entry
+//	POST /api/dpco/registry/{id}/suspend  — suspend licence + Kafka event
+//	GET  /metrics                         — operational metrics
 package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -48,42 +50,41 @@ func getenv(key, fallback string) string {
 }
 
 var (
-	port                = getenv("PORT", "8310")
-	kafkaBrokers        = strings.Split(getenv("KAFKA_BROKERS", "localhost:9092"), ",")
-	kafkaEnabled        = getenv("KAFKA_ENABLED", "true") == "true"
-	kafkaTopic          = "ndsep.dpco.registry.events"
-	daprHTTPPort        = getenv("DAPR_HTTP_PORT", "3500")
-	daprEnabled         = getenv("DAPR_ENABLED", "true") == "true"
-	daprStateStore      = "redis-state"
-	daprPubSub          = "kafka-pubsub"
-	redisURL            = getenv("REDIS_URL", "redis://localhost:6379")
-	tigerbeetleURL      = getenv("TIGERBEETLE_SERVICE_URL", "http://localhost:8240")
-	tigerbeetleEnabled  = getenv("TIGERBEETLE_ENABLED", "true") == "true"
-	apisixAdminURL      = getenv("APISIX_ADMIN_URL", "http://localhost:9180")
-	apisixAdminKey      = os.Getenv("APISIX_ADMIN_KEY")
-	apisixEnabled       = getenv("APISIX_ENABLED", "true") == "true"
-	selfURL             = fmt.Sprintf("http://localhost:%s", getenv("PORT", "8310"))
+	port               = getenv("PORT", "8310")
+	kafkaBrokers       = strings.Split(getenv("KAFKA_BROKERS", "localhost:9092"), ",")
+	kafkaEnabled       = getenv("KAFKA_ENABLED", "true") == "true"
+	kafkaTopic         = "ndsep.dpco.registry.events"
+	daprHTTPPort       = getenv("DAPR_HTTP_PORT", "3500")
+	daprEnabled        = getenv("DAPR_ENABLED", "true") == "true"
+	daprStateStore     = "redis-state"
+	daprPubSub         = "kafka-pubsub"
+	redisURL           = getenv("REDIS_URL", "redis://localhost:6379")
+	tigerbeetleURL     = getenv("TIGERBEETLE_SERVICE_URL", "http://localhost:8240")
+	tigerbeetleEnabled = getenv("TIGERBEETLE_ENABLED", "true") == "true"
+	apisixAdminURL     = getenv("APISIX_ADMIN_URL", "http://localhost:9180")
+	apisixAdminKey     = os.Getenv("APISIX_ADMIN_KEY")
+	apisixEnabled      = getenv("APISIX_ENABLED", "true") == "true"
+	dbURL              = os.Getenv("DATABASE_URL")
+	selfURL            = fmt.Sprintf("http://localhost:%s", getenv("PORT", "8310"))
 )
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
 var (
-	mu              sync.RWMutex
-	kafkaProducer   sarama.SyncProducer
-	kafkaOK         bool
-	daprOK          bool
-	tigerbeetleOK   bool
-	apisixOK        bool
-	// In-memory fallback store
-	dpcoStore       = make(map[string]map[string]interface{})
+	mu            sync.RWMutex
+	kafkaProducer sarama.SyncProducer
+	kafkaOK       bool
+	daprOK        bool
+	tigerbeetleOK bool
+	apisixOK      bool
 	// Metrics
-	registrations   int64
-	renewals        int64
-	suspensions     int64
-	kafkaEvents     int64
-	daprOps         int64
-	tbEntries       int64
-	cacheHits       int64
+	registrations int64
+	renewals      int64
+	suspensions   int64
+	kafkaEvents   int64
+	daprOps       int64
+	tbEntries     int64
+	cacheHits     int64
 )
 
 // ─── Kafka Init ───────────────────────────────────────────────────────────────
@@ -100,11 +101,16 @@ func initKafka() {
 			p, err := sarama.NewSyncProducer(kafkaBrokers, cfg)
 			if err != nil {
 				logger.Printf("[Kafka] Connect failed (%v), retry in 10s", err)
-				mu.Lock(); kafkaOK = false; mu.Unlock()
+				mu.Lock()
+				kafkaOK = false
+				mu.Unlock()
 				time.Sleep(10 * time.Second)
 				continue
 			}
-			mu.Lock(); kafkaProducer = p; kafkaOK = true; mu.Unlock()
+			mu.Lock()
+			kafkaProducer = p
+			kafkaOK = true
+			mu.Unlock()
 			logger.Printf("[Kafka] Connected to %v", kafkaBrokers)
 			return
 		}
@@ -113,7 +119,8 @@ func initKafka() {
 
 func publishKafka(eventType string, payload map[string]interface{}) {
 	mu.RLock()
-	ok := kafkaOK; p := kafkaProducer
+	ok := kafkaOK
+	p := kafkaProducer
 	mu.RUnlock()
 	payload["event_type"] = eventType
 	payload["source"] = "dpco-registry-service"
@@ -147,12 +154,16 @@ func initDapr() {
 			resp, err := http.Get(url)
 			if err != nil || resp.StatusCode != 200 {
 				logger.Printf("[Dapr] Not reachable, retry in 10s")
-				mu.Lock(); daprOK = false; mu.Unlock()
+				mu.Lock()
+				daprOK = false
+				mu.Unlock()
 				time.Sleep(10 * time.Second)
 				continue
 			}
 			resp.Body.Close()
-			mu.Lock(); daprOK = true; mu.Unlock()
+			mu.Lock()
+			daprOK = true
+			mu.Unlock()
 			logger.Printf("[Dapr] Sidecar connected on port %s", daprHTTPPort)
 			return
 		}
@@ -207,12 +218,16 @@ func initTigerBeetle() {
 			resp, err := http.Get(fmt.Sprintf("%s/health", tigerbeetleURL))
 			if err != nil || resp.StatusCode != 200 {
 				logger.Printf("[TigerBeetle] Not reachable, retry in 15s")
-				mu.Lock(); tigerbeetleOK = false; mu.Unlock()
+				mu.Lock()
+				tigerbeetleOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
 			resp.Body.Close()
-			mu.Lock(); tigerbeetleOK = true; mu.Unlock()
+			mu.Lock()
+			tigerbeetleOK = true
+			mu.Unlock()
 			logger.Printf("[TigerBeetle] Connected at %s", tigerbeetleURL)
 			return
 		}
@@ -256,7 +271,7 @@ func registerApisixRoutes() {
 			"id": "dpco-registry-list", "name": "DPCO Registry List",
 			"uri": "/dpco/registry*", "methods": []string{"GET", "POST"},
 			"upstream": map[string]interface{}{
-				"type": "roundrobin",
+				"type":  "roundrobin",
 				"nodes": map[string]interface{}{fmt.Sprintf("localhost:%s", port): 1},
 			},
 			"plugins": map[string]interface{}{
@@ -277,11 +292,15 @@ func registerApisixRoutes() {
 		resp, err := client.Do(req)
 		if err != nil {
 			logger.Printf("[APISIX] Route registration failed for %s: %v", id, err)
-			mu.Lock(); apisixOK = false; mu.Unlock()
+			mu.Lock()
+			apisixOK = false
+			mu.Unlock()
 			continue
 		}
 		resp.Body.Close()
-		mu.Lock(); apisixOK = true; mu.Unlock()
+		mu.Lock()
+		apisixOK = true
+		mu.Unlock()
 		logger.Printf("[APISIX] Route registered: %s → %s", id, selfURL)
 	}
 }
@@ -290,46 +309,54 @@ func registerApisixRoutes() {
 
 func health(w http.ResponseWriter, r *http.Request) {
 	mu.RLock()
-	kOK := kafkaOK; dOK := daprOK; tOK := tigerbeetleOK; aOK := apisixOK
-	total := len(dpcoStore)
+	kOK := kafkaOK
+	dOK := daprOK
+	tOK := tigerbeetleOK
+	aOK := apisixOK
 	mu.RUnlock()
+	records, err := listRegistryRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List DPCOs for health failed: %v", err)
+		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	total := len(records)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"service": "dpco-registry-service", "status": "healthy",
 		"port": port, "uptime_s": time.Since(startTime).Seconds(),
-		"kafka":        map[string]interface{}{"connected": kOK, "topic": kafkaTopic, "events": atomic.LoadInt64(&kafkaEvents)},
-		"dapr":         map[string]interface{}{"connected": dOK, "state_store": daprStateStore, "pubsub": daprPubSub, "ops": atomic.LoadInt64(&daprOps)},
-		"tigerbeetle":  map[string]interface{}{"connected": tOK, "url": tigerbeetleURL, "entries": atomic.LoadInt64(&tbEntries)},
-		"apisix":       map[string]interface{}{"connected": aOK, "admin_url": apisixAdminURL},
-		"total_dpcos":  total,
+		"kafka":         map[string]interface{}{"connected": kOK, "topic": kafkaTopic, "events": atomic.LoadInt64(&kafkaEvents)},
+		"dapr":          map[string]interface{}{"connected": dOK, "state_store": daprStateStore, "pubsub": daprPubSub, "ops": atomic.LoadInt64(&daprOps)},
+		"tigerbeetle":   map[string]interface{}{"connected": tOK, "url": tigerbeetleURL, "entries": atomic.LoadInt64(&tbEntries)},
+		"apisix":        map[string]interface{}{"connected": aOK, "admin_url": apisixAdminURL},
+		"total_dpcos":   total,
 		"registrations": atomic.LoadInt64(&registrations),
-		"renewals":     atomic.LoadInt64(&renewals),
-		"suspensions":  atomic.LoadInt64(&suspensions),
-		"middleware":   []string{"kafka", "dapr", "redis", "tigerbeetle", "apisix"},
-		"timestamp":    time.Now().UTC(),
+		"renewals":      atomic.LoadInt64(&renewals),
+		"suspensions":   atomic.LoadInt64(&suspensions),
+		"middleware":    []string{"kafka", "dapr", "redis", "tigerbeetle", "apisix"},
+		"timestamp":     time.Now().UTC(),
 	})
 }
 
 func listDpcos(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	result := make([]map[string]interface{}, 0, len(dpcoStore))
-	for _, d := range dpcoStore {
-		result = append(result, d)
+	result, err := listRegistryRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List DPCOs failed: %v", err)
+		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
+		return
 	}
-	mu.RUnlock()
 	atomic.AddInt64(&cacheHits, 1)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"dpcos": result, "total": len(result), "cached": true})
+	json.NewEncoder(w).Encode(map[string]interface{}{"dpcos": result, "total": len(result), "cached": false})
 }
 
 func getDpco(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
-	mu.RLock()
-	dpco, ok := dpcoStore[id]
-	mu.RUnlock()
-	if !ok {
-		http.Error(w, `{"error":"DPCO not found"}`, http.StatusNotFound)
+	dpco, err := loadRegistryRecord(r.Context(), id)
+	if err != nil {
+		logger.Printf("[Storage] Load DPCO failed: %v", err)
+		http.Error(w, `{"error":"DPCO not found or durable registry storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -362,17 +389,19 @@ func registerDpco(w http.ResponseWriter, r *http.Request) {
 		"id": id, "name": req.Name, "licence_number": req.LicenceNumber,
 		"type": req.Type, "state": req.State, "email": req.Email,
 		"phone": req.Phone, "address": req.Address,
-		"status":       "active",
-		"licence_date": time.Now().UTC().Format("2006-01-02"),
-		"expiry_date":  time.Now().AddDate(1, 0, 0).UTC().Format("2006-01-02"),
+		"status":        "active",
+		"licence_date":  time.Now().UTC().Format("2006-01-02"),
+		"expiry_date":   time.Now().AddDate(1, 0, 0).UTC().Format("2006-01-02"),
 		"registered_at": time.Now().UTC(),
 	}
-	mu.Lock()
-	dpcoStore[id] = dpco
-	mu.Unlock()
 	// TigerBeetle fee ledger
 	txID := recordFeeEntry(id, "registration", req.FeeNGN)
 	dpco["fee_tx_id"] = txID
+	if err := saveRegistryRecord(r.Context(), id, dpco); err != nil {
+		logger.Printf("[Storage] Persist DPCO failed: %v", err)
+		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	// Dapr state
 	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
 	daprPublish("dpco.registered", dpco)
@@ -396,19 +425,22 @@ func renewLicence(w http.ResponseWriter, r *http.Request) {
 	if req.FeeNGN == 0 {
 		req.FeeNGN = 500000
 	}
-	mu.Lock()
-	dpco, ok := dpcoStore[id]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"DPCO not found"}`, http.StatusNotFound)
+	dpco, err := loadRegistryRecord(r.Context(), id)
+	if err != nil {
+		logger.Printf("[Storage] Load DPCO failed: %v", err)
+		http.Error(w, `{"error":"DPCO not found or durable registry storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	dpco["status"] = "active"
 	dpco["expiry_date"] = time.Now().AddDate(1, 0, 0).UTC().Format("2006-01-02")
 	dpco["renewed_at"] = time.Now().UTC()
-	dpcoStore[id] = dpco
-	mu.Unlock()
 	txID := recordFeeEntry(id, "renewal", req.FeeNGN)
+	dpco["fee_tx_id"] = txID
+	if err := saveRegistryRecord(r.Context(), id, dpco); err != nil {
+		logger.Printf("[Storage] Persist DPCO renewal failed: %v", err)
+		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
 	publishKafka("dpco.licence_renewed", map[string]interface{}{
 		"dpco_id": id, "new_expiry": dpco["expiry_date"], "fee_ngn": req.FeeNGN, "fee_tx_id": txID,
@@ -425,18 +457,20 @@ func suspendLicence(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	mu.Lock()
-	dpco, ok := dpcoStore[id]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"DPCO not found"}`, http.StatusNotFound)
+	dpco, err := loadRegistryRecord(r.Context(), id)
+	if err != nil {
+		logger.Printf("[Storage] Load DPCO failed: %v", err)
+		http.Error(w, `{"error":"DPCO not found or durable registry storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	dpco["status"] = "suspended"
 	dpco["suspended_at"] = time.Now().UTC()
 	dpco["suspension_reason"] = req.Reason
-	dpcoStore[id] = dpco
-	mu.Unlock()
+	if err := saveRegistryRecord(r.Context(), id, dpco); err != nil {
+		logger.Printf("[Storage] Persist DPCO suspension failed: %v", err)
+		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
 	publishKafka("dpco.licence_suspended", map[string]interface{}{
 		"dpco_id": id, "reason": req.Reason, "suspended_at": time.Now().UTC(),
@@ -447,15 +481,19 @@ func suspendLicence(w http.ResponseWriter, r *http.Request) {
 }
 
 func metrics(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	total := len(dpcoStore)
+	records, err := listRegistryRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List DPCOs for metrics failed: %v", err)
+		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	total := len(records)
 	statusCount := make(map[string]int)
-	for _, d := range dpcoStore {
+	for _, d := range records {
 		if s, ok := d["status"].(string); ok {
 			statusCount[s]++
 		}
 	}
-	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"total_dpcos": total, "by_status": statusCount,
@@ -472,6 +510,10 @@ func metrics(w http.ResponseWriter, r *http.Request) {
 func main() {
 	logger.Printf("DPCO Registry Service starting on port %s", port)
 	logger.Printf("Middleware: Kafka=%v Dapr=%v TigerBeetle=%v APISIX=%v", kafkaEnabled, daprEnabled, tigerbeetleEnabled, apisixEnabled)
+	if err := initRegistryStore(context.Background()); err != nil {
+		logger.Fatalf("Durable registry storage unavailable: %v", err)
+	}
+	defer closeRegistryStore()
 
 	initKafka()
 	initDapr()
