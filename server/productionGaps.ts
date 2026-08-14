@@ -378,7 +378,8 @@ export async function syncOpenAppSecLearning(): Promise<void> {
 
 export async function registerApisixRoutes(): Promise<void> {
   const apisixUrl = process.env.APISIX_ADMIN_URL ?? "http://localhost:9180";
-  const adminKey = process.env.APISIX_ADMIN_KEY ?? "CHANGE_ME_IN_PRODUCTION";
+  const adminKey = process.env.APISIX_ADMIN_KEY;
+  if (!adminKey) throw new Error("APISIX_ADMIN_KEY is required for dynamic route registration");
 
   const routes = [
     { uri: "/api/v2/*", upstream: { type: "roundrobin", nodes: { "127.0.0.1:3000": 1 } }, plugins: { "limit-count": { count: 200, time_window: 60, rejected_code: 429 } } },
