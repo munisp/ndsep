@@ -280,3 +280,7 @@
 - [x] Add role-based alerts when high-risk reconciliation exceptions open
 - [x] Add interactive callback registration guidance for the selected payment gateway
 - [x] Add regression coverage for retry bounds, high-risk alert targeting, and callback guide state
+- [x] Add an admin dashboard badge for pending high-risk reconciliation exceptions
+- [x] Add an administrator manual retry control for eligible failed reconciliation checks
+- [x] Add searchable role-targeted reconciliation alert history
+- [x] Add regression coverage for high-risk badge counts, manual retry restrictions, and alert search

@@ -242,6 +242,11 @@ export async function processDueGatewayVerificationRetries(limit = 10) {
   return { dueCount: due.rowCount, retried, blocked, exhausted };
 }
 
+export async function triggerManualGatewayVerificationRetry(input: { deliveryId: string; actorOpenId: string }) {
+  await transaction(async (client) => { const found = await client.query<DeliveryRow>("SELECT * FROM payment_gateway_webhook_deliveries WHERE id = $1::uuid FOR UPDATE", [input.deliveryId]); const delivery = found.rows[0]; if (!delivery) throw new Error("The reconciliation delivery was not found."); if (delivery.exception_status !== "open" || delivery.verification_state !== "failed") throw new Error("Only open provider-verification failures can be retried manually."); if (delivery.retry_count >= MAX_RECONCILIATION_RETRIES) throw new Error("The controlled retry limit has been reached; resolve the exception with an auditable note."); const now = new Date().toISOString(); await client.query("UPDATE payment_gateway_webhook_deliveries SET retry_status = 'scheduled', retry_after = $2::timestamptz WHERE id = $1::uuid", [input.deliveryId, now]); await appendEvent(client, { aggregateType: "gateway_webhook", aggregateId: input.deliveryId, eventType: "gateway_verification_manual_retry_requested", actorOpenId: input.actorOpenId, occurredAt: now, data: { nextAttempt: delivery.retry_count + 1, settlementStatusUnchanged: true } }); });
+  return processDueGatewayVerificationRetries(1);
+}
+
 export async function listPaymentAuditEvents(filter: PaymentAuditFilter = {}) {
   const pool = await readyPool(); const clauses: string[] = []; const values: unknown[] = [];
   const add = (fragment: string, value: unknown) => { values.push(value); clauses.push(fragment.replace("?", `$${values.length}`)); };
