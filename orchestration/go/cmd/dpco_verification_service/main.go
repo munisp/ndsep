@@ -9,13 +9,14 @@
 //   - Graceful degradation on all middleware failures
 //
 // Endpoints:
-//   POST /api/dpco/verification/statements          — create new statement
-//   GET  /api/dpco/verification/statements          — list all statements
-//   GET  /api/dpco/verification/statements/{id}     — get statement
-//   POST /api/dpco/verification/statements/{id}/sign — sign statement (Temporal workflow)
-//   POST /api/dpco/verification/statements/{id}/issue — issue to data controller
-//   GET  /health
-//   GET  /metrics
+//
+//	POST /api/dpco/verification/statements          — create new statement
+//	GET  /api/dpco/verification/statements          — list all statements
+//	GET  /api/dpco/verification/statements/{id}     — get statement
+//	POST /api/dpco/verification/statements/{id}/sign — sign statement (Temporal workflow)
+//	POST /api/dpco/verification/statements/{id}/issue — issue to data controller
+//	GET  /health
+//	GET  /metrics
 package main
 
 import (
@@ -70,15 +71,15 @@ var (
 // ─── State ────────────────────────────────────────────────────────────────────
 
 var (
-	mu              sync.RWMutex
-	kafkaProducer   sarama.SyncProducer
-	kafkaOK         bool
-	temporalClient  client.Client
-	temporalOK      bool
-	permifyOK       bool
-	signingKey      *rsa.PrivateKey
-	signingCert     *x509.Certificate
-	statementStore  = make(map[string]map[string]interface{})
+	mu             sync.RWMutex
+	kafkaProducer  sarama.SyncProducer
+	kafkaOK        bool
+	temporalClient client.Client
+	temporalOK     bool
+	permifyOK      bool
+	signingKey     *rsa.PrivateKey
+	signingCert    *x509.Certificate
+	statementStore = make(map[string]map[string]interface{})
 	// Metrics
 	statementsCreated int64
 	statementsSigned  int64
@@ -93,13 +94,7 @@ func initSigningKey() {
 	// Try to load from disk
 	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
-		logger.Printf("[Signing] Key not found at %s, generating ephemeral key", keyPath)
-		key, genErr := rsa.GenerateKey(rand.Reader, 2048)
-		if genErr != nil {
-			logger.Printf("[Signing] Key generation failed: %v", genErr)
-			return
-		}
-		signingKey = key
+		logger.Printf("[Signing] Required key unavailable at %s: %v", keyPath, err)
 		return
 	}
 	block, _ := pem.Decode(keyPEM)
@@ -155,11 +150,16 @@ func initKafka() {
 			p, err := sarama.NewSyncProducer(kafkaBrokers, cfg)
 			if err != nil {
 				logger.Printf("[Kafka] Connect failed (%v), retry in 10s", err)
-				mu.Lock(); kafkaOK = false; mu.Unlock()
+				mu.Lock()
+				kafkaOK = false
+				mu.Unlock()
 				time.Sleep(10 * time.Second)
 				continue
 			}
-			mu.Lock(); kafkaProducer = p; kafkaOK = true; mu.Unlock()
+			mu.Lock()
+			kafkaProducer = p
+			kafkaOK = true
+			mu.Unlock()
 			logger.Printf("[Kafka] Connected to %v", kafkaBrokers)
 			return
 		}
@@ -168,7 +168,8 @@ func initKafka() {
 
 func publishKafka(eventType string, payload map[string]interface{}) {
 	mu.RLock()
-	ok := kafkaOK; p := kafkaProducer
+	ok := kafkaOK
+	p := kafkaProducer
 	mu.RUnlock()
 	payload["event_type"] = eventType
 	payload["source"] = "dpco-verification-service"
@@ -201,11 +202,16 @@ func initTemporal() {
 			c, err := client.Dial(client.Options{HostPort: temporalHost, Namespace: "default"})
 			if err != nil {
 				logger.Printf("[Temporal] Connect failed (%v), retry in 15s", err)
-				mu.Lock(); temporalOK = false; mu.Unlock()
+				mu.Lock()
+				temporalOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
-			mu.Lock(); temporalClient = c; temporalOK = true; mu.Unlock()
+			mu.Lock()
+			temporalClient = c
+			temporalOK = true
+			mu.Unlock()
 			logger.Printf("[Temporal] Connected to %s", temporalHost)
 			return
 		}
@@ -214,10 +220,11 @@ func initTemporal() {
 
 func startVerificationWorkflow(statementID, dpcoID, orgID string) (string, error) {
 	mu.RLock()
-	ok := temporalOK; tc := temporalClient
+	ok := temporalOK
+	tc := temporalClient
 	mu.RUnlock()
 	if !ok || tc == nil {
-		return fmt.Sprintf("wf-dpco-vs-%s", statementID), nil
+		return "", fmt.Errorf("Temporal verification workflow service is unavailable")
 	}
 	opts := client.StartWorkflowOptions{
 		ID:        fmt.Sprintf("dpco-vs-%s", statementID),
@@ -242,12 +249,16 @@ func initPermify() {
 			resp, err := http.Get(fmt.Sprintf("%s/healthz", permifyURL))
 			if err != nil || resp.StatusCode != 200 {
 				logger.Printf("[Permify] Not reachable, retry in 15s")
-				mu.Lock(); permifyOK = false; mu.Unlock()
+				mu.Lock()
+				permifyOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
 			resp.Body.Close()
-			mu.Lock(); permifyOK = true; mu.Unlock()
+			mu.Lock()
+			permifyOK = true
+			mu.Unlock()
 			logger.Printf("[Permify] Connected at %s", permifyURL)
 			return
 		}
@@ -260,7 +271,7 @@ func checkPermission(userID, action string) bool {
 	ok := permifyOK
 	mu.RUnlock()
 	if !ok || !permifyEnabled {
-		return true
+		return false
 	}
 	body := map[string]interface{}{
 		"metadata":   map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
@@ -271,12 +282,14 @@ func checkPermission(userID, action string) bool {
 	b, _ := json.Marshal(body)
 	url := fmt.Sprintf("%s/v1/tenants/%s/permissions/check", permifyURL, permifyTenant)
 	resp, err := http.Post(url, "application/json", strings.NewReader(string(b)))
-	if err != nil {
-		return true
+	if err != nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false
 	}
 	defer resp.Body.Close()
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false
+	}
 	return result["can"] == "CHECK_RESULT_ALLOWED"
 }
 
@@ -284,7 +297,9 @@ func checkPermission(userID, action string) bool {
 
 func health(w http.ResponseWriter, r *http.Request) {
 	mu.RLock()
-	kOK := kafkaOK; tOK := temporalOK; pOK := permifyOK
+	kOK := kafkaOK
+	tOK := temporalOK
+	pOK := permifyOK
 	total := len(statementStore)
 	mu.RUnlock()
 	certInfo := map[string]interface{}{"loaded": signingKey != nil}
@@ -312,19 +327,19 @@ func health(w http.ResponseWriter, r *http.Request) {
 
 func createStatement(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		DpcoID         string `json:"dpco_id"`
-		DpcoName       string `json:"dpco_name"`
-		DpcoLicence    string `json:"dpco_licence"`
-		OrgID          string `json:"org_id"`
-		OrgName        string `json:"org_name"`
-		AuditID        string `json:"audit_id"`
-		AuditType      string `json:"audit_type"`
-		AuditYear      int    `json:"audit_year"`
-		AuditScope     string `json:"audit_scope"`
+		DpcoID          string  `json:"dpco_id"`
+		DpcoName        string  `json:"dpco_name"`
+		DpcoLicence     string  `json:"dpco_licence"`
+		OrgID           string  `json:"org_id"`
+		OrgName         string  `json:"org_name"`
+		AuditID         string  `json:"audit_id"`
+		AuditType       string  `json:"audit_type"`
+		AuditYear       int     `json:"audit_year"`
+		AuditScope      string  `json:"audit_scope"`
 		ComplianceScore float64 `json:"compliance_score"`
-		Findings       string `json:"findings"`
-		Recommendation string `json:"recommendation"`
-		LeadAuditor    string `json:"lead_auditor"`
+		Findings        string  `json:"findings"`
+		Recommendation  string  `json:"recommendation"`
+		LeadAuditor     string  `json:"lead_auditor"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -483,9 +498,9 @@ func metrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"total_statements": total, "by_status": byStatus,
-		"created": atomic.LoadInt64(&statementsCreated),
-		"signed":  atomic.LoadInt64(&statementsSigned),
-		"issued":  atomic.LoadInt64(&statementsIssued),
+		"created":      atomic.LoadInt64(&statementsCreated),
+		"signed":       atomic.LoadInt64(&statementsSigned),
+		"issued":       atomic.LoadInt64(&statementsIssued),
 		"kafka_events": atomic.LoadInt64(&kafkaEvents),
 		"perm_checks":  atomic.LoadInt64(&permChecks),
 	})
