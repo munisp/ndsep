@@ -344,7 +344,10 @@ async fn main() {
     let keycloak_url = get_env("KEYCLOAK_URL", "http://localhost:8080");
     let realm = get_env("KEYCLOAK_REALM", "ndsep");
     let client_id = get_env("KEYCLOAK_CLIENT_ID", "ndsep-backend");
-    let client_secret = get_env("KEYCLOAK_CLIENT_SECRET", "CHANGE_ME_IN_PRODUCTION");
+    let client_secret = match std::env::var("KEYCLOAK_CLIENT_SECRET") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => panic!("KEYCLOAK_CLIENT_SECRET is required for Keycloak validation"),
+    };
 
     let state = AppState {
         client: Client::builder()
