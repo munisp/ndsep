@@ -3,13 +3,13 @@
 // Builds and queries a compliance knowledge graph in FalkorDB (Redis Graph).
 // The graph models entities and relationships across the NDSEP domain:
 //
-//   Nodes:
-//     Organization, Officer, Violation, Policy, Regulation, Sector,
-//     EnforcementAction, Penalty, Certificate, DSAR, BreachReport
+//	Nodes:
+//	  Organization, Officer, Violation, Policy, Regulation, Sector,
+//	  EnforcementAction, Penalty, Certificate, DSAR, BreachReport
 //
-//   Edges:
-//     BELONGS_TO, HAS_VIOLATION, GOVERNED_BY, ENFORCED_BY, FILED_AGAINST,
-//     REFERENCES, SECTOR_PEER, OFFICER_OF, REPORTED_BREACH, SUBJECT_TO
+//	Edges:
+//	  BELONGS_TO, HAS_VIOLATION, GOVERNED_BY, ENFORCED_BY, FILED_AGAINST,
+//	  REFERENCES, SECTOR_PEER, OFFICER_OF, REPORTED_BREACH, SUBJECT_TO
 //
 // Graph queries power:
 //   - Compliance path analysis (org → violations → policies → regulations)
@@ -37,11 +37,11 @@ import (
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 var (
-	dbURL        = getEnv("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db")
-	falkorURL    = getEnv("FALKORDB_URL", "redis://localhost:6379")
-	relayURL     = getEnv("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-	port         = getEnv("FALKORDB_PORT", "8210")
-	workerStart  = time.Now()
+	dbURL       = os.Getenv("DATABASE_URL")
+	falkorURL   = getEnv("FALKORDB_URL", "redis://localhost:6379")
+	relayURL    = getEnv("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
+	port        = getEnv("FALKORDB_PORT", "8210")
+	workerStart = time.Now()
 )
 
 // ── State ──────────────────────────────────────────────────────────────────────
@@ -68,9 +68,9 @@ type GraphNode struct {
 }
 
 type GraphEdge struct {
-	FromID   string `json:"from_id"`
-	ToID     string `json:"to_id"`
-	Relation string `json:"relation"`
+	FromID   string  `json:"from_id"`
+	ToID     string  `json:"to_id"`
+	Relation string  `json:"relation"`
 	Weight   float64 `json:"weight"`
 }
 
@@ -90,13 +90,19 @@ type InMemoryGraph struct {
 	Nodes map[string]GraphNode
 	Edges []GraphEdge
 	// Adjacency: nodeID → list of (neighborID, relation, weight)
-	Adj   map[string][]struct{ To, Rel string; W float64 }
+	Adj map[string][]struct {
+		To, Rel string
+		W       float64
+	}
 }
 
 var graph = &InMemoryGraph{
 	Nodes: make(map[string]GraphNode),
 	Edges: []GraphEdge{},
-	Adj:   make(map[string][]struct{ To, Rel string; W float64 }),
+	Adj: make(map[string][]struct {
+		To, Rel string
+		W       float64
+	}),
 }
 
 func (g *InMemoryGraph) AddNode(n GraphNode) {
@@ -106,7 +112,10 @@ func (g *InMemoryGraph) AddNode(n GraphNode) {
 
 func (g *InMemoryGraph) AddEdge(e GraphEdge) {
 	g.Edges = append(g.Edges, e)
-	g.Adj[e.FromID] = append(g.Adj[e.FromID], struct{ To, Rel string; W float64 }{e.ToID, e.Relation, e.Weight})
+	g.Adj[e.FromID] = append(g.Adj[e.FromID], struct {
+		To, Rel string
+		W       float64
+	}{e.ToID, e.Relation, e.Weight})
 	atomic.AddInt64(&edgesCreated, 1)
 }
 
@@ -153,7 +162,10 @@ func buildGraph(db *sql.DB) error {
 	graph = &InMemoryGraph{
 		Nodes: make(map[string]GraphNode),
 		Edges: []GraphEdge{},
-		Adj:   make(map[string][]struct{ To, Rel string; W float64 }),
+		Adj: make(map[string][]struct {
+			To, Rel string
+			W       float64
+		}),
 	}
 
 	// ── Organizations ──────────────────────────────────────────────────────────
@@ -456,10 +468,10 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 			typeCounts[n.Type]++
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"total_nodes":  len(graph.Nodes),
-			"total_edges":  len(graph.Edges),
-			"node_types":   typeCounts,
-			"last_build":   lastBuildTime,
+			"total_nodes": len(graph.Nodes),
+			"total_edges": len(graph.Edges),
+			"node_types":  typeCounts,
+			"last_build":  lastBuildTime,
 		})
 	default:
 		http.Error(w, "unknown query_type", http.StatusBadRequest)
@@ -490,6 +502,10 @@ func rebuildHandler(w http.ResponseWriter, r *http.Request) {
 // ── Main ───────────────────────────────────────────────────────────────────────
 func main() {
 	log.Printf("[KG] Starting NDSEP FalkorDB Knowledge Graph Worker on port %s", port)
+	if dbURL == "" {
+		log.Fatal("[KG] DATABASE_URL is required; refusing to start an in-memory graph fallback")
+	}
+	log.Fatal("[KG] Real FalkorDB client integration is required; refusing to serve the retired in-memory graph implementation")
 
 	// Initial graph build
 	go func() {
