@@ -172,41 +172,53 @@ func initDapr() {
 	}()
 }
 
-func daprSaveState(key string, value interface{}) {
+func daprSaveState(key string, value interface{}) error {
 	atomic.AddInt64(&daprOps, 1)
 	mu.RLock()
 	ok := daprOK
 	mu.RUnlock()
 	if !ok {
-		return // fallback to in-memory
+		return fmt.Errorf("Dapr state sidecar is unavailable")
 	}
 	body := []map[string]interface{}{{"key": key, "value": value}}
-	b, _ := json.Marshal(body)
+	b, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode Dapr state payload: %w", err)
+	}
 	url := fmt.Sprintf("http://localhost:%s/v1.0/state/%s", daprHTTPPort, daprStateStore)
 	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
 	if err != nil {
-		logger.Printf("[Dapr] SaveState error: %v", err)
-		return
+		return fmt.Errorf("persist Dapr state: %w", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("Dapr state write rejected with status %d", resp.StatusCode)
+	}
+	return nil
 }
 
-func daprPublish(topic string, data interface{}) {
+func daprPublish(topic string, data interface{}) error {
 	mu.RLock()
 	ok := daprOK
 	mu.RUnlock()
 	if !ok {
-		return
+		return fmt.Errorf("Dapr pub/sub sidecar is unavailable")
 	}
 	body := map[string]interface{}{"data": data}
-	b, _ := json.Marshal(body)
+	b, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode Dapr publish payload: %w", err)
+	}
 	url := fmt.Sprintf("http://localhost:%s/v1.0/publish/%s/%s", daprHTTPPort, daprPubSub, topic)
 	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
 	if err != nil {
-		logger.Printf("[Dapr] Publish error: %v", err)
-		return
+		return fmt.Errorf("publish Dapr event: %w", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("Dapr publish rejected with status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // ─── TigerBeetle Ledger ───────────────────────────────────────────────────────
@@ -404,9 +416,17 @@ func registerDpco(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	// Dapr state
-	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
-	daprPublish("dpco.registered", dpco)
+	// Dapr state and event delivery
+	if err := daprSaveState(fmt.Sprintf("dpco:%s", id), dpco); err != nil {
+		logger.Printf("[Dapr] Registry state write failed: %v", err)
+		http.Error(w, `{"error":"registry state delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if err := daprPublish("dpco.registered", dpco); err != nil {
+		logger.Printf("[Dapr] Registry event publish failed: %v", err)
+		http.Error(w, `{"error":"registry event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	// Kafka
 	if err := publishKafka("dpco.registered", map[string]interface{}{
 		"dpco_id": id, "name": req.Name, "licence_number": req.LicenceNumber,
@@ -447,7 +467,11 @@ func renewLicence(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
+	if err := daprSaveState(fmt.Sprintf("dpco:%s", id), dpco); err != nil {
+		logger.Printf("[Dapr] Registry renewal state write failed: %v", err)
+		http.Error(w, `{"error":"registry state delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	if err := publishKafka("dpco.licence_renewed", map[string]interface{}{
 		"dpco_id": id, "new_expiry": dpco["expiry_date"], "fee_ngn": req.FeeNGN, "fee_tx_id": txID,
 	}); err != nil {
@@ -481,7 +505,11 @@ func suspendLicence(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"durable registry storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
+	if err := daprSaveState(fmt.Sprintf("dpco:%s", id), dpco); err != nil {
+		logger.Printf("[Dapr] Registry suspension state write failed: %v", err)
+		http.Error(w, `{"error":"registry state delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	if err := publishKafka("dpco.licence_suspended", map[string]interface{}{
 		"dpco_id": id, "reason": req.Reason, "suspended_at": time.Now().UTC(),
 	}); err != nil {
