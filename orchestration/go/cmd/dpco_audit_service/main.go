@@ -59,7 +59,7 @@ var (
 	permifyTenant    = getenv("PERMIFY_TENANT_ID", "t1")
 	keycloakEnabled  = getenv("KEYCLOAK_ENABLED", "true") == "true"
 	permifyEnabled   = getenv("PERMIFY_ENABLED", "true") == "true"
-	dbURL            = getenv("DATABASE_URL", "postgres://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db?sslmode=disable")
+	dbURL            = os.Getenv("DATABASE_URL")
 )
 
 // ─── Audit Stage Definitions ─────────────────────────────────────────────────
