@@ -16,7 +16,7 @@ import (
 var (
 	PORT             = getEnv("APISIX_MANAGER_PORT", "8153")
 	APISIX_ADMIN_URL = getEnv("APISIX_ADMIN_URL", "http://localhost:9180")
-	APISIX_ADMIN_KEY = getEnv("APISIX_ADMIN_KEY", "CHANGE_ME_IN_PRODUCTION")
+	APISIX_ADMIN_KEY = os.Getenv("APISIX_ADMIN_KEY")
 	NDSEP_APP_URL    = getEnv("NDSEP_APP_URL", "http://localhost:3000")
 )
 
