@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 PORT = int(os.getenv("OPENSEARCH_QUERY_PORT", "8166"))
 OPENSEARCH_URL = os.getenv("OPENSEARCH_URL", "http://localhost:9200")
 OPENSEARCH_USER = os.getenv("OPENSEARCH_USER", "admin")
-OPENSEARCH_PASS = os.getenv("OPENSEARCH_PASS", "CHANGE_ME_IN_PRODUCTION")
+OPENSEARCH_PASS = os.getenv("OPENSEARCH_PASS", "")
 
 # NDSEP OpenSearch indices
 NDSEP_INDICES = {
