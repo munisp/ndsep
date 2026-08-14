@@ -284,3 +284,7 @@
 - [x] Add an administrator manual retry control for eligible failed reconciliation checks
 - [x] Add searchable role-targeted reconciliation alert history
 - [x] Add regression coverage for high-risk badge counts, manual retry restrictions, and alert search
+- [x] Display retry attempt count and next scheduled retry time in reconciliation exceptions
+- [x] Add exception queue filtering and sorting by retry count and retry schedule
+- [x] Add role-targeted high-risk alert read acknowledgements
+- [x] Add regression coverage for retry metadata, queue controls, and alert acknowledgement

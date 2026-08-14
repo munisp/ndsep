@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
-import { getPaymentGatewayOperationalHealth, listHighRiskReconciliationAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, processDueGatewayVerificationRetries, resetPaymentAuditForTests, resolvePaymentReconciliationException } from "../server/offlinePaymentRepository";
+import { acknowledgeHighRiskReconciliationAlert, getPaymentGatewayOperationalHealth, listHighRiskReconciliationAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, processDueGatewayVerificationRetries, resetPaymentAuditForTests, resolvePaymentReconciliationException } from "../server/offlinePaymentRepository";
 
 const testUrl = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
 process.env.PAYMENT_AUDIT_POSTGRES_URL = testUrl;
@@ -40,5 +40,12 @@ describe("payment reconciliation exceptions", () => {
     const retry = await pool.query<{ retry_status: string; retry_count: number; retry_after: Date | null }>("SELECT retry_status, retry_count, retry_after FROM payment_gateway_webhook_deliveries WHERE id = $1::uuid", [retryId]);
     expect(retry.rows[0]).toMatchObject({ retry_status: "scheduled", retry_count: 2 }); expect(retry.rows[0]?.retry_after).not.toBeNull();
     await expect(listHighRiskReconciliationAlerts("planning_supervisor")).resolves.toMatchObject([{ id: alertId, severity: "high", targetRole: "planning_supervisor" }]);
+  });
+  it("records a role-qualified alert acknowledgement without changing the alert audience", async () => {
+    const deliveryId = crypto.randomUUID(); const alertId = crypto.randomUUID();
+    await pool.query("INSERT INTO payment_gateway_webhook_deliveries (id, provider, gateway_event_id, event_type, payload_sha256, signature_algorithm, reconciliation_state, verification_state, received_at) VALUES ($1::uuid,'paystack','evt-alert-ack','charge.success',$2,'HMAC-SHA512','ignored','unverified',now())", [deliveryId, "c".repeat(64)]);
+    await pool.query("INSERT INTO payment_reconciliation_role_alerts (id, delivery_id, target_role, severity, title, body, created_at) VALUES ($1::uuid,$2::uuid,'planning_supervisor','high','High-risk payment reconciliation exception','Review required.',now())", [alertId, deliveryId]);
+    await expect(acknowledgeHighRiskReconciliationAlert({ alertId, role: "planning_supervisor", actorOpenId: "supervisor-1" })).resolves.toMatchObject({ id: alertId, targetRole: "planning_supervisor" });
+    await expect(listHighRiskReconciliationAlerts("planning_supervisor")).resolves.toMatchObject([{ id: alertId, readAt: expect.any(String) }]);
   });
 });
