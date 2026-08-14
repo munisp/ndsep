@@ -166,18 +166,20 @@ func initKafka() {
 	}()
 }
 
-func publishKafka(eventType string, payload map[string]interface{}) {
+func publishKafka(eventType string, payload map[string]interface{}) error {
 	mu.RLock()
 	ok := kafkaOK
 	p := kafkaProducer
 	mu.RUnlock()
+	if !ok || p == nil {
+		return fmt.Errorf("Kafka is unavailable for %s", eventType)
+	}
 	payload["event_type"] = eventType
 	payload["source"] = "dpco-verification-service"
 	payload["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-	b, _ := json.Marshal(payload)
-	if !ok || p == nil {
-		logger.Printf("[Kafka] Stub: %s", eventType)
-		return
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode Kafka event %s: %w", eventType, err)
 	}
 	msg := &sarama.ProducerMessage{
 		Topic: kafkaTopic,
@@ -185,10 +187,10 @@ func publishKafka(eventType string, payload map[string]interface{}) {
 		Value: sarama.ByteEncoder(b),
 	}
 	if _, _, err := p.SendMessage(msg); err != nil {
-		logger.Printf("[Kafka] Publish error: %v", err)
-		return
+		return fmt.Errorf("publish Kafka event %s: %w", eventType, err)
 	}
 	atomic.AddInt64(&kafkaEvents, 1)
+	return nil
 }
 
 // ─── Temporal Init ────────────────────────────────────────────────────────────
@@ -361,16 +363,22 @@ func createStatement(w http.ResponseWriter, r *http.Request) {
 	wfID, err := startVerificationWorkflow(id, req.DpcoID, req.OrgID)
 	if err != nil {
 		logger.Printf("[Temporal] Workflow error: %v", err)
+		http.Error(w, `{"error":"verification workflow unavailable"}`, http.StatusServiceUnavailable)
+		return
 	}
 	statement["workflow_id"] = wfID
 	mu.Lock()
 	statementStore[id] = statement
 	mu.Unlock()
 	atomic.AddInt64(&statementsCreated, 1)
-	publishKafka("dpco.verification.created", map[string]interface{}{
+	if err := publishKafka("dpco.verification.created", map[string]interface{}{
 		"statement_id": id, "ref_number": refNumber,
 		"dpco_id": req.DpcoID, "org_id": req.OrgID, "audit_year": req.AuditYear,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Verification create event failed: %v", err)
+		http.Error(w, `{"error":"verification event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": id, "ref_number": refNumber, "status": "draft"})
 }
@@ -419,11 +427,15 @@ func signStatement(w http.ResponseWriter, r *http.Request) {
 	statementStore[id] = stmt
 	mu.Unlock()
 	atomic.AddInt64(&statementsSigned, 1)
-	publishKafka("dpco.verification.signed", map[string]interface{}{
+	if err := publishKafka("dpco.verification.signed", map[string]interface{}{
 		"statement_id": id, "ref_number": stmt["ref_number"],
 		"dpco_id": stmt["dpco_id"], "signed_by": req.SignedBy,
 		"digest_sha256": digest,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Verification signing event failed: %v", err)
+		http.Error(w, `{"error":"verification event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok": true, "id": id, "status": "signed",
@@ -451,11 +463,15 @@ func issueStatement(w http.ResponseWriter, r *http.Request) {
 	statementStore[id] = stmt
 	mu.Unlock()
 	atomic.AddInt64(&statementsIssued, 1)
-	publishKafka("dpco.verification.issued", map[string]interface{}{
+	if err := publishKafka("dpco.verification.issued", map[string]interface{}{
 		"statement_id": id, "ref_number": stmt["ref_number"],
 		"dpco_id": stmt["dpco_id"], "org_id": stmt["org_id"],
 		"issued_at": time.Now().UTC(),
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Verification issuance event failed: %v", err)
+		http.Error(w, `{"error":"verification event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": id, "status": "issued", "issued_at": time.Now().UTC()})
 }
