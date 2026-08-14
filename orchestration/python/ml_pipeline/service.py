@@ -410,6 +410,6 @@ def training_data_sample():
 if __name__ == "__main__":
     port = int(os.getenv("ML_PIPELINE_PORT", os.getenv("PORT", "8125")))
     logger.info(f"NDSEP ML Pipeline v2.2.0 starting on port {port}")
-    logger.info(f"DB integration: {'enabled' if DB_AVAILABLE and DATABASE_URL else 'disabled (formula fallback)'}")
+    logger.info(f"DB integration: {'enabled' if DB_AVAILABLE and DATABASE_URL else 'disabled'}; persisted model artifact required for inference")
     retrain_model_from_db()
     uvicorn.run(app, host="0.0.0.0", port=port)
