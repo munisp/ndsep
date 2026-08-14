@@ -288,3 +288,7 @@
 - [x] Add exception queue filtering and sorting by retry count and retry schedule
 - [x] Add role-targeted high-risk alert read acknowledgements
 - [x] Add regression coverage for retry metadata, queue controls, and alert acknowledgement
+- [x] Add filtered reconciliation exception CSV export with audit evidence
+- [x] Add Operations retry-outcome trend chart and success-rate summary
+- [x] Add visible, auditable escalation timers for unacknowledged high-risk alerts
+- [x] Add regression coverage for export data, retry metrics, and alert escalation timing
