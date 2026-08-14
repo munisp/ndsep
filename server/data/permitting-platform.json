@@ -1131,15 +1131,7 @@
       "nextFocus": "install experience, background sync visibility, and richer admin data tables"
     }
   ],
-  "signingKeys": [
-    {
-      "keyId": "test-audit-rsa-key",
-      "algorithm": "RSA-SHA256",
-      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwMgqfAsJBMD261g+cEuv\nbO3IgTfE3oDcLx+ksCFhlzniVp7Fi4INTGyLDYWMv1CW1pd0D4xMohCbZcpCePBn\nDy5Blgy/eY9XVB3o/evr7c+3W/uCraqq8ZVWPcgVIpPvn9+nDhDdBdRHsDolgi8/\nvYW73hLnckVSqSyLlBMFZxRP3ZYJLJ4S3pAqdJd0Ux3vAaXBOEyohDofYknzVLMV\nQtUo4AOWOxQ7tsMtZ/lAhZG1/46GASAQ2739yTOLRv47PzPlzC/os+hv6/V7P1m4\nuGc4ldHkray1XWbQGfQwX4MLgrVeUpzb3IQeJWuNjNobzMcz/OChfEHlAL1WHzFn\ntQIDAQAB\n-----END PUBLIC KEY-----\n",
-      "createdAt": "2026-08-14T00:54:12.699Z",
-      "active": true
-    }
-  ],
+  "signingKeys": [],
   "reminderQueue": [
     {
       "id": "reminder-permit-mining-001-handoff-permit-mining-001-mining_reviewer",
@@ -1219,7 +1211,7 @@
     {
       "id": "digest-email-mining-cadastre",
       "agencyId": "mining-cadastre",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "email",
       "subject": "Mining Cadastre Office queue digest",
       "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
@@ -1229,7 +1221,7 @@
     {
       "id": "digest-inapp-mining-cadastre",
       "agencyId": "mining-cadastre",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "in_app",
       "subject": "Mining Cadastre Office supervisor digest",
       "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
@@ -1239,7 +1231,7 @@
     {
       "id": "digest-email-petroleum-regulator",
       "agencyId": "petroleum-regulator",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "email",
       "subject": "Petroleum Licensing Authority queue digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1249,7 +1241,7 @@
     {
       "id": "digest-inapp-petroleum-regulator",
       "agencyId": "petroleum-regulator",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "in_app",
       "subject": "Petroleum Licensing Authority supervisor digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1259,7 +1251,7 @@
     {
       "id": "digest-email-environment-agency",
       "agencyId": "environment-agency",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "email",
       "subject": "Environmental Compliance Agency queue digest",
       "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1269,7 +1261,7 @@
     {
       "id": "digest-inapp-environment-agency",
       "agencyId": "environment-agency",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "in_app",
       "subject": "Environmental Compliance Agency supervisor digest",
       "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1279,7 +1271,7 @@
     {
       "id": "digest-email-planning-authority",
       "agencyId": "planning-authority",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "email",
       "subject": "Regional Planning and Infrastructure Authority queue digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1289,7 +1281,7 @@
     {
       "id": "digest-inapp-planning-authority",
       "agencyId": "planning-authority",
-      "generatedAt": "2026-08-14T00:54:12.699Z",
+      "generatedAt": "2026-08-14T01:17:40.789Z",
       "channel": "in_app",
       "subject": "Regional Planning and Infrastructure Authority supervisor digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",

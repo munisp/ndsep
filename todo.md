@@ -296,3 +296,5 @@
 - [ ] Add date-range controls to reconciliation exception exports
 - [ ] Add daily retry-success percentage bars to Operations
 - [ ] Add regression coverage for escalation delivery, date filtering, and daily success-rate calculations
+- [ ] Add a dedicated senior-admin escalated alert history tab with filtering
+- [ ] Run focused end-to-end review and fix all confirmed findings across the affected payment operations flows
