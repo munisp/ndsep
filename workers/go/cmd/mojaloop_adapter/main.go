@@ -19,7 +19,7 @@ var (
 	MOJALOOP_SWITCH_URL = getEnv("MOJALOOP_SWITCH_URL", "http://localhost:3001")
 	MOJALOOP_FSPIOP_SRC = getEnv("MOJALOOP_FSPIOP_SOURCE", "ndsep-dfsp")
 	MOJALOOP_CURRENCY   = getEnv("MOJALOOP_CURRENCY", "NGN")
-	PG_URL              = getEnv("DATABASE_URL", "postgresql://ndsep_user:CHANGE_ME_IN_PRODUCTION@localhost:5432/ndsep_db")
+		PG_URL              = os.Getenv("DATABASE_URL")
 	KAFKA_BROKER        = getEnv("KAFKA_BROKER", "localhost:9092")
 )
 
