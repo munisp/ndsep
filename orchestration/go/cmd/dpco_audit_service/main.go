@@ -80,8 +80,6 @@ var (
 	keycloakClient *gocloak.GoCloak
 	keycloakOK     bool
 	permifyOK      bool
-	// In-memory audit store (fallback when DB is unavailable)
-	auditStore = make(map[string]map[string]interface{})
 	// Metrics
 	auditsInitiated  int64
 	stageAdvances    int64
@@ -398,9 +396,11 @@ func initiateAudit(w http.ResponseWriter, r *http.Request) {
 			{"stage": "initiated", "entered_at": time.Now().UTC(), "entered_by": userID},
 		},
 	}
-	mu.Lock()
-	auditStore[auditID] = audit
-	mu.Unlock()
+	if err := saveAuditRecord(r.Context(), auditID, audit); err != nil {
+		logger.Printf("[Storage] Persist audit failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&auditsInitiated, 1)
 	publishKafka("dpco.audit.initiated", map[string]interface{}{
 		"audit_id": auditID, "dpco_org_id": req.DpcoOrgID, "org_id": req.OrgID,
@@ -418,14 +418,17 @@ func advanceStage(w http.ResponseWriter, r *http.Request) {
 		UserID string `json:"user_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	mu.Lock()
-	audit, ok := auditStore[auditID]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"audit not found"}`, http.StatusNotFound)
+	audit, err := loadAuditRecord(r.Context(), auditID)
+	if err != nil {
+		logger.Printf("[Storage] Load audit failed: %v", err)
+		http.Error(w, `{"error":"audit not found or durable storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	currentStage := audit["current_stage"].(string)
+	currentStage, ok := audit["current_stage"].(string)
+	if !ok {
+		http.Error(w, `{"error":"invalid persisted audit stage"}`, http.StatusInternalServerError)
+		return
+	}
 	stageIdx := -1
 	for i, s := range auditStages {
 		if s == currentStage {
@@ -434,20 +437,22 @@ func advanceStage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if stageIdx < 0 || stageIdx >= len(auditStages)-1 {
-		mu.Unlock()
 		http.Error(w, `{"error":"already at final stage"}`, http.StatusBadRequest)
 		return
 	}
 	nextStage := auditStages[stageIdx+1]
 	audit["current_stage"] = nextStage
-	history := audit["stage_history"].([]map[string]interface{})
+	history, _ := audit["stage_history"].([]interface{})
 	history = append(history, map[string]interface{}{
 		"stage": nextStage, "entered_at": time.Now().UTC(),
 		"entered_by": req.UserID, "notes": req.Notes,
 	})
 	audit["stage_history"] = history
-	auditStore[auditID] = audit
-	mu.Unlock()
+	if err := saveAuditRecord(r.Context(), auditID, audit); err != nil {
+		logger.Printf("[Storage] Persist stage advance failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&stageAdvances, 1)
 	publishKafka("dpco.audit.stage_advanced", map[string]interface{}{
 		"audit_id": auditID, "from_stage": currentStage, "to_stage": nextStage,
@@ -461,12 +466,12 @@ func advanceStage(w http.ResponseWriter, r *http.Request) {
 }
 
 func listAudits(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	result := make([]map[string]interface{}, 0, len(auditStore))
-	for _, a := range auditStore {
-		result = append(result, a)
+	result, err := listAuditRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List audits failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
 	}
-	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"audits": result, "total": len(result)})
 }
@@ -474,11 +479,10 @@ func listAudits(w http.ResponseWriter, r *http.Request) {
 func getAudit(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	auditID := vars["auditId"]
-	mu.RLock()
-	audit, ok := auditStore[auditID]
-	mu.RUnlock()
-	if !ok {
-		http.Error(w, `{"error":"audit not found"}`, http.StatusNotFound)
+	audit, err := loadAuditRecord(r.Context(), auditID)
+	if err != nil {
+		logger.Printf("[Storage] Load audit failed: %v", err)
+		http.Error(w, `{"error":"audit not found or durable storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -498,11 +502,10 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
-	mu.Lock()
-	audit, ok := auditStore[auditID]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"audit not found"}`, http.StatusNotFound)
+	audit, err := loadAuditRecord(r.Context(), auditID)
+	if err != nil {
+		logger.Printf("[Storage] Load audit failed: %v", err)
+		http.Error(w, `{"error":"audit not found or durable storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	controls, _ := audit["control_assessments"].(map[string]interface{})
@@ -533,8 +536,11 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 	if total > 0 {
 		audit["compliance_score"] = scored / total * 100
 	}
-	auditStore[auditID] = audit
-	mu.Unlock()
+	if err := saveAuditRecord(r.Context(), auditID, audit); err != nil {
+		logger.Printf("[Storage] Persist assessment failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	publishKafka("dpco.audit.control_assessed", map[string]interface{}{
 		"audit_id": auditID, "control_id": req.ControlID, "rating": req.Rating,
 	})
@@ -543,15 +549,19 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func metrics(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	total := len(auditStore)
+	audits, err := listAuditRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List audits for metrics failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	total := len(audits)
 	stageCount := make(map[string]int)
-	for _, a := range auditStore {
+	for _, a := range audits {
 		if s, ok := a["current_stage"].(string); ok {
 			stageCount[s]++
 		}
 	}
-	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"total_audits":      total,
