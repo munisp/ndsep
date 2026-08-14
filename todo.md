@@ -276,3 +276,7 @@
 - [x] Add a reconciliation exception queue with administrator review and auditable resolution outcomes
 - [x] Add operations dashboard callback readiness and gateway connection-health widget
 - [x] Add regression coverage for gateway settings access, exception lifecycle, and health status reporting
+- [x] Add controlled retries for transient provider transaction-verification failures with auditable outcomes
+- [x] Add role-based alerts when high-risk reconciliation exceptions open
+- [x] Add interactive callback registration guidance for the selected payment gateway
+- [x] Add regression coverage for retry bounds, high-risk alert targeting, and callback guide state

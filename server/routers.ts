@@ -62,7 +62,7 @@ import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, 
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
 import { acknowledgeFieldEvidenceEscalation, assignFieldEvidenceSupervisor, escalateFieldEvidence, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
-import { getOfflinePaymentSummary, getPaymentGatewayOperationalHealth, listPaymentAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, listPaymentStateApprovalPolicies, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, PAYMENT_APPROVAL_ROLES, PAYMENT_JURISDICTIONS, recordPaymentAuditExport, resolvePaymentReconciliationException, reviewOfflinePayment, submitOfflinePayment, updatePaymentStateApprovalPolicy, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
+import { getOfflinePaymentSummary, getPaymentGatewayOperationalHealth, listHighRiskReconciliationAlerts, listPaymentAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, listPaymentStateApprovalPolicies, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, PAYMENT_APPROVAL_ROLES, PAYMENT_JURISDICTIONS, processDueGatewayVerificationRetries, recordPaymentAuditExport, resolvePaymentReconciliationException, reviewOfflinePayment, submitOfflinePayment, updatePaymentStateApprovalPolicy, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
 import { getGatewayActivationStatus } from "./paymentGatewayConfig";
 
 const businessProfileSchema = z.object({
@@ -180,6 +180,8 @@ export const appRouter = router({
   paymentOperations: router({
     gatewayActivation: adminProcedure.input(z.object({ provider: z.enum(["paystack", "flutterwave"]).optional() })).query(({ input }) => getGatewayActivationStatus(input.provider)),
     gatewayHealth: adminProcedure.query(() => getPaymentGatewayOperationalHealth()),
+    highRiskReconciliationAlerts: enterpriseProcedure.input(z.object({ role: z.enum(PAYMENT_APPROVAL_ROLES), limit: z.number().int().min(1).max(100).default(50) })).query(({ ctx, input }) => { assertEnterpriseRole(ctx.enterprise, [input.role]); return listHighRiskReconciliationAlerts(input.role, input.limit); }),
+    processDueRetries: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(50).default(10) })).mutation(({ input }) => processDueGatewayVerificationRetries(input.limit)),
     reconciliationExceptions: adminProcedure.input(z.object({ status: z.enum(["open", "resolved", "dismissed", "all"]).default("open"), limit: z.number().int().min(1).max(500).default(100) })).query(({ input }) => listPaymentReconciliationExceptions(input)),
     resolveReconciliationException: adminProcedure.input(z.object({ deliveryId: z.string().uuid(), decision: z.enum(["resolved", "dismissed"]), note: z.string().min(3).max(2000) })).mutation(({ ctx, input }) => resolvePaymentReconciliationException({ ...input, actorOpenId: ctx.user.openId })),
     statePolicies: adminProcedure.query(() => listPaymentStateApprovalPolicies()),
