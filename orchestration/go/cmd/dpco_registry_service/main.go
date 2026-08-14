@@ -117,18 +117,20 @@ func initKafka() {
 	}()
 }
 
-func publishKafka(eventType string, payload map[string]interface{}) {
+func publishKafka(eventType string, payload map[string]interface{}) error {
 	mu.RLock()
 	ok := kafkaOK
 	p := kafkaProducer
 	mu.RUnlock()
+	if !ok || p == nil {
+		return fmt.Errorf("Kafka is unavailable for %s", eventType)
+	}
 	payload["event_type"] = eventType
 	payload["source"] = "dpco-registry-service"
 	payload["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-	b, _ := json.Marshal(payload)
-	if !ok || p == nil {
-		logger.Printf("[Kafka] Stub: %s", eventType)
-		return
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode Kafka event %s: %w", eventType, err)
 	}
 	msg := &sarama.ProducerMessage{
 		Topic: kafkaTopic,
@@ -136,10 +138,10 @@ func publishKafka(eventType string, payload map[string]interface{}) {
 		Value: sarama.ByteEncoder(b),
 	}
 	if _, _, err := p.SendMessage(msg); err != nil {
-		logger.Printf("[Kafka] Publish error: %v", err)
-		return
+		return fmt.Errorf("publish Kafka event %s: %w", eventType, err)
 	}
 	atomic.AddInt64(&kafkaEvents, 1)
+	return nil
 }
 
 // ─── Dapr State ───────────────────────────────────────────────────────────────
@@ -406,10 +408,14 @@ func registerDpco(w http.ResponseWriter, r *http.Request) {
 	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
 	daprPublish("dpco.registered", dpco)
 	// Kafka
-	publishKafka("dpco.registered", map[string]interface{}{
+	if err := publishKafka("dpco.registered", map[string]interface{}{
 		"dpco_id": id, "name": req.Name, "licence_number": req.LicenceNumber,
 		"type": req.Type, "state": req.State, "fee_ngn": req.FeeNGN, "fee_tx_id": txID,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Registry event failed: %v", err)
+		http.Error(w, `{"error":"registry event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&registrations, 1)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": id, "licence_number": req.LicenceNumber, "fee_tx_id": txID})
@@ -442,9 +448,13 @@ func renewLicence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
-	publishKafka("dpco.licence_renewed", map[string]interface{}{
+	if err := publishKafka("dpco.licence_renewed", map[string]interface{}{
 		"dpco_id": id, "new_expiry": dpco["expiry_date"], "fee_ngn": req.FeeNGN, "fee_tx_id": txID,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Registry renewal event failed: %v", err)
+		http.Error(w, `{"error":"registry event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&renewals, 1)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": id, "new_expiry": dpco["expiry_date"], "fee_tx_id": txID})
@@ -472,9 +482,13 @@ func suspendLicence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	daprSaveState(fmt.Sprintf("dpco:%s", id), dpco)
-	publishKafka("dpco.licence_suspended", map[string]interface{}{
+	if err := publishKafka("dpco.licence_suspended", map[string]interface{}{
 		"dpco_id": id, "reason": req.Reason, "suspended_at": time.Now().UTC(),
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Registry suspension event failed: %v", err)
+		http.Error(w, `{"error":"registry event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&suspensions, 1)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "id": id, "status": "suspended"})
