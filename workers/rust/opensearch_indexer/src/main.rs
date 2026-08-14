@@ -14,7 +14,7 @@ use chrono::Utc;
 use lazy_static::lazy_static;
 use prometheus::{Counter, Encoder, Registry, TextEncoder};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     env,
     sync::{
@@ -252,7 +252,7 @@ async fn search_documents(
     }
 
     match http_req.send().await {
-        Ok(resp) => {
+        Ok(resp) if resp.status().is_success() => {
             SEARCH_COUNTER.inc();
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
             Json(serde_json::json!({
@@ -263,15 +263,28 @@ async fn search_documents(
             }))
             .into_response()
         }
+        Ok(resp) => {
+            ERROR_COUNTER.inc();
+            let status = resp.status();
+            let detail = resp.text().await.unwrap_or_default();
+            tracing::error!("OpenSearch rejected search with HTTP {}: {}", status, detail);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": format!("OpenSearch returned HTTP {}", status),
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             ERROR_COUNTER.inc();
-            tracing::warn!("OpenSearch search degraded: {}", e);
+            tracing::error!("OpenSearch search request failed: {}", e);
             (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(serde_json::json!({
                     "success": false,
-                    "degraded": true,
-                    "error": e.to_string(),
+                    "error": "OpenSearch is unavailable",
                 })),
             )
                 .into_response()
@@ -303,11 +316,25 @@ async fn bulk_index(
     }
 
     match http_req.send().await {
-        Ok(resp) => {
+        Ok(resp) if resp.status().is_success() => {
             let count = req.documents.len() as u64;
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            let rejected = body.get("errors").and_then(|value| value.as_bool()).unwrap_or(true);
+            if rejected {
+                ERROR_COUNTER.inc();
+                tracing::error!("OpenSearch bulk write returned per-document failures");
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "success": false,
+                        "indexed": 0,
+                        "error": "OpenSearch bulk write rejected one or more documents",
+                    })),
+                )
+                    .into_response();
+            }
             INDEX_COUNTER.inc_by(count as f64);
             state.index_count.fetch_add(count, Ordering::Relaxed);
-            let body: serde_json::Value = resp.json().await.unwrap_or_default();
             Json(serde_json::json!({
                 "success": true,
                 "indexed": count,
@@ -316,20 +343,38 @@ async fn bulk_index(
             }))
             .into_response()
         }
+        Ok(resp) => {
+            ERROR_COUNTER.inc();
+            let status = resp.status();
+            let detail = resp.text().await.unwrap_or_default();
+            tracing::error!("OpenSearch rejected bulk write with HTTP {}: {}", status, detail);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({
+                    "success": false,
+                    "indexed": 0,
+                    "error": format!("OpenSearch returned HTTP {}", status),
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             ERROR_COUNTER.inc();
-            Json(serde_json::json!({
-                "success": true,
-                "degraded": true,
-                "indexed": 0,
-                "error": e.to_string(),
-            }))
-            .into_response()
+            tracing::error!("OpenSearch bulk request failed: {}", e);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "success": false,
+                    "indexed": 0,
+                    "error": "OpenSearch is unavailable",
+                })),
+            )
+                .into_response()
         }
     }
 }
 
-async fn list_indices(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_indices(State(_state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({
         "indices": NDSEP_INDICES.iter().map(|(name, _)| name).collect::<Vec<_>>(),
         "count": NDSEP_INDICES.len(),
@@ -337,15 +382,42 @@ async fn list_indices(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
-    Json(serde_json::json!({
-        "status": "healthy",
-        "service": "ndsep-opensearch-indexer",
-        "version": "1.0.0",
-        "uptime": state.start_time.elapsed().as_secs(),
-        "indexed": state.index_count.load(Ordering::Relaxed),
-        "indices": NDSEP_INDICES.len(),
-        "opensearch_url": state.opensearch_url,
-    }))
+    match state.client.get(&state.opensearch_url).send().await {
+        Ok(response) if response.status().is_success() => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "healthy",
+                "service": "ndsep-opensearch-indexer",
+                "version": "1.0.0",
+                "uptime": state.start_time.elapsed().as_secs(),
+                "indexed": state.index_count.load(Ordering::Relaxed),
+                "indices": NDSEP_INDICES.len(),
+                "opensearch_url": state.opensearch_url,
+            })),
+        ).into_response(),
+        Ok(response) => {
+            ERROR_COUNTER.inc();
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "unhealthy",
+                    "service": "ndsep-opensearch-indexer",
+                    "error": format!("OpenSearch returned HTTP {}", response.status()),
+                })),
+            ).into_response()
+        }
+        Err(_error) => {
+            ERROR_COUNTER.inc();
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "unhealthy",
+                    "service": "ndsep-opensearch-indexer",
+                    "error": "OpenSearch is unavailable",
+                })),
+            ).into_response()
+        }
+    }
 }
 
 async fn metrics() -> impl IntoResponse {
@@ -369,8 +441,12 @@ async fn main() {
 
     let port = get_env("OPENSEARCH_INDEXER_PORT", "8161");
     let opensearch_url = get_env("OPENSEARCH_URL", "http://localhost:9200");
-    let opensearch_user = get_env("OPENSEARCH_USER", "admin");
-    let opensearch_pass = get_env("OPENSEARCH_PASSWORD", "CHANGE_ME_IN_PRODUCTION");
+    let opensearch_user = get_env("OPENSEARCH_USER", "");
+    let opensearch_pass = get_env("OPENSEARCH_PASSWORD", "");
+    if !opensearch_user.is_empty() && opensearch_pass.is_empty() {
+        tracing::error!("OPENSEARCH_PASSWORD must be configured when OPENSEARCH_USER is set");
+        std::process::exit(1);
+    }
     let opensearch_auth = if opensearch_user.is_empty() {
         String::new()
     } else {
