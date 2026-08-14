@@ -226,8 +226,7 @@ func validateToken(token string) (string, []string, error) {
 	kc := keycloakClient
 	mu.RUnlock()
 	if !ok || kc == nil {
-		// Fallback: accept token, return dpco role
-		return "dpco-user-fallback", []string{"dpco"}, nil
+		return "", nil, fmt.Errorf("Keycloak token validation is unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -237,7 +236,7 @@ func validateToken(token string) (string, []string, error) {
 	}
 	info, err := kc.GetUserInfo(ctx, token, keycloakRealm)
 	if err != nil {
-		return "", []string{"dpco"}, nil
+		return "", nil, fmt.Errorf("Keycloak user information lookup failed: %w", err)
 	}
 	userID := ""
 	if info.Sub != nil {
@@ -251,14 +250,15 @@ func validateToken(token string) (string, []string, error) {
 func checkPermission(userID, resource, action string) bool {
 	atomic.AddInt64(&permChecks, 1)
 	if !permifyEnabled {
-		return true
+		logger.Printf("[Permify] Disabled: denying %s on %s for %s", action, resource, userID)
+		return false
 	}
 	mu.RLock()
 	ok := permifyOK
 	mu.RUnlock()
 	if !ok {
-		logger.Printf("[Permify] Degraded: allowing %s on %s for %s", action, resource, userID)
-		return true
+		logger.Printf("[Permify] Unavailable: denying %s on %s for %s", action, resource, userID)
+		return false
 	}
 	body := map[string]interface{}{
 		"metadata":  map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
@@ -271,11 +271,18 @@ func checkPermission(userID, resource, action string) bool {
 	resp, err := http.Post(url, "application/json", strings.NewReader(string(b)))
 	if err != nil {
 		logger.Printf("[Permify] Check failed: %v", err)
-		return true // degrade gracefully
+		return false
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Printf("[Permify] Check rejected with HTTP %d", resp.StatusCode)
+		return false
+	}
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Printf("[Permify] Invalid response: %v", err)
+		return false
+	}
 	return result["can"] == "CHECK_RESULT_ALLOWED"
 }
 
