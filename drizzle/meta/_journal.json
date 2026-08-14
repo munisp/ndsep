@@ -203,6 +203,13 @@
       "when": 1786637530000,
       "tag": "0028_api_usage_log_fk_index",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786639100000,
+      "tag": "0029_bootstrap_tables_canonical",
+      "breakpoints": true
     }
   ]
 }

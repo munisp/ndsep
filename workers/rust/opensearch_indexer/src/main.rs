@@ -480,3 +480,127 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::{to_bytes, Body},
+        http::Request,
+        routing::any,
+    };
+    use tower::ServiceExt;
+
+    fn state(url: String) -> AppState {
+        AppState {
+            client: Client::new(),
+            opensearch_url: url,
+            opensearch_auth: String::new(),
+            start_time: Instant::now(),
+            index_count: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    async fn upstream(status: StatusCode, payload: serde_json::Value) -> String {
+        let app = Router::new().fallback(any(move || {
+            let payload = payload.clone();
+            async move { (status, Json(payload)) }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
+    fn json_request(uri: &str, payload: serde_json::Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(payload.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn index_write_rejection_is_reported_as_gateway_failure() {
+        let url = upstream(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({"error": "rejected"})).await;
+        let app = Router::new().route("/index", post(index_document)).with_state(state(url));
+        let response = app.oneshot(json_request("/index", serde_json::json!({
+            "index": "ndsep-audit-logs",
+            "id": "audit-1",
+            "document": {"action": "write"}
+        }))).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = response_json(response).await;
+        assert_eq!(body["success"], false);
+    }
+
+    #[tokio::test]
+    async fn bulk_per_document_rejection_is_not_acknowledged() {
+        let url = upstream(StatusCode::OK, serde_json::json!({
+            "errors": true,
+            "items": [{"index": {"status": 400, "error": "mapping rejected"}}]
+        })).await;
+        let app = Router::new().route("/bulk", post(bulk_index)).with_state(state(url));
+        let response = app.oneshot(json_request("/bulk", serde_json::json!({
+            "index": "ndsep-audit-logs",
+            "documents": [{"action": "write"}]
+        }))).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = response_json(response).await;
+        assert_eq!(body["success"], false);
+        assert_eq!(body["indexed"], 0);
+    }
+
+    #[tokio::test]
+    async fn unavailable_search_returns_service_unavailable_not_empty_success() {
+        let app = Router::new().route("/search", post(search_documents))
+            .with_state(state("http://127.0.0.1:9".to_string()));
+        let response = app.oneshot(json_request("/search", serde_json::json!({
+            "index": "ndsep-audit-logs",
+            "query": "breach"
+        }))).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response_json(response).await;
+        assert_eq!(body["success"], false);
+        assert_eq!(body["error"], "OpenSearch is unavailable");
+    }
+
+    #[tokio::test]
+    async fn health_returns_unhealthy_when_upstream_is_unreachable() {
+        let app = Router::new().route("/health", get(health))
+            .with_state(state("http://127.0.0.1:9".to_string()));
+        let response = app.oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response_json(response).await;
+        assert_eq!(body["status"], "unhealthy");
+        assert_eq!(body["error"], "OpenSearch is unavailable");
+    }
+
+    #[tokio::test]
+    async fn accepted_index_write_is_acknowledged_only_after_upstream_success() {
+        let url = upstream(StatusCode::CREATED, serde_json::json!({"result": "created"})).await;
+        let app = Router::new().route("/index", post(index_document)).with_state(state(url));
+        let response = app.oneshot(json_request("/index", serde_json::json!({
+            "index": "ndsep-audit-logs",
+            "id": "audit-2",
+            "document": {"action": "create"}
+        }))).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["success"], true);
+        assert_eq!(body["id"], "audit-2");
+    }
+}

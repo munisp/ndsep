@@ -1,7 +1,7 @@
 /**
  * NDSEP Middleware Extensions — Phase 25
  * Full integration with: Dapr, Fluvio, OpenSearch, Mojaloop, Keycloak, Permify, Lakehouse
- * All calls are fire-and-forget with graceful degradation (never block the tRPC response)
+ * Required integrations propagate unavailable or rejected operations so callers cannot report side effects that did not occur.
  */
 
 import { permifyCheck as checkPermifyPermission } from "./permify";
@@ -24,15 +24,20 @@ const DAPR_STATE_URL = process.env.DAPR_STATE_URL || "http://localhost:8167";
 // ─── Shared fetch helper ─────────────────────────────────────────────────────
 
 async function postJSON(url: string, body: object): Promise<void> {
+  let response: Response;
   try {
-    await fetch(url, {
+    response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(3000),
     });
-  } catch {
-    // Graceful degradation — never block the caller
+  } catch (err) {
+    throw new Error(`Required integration POST ${url} is unavailable: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Required integration POST ${url} failed with HTTP ${response.status}: ${detail}`);
   }
 }
 
@@ -50,18 +55,20 @@ export async function daprStateSet(key: string, value: unknown): Promise<void> {
 
 /** Get a value from the Dapr state store */
 export async function daprStateGet(key: string): Promise<unknown> {
+  let resp: Response;
   try {
-    const resp = await fetch(`${DAPR_STATE_URL}/state/get`, {
+    resp = await fetch(`${DAPR_STATE_URL}/state/get`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key }),
       signal: AbortSignal.timeout(2000),
     });
-    const data = await resp.json() as { value: unknown };
-    return data.value;
-  } catch {
-    return null;
+  } catch (err) {
+    throw new Error(`Dapr state lookup for ${key} is unavailable: ${err instanceof Error ? err.message : String(err)}`);
   }
+  if (!resp.ok) throw new Error(`Dapr state lookup for ${key} failed with HTTP ${resp.status}`);
+  const data = await resp.json() as { value: unknown };
+  return data.value;
 }
 
 // ─── Fluvio ──────────────────────────────────────────────────────────────────
@@ -85,34 +92,28 @@ export async function opensearchIndex(index: string, doc: object): Promise<void>
 
 /** Search OpenSearch (returns results or empty array on error) */
 export async function opensearchSearch(index: string, params: object): Promise<unknown[]> {
-  try {
-    const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ index, ...params }),
-      signal: AbortSignal.timeout(5000),
-    });
-    const data = await resp.json() as { result?: { hits?: { hits?: unknown[] } } };
-    return data.result?.hits?.hits ?? [];
-  } catch {
-    return [];
-  }
+  const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ index, ...params }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`OpenSearch query failed with HTTP ${resp.status}`);
+  const data = await resp.json() as { result?: { hits?: { hits?: unknown[] } } };
+  return data.result?.hits?.hits ?? [];
 }
 
 /** Global search across all NDSEP indices */
 export async function opensearchGlobalSearch(q: string, sectors?: string[]): Promise<unknown[]> {
-  try {
-    const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search/global`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q, sectors }),
-      signal: AbortSignal.timeout(5000),
-    });
-    const data = await resp.json() as { result?: { hits?: { hits?: unknown[] } } };
-    return data.result?.hits?.hits ?? [];
-  } catch {
-    return [];
-  }
+  const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search/global`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ q, sectors }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!resp.ok) throw new Error(`OpenSearch global query failed with HTTP ${resp.status}`);
+  const data = await resp.json() as { result?: { hits?: { hits?: unknown[] } } };
+  return data.result?.hits?.hits ?? [];
 }
 
 // ─── Lakehouse ───────────────────────────────────────────────────────────────
@@ -184,8 +185,8 @@ export async function keycloakValidate(token: string, requiredRoles?: string[]):
       signal: AbortSignal.timeout(3000),
     });
     return await resp.json() as { valid: boolean; roles: string[]; sub?: string; username?: string };
-  } catch {
-    return { valid: true, roles: [] }; // Fail open in degraded mode
+  } catch (err) {
+    return { valid: false, roles: [] };
   }
 }
 
@@ -256,8 +257,7 @@ export async function emitComplianceEvent(params: {
     ...params.data,
   };
 
-  // Fire all in parallel — none block the caller
-  await Promise.allSettled([
+  await Promise.all([
     fluvioPublish(params.eventType, event),
     opensearchIndex("compliance_events", event),
     lakehouseIngest("compliance_events", [event]),

@@ -117,9 +117,10 @@ describe("APISIX key hardening", () => {
     expect(src).toContain("APISIX_ADMIN_KEY");
   });
 
-  it("has CHANGE_ME_IN_PRODUCTION fallback sentinel", () => {
+  it("requires APISIX_ADMIN_KEY and has no placeholder fallback", () => {
     const src = readFile("server/apisix.ts");
-    expect(src).toContain("CHANGE_ME_IN_PRODUCTION");
+    expect(src).toContain("APISIX_ADMIN_KEY is required for gateway administration");
+    expect(src).not.toContain("CHANGE_ME_IN_PRODUCTION");
   });
 });
 

@@ -44,8 +44,8 @@ const CRITICAL_COLUMNS = [
   ["public_compliance_registry", "is_published"],
 ] as const;
 
-const EXPECTED_MIGRATION_COUNT = 29;
-const MINIMUM_TABLE_COUNT = 153;
+const EXPECTED_MIGRATION_COUNT = 30;
+const MINIMUM_TABLE_COUNT = 165;
 const MINIMUM_FOREIGN_KEY_COUNT = 83;
 
 function pushCheck(checks: MigrationCheck[], name: string, ok: boolean, details: string, statusWhenFalse: "fail" | "warn" = "fail") {

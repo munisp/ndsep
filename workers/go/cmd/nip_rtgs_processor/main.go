@@ -147,8 +147,6 @@ func amlRiskScore(txn NIPTransaction) float64 {
 
 // processNIPTransaction handles a single NIP payment
 func processNIPTransaction(txn NIPTransaction) {
-	start := time.Now()
-
 	// Step 1: Validate
 	valid, reason := validateNIPTransaction(txn)
 	if !valid {
@@ -198,38 +196,19 @@ func processNIPTransaction(txn NIPTransaction) {
 			UPDATE nip_transactions SET aml_flagged=true WHERE id=$1`, txn.ID)
 	}
 
-	// Step 4: Simulate NIBSS routing and settlement
-	processingTime := time.Since(start).Milliseconds() + int64(rand.Intn(500)+100)
-	responseCode := "00" // Success
-	status := "completed"
-
-	// Simulate occasional failures (2% failure rate)
-	if rand.Float64() < 0.02 {
-		responseCode = "91"
-		status = "failed"
+	// Step 4: An authoritative NIBSS gateway response is mandatory before a
+	// transaction can be completed. This worker intentionally records no
+	// settlement outcome until a configured gateway client is implemented.
+	if _, err := shared.DB.Exec(`
+		UPDATE nip_transactions
+		SET status='settlement_pending', response_code='GATEWAY_REQUIRED',
+		response_message='NIBSS gateway response required before settlement'
+		WHERE id=$1`, txn.ID); err != nil {
+		shared.Log("ERROR", "NIP_PENDING_STATUS_WRITE_FAILED", map[string]interface{}{"txn_id": txn.ID, "error": err.Error()})
+		return
 	}
-
-	// Step 5: Update transaction record
-	shared.DB.Exec(`
-		UPDATE nip_transactions 
-		SET status=$1, response_code=$2, response_message=$3,
-		settlement_date=NOW(), completed_at=NOW()
-		WHERE id=$4`,
-		status, responseCode,
-		map[string]string{"00": "Approved", "91": "Switch Unavailable"}[responseCode],
-		txn.ID,
-	)
-
-	atomic.AddInt64(&nipProcessed, 1)
-	shared.Log("INFO", "NIP_PROCESSED", map[string]interface{}{
-		"txn_id": txn.ID, "ref": txn.NibssRef, "status": status,
-		"amount_ngn": float64(txn.Amount) / 100, "processing_ms": processingTime,
-	})
-
-	// Step 6: Publish to Kafka event bus
-	shared.PublishEvent("nip.transaction.processed", map[string]interface{}{
-		"session_id": txn.SessionID, "ref": txn.NibssRef,
-		"amount": txn.Amount, "status": status, "timestamp": time.Now(),
+	shared.Log("ERROR", "NIP_SETTLEMENT_GATEWAY_REQUIRED", map[string]interface{}{
+		"txn_id": txn.ID, "ref": txn.NibssRef, "amount_ngn": float64(txn.Amount) / 100,
 	})
 }
 
@@ -253,26 +232,17 @@ func processRTGSTransaction(txn RTGSTransaction) {
 		return
 	}
 
-	// Simulate CBN RTGS settlement
-	settlementTime := time.Now().Add(time.Duration(rand.Intn(RTGS_SETTLEMENT_WINDOW_S)) * time.Second)
-	status := "settled"
-	if rand.Float64() < 0.01 { // 1% rejection rate
-		status = "rejected"
+	// A CBN RTGS gateway confirmation is mandatory before a transaction can be
+	// marked settled. Do not generate a simulated timestamp or acknowledgement.
+	if _, err := shared.DB.Exec(`
+		UPDATE rtgs_transactions
+		SET status='settlement_pending', rejection_reason='CBN RTGS gateway response required before settlement'
+		WHERE id=$1`, txn.ID); err != nil {
+		shared.Log("ERROR", "RTGS_PENDING_STATUS_WRITE_FAILED", map[string]interface{}{"txn_id": txn.ID, "error": err.Error()})
+		return
 	}
-
-	shared.DB.Exec(`
-		UPDATE rtgs_transactions SET status=$1, settled_at=$2
-		WHERE id=$3`, status, settlementTime, txn.ID)
-
-	atomic.AddInt64(&rtgsSettled, 1)
-	shared.Log("INFO", "RTGS_SETTLED", map[string]interface{}{
-		"txn_id": txn.ID, "ref": txn.RTGSReference, "status": status,
-		"amount_ngn": float64(txn.Amount) / 100,
-	})
-
-	shared.PublishEvent("rtgs.transaction.settled", map[string]interface{}{
-		"ref": txn.RTGSReference, "amount": txn.Amount, "status": status,
-		"settlement_time": settlementTime,
+	shared.Log("ERROR", "RTGS_SETTLEMENT_GATEWAY_REQUIRED", map[string]interface{}{
+		"txn_id": txn.ID, "ref": txn.RTGSReference, "amount_ngn": float64(txn.Amount) / 100,
 	})
 }
 
