@@ -202,10 +202,10 @@ async function checkOpenSearch(): Promise<MiddlewareHealth> {
 async function checkApisix(): Promise<MiddlewareHealth> {
   const start = Date.now();
   const apisixUrl = process.env.APISIX_ADMIN_URL;
-  if (!apisixUrl) return { name: "APISIX", status: "unconfigured", latencyMs: 0, details: {}, checkedAt: ts() };
+  const apiKey = process.env.APISIX_ADMIN_KEY;
+  if (!apisixUrl || !apiKey) return { name: "APISIX", status: "unconfigured", latencyMs: 0, details: {}, checkedAt: ts() };
 
   try {
-    const apiKey = process.env.APISIX_ADMIN_KEY ?? "CHANGE_ME_IN_PRODUCTION";
     const res = await fetch(`${apisixUrl}/apisix/admin/routes`, {
       headers: { "X-API-KEY": apiKey },
       signal: AbortSignal.timeout(5000),
