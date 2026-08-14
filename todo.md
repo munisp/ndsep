@@ -272,3 +272,7 @@
 - [x] Require authenticated provider transaction re-verification before recording settlement evidence
 - [x] Add state-specific high-value thresholds and distinct administrator approval-role rules
 - [x] Add regression coverage for provider configuration, settlement re-verification, and state policy enforcement
+- [x] Add a dedicated administrator payment-gateway settings page with redacted credential status and secure update controls
+- [x] Add a reconciliation exception queue with administrator review and auditable resolution outcomes
+- [x] Add operations dashboard callback readiness and gateway connection-health widget
+- [x] Add regression coverage for gateway settings access, exception lifecycle, and health status reporting

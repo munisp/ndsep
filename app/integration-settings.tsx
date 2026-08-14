@@ -144,6 +144,8 @@ export default function IntegrationSettingsScreen() {
           </View>
         </Pressable>
 
+        <Link href={"/payment-gateway-settings" as never} asChild><View className="rounded-2xl border border-primary bg-primary/5 px-4 py-4"><Text className="text-center font-semibold text-primary">Open dedicated payment gateway settings</Text></View></Link>
+
         <Link href={"/(tabs)/profile" as never} asChild>
           <View className="rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Return to profile</Text></View>
         </Link>

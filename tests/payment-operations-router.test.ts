@@ -56,6 +56,8 @@ describe("payment operation routes", () => {
 
     expect(await applicant.paymentOperations.myAlerts()).toEqual([]);
     expect((await administrator.paymentOperations.pendingSummary()).pendingCount).toBe(1);
+    await expect(applicant.paymentOperations.gatewayHealth()).rejects.toThrow();
+    await expect(applicant.paymentOperations.reconciliationExceptions({ status: "open", limit: 10 })).rejects.toThrow();
 
     await administrator.paymentOperations.review({ paymentId: submitted.id, decision: "approved", reviewerRole: "planning_supervisor", reason: "Transfer advice reconciled with the administrative review record." });
     const alerts = await applicant.paymentOperations.myAlerts();
