@@ -14,7 +14,12 @@ type FieldName =
   | "NIMC_NVS_BRIDGE_URL"
   | "NIMC_NVS_BRIDGE_TOKEN"
   | "CAC_VAS_BRIDGE_URL"
-  | "CAC_VAS_BRIDGE_TOKEN";
+  | "CAC_VAS_BRIDGE_TOKEN"
+  | "PAYMENT_GATEWAY_ACTIVE_PROVIDER"
+  | "PAYMENT_GATEWAY_PUBLIC_BASE_URL"
+  | "PAYSTACK_SECRET_KEY"
+  | "FLUTTERWAVE_WEBHOOK_SECRET_HASH"
+  | "FLUTTERWAVE_SECRET_KEY";
 
 const groups: Array<{ title: string; note: string; fields: Array<{ key: FieldName; label: string; secret?: boolean }> }> = [
   {
@@ -44,11 +49,23 @@ const groups: Array<{ title: string; note: string; fields: Array<{ key: FieldNam
       { key: "CAC_VAS_BRIDGE_TOKEN", label: "CAC bridge token", secret: true },
     ],
   },
+  {
+    title: "Payment gateway activation",
+    note: "Choose one provider, set a public HTTPS origin, and enter only the selected provider’s server credentials. Webhook settlement evidence remains unavailable until all required values are present and the provider transaction can be re-verified.",
+    fields: [
+      { key: "PAYMENT_GATEWAY_ACTIVE_PROVIDER", label: "Active provider (paystack or flutterwave)" },
+      { key: "PAYMENT_GATEWAY_PUBLIC_BASE_URL", label: "Public HTTPS origin" },
+      { key: "PAYSTACK_SECRET_KEY", label: "Paystack secret key", secret: true },
+      { key: "FLUTTERWAVE_WEBHOOK_SECRET_HASH", label: "Flutterwave webhook secret hash", secret: true },
+      { key: "FLUTTERWAVE_SECRET_KEY", label: "Flutterwave secret key", secret: true },
+    ],
+  },
 ];
 
 export default function IntegrationSettingsScreen() {
   const utils = trpc.useUtils();
   const statusQuery = trpc.integrationSettings.status.useQuery();
+  const gatewayActivation = trpc.paymentOperations.gatewayActivation.useQuery({}, { retry: false });
   const [values, setValues] = useState<Partial<Record<FieldName, string>>>({});
   const [feedback, setFeedback] = useState<string | null>(null);
   const save = trpc.integrationSettings.save.useMutation({
@@ -81,6 +98,8 @@ export default function IntegrationSettingsScreen() {
             <Text className="mt-2 text-sm text-muted">The fields below are disabled to prevent credentials from being stored insecurely. Add the server encryption key first, then authenticate as an administrator.</Text>
           </View>
         ) : null}
+
+        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Gateway callback status</Text><Text className={`mt-2 text-sm font-semibold ${gatewayActivation.data?.ready ? "text-success" : "text-warning"}`}>{gatewayActivation.data?.ready ? "Configuration complete; provider transaction re-verification is still required for settlement evidence." : "Gateway settlement is unavailable"}</Text><Text className="mt-2 text-sm leading-5 text-muted">{gatewayActivation.data?.callbackUrl ? `Register this callback with the selected provider: ${gatewayActivation.data.callbackUrl}` : gatewayActivation.data?.reason ?? "Authenticate as an administrator to inspect gateway activation status."}</Text></View>
 
         {groups.map((group) => (
           <View key={group.title} className="rounded-3xl border border-border bg-surface p-5">

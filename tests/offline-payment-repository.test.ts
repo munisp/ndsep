@@ -9,6 +9,7 @@ import {
   listReceiptScanHistory,
   reviewOfflinePayment,
   submitOfflinePayment,
+  updatePaymentStateApprovalPolicy,
   verifyReceiptAndRecordScan,
 } from "../server/offlinePaymentRepository";
 
@@ -20,6 +21,7 @@ process.env.PAYMENT_AUDIT_POSTGRES_URL = "postgresql://ubuntu@/idlr_payment_test
 beforeEach(async () => {
   const { resetPaymentAuditForTests } = await import("../server/offlinePaymentRepository");
   await resetPaymentAuditForTests();
+  await updatePaymentStateApprovalPolicy({ jurisdiction: "lagos", highValueThresholdKobo: 5000000, firstApproverRole: "planning_supervisor", secondApproverRole: "environment_reviewer", updatedBy: "policy-admin" });
 });
 afterEach(async () => {
   const { resetPaymentAuditForTests } = await import("../server/offlinePaymentRepository");
@@ -31,6 +33,7 @@ describe("offline payment operations", () => {
     const payment = await submitOfflinePayment({
       applicantOpenId: "applicant-1",
       applicantName: "Amina Musa",
+      jurisdiction: "lagos",
       reference: "ng-2026-001",
       amountKobo: 2500000,
       service: "Certificate of Occupancy statutory fee",
@@ -41,7 +44,7 @@ describe("offline payment operations", () => {
     await expect(verifyReceiptAndRecordScan({ reference: "NG-2026-001", scannedBy: "admin-1" })).resolves.toMatchObject({ scan: { outcome: "pending_review" } });
     await expect(listPaymentAlerts("applicant-1")).resolves.toHaveLength(0);
 
-    await reviewOfflinePayment({ paymentId: payment.id, decision: "approved", reviewerOpenId: "admin-1", reason: "Transfer evidence reconciled against the review record." });
+    await reviewOfflinePayment({ paymentId: payment.id, decision: "approved", reviewerOpenId: "admin-1", reviewerRole: "planning_supervisor", reason: "Transfer evidence reconciled against the review record." });
 
     await expect(getOfflinePaymentSummary()).resolves.toMatchObject({ pendingCount: 0, approvedCount: 1, rejectedCount: 0, totalCount: 1 });
     await expect(verifyReceiptAndRecordScan({ reference: "ng-2026-001", scannedBy: "admin-1" })).resolves.toMatchObject({ scan: { outcome: "approved" } });

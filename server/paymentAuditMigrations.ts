@@ -128,16 +128,34 @@ const PAYMENT_AUDIT_DDL = [
   `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_provider text NULL`,
   `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_event_id text NULL`,
   `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_reconciled_at timestamptz NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS settlement_status text NOT NULL DEFAULT 'unverified'`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS settlement_verified_at timestamptz NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS gateway_verified_transaction_id text NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS jurisdiction text NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS approval_policy_version bigint NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS first_approver_role text NULL`,
+  `ALTER TABLE offline_payment_records ADD COLUMN IF NOT EXISTS second_approver_role text NULL`,
   `ALTER TABLE offline_payment_records DROP CONSTRAINT IF EXISTS offline_payment_records_status_check`,
   `ALTER TABLE offline_payment_records DROP CONSTRAINT IF EXISTS offline_payment_records_check`,
   `ALTER TABLE offline_payment_records ADD CONSTRAINT offline_payment_records_status_check CHECK (
       status IN ('pending_review', 'awaiting_second_approval', 'approved', 'rejected') AND
       gateway_reconciliation_state IN ('unavailable', 'unmatched', 'matched', 'mismatch') AND
+      settlement_status IN ('unverified', 'verified', 'verification_failed', 'unavailable') AND
       ((status = 'pending_review' AND reviewed_at IS NULL AND reviewed_by IS NULL AND review_reason IS NULL AND first_approved_at IS NULL AND first_approved_by IS NULL AND first_approval_reason IS NULL) OR
        (status = 'awaiting_second_approval' AND dual_control_required = true AND reviewed_at IS NULL AND reviewed_by IS NULL AND review_reason IS NULL AND first_approved_at IS NOT NULL AND first_approved_by IS NOT NULL AND first_approval_reason IS NOT NULL) OR
        (status IN ('approved', 'rejected') AND reviewed_at IS NOT NULL AND reviewed_by IS NOT NULL AND review_reason IS NOT NULL))
     )`,
   `CREATE INDEX IF NOT EXISTS offline_payment_records_dual_control_idx ON offline_payment_records (submitted_at DESC) WHERE status = 'awaiting_second_approval'`,
+  `CREATE TABLE IF NOT EXISTS payment_state_approval_policies (
+      jurisdiction text PRIMARY KEY CHECK (jurisdiction IN ('lagos', 'fct', 'kano')),
+      high_value_threshold_kobo bigint NOT NULL CHECK (high_value_threshold_kobo > 0),
+      first_approver_role text NOT NULL CHECK (first_approver_role IN ('mining_reviewer', 'petroleum_reviewer', 'environment_reviewer', 'planning_supervisor')),
+      second_approver_role text NOT NULL CHECK (second_approver_role IN ('mining_reviewer', 'petroleum_reviewer', 'environment_reviewer', 'planning_supervisor')),
+      version bigint NOT NULL DEFAULT 1,
+      updated_by text NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      CHECK (first_approver_role <> second_approver_role)
+    )`,
   `CREATE TABLE IF NOT EXISTS payment_gateway_webhook_deliveries (
       id uuid PRIMARY KEY,
       provider text NOT NULL CHECK (provider IN ('paystack', 'flutterwave')),
@@ -152,8 +170,13 @@ const PAYMENT_AUDIT_DDL = [
       CONSTRAINT payment_gateway_webhook_deliveries_provider_event_unique UNIQUE (provider, gateway_event_id)
     )`,
   `CREATE INDEX IF NOT EXISTS payment_gateway_webhook_deliveries_received_idx ON payment_gateway_webhook_deliveries (received_at DESC)`,
+  `ALTER TABLE payment_gateway_webhook_deliveries ADD COLUMN IF NOT EXISTS verification_state text NOT NULL DEFAULT 'unverified'`,
+  `ALTER TABLE payment_gateway_webhook_deliveries ADD COLUMN IF NOT EXISTS verified_transaction_id text NULL`,
+  `ALTER TABLE payment_gateway_webhook_deliveries ADD COLUMN IF NOT EXISTS verification_error text NULL`,
+  `ALTER TABLE payment_gateway_webhook_deliveries DROP CONSTRAINT IF EXISTS payment_gateway_webhook_deliveries_verification_state_check`,
+  `ALTER TABLE payment_gateway_webhook_deliveries ADD CONSTRAINT payment_gateway_webhook_deliveries_verification_state_check CHECK (verification_state IN ('unverified', 'verified', 'failed', 'unavailable'))`,
   `ALTER TABLE payment_audit_events DROP CONSTRAINT IF EXISTS payment_audit_events_aggregate_type_check`,
-  `ALTER TABLE payment_audit_events ADD CONSTRAINT payment_audit_events_aggregate_type_check CHECK (aggregate_type IN ('payment', 'alert', 'receipt_scan', 'migration', 'gateway_webhook', 'payment_audit_export'))`,
+  `ALTER TABLE payment_audit_events ADD CONSTRAINT payment_audit_events_aggregate_type_check CHECK (aggregate_type IN ('payment', 'alert', 'receipt_scan', 'migration', 'gateway_webhook', 'payment_audit_export', 'payment_policy'))`,
 ];
 
 async function appendLegacyEvent(client: PoolClient, input: { aggregateType: "payment" | "alert" | "receipt_scan" | "migration"; aggregateId: string; eventType: string; actorOpenId: string | null; occurredAt: string; payload: Record<string, unknown> }) {

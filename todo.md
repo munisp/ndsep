@@ -268,3 +268,7 @@
 - [x] Add filtered, exportable administrator dashboard for append-only payment audit events
 - [x] Add regression tests for webhook integrity, dual-control separation, and audit-event export
 - [x] Maintain default-unavailable gateway reconciliation until a real provider signature secret is securely configured
+- [x] Add secure, fail-closed provider activation configuration and callback URL reporting
+- [x] Require authenticated provider transaction re-verification before recording settlement evidence
+- [x] Add state-specific high-value thresholds and distinct administrator approval-role rules
+- [x] Add regression coverage for provider configuration, settlement re-verification, and state policy enforcement

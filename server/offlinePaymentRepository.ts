@@ -2,11 +2,18 @@ import crypto from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 
 import { runPaymentAuditMigrations } from "./paymentAuditMigrations";
+import { GatewayProviderUnavailableError, GatewayTransactionVerificationError, getGatewayWebhookSecret, reverifyGatewayTransaction } from "./paymentGatewayConfig";
 
 export type OfflinePaymentStatus = "pending_review" | "awaiting_second_approval" | "approved" | "rejected";
 export type ReceiptScanOutcome = OfflinePaymentStatus | "not_found";
 export type GatewayProvider = "paystack" | "flutterwave";
 export type GatewayReconciliationState = "unavailable" | "unmatched" | "matched" | "mismatch";
+export type PaymentSettlementStatus = "unverified" | "verified" | "verification_failed" | "unavailable";
+export const PAYMENT_JURISDICTIONS = ["lagos", "fct", "kano"] as const;
+export type PaymentJurisdiction = (typeof PAYMENT_JURISDICTIONS)[number];
+export const PAYMENT_APPROVAL_ROLES = ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"] as const;
+export type PaymentApprovalRole = (typeof PAYMENT_APPROVAL_ROLES)[number];
+export type PaymentStateApprovalPolicy = { jurisdiction: PaymentJurisdiction; highValueThresholdKobo: number; firstApproverRole: PaymentApprovalRole; secondApproverRole: PaymentApprovalRole; version: number; updatedBy: string; updatedAt: string };
 
 export type OfflinePaymentRecord = {
   id: string;
@@ -26,6 +33,13 @@ export type OfflinePaymentRecord = {
   gatewayProvider: GatewayProvider | null;
   gatewayEventId: string | null;
   gatewayReconciledAt: string | null;
+  settlementStatus: PaymentSettlementStatus;
+  settlementVerifiedAt: string | null;
+  gatewayVerifiedTransactionId: string | null;
+  jurisdiction: PaymentJurisdiction | null;
+  approvalPolicyVersion: number | null;
+  firstApproverRole: PaymentApprovalRole | null;
+  secondApproverRole: PaymentApprovalRole | null;
   submittedAt: string;
   reviewedAt: string | null;
   reviewedBy: string | null;
@@ -36,14 +50,15 @@ export type PaymentAlert = { id: string; applicantOpenId: string; paymentId: str
 export type ReceiptScanRecord = { id: string; scannedBy: string; reference: string; paymentId: string | null; outcome: ReceiptScanOutcome; scannedAt: string };
 export type PaymentAuditEvent = { eventId: string; aggregateType: string; aggregateId: string; sequenceNumber: number; eventType: string; actorOpenId: string | null; payload: Record<string, unknown>; occurredAt: string; previousEventHash: string | null; eventHash: string };
 export type PaymentAuditFilter = { aggregateType?: string | null; eventType?: string | null; actorOpenId?: string | null; from?: string | null; to?: string | null; limit?: number };
-export type GatewayWebhookResult = { state: "processed" | "duplicate"; provider: GatewayProvider; eventId: string; reconciliationState: "ignored" | "unmatched_reference" | "matched" | "mismatch"; paymentId: string | null };
+export type GatewayWebhookResult = { state: "processed" | "duplicate"; provider: GatewayProvider; eventId: string; reconciliationState: "ignored" | "unmatched_reference" | "matched" | "mismatch"; settlementStatus: PaymentSettlementStatus | null; paymentId: string | null };
 
 export class GatewayWebhookUnavailableError extends Error { constructor() { super("Gateway reconciliation is unavailable because no signature secret is configured for this provider."); } }
 export class GatewayWebhookSignatureError extends Error { constructor() { super("Gateway webhook signature validation failed."); } }
 
 type PaymentRow = {
-  id: string; applicant_open_id: string; applicant_name: string | null; reference: string; amount_kobo: string | number; currency: "NGN"; service: string; evidence_description: string; status: OfflinePaymentStatus; dual_control_required: boolean; first_approved_at: Date | null; first_approved_by: string | null; first_approval_reason: string | null; gateway_reconciliation_state: GatewayReconciliationState; gateway_provider: GatewayProvider | null; gateway_event_id: string | null; gateway_reconciled_at: Date | null; submitted_at: Date; reviewed_at: Date | null; reviewed_by: string | null; review_reason: string | null;
+  id: string; applicant_open_id: string; applicant_name: string | null; reference: string; amount_kobo: string | number; currency: "NGN"; service: string; evidence_description: string; status: OfflinePaymentStatus; dual_control_required: boolean; first_approved_at: Date | null; first_approved_by: string | null; first_approval_reason: string | null; gateway_reconciliation_state: GatewayReconciliationState; gateway_provider: GatewayProvider | null; gateway_event_id: string | null; gateway_reconciled_at: Date | null; settlement_status: PaymentSettlementStatus; settlement_verified_at: Date | null; gateway_verified_transaction_id: string | null; jurisdiction: PaymentJurisdiction | null; approval_policy_version: string | number | null; first_approver_role: PaymentApprovalRole | null; second_approver_role: PaymentApprovalRole | null; submitted_at: Date; reviewed_at: Date | null; reviewed_by: string | null; review_reason: string | null;
 };
+type PolicyRow = { jurisdiction: PaymentJurisdiction; high_value_threshold_kobo: string | number; first_approver_role: PaymentApprovalRole; second_approver_role: PaymentApprovalRole; version: string | number; updated_by: string; updated_at: Date };
 type AlertRow = { id: string; applicant_open_id: string; payment_id: string; type: PaymentAlert["type"]; title: string; body: string; created_at: Date; read_at: Date | null };
 type ScanRow = { id: string; scanned_by: string; reference: string; payment_id: string | null; outcome: ReceiptScanOutcome; scanned_at: Date };
 type AuditRow = { event_id: string; aggregate_type: string; aggregate_id: string; sequence_number: string | number; event_type: string; actor_open_id: string | null; payload: Record<string, unknown>; occurred_at: Date; previous_event_hash: string | null; event_hash: string };
@@ -65,15 +80,16 @@ function poolFor(url: string) { let pool = pools.get(url); if (!pool) { pool = n
 async function readyPool() { const url = paymentAuditUrl(); const pool = poolFor(url); let migration = migrations.get(url); if (!migration) { migration = runPaymentAuditMigrations(pool); migrations.set(url, migration); } try { await migration; return pool; } catch (error) { migrations.delete(url); const message = error instanceof Error ? error.message : "unknown PostgreSQL error"; throw new Error(`Payment operations are unavailable because the PostgreSQL audit store could not be initialized: ${message}`); } }
 
 function mapPayment(row: PaymentRow): OfflinePaymentRecord {
-  return { id: row.id, applicantOpenId: row.applicant_open_id, applicantName: row.applicant_name, reference: row.reference, amountKobo: Number(row.amount_kobo), currency: row.currency, service: row.service, evidenceDescription: row.evidence_description, status: row.status, dualControlRequired: row.dual_control_required, firstApprovedAt: row.first_approved_at?.toISOString() ?? null, firstApprovedBy: row.first_approved_by, firstApprovalReason: row.first_approval_reason, gatewayReconciliationState: row.gateway_reconciliation_state, gatewayProvider: row.gateway_provider, gatewayEventId: row.gateway_event_id, gatewayReconciledAt: row.gateway_reconciled_at?.toISOString() ?? null, submittedAt: row.submitted_at.toISOString(), reviewedAt: row.reviewed_at?.toISOString() ?? null, reviewedBy: row.reviewed_by, reviewReason: row.review_reason };
+  return { id: row.id, applicantOpenId: row.applicant_open_id, applicantName: row.applicant_name, reference: row.reference, amountKobo: Number(row.amount_kobo), currency: row.currency, service: row.service, evidenceDescription: row.evidence_description, status: row.status, dualControlRequired: row.dual_control_required, firstApprovedAt: row.first_approved_at?.toISOString() ?? null, firstApprovedBy: row.first_approved_by, firstApprovalReason: row.first_approval_reason, gatewayReconciliationState: row.gateway_reconciliation_state, gatewayProvider: row.gateway_provider, gatewayEventId: row.gateway_event_id, gatewayReconciledAt: row.gateway_reconciled_at?.toISOString() ?? null, settlementStatus: row.settlement_status, settlementVerifiedAt: row.settlement_verified_at?.toISOString() ?? null, gatewayVerifiedTransactionId: row.gateway_verified_transaction_id, jurisdiction: row.jurisdiction, approvalPolicyVersion: row.approval_policy_version === null ? null : Number(row.approval_policy_version), firstApproverRole: row.first_approver_role, secondApproverRole: row.second_approver_role, submittedAt: row.submitted_at.toISOString(), reviewedAt: row.reviewed_at?.toISOString() ?? null, reviewedBy: row.reviewed_by, reviewReason: row.review_reason };
 }
+function mapPolicy(row: PolicyRow): PaymentStateApprovalPolicy { return { jurisdiction: row.jurisdiction, highValueThresholdKobo: Number(row.high_value_threshold_kobo), firstApproverRole: row.first_approver_role, secondApproverRole: row.second_approver_role, version: Number(row.version), updatedBy: row.updated_by, updatedAt: row.updated_at.toISOString() }; }
 function mapAlert(row: AlertRow): PaymentAlert { return { id: row.id, applicantOpenId: row.applicant_open_id, paymentId: row.payment_id, type: row.type, title: row.title, body: row.body, createdAt: row.created_at.toISOString(), readAt: row.read_at?.toISOString() ?? null }; }
 function mapScan(row: ScanRow): ReceiptScanRecord { return { id: row.id, scannedBy: row.scanned_by, reference: row.reference, paymentId: row.payment_id, outcome: row.outcome, scannedAt: row.scanned_at.toISOString() }; }
 function mapAudit(row: AuditRow): PaymentAuditEvent { return { eventId: row.event_id, aggregateType: row.aggregate_type, aggregateId: row.aggregate_id, sequenceNumber: Number(row.sequence_number), eventType: row.event_type, actorOpenId: row.actor_open_id, payload: row.payload, occurredAt: row.occurred_at.toISOString(), previousEventHash: row.previous_event_hash, eventHash: row.event_hash }; }
 function normaliseReference(value: string) { return value.trim().toUpperCase(); }
 function hashEvent(input: { aggregateType: string; aggregateId: string; sequence: number; eventType: string; occurredAt: string; previousHash: string | null; data: Record<string, unknown> }) { return crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex"); }
 
-async function appendEvent(client: PoolClient, input: { aggregateType: "payment" | "alert" | "receipt_scan" | "gateway_webhook" | "payment_audit_export"; aggregateId: string; eventType: string; actorOpenId: string | null; occurredAt: string; data: Record<string, unknown> }) {
+async function appendEvent(client: PoolClient, input: { aggregateType: "payment" | "alert" | "receipt_scan" | "gateway_webhook" | "payment_audit_export" | "payment_policy"; aggregateId: string; eventType: string; actorOpenId: string | null; occurredAt: string; data: Record<string, unknown> }) {
   const prior = await client.query<{ sequence_number: string; event_hash: string }>("SELECT sequence_number, event_hash FROM payment_audit_events WHERE aggregate_type = $1 AND aggregate_id = $2 ORDER BY sequence_number DESC LIMIT 1 FOR UPDATE", [input.aggregateType, input.aggregateId]);
   const sequence = prior.rowCount ? Number(prior.rows[0]!.sequence_number) + 1 : 1;
   const previousHash = prior.rowCount ? prior.rows[0]!.event_hash : null;
@@ -83,15 +99,22 @@ async function appendEvent(client: PoolClient, input: { aggregateType: "payment"
 }
 async function transaction<T>(operation: (client: PoolClient) => Promise<T>) { const pool = await readyPool(); const client = await pool.connect(); try { await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE"); const result = await operation(client); await client.query("COMMIT"); return result; } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); } }
 
-export async function submitOfflinePayment(input: { applicantOpenId: string; applicantName: string | null; reference: string; amountKobo: number; service: string; evidenceDescription: string }) {
+export async function listPaymentStateApprovalPolicies() { const pool = await readyPool(); const result = await pool.query<PolicyRow>("SELECT * FROM payment_state_approval_policies ORDER BY jurisdiction ASC"); return result.rows.map(mapPolicy); }
+export async function updatePaymentStateApprovalPolicy(input: { jurisdiction: PaymentJurisdiction; highValueThresholdKobo: number; firstApproverRole: PaymentApprovalRole; secondApproverRole: PaymentApprovalRole; updatedBy: string }) {
+  if (input.firstApproverRole === input.secondApproverRole) throw new Error("The first and second payment approval roles must be different.");
+  return transaction(async (client) => { const result = await client.query<PolicyRow>("INSERT INTO payment_state_approval_policies (jurisdiction, high_value_threshold_kobo, first_approver_role, second_approver_role, version, updated_by, updated_at) VALUES ($1,$2,$3,$4,1,$5,now()) ON CONFLICT (jurisdiction) DO UPDATE SET high_value_threshold_kobo = EXCLUDED.high_value_threshold_kobo, first_approver_role = EXCLUDED.first_approver_role, second_approver_role = EXCLUDED.second_approver_role, version = payment_state_approval_policies.version + 1, updated_by = EXCLUDED.updated_by, updated_at = now() RETURNING *", [input.jurisdiction, input.highValueThresholdKobo, input.firstApproverRole, input.secondApproverRole, input.updatedBy]); const policy = mapPolicy(result.rows[0]!); await appendEvent(client, { aggregateType: "payment_policy", aggregateId: policy.jurisdiction, eventType: "payment_state_policy_updated", actorOpenId: input.updatedBy, occurredAt: policy.updatedAt, data: { highValueThresholdKobo: policy.highValueThresholdKobo, firstApproverRole: policy.firstApproverRole, secondApproverRole: policy.secondApproverRole, version: policy.version } }); return policy; });
+}
+async function requirePaymentStatePolicy(jurisdiction: PaymentJurisdiction) { const pool = await readyPool(); const result = await pool.query<PolicyRow>("SELECT * FROM payment_state_approval_policies WHERE jurisdiction = $1", [jurisdiction]); if (!result.rowCount) throw new Error(`Payment approvals are unavailable for ${jurisdiction.toUpperCase()} until an authorised administrator configures the high-value threshold and two distinct approval roles.`); return mapPolicy(result.rows[0]!); }
+
+export async function submitOfflinePayment(input: { applicantOpenId: string; applicantName: string | null; jurisdiction: PaymentJurisdiction; reference: string; amountKobo: number; service: string; evidenceDescription: string }) {
   const reference = normaliseReference(input.reference);
   if (!reference) throw new Error("A bank-transfer or cash-deposit reference is required.");
-  const paymentId = crypto.randomUUID(); const submittedAt = new Date().toISOString(); const dualControlRequired = input.amountKobo >= highValueThresholdKobo();
+  const policy = await requirePaymentStatePolicy(input.jurisdiction); const paymentId = crypto.randomUUID(); const submittedAt = new Date().toISOString(); const dualControlRequired = input.amountKobo >= policy.highValueThresholdKobo;
   return transaction(async (client) => {
     const duplicate = await client.query("SELECT 1 FROM offline_payment_records WHERE reference = $1", [reference]);
     if (duplicate.rowCount) throw new Error("That payment reference has already been submitted for review.");
-    const inserted = await client.query<PaymentRow>("INSERT INTO offline_payment_records (id, applicant_open_id, applicant_name, reference, amount_kobo, currency, service, evidence_description, status, dual_control_required, submitted_at) VALUES ($1::uuid,$2,$3,$4,$5,'NGN',$6,$7,'pending_review',$8,$9::timestamptz) RETURNING *", [paymentId, input.applicantOpenId, input.applicantName, reference, input.amountKobo, input.service.trim(), input.evidenceDescription.trim(), dualControlRequired, submittedAt]);
-    await appendEvent(client, { aggregateType: "payment", aggregateId: paymentId, eventType: "offline_payment_submitted", actorOpenId: input.applicantOpenId, occurredAt: submittedAt, data: { reference, amountKobo: input.amountKobo, currency: "NGN", service: input.service.trim(), dualControlRequired, dualControlThresholdKobo: highValueThresholdKobo() } });
+    const inserted = await client.query<PaymentRow>("INSERT INTO offline_payment_records (id, applicant_open_id, applicant_name, reference, amount_kobo, currency, service, evidence_description, status, dual_control_required, jurisdiction, approval_policy_version, first_approver_role, second_approver_role, submitted_at) VALUES ($1::uuid,$2,$3,$4,$5,'NGN',$6,$7,'pending_review',$8,$9,$10,$11,$12,$13::timestamptz) RETURNING *", [paymentId, input.applicantOpenId, input.applicantName, reference, input.amountKobo, input.service.trim(), input.evidenceDescription.trim(), dualControlRequired, policy.jurisdiction, policy.version, policy.firstApproverRole, policy.secondApproverRole, submittedAt]);
+    await appendEvent(client, { aggregateType: "payment", aggregateId: paymentId, eventType: "offline_payment_submitted", actorOpenId: input.applicantOpenId, occurredAt: submittedAt, data: { reference, amountKobo: input.amountKobo, currency: "NGN", service: input.service.trim(), jurisdiction: policy.jurisdiction, approvalPolicyVersion: policy.version, dualControlRequired, dualControlThresholdKobo: policy.highValueThresholdKobo, firstApproverRole: policy.firstApproverRole, secondApproverRole: policy.secondApproverRole } });
     return mapPayment(inserted.rows[0]!);
   });
 }
@@ -109,22 +132,25 @@ async function createDecisionAlert(client: PoolClient, payment: PaymentRow, paym
   await appendEvent(client, { aggregateType: "alert", aggregateId: alertId, eventType: "payment_alert_created", actorOpenId: reviewerOpenId, occurredAt: reviewedAt, data: { paymentId, type: approved ? "offline_payment_approved" : "offline_payment_rejected" } });
 }
 
-export async function reviewOfflinePayment(input: { paymentId: string; decision: "approved" | "rejected"; reviewerOpenId: string; reason: string }) {
+export async function reviewOfflinePayment(input: { paymentId: string; decision: "approved" | "rejected"; reviewerOpenId: string; reviewerRole: PaymentApprovalRole; reason: string }) {
   return transaction(async (client) => {
     const existing = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE id = $1::uuid FOR UPDATE", [input.paymentId]); const payment = existing.rows[0];
     if (!payment) throw new Error("The offline payment record no longer exists.");
     if (payment.status !== "pending_review" && payment.status !== "awaiting_second_approval") throw new Error("Only payment records awaiting an authorised review can be decided.");
+    if (!payment.jurisdiction || !payment.first_approver_role || !payment.second_approver_role) throw new Error("This payment record predates state approval policy controls and must be remediated by an authorised administrator before review.");
     const reviewedAt = new Date().toISOString(); const reason = input.reason.trim(); if (reason.length < 3) throw new Error("A concise review reason is required.");
+    const requiredRole = payment.status === "awaiting_second_approval" ? payment.second_approver_role : payment.first_approver_role;
+    if (input.reviewerRole !== requiredRole) throw new Error(`The ${payment.jurisdiction.toUpperCase()} policy requires ${requiredRole} for this approval stage.`);
     if (input.decision === "approved" && payment.status === "pending_review" && payment.dual_control_required) {
       const staged = await client.query<PaymentRow>("UPDATE offline_payment_records SET status = 'awaiting_second_approval', first_approved_at = $2::timestamptz, first_approved_by = $3, first_approval_reason = $4, version = version + 1, updated_at = now() WHERE id = $1::uuid AND status = 'pending_review' RETURNING *", [input.paymentId, reviewedAt, input.reviewerOpenId, reason]);
       if (!staged.rowCount) throw new Error("The payment record changed before the first approval could be applied. Refresh and try again.");
-      await appendEvent(client, { aggregateType: "payment", aggregateId: input.paymentId, eventType: "offline_payment_first_approval", actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { reason, dualControlRequired: true } });
+      await appendEvent(client, { aggregateType: "payment", aggregateId: input.paymentId, eventType: "offline_payment_first_approval", actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { reason, reviewerRole: input.reviewerRole, dualControlRequired: true } });
       return mapPayment(staged.rows[0]!);
     }
     if (input.decision === "approved" && payment.status === "awaiting_second_approval" && payment.first_approved_by === input.reviewerOpenId) throw new Error("A second administrator who did not provide the first approval must approve this high-value payment.");
     const updated = await client.query<PaymentRow>("UPDATE offline_payment_records SET status = $2, reviewed_at = $3::timestamptz, reviewed_by = $4, review_reason = $5, version = version + 1, updated_at = now() WHERE id = $1::uuid AND status IN ('pending_review', 'awaiting_second_approval') RETURNING *", [input.paymentId, input.decision, reviewedAt, input.reviewerOpenId, reason]);
     if (!updated.rowCount) throw new Error("The payment record changed before this review could be applied. Refresh and try again.");
-    await appendEvent(client, { aggregateType: "payment", aggregateId: input.paymentId, eventType: input.decision === "approved" && payment.status === "awaiting_second_approval" ? "offline_payment_second_approval" : `offline_payment_${input.decision}`, actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { reason, firstApprovedBy: payment.first_approved_by } });
+    await appendEvent(client, { aggregateType: "payment", aggregateId: input.paymentId, eventType: input.decision === "approved" && payment.status === "awaiting_second_approval" ? "offline_payment_second_approval" : `offline_payment_${input.decision}`, actorOpenId: input.reviewerOpenId, occurredAt: reviewedAt, data: { reason, reviewerRole: input.reviewerRole, firstApprovedBy: payment.first_approved_by } });
     await createDecisionAlert(client, payment, input.paymentId, input.decision, input.reviewerOpenId, reason, reviewedAt);
     return mapPayment(updated.rows[0]!);
   });
@@ -139,7 +165,7 @@ export async function verifyReceiptAndRecordScan(input: { reference: string; sca
 }
 export async function listReceiptScanHistory(scannedBy: string, limit = 25) { const pool = await readyPool(); const safeLimit = Math.max(1, Math.min(limit, 100)); const result = await pool.query<ScanRow>("SELECT * FROM payment_receipt_scans WHERE scanned_by = $1 ORDER BY scanned_at DESC LIMIT $2", [scannedBy, safeLimit]); return result.rows.map(mapScan); }
 
-function gatewaySecret(provider: GatewayProvider) { const secret = provider === "paystack" ? process.env.PAYSTACK_WEBHOOK_SECRET?.trim() : process.env.FLUTTERWAVE_WEBHOOK_SECRET_HASH?.trim(); if (!secret) throw new GatewayWebhookUnavailableError(); return secret; }
+function gatewaySecret(provider: GatewayProvider) { try { return getGatewayWebhookSecret(provider); } catch (error) { if (error instanceof GatewayProviderUnavailableError) throw new GatewayWebhookUnavailableError(); throw error; } }
 function safeSignatureEqual(expected: string, supplied: string) { const expectedBytes = Buffer.from(expected); const suppliedBytes = Buffer.from(supplied); return expectedBytes.length === suppliedBytes.length && crypto.timingSafeEqual(expectedBytes, suppliedBytes); }
 function verifyGatewaySignature(provider: GatewayProvider, rawBody: string, suppliedSignature: string) { const secret = gatewaySecret(provider); const expected = provider === "paystack" ? crypto.createHmac("sha512", secret).update(rawBody).digest("hex") : crypto.createHmac("sha256", secret).update(rawBody).digest("base64"); if (!safeSignatureEqual(expected, suppliedSignature)) throw new GatewayWebhookSignatureError(); }
 function getPayloadObject(rawBody: string) { try { const parsed = JSON.parse(rawBody) as unknown; if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid"); return parsed as { id?: unknown; event?: unknown; type?: unknown; timestamp?: unknown; data?: Record<string, unknown> }; } catch { throw new Error("Gateway webhook payload is not valid JSON."); } }
@@ -150,20 +176,28 @@ export async function reconcileGatewayWebhook(input: { provider: GatewayProvider
   verifyGatewaySignature(input.provider, input.rawBody, input.signature); const payload = getPayloadObject(input.rawBody); const data = payload.data ?? {}; const eventType = asText(input.provider === "paystack" ? payload.event : payload.type) ?? "unknown"; const reference = normaliseReference(asText(input.provider === "paystack" ? data.reference : (data.tx_ref ?? data.reference)) ?? "");
   const providerEventId = asText(payload.id) ?? asText(data.id) ?? (reference && eventType !== "unknown" ? `${eventType}:${reference}:${asText(payload.timestamp) ?? asText(data.paid_at) ?? "undated"}` : null); if (!providerEventId) throw new Error("Gateway webhook payload did not include a stable event identifier.");
   const success = input.provider === "paystack" ? eventType === "charge.success" : eventType === "charge.completed" && ["succeeded", "successful"].includes((asText(data.status) ?? "").toLowerCase()); const receivedAt = new Date().toISOString(); const payloadHash = crypto.createHash("sha256").update(input.rawBody).digest("hex");
-  return transaction(async (client) => {
-    const deliveryId = crypto.randomUUID(); const delivery = await client.query<{ id: string }>("INSERT INTO payment_gateway_webhook_deliveries (id, provider, gateway_event_id, event_type, reference, payload_sha256, signature_algorithm, reconciliation_state, received_at) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,'ignored',$8::timestamptz) ON CONFLICT (provider, gateway_event_id) DO NOTHING RETURNING id", [deliveryId, input.provider, providerEventId, eventType, reference || null, payloadHash, input.provider === "paystack" ? "HMAC-SHA512" : "HMAC-SHA256", receivedAt]);
-    if (!delivery.rowCount) return { state: "duplicate", provider: input.provider, eventId: providerEventId, reconciliationState: "ignored", paymentId: null } satisfies GatewayWebhookResult;
-    let reconciliationState: GatewayWebhookResult["reconciliationState"] = "ignored"; let paymentId: string | null = null;
-    if (success && reference) {
-      const paymentResult = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE reference = $1 FOR UPDATE", [reference]); const payment = paymentResult.rows[0] ?? null; const amount = numberValue(data.amount); const amountKobo = amount === null ? null : input.provider === "paystack" ? Math.round(amount) : Math.round(amount * 100);
-      if (!payment) reconciliationState = "unmatched_reference";
-      else if (amountKobo !== Number(payment.amount_kobo) || payment.currency !== "NGN") { reconciliationState = "mismatch"; paymentId = payment.id; await client.query("UPDATE offline_payment_records SET gateway_reconciliation_state = 'mismatch', gateway_provider = $2, gateway_event_id = $3, gateway_reconciled_at = $4::timestamptz, updated_at = now() WHERE id = $1::uuid", [payment.id, input.provider, providerEventId, receivedAt]); }
-      else { reconciliationState = "matched"; paymentId = payment.id; await client.query("UPDATE offline_payment_records SET gateway_reconciliation_state = 'matched', gateway_provider = $2, gateway_event_id = $3, gateway_reconciled_at = $4::timestamptz, updated_at = now() WHERE id = $1::uuid", [payment.id, input.provider, providerEventId, receivedAt]); }
+  const pool = await readyPool(); let candidate: PaymentRow | null = null; let verification: Awaited<ReturnType<typeof reverifyGatewayTransaction>> | null = null; let verificationError: string | null = null;
+  if (success && reference) {
+    const result = await pool.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE reference = $1", [reference]); candidate = result.rows[0] ?? null;
+    if (candidate) {
+      try { verification = await reverifyGatewayTransaction({ provider: input.provider, reference, providerTransactionId: asText(data.id), expectedAmountKobo: Number(candidate.amount_kobo), expectedCurrency: candidate.currency }); }
+      catch (error) { if (error instanceof GatewayProviderUnavailableError) throw new GatewayWebhookUnavailableError(); verificationError = error instanceof GatewayTransactionVerificationError ? error.message : "Gateway re-verification was unavailable."; }
     }
-    await client.query("UPDATE payment_gateway_webhook_deliveries SET reconciliation_state = $2, payment_id = $3::uuid WHERE id = $1::uuid", [deliveryId, reconciliationState, paymentId]);
-    await appendEvent(client, { aggregateType: "gateway_webhook", aggregateId: deliveryId, eventType: "gateway_webhook_received", actorOpenId: null, occurredAt: receivedAt, data: { provider: input.provider, providerEventId, eventType, reference: reference || null, payloadSha256: payloadHash, reconciliationState } });
-    if (paymentId) await appendEvent(client, { aggregateType: "payment", aggregateId: paymentId, eventType: reconciliationState === "matched" ? "gateway_reconciliation_matched" : "gateway_reconciliation_mismatch", actorOpenId: null, occurredAt: receivedAt, data: { provider: input.provider, providerEventId, payloadSha256: payloadHash, reconciliationState } });
-    return { state: "processed", provider: input.provider, eventId: providerEventId, reconciliationState, paymentId } satisfies GatewayWebhookResult;
+  }
+  return transaction(async (client) => {
+    const deliveryId = crypto.randomUUID(); const delivery = await client.query<{ id: string }>("INSERT INTO payment_gateway_webhook_deliveries (id, provider, gateway_event_id, event_type, reference, payload_sha256, signature_algorithm, reconciliation_state, verification_state, received_at) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,'ignored','unverified',$8::timestamptz) ON CONFLICT (provider, gateway_event_id) DO NOTHING RETURNING id", [deliveryId, input.provider, providerEventId, eventType, reference || null, payloadHash, input.provider === "paystack" ? "HMAC-SHA512" : "HMAC-SHA256", receivedAt]);
+    if (!delivery.rowCount) return { state: "duplicate", provider: input.provider, eventId: providerEventId, reconciliationState: "ignored", settlementStatus: null, paymentId: null } satisfies GatewayWebhookResult;
+    let reconciliationState: GatewayWebhookResult["reconciliationState"] = "ignored"; let settlementStatus: PaymentSettlementStatus | null = null; let paymentId: string | null = null;
+    if (success && reference) {
+      const paymentResult = await client.query<PaymentRow>("SELECT * FROM offline_payment_records WHERE reference = $1 FOR UPDATE", [reference]); const payment = paymentResult.rows[0] ?? null;
+      if (!payment) reconciliationState = "unmatched_reference";
+      else if (!verification || verification.reference !== payment.reference || verification.amountKobo !== Number(payment.amount_kobo) || verification.currency !== payment.currency) { reconciliationState = "mismatch"; settlementStatus = "verification_failed"; paymentId = payment.id; await client.query("UPDATE offline_payment_records SET gateway_reconciliation_state = 'mismatch', gateway_provider = $2, gateway_event_id = $3, gateway_reconciled_at = $4::timestamptz, settlement_status = 'verification_failed', updated_at = now() WHERE id = $1::uuid", [payment.id, input.provider, providerEventId, receivedAt]); }
+      else { reconciliationState = "matched"; settlementStatus = "verified"; paymentId = payment.id; await client.query("UPDATE offline_payment_records SET gateway_reconciliation_state = 'matched', gateway_provider = $2, gateway_event_id = $3, gateway_reconciled_at = $4::timestamptz, settlement_status = 'verified', settlement_verified_at = $4::timestamptz, gateway_verified_transaction_id = $5, updated_at = now() WHERE id = $1::uuid", [payment.id, input.provider, providerEventId, receivedAt, verification.providerTransactionId]); }
+    }
+    await client.query("UPDATE payment_gateway_webhook_deliveries SET reconciliation_state = $2, payment_id = $3::uuid, verification_state = $4, verified_transaction_id = $5, verification_error = $6 WHERE id = $1::uuid", [deliveryId, reconciliationState, paymentId, settlementStatus === "verified" ? "verified" : verificationError ? "failed" : "unverified", verification?.providerTransactionId ?? null, verificationError]);
+    await appendEvent(client, { aggregateType: "gateway_webhook", aggregateId: deliveryId, eventType: "gateway_webhook_received", actorOpenId: null, occurredAt: receivedAt, data: { provider: input.provider, providerEventId, eventType, reference: reference || null, payloadSha256: payloadHash, reconciliationState, settlementStatus, providerReverified: settlementStatus === "verified" } });
+    if (paymentId) await appendEvent(client, { aggregateType: "payment", aggregateId: paymentId, eventType: settlementStatus === "verified" ? "gateway_settlement_reverified" : "gateway_settlement_verification_failed", actorOpenId: null, occurredAt: receivedAt, data: { provider: input.provider, providerEventId, payloadSha256: payloadHash, reconciliationState, settlementStatus, verificationError } });
+    return { state: "processed", provider: input.provider, eventId: providerEventId, reconciliationState, settlementStatus, paymentId } satisfies GatewayWebhookResult;
   });
 }
 

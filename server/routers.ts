@@ -62,7 +62,8 @@ import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, 
 import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
 import { acknowledgeFieldEvidenceEscalation, assignFieldEvidenceSupervisor, escalateFieldEvidence, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
-import { getOfflinePaymentSummary, listPaymentAlerts, listPaymentAuditEvents, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, recordPaymentAuditExport, reviewOfflinePayment, submitOfflinePayment, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
+import { getOfflinePaymentSummary, listPaymentAlerts, listPaymentAuditEvents, listPaymentStateApprovalPolicies, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, PAYMENT_APPROVAL_ROLES, PAYMENT_JURISDICTIONS, recordPaymentAuditExport, reviewOfflinePayment, submitOfflinePayment, updatePaymentStateApprovalPolicy, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
+import { getGatewayActivationStatus } from "./paymentGatewayConfig";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -177,16 +178,21 @@ export const appRouter = router({
       .mutation(({ ctx, input }) => updateLocalPolicy({ ...input, updatedBy: ctx.user.openId })),
   }),
   paymentOperations: router({
+    gatewayActivation: adminProcedure.input(z.object({ provider: z.enum(["paystack", "flutterwave"]).optional() })).query(({ input }) => getGatewayActivationStatus(input.provider)),
+    statePolicies: adminProcedure.query(() => listPaymentStateApprovalPolicies()),
+    updateStatePolicy: adminProcedure
+      .input(z.object({ jurisdiction: z.enum(PAYMENT_JURISDICTIONS), highValueThresholdKobo: z.number().int().positive(), firstApproverRole: z.enum(PAYMENT_APPROVAL_ROLES), secondApproverRole: z.enum(PAYMENT_APPROVAL_ROLES) }))
+      .mutation(({ ctx, input }) => updatePaymentStateApprovalPolicy({ ...input, updatedBy: ctx.user.openId })),
     submitOfflinePayment: protectedProcedure
-      .input(z.object({ reference: z.string().min(3).max(120), amountKobo: z.number().int().positive(), service: z.string().min(3).max(200), evidenceDescription: z.string().min(3).max(2000) }))
+      .input(z.object({ jurisdiction: z.enum(PAYMENT_JURISDICTIONS), reference: z.string().min(3).max(120), amountKobo: z.number().int().positive(), service: z.string().min(3).max(200), evidenceDescription: z.string().min(3).max(2000) }))
       .mutation(({ ctx, input }) => submitOfflinePayment({ ...input, applicantOpenId: ctx.user.openId, applicantName: ctx.user.name ?? null })),
     myAlerts: protectedProcedure.query(({ ctx }) => listPaymentAlerts(ctx.user.openId)),
     markAlertRead: protectedProcedure.input(z.object({ alertId: z.string().min(8) })).mutation(({ ctx, input }) => markPaymentAlertRead({ applicantOpenId: ctx.user.openId, alertId: input.alertId })),
     pendingSummary: adminProcedure.query(() => getOfflinePaymentSummary()),
     listPending: adminProcedure.query(() => listPendingOfflinePayments()),
-    review: adminProcedure
-      .input(z.object({ paymentId: z.string().min(8), decision: z.enum(["approved", "rejected"]), reason: z.string().min(3).max(2000) }))
-      .mutation(({ ctx, input }) => reviewOfflinePayment({ ...input, reviewerOpenId: ctx.user.openId })),
+    review: enterpriseProcedure
+      .input(z.object({ paymentId: z.string().min(8), decision: z.enum(["approved", "rejected"]), reviewerRole: z.enum(PAYMENT_APPROVAL_ROLES), reason: z.string().min(3).max(2000) }))
+      .mutation(({ ctx, input }) => { assertEnterpriseRole(ctx.enterprise, [input.reviewerRole]); return reviewOfflinePayment({ ...input, reviewerOpenId: ctx.user!.openId }); }),
     verifyReceiptAndLog: adminProcedure.input(z.object({ reference: z.string().min(3).max(500) })).mutation(({ ctx, input }) => verifyReceiptAndRecordScan({ ...input, scannedBy: ctx.user.openId })),
     scanHistory: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(25) })).query(({ ctx, input }) => listReceiptScanHistory(ctx.user.openId, input.limit)),
     auditEvents: adminProcedure
