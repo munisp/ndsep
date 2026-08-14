@@ -571,6 +571,10 @@ func main() {
 	logger.Printf("Middleware: Kafka=%v Temporal=%v Keycloak=%v Permify=%v", kafkaEnabled, temporalEnabled, keycloakEnabled, permifyEnabled)
 	logger.Printf("Kafka brokers: %v | Topic: %s", kafkaBrokers, kafkaTopic)
 	logger.Printf("Temporal: %s | Keycloak: %s realm=%s | Permify: %s", temporalHost, keycloakURL, keycloakRealm, permifyURL)
+	if err := initAuditStore(context.Background()); err != nil {
+		logger.Fatalf("Durable audit storage unavailable: %v", err)
+	}
+	defer closeAuditStore()
 
 	initKafka()
 	initTemporal()
