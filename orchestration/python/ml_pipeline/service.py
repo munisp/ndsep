@@ -10,10 +10,11 @@ Falls back to deterministic formula when DB is unavailable.
 import os
 import math
 import logging
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
@@ -32,6 +33,16 @@ app = FastAPI(title="NDSEP ML Pipeline", version="2.2.0")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 RETRAIN_INTERVAL_HOURS = int(os.getenv("RETRAIN_INTERVAL_HOURS", "24"))
+MODEL_ARTIFACT_PATH = os.getenv("ML_MODEL_ARTIFACT_PATH", "")
+
+
+def require_persisted_model() -> Path:
+    if not MODEL_ARTIFACT_PATH:
+        raise HTTPException(status_code=503, detail="ML inference unavailable: ML_MODEL_ARTIFACT_PATH is required")
+    artifact = Path(MODEL_ARTIFACT_PATH)
+    if not artifact.is_file() or artifact.stat().st_size == 0:
+        raise HTTPException(status_code=503, detail="ML inference unavailable: configured model artifact is absent")
+    return artifact
 
 # ── In-memory model state ──────────────────────────────────────────────────
 _model_state: Dict[str, Any] = {
@@ -247,6 +258,7 @@ def health():
 
 @app.post("/ml/risk-score")
 def risk_score(req: RiskScoreRequest):
+    require_persisted_model()
     violation_count = req.violation_count
     avg_compliance_score = req.avg_compliance_score
     days_since_last_audit = req.days_since_last_audit
@@ -315,6 +327,7 @@ def risk_score(req: RiskScoreRequest):
 
 @app.post("/ml/compliance-predict")
 def compliance_predict(req: CompliancePredictionRequest):
+    require_persisted_model()
     trend_delta = {"improving": +5.0, "stable": 0.0, "worsening": -8.0}.get(req.violation_trend, 0.0)
     remediation_boost = req.remediation_actions * 2.5
     deadline_pressure = max(0.0, (90 - req.days_to_deadline) * 0.1)
@@ -333,6 +346,7 @@ def compliance_predict(req: CompliancePredictionRequest):
 
 @app.post("/ml/sla-breach-predict")
 def sla_breach_predict(req: SLABreachRequest):
+    require_persisted_model()
     progress_ratio = req.elapsed_hours / req.sla_hours if req.sla_hours > 0 else 0.0
     breach_probability = min(1.0, progress_ratio * req.complexity_score * 1.2)
     will_breach = breach_probability > 0.7
@@ -350,6 +364,7 @@ def sla_breach_predict(req: SLABreachRequest):
 @app.post("/ml/retrain")
 def trigger_retrain(req: NightlyRetrainRequest, background_tasks: BackgroundTasks):
     """Triggered by Temporal nightly cron workflow."""
+    require_persisted_model()
     last = _model_state.get("last_trained")
     if last and not req.force:
         last_dt = datetime.fromisoformat(last)
