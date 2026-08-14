@@ -292,3 +292,7 @@
 - [x] Add Operations retry-outcome trend chart and success-rate summary
 - [x] Add visible, auditable escalation timers for unacknowledged high-risk alerts
 - [x] Add regression coverage for export data, retry metrics, and alert escalation timing
+- [ ] Add automatic senior-admin escalation delivery for overdue high-risk alerts
+- [ ] Add date-range controls to reconciliation exception exports
+- [ ] Add daily retry-success percentage bars to Operations
+- [ ] Add regression coverage for escalation delivery, date filtering, and daily success-rate calculations
