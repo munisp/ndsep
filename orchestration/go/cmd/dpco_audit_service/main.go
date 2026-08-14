@@ -120,29 +120,31 @@ func initKafka() {
 	}()
 }
 
-func publishKafka(eventType string, payload map[string]interface{}) {
+func publishKafka(eventType string, payload map[string]interface{}) error {
 	mu.RLock()
 	ok := kafkaOK
 	p := kafkaProducer
 	mu.RUnlock()
 	if !ok || p == nil {
-		logger.Printf("[Kafka] Stub: %s %v", eventType, payload)
-		return
+		return fmt.Errorf("Kafka is unavailable for %s", eventType)
 	}
 	payload["event_type"] = eventType
 	payload["source"] = "dpco-audit-service"
 	payload["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-	b, _ := json.Marshal(payload)
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode Kafka event %s: %w", eventType, err)
+	}
 	msg := &sarama.ProducerMessage{
 		Topic: kafkaTopic,
 		Key:   sarama.StringEncoder(eventType),
 		Value: sarama.ByteEncoder(b),
 	}
 	if _, _, err := p.SendMessage(msg); err != nil {
-		logger.Printf("[Kafka] Publish error: %v", err)
-		return
+		return fmt.Errorf("publish Kafka event %s: %w", eventType, err)
 	}
 	atomic.AddInt64(&kafkaEvents, 1)
+	return nil
 }
 
 // ─── Temporal Init ────────────────────────────────────────────────────────────
@@ -402,10 +404,14 @@ func initiateAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	atomic.AddInt64(&auditsInitiated, 1)
-	publishKafka("dpco.audit.initiated", map[string]interface{}{
+	if err := publishKafka("dpco.audit.initiated", map[string]interface{}{
 		"audit_id": auditID, "dpco_org_id": req.DpcoOrgID, "org_id": req.OrgID,
 		"audit_type": req.AuditType, "audit_year": req.AuditYear, "workflow_id": workflowID,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Audit initiation event failed: %v", err)
+		http.Error(w, `{"error":"audit event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "audit_id": auditID, "workflow_id": workflowID, "current_stage": "initiated"})
 }
@@ -454,10 +460,14 @@ func advanceStage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	atomic.AddInt64(&stageAdvances, 1)
-	publishKafka("dpco.audit.stage_advanced", map[string]interface{}{
+	if err := publishKafka("dpco.audit.stage_advanced", map[string]interface{}{
 		"audit_id": auditID, "from_stage": currentStage, "to_stage": nextStage,
 		"advanced_by": req.UserID, "notes": req.Notes,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Audit stage event failed: %v", err)
+		http.Error(w, `{"error":"audit event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok": true, "audit_id": auditID,
@@ -541,9 +551,13 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	publishKafka("dpco.audit.control_assessed", map[string]interface{}{
+	if err := publishKafka("dpco.audit.control_assessed", map[string]interface{}{
 		"audit_id": auditID, "control_id": req.ControlID, "rating": req.Rating,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Audit assessment event failed: %v", err)
+		http.Error(w, `{"error":"audit event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "control_id": req.ControlID, "rating": req.Rating})
 }
