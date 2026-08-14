@@ -174,8 +174,7 @@ func startAuditWorkflow(auditID, dpcoOrgID, orgID, auditType string) (string, er
 	tc := temporalClient
 	mu.RUnlock()
 	if !ok || tc == nil {
-		// Stub: return a fake workflow ID
-		return fmt.Sprintf("wf-dpco-audit-%s", auditID), nil
+		return "", fmt.Errorf("Temporal audit workflow service is unavailable")
 	}
 	opts := client.StartWorkflowOptions{
 		ID:        fmt.Sprintf("dpco-audit-%s", auditID),
