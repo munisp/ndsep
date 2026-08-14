@@ -72,16 +72,16 @@ var auditStages = []string{
 // ─── State ────────────────────────────────────────────────────────────────────
 
 var (
-	mu               sync.RWMutex
-	kafkaProducer    sarama.SyncProducer
-	kafkaOK          bool
-	temporalClient   client.Client
-	temporalOK       bool
-	keycloakClient   *gocloak.GoCloak
-	keycloakOK       bool
-	permifyOK        bool
+	mu             sync.RWMutex
+	kafkaProducer  sarama.SyncProducer
+	kafkaOK        bool
+	temporalClient client.Client
+	temporalOK     bool
+	keycloakClient *gocloak.GoCloak
+	keycloakOK     bool
+	permifyOK      bool
 	// In-memory audit store (fallback when DB is unavailable)
-	auditStore       = make(map[string]map[string]interface{})
+	auditStore = make(map[string]map[string]interface{})
 	// Metrics
 	auditsInitiated  int64
 	stageAdvances    int64
@@ -106,11 +106,16 @@ func initKafka() {
 			p, err := sarama.NewSyncProducer(kafkaBrokers, cfg)
 			if err != nil {
 				logger.Printf("[Kafka] Connect failed (%v), retry in 10s", err)
-				mu.Lock(); kafkaOK = false; mu.Unlock()
+				mu.Lock()
+				kafkaOK = false
+				mu.Unlock()
 				time.Sleep(10 * time.Second)
 				continue
 			}
-			mu.Lock(); kafkaProducer = p; kafkaOK = true; mu.Unlock()
+			mu.Lock()
+			kafkaProducer = p
+			kafkaOK = true
+			mu.Unlock()
 			logger.Printf("[Kafka] Connected to %v", kafkaBrokers)
 			return
 		}
@@ -157,11 +162,16 @@ func initTemporal() {
 			})
 			if err != nil {
 				logger.Printf("[Temporal] Connect failed (%v), retry in 15s", err)
-				mu.Lock(); temporalOK = false; mu.Unlock()
+				mu.Lock()
+				temporalOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
-			mu.Lock(); temporalClient = c; temporalOK = true; mu.Unlock()
+			mu.Lock()
+			temporalClient = c
+			temporalOK = true
+			mu.Unlock()
 			logger.Printf("[Temporal] Connected to %s", temporalHost)
 			return
 		}
@@ -207,11 +217,16 @@ func initKeycloak() {
 			cancel()
 			if err != nil {
 				logger.Printf("[Keycloak] Connect failed (%v), retry in 15s", err)
-				mu.Lock(); keycloakOK = false; mu.Unlock()
+				mu.Lock()
+				keycloakOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
-			mu.Lock(); keycloakClient = kc; keycloakOK = true; mu.Unlock()
+			mu.Lock()
+			keycloakClient = kc
+			keycloakOK = true
+			mu.Unlock()
 			logger.Printf("[Keycloak] Connected realm=%s", keycloakRealm)
 			return
 		}
@@ -260,10 +275,10 @@ func checkPermission(userID, resource, action string) bool {
 		return false
 	}
 	body := map[string]interface{}{
-		"metadata":  map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
-		"entity":    map[string]interface{}{"type": resource, "id": "dpco-audit"},
+		"metadata":   map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
+		"entity":     map[string]interface{}{"type": resource, "id": "dpco-audit"},
 		"permission": action,
-		"subject":   map[string]interface{}{"type": "user", "id": userID},
+		"subject":    map[string]interface{}{"type": "user", "id": userID},
 	}
 	b, _ := json.Marshal(body)
 	url := fmt.Sprintf("%s/v1/tenants/%s/permissions/check", permifyURL, permifyTenant)
@@ -291,12 +306,16 @@ func initPermify() {
 			resp, err := http.Get(fmt.Sprintf("%s/healthz", permifyURL))
 			if err != nil || resp.StatusCode != 200 {
 				logger.Printf("[Permify] Not reachable, retry in 15s")
-				mu.Lock(); permifyOK = false; mu.Unlock()
+				mu.Lock()
+				permifyOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
 			resp.Body.Close()
-			mu.Lock(); permifyOK = true; mu.Unlock()
+			mu.Lock()
+			permifyOK = true
+			mu.Unlock()
 			logger.Printf("[Permify] Connected at %s", permifyURL)
 			return
 		}
@@ -307,22 +326,25 @@ func initPermify() {
 
 func health(w http.ResponseWriter, r *http.Request) {
 	mu.RLock()
-	kOK := kafkaOK; tOK := temporalOK; kcOK := keycloakOK; pOK := permifyOK
+	kOK := kafkaOK
+	tOK := temporalOK
+	kcOK := keycloakOK
+	pOK := permifyOK
 	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"service":           "dpco-audit-service",
-		"status":            "healthy",
-		"port":              port,
-		"uptime_s":          time.Since(startTime).Seconds(),
-		"kafka":             map[string]interface{}{"connected": kOK, "topic": kafkaTopic, "events_published": atomic.LoadInt64(&kafkaEvents)},
-		"temporal":          map[string]interface{}{"connected": tOK, "host": temporalHost, "task_queue": "ndsep-dpco-audit"},
-		"keycloak":          map[string]interface{}{"connected": kcOK, "realm": keycloakRealm, "tokens_validated": atomic.LoadInt64(&tokenValidations)},
-		"permify":           map[string]interface{}{"connected": pOK, "checks": atomic.LoadInt64(&permChecks)},
-		"audits_initiated":  atomic.LoadInt64(&auditsInitiated),
-		"stage_advances":    atomic.LoadInt64(&stageAdvances),
-		"middleware": []string{"kafka", "temporal", "keycloak", "permify", "redis"},
-		"timestamp":         time.Now().UTC(),
+		"service":          "dpco-audit-service",
+		"status":           "healthy",
+		"port":             port,
+		"uptime_s":         time.Since(startTime).Seconds(),
+		"kafka":            map[string]interface{}{"connected": kOK, "topic": kafkaTopic, "events_published": atomic.LoadInt64(&kafkaEvents)},
+		"temporal":         map[string]interface{}{"connected": tOK, "host": temporalHost, "task_queue": "ndsep-dpco-audit"},
+		"keycloak":         map[string]interface{}{"connected": kcOK, "realm": keycloakRealm, "tokens_validated": atomic.LoadInt64(&tokenValidations)},
+		"permify":          map[string]interface{}{"connected": pOK, "checks": atomic.LoadInt64(&permChecks)},
+		"audits_initiated": atomic.LoadInt64(&auditsInitiated),
+		"stage_advances":   atomic.LoadInt64(&stageAdvances),
+		"middleware":       []string{"kafka", "temporal", "keycloak", "permify", "redis"},
+		"timestamp":        time.Now().UTC(),
 	})
 }
 
@@ -357,6 +379,8 @@ func initiateAudit(w http.ResponseWriter, r *http.Request) {
 	workflowID, err := startAuditWorkflow(auditID, req.DpcoOrgID, req.OrgID, req.AuditType)
 	if err != nil {
 		logger.Printf("[Temporal] Workflow start error: %v", err)
+		http.Error(w, `{"error":"audit workflow unavailable"}`, http.StatusServiceUnavailable)
+		return
 	}
 	audit := map[string]interface{}{
 		"id":            auditID,
@@ -497,9 +521,11 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 		c := v.(map[string]interface{})
 		switch c["rating"] {
 		case "pass":
-			scored += 100; total += 100
+			scored += 100
+			total += 100
 		case "partial":
-			scored += 50; total += 100
+			scored += 50
+			total += 100
 		case "fail":
 			total += 100
 		}
@@ -528,13 +554,13 @@ func metrics(w http.ResponseWriter, r *http.Request) {
 	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"total_audits":     total,
-		"audits_initiated": atomic.LoadInt64(&auditsInitiated),
-		"stage_advances":   atomic.LoadInt64(&stageAdvances),
-		"kafka_events":     atomic.LoadInt64(&kafkaEvents),
+		"total_audits":      total,
+		"audits_initiated":  atomic.LoadInt64(&auditsInitiated),
+		"stage_advances":    atomic.LoadInt64(&stageAdvances),
+		"kafka_events":      atomic.LoadInt64(&kafkaEvents),
 		"token_validations": atomic.LoadInt64(&tokenValidations),
-		"perm_checks":      atomic.LoadInt64(&permChecks),
-		"by_stage":         stageCount,
+		"perm_checks":       atomic.LoadInt64(&permChecks),
+		"by_stage":          stageCount,
 	})
 }
 
