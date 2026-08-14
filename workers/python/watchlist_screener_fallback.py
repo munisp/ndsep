@@ -276,12 +276,14 @@ def screen_entity(
         metrics["screens_total"] += 1
         metrics["last_screen_at"] = datetime.now(timezone.utc).isoformat()
 
-    except ImportError:
-        logger.warning("psycopg2 not available - running in mock mode")
-        result["mock"] = True
+    except ImportError as e:
+        logger.error("psycopg2 is required for authoritative watchlist screening")
+        metrics["db_errors"] += 1
+        raise RuntimeError("authoritative watchlist screening is unavailable") from e
     except Exception as e:
         logger.error(f"DB error during screening: {e}")
         metrics["db_errors"] += 1
+        raise RuntimeError("authoritative watchlist screening failed") from e
 
     return result
 
