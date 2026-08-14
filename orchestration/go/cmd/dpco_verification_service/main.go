@@ -66,6 +66,7 @@ var (
 	permifyEnabled  = getenv("PERMIFY_ENABLED", "true") == "true"
 	certPath        = getenv("NDSEP_CERT_PATH", "./certs/ndsep-signing.crt")
 	keyPath         = getenv("NDSEP_KEY_PATH", "./certs/ndsep-signing.key")
+	dbURL           = os.Getenv("DATABASE_URL")
 )
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -79,7 +80,7 @@ var (
 	permifyOK      bool
 	signingKey     *rsa.PrivateKey
 	signingCert    *x509.Certificate
-	statementStore = make(map[string]map[string]interface{})
+
 	// Metrics
 	statementsCreated int64
 	statementsSigned  int64
@@ -302,8 +303,14 @@ func health(w http.ResponseWriter, r *http.Request) {
 	kOK := kafkaOK
 	tOK := temporalOK
 	pOK := permifyOK
-	total := len(statementStore)
 	mu.RUnlock()
+	statements, err := listStatementRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List verification statements for health failed: %v", err)
+		http.Error(w, `{"error":"durable verification storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	total := len(statements)
 	certInfo := map[string]interface{}{"loaded": signingKey != nil}
 	if signingCert != nil {
 		certInfo["subject"] = signingCert.Subject.CommonName
@@ -367,9 +374,11 @@ func createStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	statement["workflow_id"] = wfID
-	mu.Lock()
-	statementStore[id] = statement
-	mu.Unlock()
+	if err := saveStatementRecord(r.Context(), id, statement); err != nil {
+		logger.Printf("[Storage] Persist verification statement failed: %v", err)
+		http.Error(w, `{"error":"durable verification storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&statementsCreated, 1)
 	if err := publishKafka("dpco.verification.created", map[string]interface{}{
 		"statement_id": id, "ref_number": refNumber,
@@ -395,11 +404,10 @@ func signStatement(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"forbidden: dpco licence required to sign"}`, http.StatusForbidden)
 		return
 	}
-	mu.Lock()
-	stmt, ok := statementStore[id]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"statement not found"}`, http.StatusNotFound)
+	stmt, err := loadStatementRecord(r.Context(), id)
+	if err != nil {
+		logger.Printf("[Storage] Load verification statement failed: %v", err)
+		http.Error(w, `{"error":"statement not found or durable verification storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	// Build canonical content for signing
@@ -408,7 +416,6 @@ func signStatement(w http.ResponseWriter, r *http.Request) {
 		stmt["compliance_score"], stmt["audit_type"])
 	sig, digest, err := signContent(content)
 	if err != nil {
-		mu.Unlock()
 		logger.Printf("[Signing] Error: %v", err)
 		http.Error(w, `{"error":"signing failed"}`, http.StatusInternalServerError)
 		return
@@ -424,8 +431,11 @@ func signStatement(w http.ResponseWriter, r *http.Request) {
 		stmt["cert_serial"] = signingCert.SerialNumber.String()
 		stmt["cert_valid_until"] = signingCert.NotAfter.Format("2006-01-02")
 	}
-	statementStore[id] = stmt
-	mu.Unlock()
+	if err := saveStatementRecord(r.Context(), id, stmt); err != nil {
+		logger.Printf("[Storage] Persist signed statement failed: %v", err)
+		http.Error(w, `{"error":"durable verification storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&statementsSigned, 1)
 	if err := publishKafka("dpco.verification.signed", map[string]interface{}{
 		"statement_id": id, "ref_number": stmt["ref_number"],
@@ -446,22 +456,23 @@ func signStatement(w http.ResponseWriter, r *http.Request) {
 func issueStatement(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
-	mu.Lock()
-	stmt, ok := statementStore[id]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"statement not found"}`, http.StatusNotFound)
+	stmt, err := loadStatementRecord(r.Context(), id)
+	if err != nil {
+		logger.Printf("[Storage] Load verification statement failed: %v", err)
+		http.Error(w, `{"error":"statement not found or durable verification storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	if stmt["status"] != "signed" {
-		mu.Unlock()
 		http.Error(w, `{"error":"statement must be signed before issuing"}`, http.StatusBadRequest)
 		return
 	}
 	stmt["status"] = "issued"
 	stmt["issued_at"] = time.Now().UTC()
-	statementStore[id] = stmt
-	mu.Unlock()
+	if err := saveStatementRecord(r.Context(), id, stmt); err != nil {
+		logger.Printf("[Storage] Persist issued statement failed: %v", err)
+		http.Error(w, `{"error":"durable verification storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&statementsIssued, 1)
 	if err := publishKafka("dpco.verification.issued", map[string]interface{}{
 		"statement_id": id, "ref_number": stmt["ref_number"],
@@ -477,12 +488,12 @@ func issueStatement(w http.ResponseWriter, r *http.Request) {
 }
 
 func listStatements(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	result := make([]map[string]interface{}, 0, len(statementStore))
-	for _, s := range statementStore {
-		result = append(result, s)
+	result, err := listStatementRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List verification statements failed: %v", err)
+		http.Error(w, `{"error":"durable verification storage unavailable"}`, http.StatusServiceUnavailable)
+		return
 	}
-	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"statements": result, "total": len(result)})
 }
@@ -490,11 +501,10 @@ func listStatements(w http.ResponseWriter, r *http.Request) {
 func getStatement(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
-	mu.RLock()
-	stmt, ok := statementStore[id]
-	mu.RUnlock()
-	if !ok {
-		http.Error(w, `{"error":"statement not found"}`, http.StatusNotFound)
+	stmt, err := loadStatementRecord(r.Context(), id)
+	if err != nil {
+		logger.Printf("[Storage] Load verification statement failed: %v", err)
+		http.Error(w, `{"error":"statement not found or durable verification storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -502,15 +512,19 @@ func getStatement(w http.ResponseWriter, r *http.Request) {
 }
 
 func metrics(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	total := len(statementStore)
+	statements, err := listStatementRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List verification statements for metrics failed: %v", err)
+		http.Error(w, `{"error":"durable verification storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	total := len(statements)
 	byStatus := make(map[string]int)
-	for _, s := range statementStore {
+	for _, s := range statements {
 		if st, ok := s["status"].(string); ok {
 			byStatus[st]++
 		}
 	}
-	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"total_statements": total, "by_status": byStatus,
@@ -525,6 +539,10 @@ func metrics(w http.ResponseWriter, r *http.Request) {
 func main() {
 	logger.Printf("DPCO Verification Service starting on port %s", port)
 	logger.Printf("Middleware: Kafka=%v Temporal=%v Permify=%v PKCS7-Signing=true", kafkaEnabled, temporalEnabled, permifyEnabled)
+	if err := initVerificationStore(context.Background()); err != nil {
+		logger.Fatalf("Durable verification storage unavailable: %v", err)
+	}
+	defer closeVerificationStore()
 
 	initSigningKey()
 	initKafka()
