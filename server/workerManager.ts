@@ -558,7 +558,7 @@ export const WORKER_DEFS: WorkerDef[] = [
     port: 8130,
     env: {
       APISIX_ADMIN_URL: process.env.APISIX_ADMIN_URL ?? "http://localhost:9180",
-      APISIX_ADMIN_KEY: process.env.APISIX_ADMIN_KEY ?? "CHANGE_ME_IN_PRODUCTION",
+      APISIX_ADMIN_KEY: process.env.APISIX_ADMIN_KEY ?? "",
       APISIX_ENABLED: process.env.APISIX_ENABLED ?? "true",
     },
     description: "Syncs 30 NDSEP journey routes to APISIX Admin API v3. Graceful degradation to in-memory registry when APISIX is unreachable.",
