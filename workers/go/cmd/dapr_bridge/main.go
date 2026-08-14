@@ -26,7 +26,7 @@ var (
 	STATE_STORE     = getEnv("DAPR_STATE_STORE", "ndsep-statestore")
 	KAFKA_BROKER    = getEnv("KAFKA_BROKER", "localhost:9092")
 	REDIS_URL       = getEnv("REDIS_URL", "redis://localhost:6379")
-	PG_URL          = getEnv("DATABASE_URL", "postgresql://ndsep_user:CHANGE_ME_IN_PRODUCTION@localhost:5432/ndsep_db")
+		PG_URL          = os.Getenv("DATABASE_URL")
 )
 
 func getEnv(key, fallback string) string {
@@ -111,9 +111,7 @@ func daprPublish(pubsub, topic string, payload interface{}) error {
 	reqWithBody.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(reqWithBody)
 	if err != nil {
-		// Dapr not running — log and continue (graceful degradation)
-		log.Printf("[DaprBridge] Dapr publish degraded (Dapr not running): topic=%s err=%v", topic, err)
-		return nil
+		return fmt.Errorf("Dapr publish unavailable for topic %s: %w", topic, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
