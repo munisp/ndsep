@@ -1,0 +1,97 @@
+{
+  "version": "2026-07-20",
+  "platform": "idlr-pts-permitting",
+  "services": [
+    {
+      "id": "typescript-orchestrator",
+      "language": "typescript",
+      "endpoint": "/api/permitting",
+      "publishes": ["permit.case.updated", "permit.obligation.risk", "permit.parity.updated"],
+      "consumes": ["review.completed", "payment.settled", "policy.decision.issued"]
+    },
+    {
+      "id": "go-event-gateway",
+      "language": "go",
+      "endpoint": "/services/go/events",
+      "publishes": ["review.completed", "payment.settled", "notification.dispatch.requested"],
+      "consumes": ["permit.case.updated", "permit.obligation.risk"]
+    },
+    {
+      "id": "python-compliance-api",
+      "language": "python",
+      "endpoint": "/services/python/compliance",
+      "publishes": ["compliance.score.updated", "document.extraction.completed"],
+      "consumes": ["permit.case.updated", "document.uploaded"]
+    },
+    {
+      "id": "rust-policy-engine",
+      "language": "rust",
+      "endpoint": "/services/rust/policy",
+      "publishes": ["policy.decision.issued"],
+      "consumes": ["permit.case.updated", "agency.assignment.changed"]
+    }
+  ],
+  "middleware": [
+    {
+      "key": "kafka",
+      "purpose": "Event backbone for permit lifecycle and review completion events"
+    },
+    {
+      "key": "temporal",
+      "purpose": "Durable workflow coordination for long-running agency reviews"
+    },
+    {
+      "key": "keycloak",
+      "purpose": "Identity federation for applicants, regulators, and external reviewers"
+    },
+    {
+      "key": "permify",
+      "purpose": "Fine-grained authorization for cross-agency case access"
+    },
+    {
+      "key": "redis",
+      "purpose": "Caching, replay coordination, and notification fan-out"
+    },
+    {
+      "key": "apisix",
+      "purpose": "Ingress, service routing, and policy enforcement"
+    },
+    {
+      "key": "tigerbeetle",
+      "purpose": "Permit fee ledger and inter-agency settlement"
+    },
+    {
+      "key": "lakehouse",
+      "purpose": "Analytics, reporting, and ML feature preparation"
+    }
+  ],
+  "events": [
+    {
+      "name": "permit.case.updated",
+      "schema": {
+        "caseId": "string",
+        "sector": "string",
+        "stage": "string",
+        "updatedAt": "iso8601"
+      }
+    },
+    {
+      "name": "review.completed",
+      "schema": {
+        "caseId": "string",
+        "agencyId": "string",
+        "decision": "approved|needs_changes|rejected",
+        "completedAt": "iso8601"
+      }
+    },
+    {
+      "name": "policy.decision.issued",
+      "schema": {
+        "caseId": "string",
+        "subject": "string",
+        "allowed": "boolean",
+        "traceId": "string"
+      }
+    }
+  ]
+}

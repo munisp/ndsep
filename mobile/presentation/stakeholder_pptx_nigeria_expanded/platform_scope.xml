@@ -1,0 +1,31 @@
+<slide id="platform_scope">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="860" height="46" font="heading" size="30" color="ink" wrap="false">What the platform actually is</text>
+  <text id="subtitle" x="58" y="86" width="1020" height="28" font="body" size="16" color="muted">The platform combines place, process, documents, field operations, trust controls, and leadership visibility in one operating environment.</text>
+  <shape id="diagram-frame" type="rect" x="58" y="132" width="470" height="380" fill="surface" stroke="border" stroke-width="1"/>
+  <image id="value-diagram" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784580151702_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL3BsYXRmb3JtX3ZhbHVlX2Zsb3c.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODAxNTE3MDJfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwzQnNZWFJtYjNKdFgzWmhiSFZsWDJac2IzYy5wbmc~eC1vc3MtcHJvY2Vzcz1pbWFnZS9yZXNpemUsd18xNTYwLGhfMTU2MC9mb3JtYXQsd2VicCIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc4Njc1MjAwMH19fV19&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEUCIQCO6NL0ARM5tYOY2pr1~F~8lxFXRXXRTd2c7bMzjDm4SwIgK-YWMX3MaUw7PweD4KtRL4oaDCpRyt~JHQIRepVzxQk_" x="76" y="154" width="434" height="336" fit="contain"/>
+  <text id="diagram-caption" x="74" y="494" width="438" height="26" font="caption" size="12" color="muted" align="center">Stakeholder value flow from intake and parcel context to delivery, trust, and economic impact</text>
+  <shape id="card-1" type="rect" x="558" y="132" width="314" height="110" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="card-1-title" x="578" y="152" width="274" height="26" font="body" size="19" color="ink"><p><strong>Land and parcel intelligence</strong></p></text>
+  <text id="card-1-copy" x="578" y="182" width="274" height="46" font="body" size="15" color="muted" line-height="1.3">Links permits, parcels, title status, risk, location context, and geospatial readiness.</text>
+  <shape id="card-2" type="rect" x="892" y="132" width="330" height="110" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="card-2-title" x="912" y="152" width="290" height="26" font="body" size="19" color="ink"><p><strong>Permit and approval orchestration</strong></p></text>
+  <text id="card-2-copy" x="912" y="182" width="290" height="46" font="body" size="15" color="muted" line-height="1.3">Runs intake, review, handoffs, escalation, issuance, and active monitoring across sectors.</text>
+  <shape id="card-3" type="rect" x="558" y="262" width="314" height="110" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="card-3-title" x="578" y="282" width="274" height="26" font="body" size="19" color="ink"><p><strong>Field and inspection operations</strong></p></text>
+  <text id="card-3-copy" x="578" y="312" width="274" height="46" font="body" size="15" color="muted" line-height="1.3">Supports missions, low-connectivity workflows, secure offline cache, replay, and geofence signals.</text>
+  <shape id="card-4" type="rect" x="892" y="262" width="330" height="110" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="card-4-title" x="912" y="282" width="290" height="26" font="body" size="19" color="ink"><p><strong>AI and document intelligence</strong></p></text>
+  <text id="card-4-copy" x="912" y="312" width="290" height="46" font="body" size="15" color="muted" line-height="1.3">Parses PDFs and images, prefills forms, summarizes alerts, and keeps reviewer verification in place.</text>
+  <shape id="card-5" type="rect" x="558" y="392" width="314" height="110" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="card-5-title" x="578" y="412" width="274" height="26" font="body" size="19" color="ink"><p><strong>Audit and trust controls</strong></p></text>
+  <text id="card-5-copy" x="578" y="442" width="274" height="46" font="body" size="15" color="muted" line-height="1.3">Creates signed audit packages, public verification, custody history, and secure download pathways.</text>
+  <shape id="card-6" type="rect" x="892" y="392" width="330" height="110" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="card-6-title" x="912" y="412" width="290" height="26" font="body" size="19" color="ink"><p><strong>Leadership and supervisor dashboards</strong></p></text>
+  <text id="card-6-copy" x="912" y="442" width="290" height="46" font="body" size="15" color="muted" line-height="1.3">Surfaces queue pressure, reminders, escalations, reassignment patterns, and stakeholder-specific views.</text>
+  <shape id="closing-band" type="rect" x="58" y="546" width="1164" height="74" fill="#F8FAFC" stroke="border" stroke-width="1"/>
+  <text id="closing" x="84" y="566" width="1112" height="34" font="body" size="19" color="ink" anchor="middle">The platform is therefore best understood as a Nigeria-ready public delivery backbone, not only as a permit interface.</text>
+  <text id="footer" x="58" y="686" width="540" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform • Nigeria stakeholder deck</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">3</text>
+</slide>

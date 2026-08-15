@@ -1,0 +1,14 @@
+<design>
+  <size width="1280" height="720"></size>
+  <color name="primary" value="#008751"/>
+  <color name="ink" value="#0F172A"/>
+  <color name="muted" value="#64748B"/>
+  <color name="paper" value="#FFFFFF"/>
+  <color name="surface" value="#F8FAFC"/>
+  <color name="hairline" value="#E2E8F0"/>
+  <color name="accent" value="#0284C7"/>
+  <font name="display" family="Inter" size="48"/>
+  <font name="heading" family="Inter" size="32"/>
+  <font name="body" family="Inter" size="18"/>
+  <font name="caption" family="Inter" size="14"/>
+</design>

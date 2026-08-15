@@ -1,0 +1,28 @@
+<slide id="operations_dashboard">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="40" width="4" height="620" fill="hairline"/>
+  <text id="title" x="86" y="52" width="820" height="46" font="heading" size="30" color="ink" wrap="false">Operational depth, not just a dashboard</text>
+  <text id="subtitle" x="86" y="102" width="1070" height="48" font="body" size="20" color="muted" line-height="1.3"><p>This real seeded view shows how queue risk, due reminders, SLA stress, and supervisor exceptions are surfaced in one operational workspace.</p></text>
+
+  <shape id="shot-frame" type="rect" x="86" y="166" width="780" height="490" fill="surface" stroke="hairline" stroke-width="1"/>
+  <image id="permits-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784577971456_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL3Blcm1pdHNfc2VlZGVkX3Yz.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1Nzc5NzE0NTZfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwzQmxjbTFwZEhOZmMyVmxaR1ZrWDNZei5wbmc~eC1vc3MtcHJvY2Vzcz1pbWFnZS9yZXNpemUsd18xNTYwLGhfMTU2MC9mb3JtYXQsd2VicCIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc4Njc1MjAwMH19fV19&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEQCIAj3bCFYtkCjBbxD1Q2BywcWNR7nwS4M8NhWjbI9EZ7qAiAdFPGAuGCqtpWoZsryTHww3EypEaQojfDTotsmEufGCA__" x="98" y="178" width="756" height="466" fit="contain"/>
+
+  <shape id="ops-card-1" type="rect" x="892" y="176" width="302" height="106" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="ops-card-1-title" x="914" y="194" width="236" height="24" font="body" size="19" color="ink" wrap="false"><strong>Queue visibility</strong></text>
+  <text id="ops-card-1-body" x="914" y="228" width="252" height="42" font="body" size="16" color="muted" line-height="1.35"><p>Agency and role filters reveal exactly where work is accumulating.</p></text>
+
+  <shape id="ops-card-2" type="rect" x="892" y="300" width="302" height="106" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="ops-card-2-title" x="914" y="318" width="236" height="24" font="body" size="19" color="ink" wrap="false"><strong>Reminder-driven urgency</strong></text>
+  <text id="ops-card-2-body" x="914" y="352" width="252" height="42" font="body" size="16" color="muted" line-height="1.35"><p>Near-due handoffs are surfaced before they become missed escalations.</p></text>
+
+  <shape id="ops-card-3" type="rect" x="892" y="424" width="302" height="106" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="ops-card-3-title" x="914" y="442" width="236" height="24" font="body" size="19" color="ink" wrap="false"><strong>SLA pressure signals</strong></text>
+  <text id="ops-card-3-body" x="914" y="476" width="252" height="42" font="body" size="16" color="muted" line-height="1.35"><p>Warning states draw attention to permits approaching their deadline thresholds.</p></text>
+
+  <shape id="ops-card-4" type="rect" x="892" y="548" width="302" height="106" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="ops-card-4-title" x="914" y="566" width="236" height="24" font="body" size="19" color="ink" wrap="false"><strong>Supervisor exception view</strong></text>
+  <text id="ops-card-4-body" x="914" y="600" width="252" height="42" font="body" size="16" color="muted" line-height="1.35"><p>Escalation and reassignment analytics expose workflow bottlenecks across agencies.</p></text>
+
+  <text id="footer" x="70" y="684" width="520" height="18" font="caption" size="14" color="muted" wrap="false">IDLR-PTS Platform | Stakeholder PowerPoint deck</text>
+  <text id="page-number" x="1210" y="684" width="24" height="18" font="caption" size="14" color="muted" align="right" wrap="false">8</text>
+</slide>

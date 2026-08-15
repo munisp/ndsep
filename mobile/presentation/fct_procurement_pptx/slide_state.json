@@ -1,0 +1,100 @@
+{
+  "project_info": {
+    "title": "FCT procurement cover",
+    "created": 1784583810.904,
+    "last_updated": 1784584387.376,
+    "total_slides": 8
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "fct_context",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "fct_geospatial",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "fct_titles",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "fct_field",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "fct_ai",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "fct_revenue",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "fct_rollout",
+      "state": "edited",
+      "pageNum": 8
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "FCT procurement cover",
+      "summary": "Introduce the FCT-focused procurement-grade platform for land administration, statutory rights of occupancy, mass-housing title continuity, parcel intelligence, and revenue assurance.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "fct_context",
+      "title": "FCT service and land-governance challenge",
+      "summary": "Frame FCT-specific challenges around AGIS-backed land administration, regularisation, mass-housing titling, and capital-region service trust.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "fct_geospatial",
+      "title": "FCT geospatial and parcel intelligence",
+      "summary": "Show the true web parcel map and explain how parcel intelligence, corridor overlays, and desk-based geospatial review support FCT land decisions.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "fct_titles",
+      "title": "FCT titling and legal workflow continuity",
+      "summary": "Present how the platform improves visibility across statutory rights of occupancy, mass-housing titling, verification, and regularisation workflows.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "fct_field",
+      "title": "FCT field and oversight operations",
+      "summary": "Show low-connectivity field execution, evidence continuity, and corridor-sensitive review for oversight teams and area-council regularisation work.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "fct_ai",
+      "title": "FCT AI-assisted intake and document control",
+      "summary": "Explain how AI document extraction and human verification improve title-processing throughput and reduce manual bottlenecks.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "fct_revenue",
+      "title": "FCT governance signals and revenue assurance",
+      "summary": "Show how FCT gains from better traceability, reduced opacity, stronger obligation visibility, and improved investor confidence.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "fct_rollout",
+      "title": "FCT procurement and rollout path",
+      "summary": "Close with a phased FCT implementation path built around titling regularisation, desk oversight, geospatial review, and auditable governance controls.",
+      "image_plan": "Use a suitable image if needed"
+    }
+  ]
+}

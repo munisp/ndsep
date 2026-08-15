@@ -1,0 +1,35 @@
+<slide id="trust">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="940" height="46" font="heading" size="30" color="ink" wrap="false">Audit integrity and verification</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="30" font="body" size="16" color="muted">Trust matters when land rights, approvals, extractives decisions, and public accountability can all be challenged. The platform therefore treats audit integrity as a core operating layer.</text>
+  <shape id="step1" type="rect" x="58" y="156" width="250" height="170" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step1t" x="80" y="182" width="206" height="24" font="body" size="20" color="ink"><p><strong>1. Workflow action</strong></p></text>
+  <text id="step1c" x="80" y="220" width="206" height="82" font="body" size="16" color="muted" line-height="1.35">Case actions, approvals, overrides, evidence handling, and handoffs are captured with actor and timing context.</text>
+  <shape id="arrow1" type="chevron" x="324" y="218" width="40" height="42" fill="brand"/>
+  <shape id="step2" type="rect" x="380" y="156" width="250" height="170" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step2t" x="402" y="182" width="206" height="24" font="body" size="20" color="ink"><p><strong>2. Signed package</strong></p></text>
+  <text id="step2c" x="402" y="220" width="206" height="82" font="body" size="16" color="muted" line-height="1.35">Audit records can be exported as signed packages with tamper-evident hash metadata and downloadable trust artifacts.</text>
+  <shape id="arrow2" type="chevron" x="646" y="218" width="40" height="42" fill="brand"/>
+  <shape id="step3" type="rect" x="702" y="156" width="250" height="170" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step3t" x="724" y="182" width="206" height="24" font="body" size="20" color="ink"><p><strong>3. Verification</strong></p></text>
+  <text id="step3c" x="724" y="220" width="206" height="82" font="body" size="16" color="muted" line-height="1.35">Public-key verification helps internal or external parties validate that shared audit material has not been altered.</text>
+  <shape id="arrow3" type="chevron" x="968" y="218" width="40" height="42" fill="brand"/>
+  <shape id="step4" type="rect" x="1024" y="156" width="198" height="170" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step4t" x="1044" y="182" width="158" height="24" font="body" size="20" color="ink"><p><strong>4. Defensible trust</strong></p></text>
+  <text id="step4c" x="1044" y="220" width="158" height="82" font="body" size="16" color="muted" line-height="1.35">Procurement, legal, oversight, and market stakeholders can rely on a clearer integrity trail.</text>
+  <shape id="b1" type="rect" x="58" y="420" width="270" height="140" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="b1t" x="82" y="446" width="222" height="22" font="body" size="18" color="ink"><p><strong>Signing-key rotation</strong></p></text>
+  <text id="b1c" x="82" y="478" width="222" height="52" font="body" size="15" color="muted" line-height="1.35">Supports longer-term operational security instead of relying on one static trust key forever.</text>
+  <shape id="b2" type="rect" x="354" y="420" width="270" height="140" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="b2t" x="378" y="446" width="222" height="22" font="body" size="18" color="ink"><p><strong>Revocation tracking</strong></p></text>
+  <text id="b2c" x="378" y="478" width="222" height="52" font="body" size="15" color="muted" line-height="1.35">Lets the platform retire compromised or superseded keys without undermining the audit-verification model.</text>
+  <shape id="b3" type="rect" x="650" y="420" width="270" height="140" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="b3t" x="674" y="446" width="222" height="22" font="body" size="18" color="ink"><p><strong>Chain of custody</strong></p></text>
+  <text id="b3c" x="674" y="478" width="222" height="52" font="body" size="15" color="muted" line-height="1.35">Shows who handled records or evidence, when they did it, and where integrity-sensitive transitions occurred.</text>
+  <shape id="b4" type="rect" x="946" y="420" width="276" height="140" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="b4t" x="970" y="446" width="228" height="22" font="body" size="18" color="ink"><p><strong>Secure offline continuity</strong></p></text>
+  <text id="b4c" x="970" y="478" width="228" height="52" font="body" size="15" color="muted" line-height="1.35">Offline audit packages can remain available to inspectors without sacrificing local encryption and access control.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">9</text>
+</slide>

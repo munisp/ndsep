@@ -1,0 +1,53 @@
+<slide id="geospatial_core">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="36" width="4" height="610" fill="hairline"/>
+  <text id="title" x="86" y="50" width="620" height="40" font="heading" size="30" color="ink" wrap="false">Geospatial and parcel intelligence are core</text>
+  <text id="subtitle" x="86" y="108" width="1040" height="52" font="body" size="20" color="muted" line-height="1.35"><p>In Nigeria, permits are not abstract files. They are decisions tied to land, corridors, sites, communities, facilities, and field events.</p></text>
+
+  <table id="geo-table" x="86" y="186" width="510" height="378" columns="2.4,3.6" rows="48,66,66,66,66,66" font="body" size="16" color="ink" padding="10 12" header-fill="brand" header-border="2 solid hairline" border-h="1 solid hairline" border-v="1 solid hairline" border-outer="1 solid hairline">
+    <tr color="paper">
+      <td><strong>Geospatial capability</strong></td>
+      <td><strong>Why it matters in Nigeria</strong></td>
+    </tr>
+    <tr>
+      <td><strong>Parcel-linked case records</strong></td>
+      <td>Keeps land, permit, title, and compliance evidence connected to one location truth.</td>
+    </tr>
+    <tr fill="mist">
+      <td><strong>Spatial-clearance stage</strong></td>
+      <td>Makes location review a visible decision gate instead of an informal back-office step.</td>
+    </tr>
+    <tr>
+      <td><strong>Location labels and asset references</strong></td>
+      <td>Supports the way agencies and operators actually refer to Nigerian sites and corridors.</td>
+    </tr>
+    <tr fill="mist">
+      <td><strong>Geofence-triggered alerts</strong></td>
+      <td>Turns field movement and parcel events into actionable workflow signals.</td>
+    </tr>
+    <tr>
+      <td><strong>Offline geofence replay</strong></td>
+      <td>Preserves site activity when connectivity is weak and reconciles it safely later.</td>
+    </tr>
+  </table>
+
+  <shape id="flow-box-1" type="rect" x="680" y="210" width="470" height="58" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="flow-box-1-text" x="706" y="227" width="418" height="24" font="strong" size="20" color="ink" wrap="false">Parcel and location context enters the case at intake</text>
+  <shape id="arrow-1" type="line" x="915" y="268" width="0" height="34" stroke="brand" stroke-width="2" arrow-end="arrow"/>
+
+  <shape id="flow-box-2" type="rect" x="680" y="302" width="470" height="58" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="flow-box-2-text" x="706" y="319" width="418" height="24" font="strong" size="20" color="ink" wrap="false">Spatial clearance becomes an explicit workflow stage</text>
+  <shape id="arrow-2" type="line" x="915" y="360" width="0" height="34" stroke="brand" stroke-width="2" arrow-end="arrow"/>
+
+  <shape id="flow-box-3" type="rect" x="680" y="394" width="470" height="58" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="flow-box-3-text" x="706" y="411" width="418" height="24" font="strong" size="20" color="ink" wrap="false">Geofence alerts and field events update operational awareness</text>
+  <shape id="arrow-3" type="line" x="915" y="452" width="0" height="34" stroke="brand" stroke-width="2" arrow-end="arrow"/>
+
+  <shape id="flow-box-4" type="rect" x="680" y="486" width="470" height="58" fill="brand" stroke="brand" stroke-width="1"/>
+  <text id="flow-box-4-text" x="706" y="503" width="418" height="24" font="strong" size="20" color="paper" wrap="false">Better land certainty, faster approvals, and safer decisions</text>
+
+  <shape id="footer-strip" type="rect" x="0" y="674" width="1280" height="46" fill="paper"/>
+  <shape id="footer-line" type="rect" x="0" y="674" width="1280" height="2" fill="brand"/>
+  <text id="footer-text" x="64" y="689" width="420" height="14" font="caption" size="13" color="muted" wrap="false">IDLR-PTS Platform | Nigeria stakeholder deck</text>
+  <text id="page-number" x="1210" y="689" width="24" height="14" font="caption" size="13" color="muted" align="right" wrap="false">5</text>
+</slide>

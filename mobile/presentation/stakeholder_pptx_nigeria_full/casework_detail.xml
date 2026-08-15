@@ -1,0 +1,30 @@
+<slide id="casework_detail">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="36" width="4" height="610" fill="hairline"/>
+  <text id="title" x="86" y="50" width="620" height="40" font="heading" size="30" color="ink" wrap="false">Casework is structured for real approvals</text>
+  <text id="subtitle" x="86" y="108" width="1038" height="44" font="body" size="20" color="muted" line-height="1.35"><p>This real seeded case shows how review ownership, permit forms, uploaded evidence, extracted data, and secure audit controls stay on one shared record.</p></text>
+
+  <shape id="screenshot-frame" type="rect" x="86" y="176" width="760" height="438" fill="paper" stroke="hairline" stroke-width="1"/>
+  <image id="permit-detail-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784579191388_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL3Blcm1pdF9kZXRhaWxfc2VlZGVkX3Yz.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1NzkxOTEzODhfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwzQmxjbTFwZEY5a1pYUmhhV3hmYzJWbFpHVmtYM1l6LnBuZz94LW9zcy1wcm9jZXNzPWltYWdlL3Jlc2l6ZSx3XzE1NjAsaF8xNTYwL2Zvcm1hdCx3ZWJwIiwiQ29uZGl0aW9uIjp7IkRhdGVMZXNzVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNzg2NzUyMDAwfX19XX0_&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEQCIG6hnJc6a-XmSx8kcjQElZ26-XlKegmDDq~A-2QGAjX2AiA4No4devohl4YhZ4zFY9ny6iyXMZB9bbFN-OTnb1S5MA__" x="98" y="188" width="736" height="414" fit="contain"/>
+
+  <shape id="card-1" type="rect" x="878" y="184" width="316" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card-1-title" x="900" y="202" width="250" height="22" font="strong" size="19" color="ink" wrap="false">Ownership and handoff</text>
+  <text id="card-1-body" x="900" y="232" width="266" height="30" font="body" size="16" color="muted" line-height="1.3"><p>Each case has explicit assignment, due time, and escalation path.</p></text>
+
+  <shape id="card-2" type="rect" x="878" y="294" width="316" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card-2-title" x="900" y="312" width="250" height="22" font="strong" size="19" color="ink" wrap="false">Structured permit forms</text>
+  <text id="card-2-body" x="900" y="342" width="266" height="30" font="body" size="16" color="muted" line-height="1.3"><p>Applicants and reviewers work on the same controlled intake structure.</p></text>
+
+  <shape id="card-3" type="rect" x="878" y="404" width="316" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card-3-title" x="900" y="422" width="250" height="22" font="strong" size="19" color="ink" wrap="false">Evidence plus AI verification</text>
+  <text id="card-3-body" x="900" y="452" width="266" height="30" font="body" size="16" color="muted" line-height="1.3"><p>Uploaded documents can be parsed and checked against extracted fields.</p></text>
+
+  <shape id="card-4" type="rect" x="878" y="514" width="316" height="92" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card-4-title" x="900" y="532" width="250" height="22" font="strong" size="19" color="ink" wrap="false">Secure final record</text>
+  <text id="card-4-body" x="900" y="562" width="266" height="30" font="body" size="16" color="muted" line-height="1.3"><p>Audit packaging, verification, and offline access are built into the same workflow.</p></text>
+
+  <shape id="footer-strip" type="rect" x="0" y="674" width="1280" height="46" fill="paper"/>
+  <shape id="footer-line" type="rect" x="0" y="674" width="1280" height="2" fill="brand"/>
+  <text id="footer-text" x="64" y="689" width="420" height="14" font="caption" size="13" color="muted" wrap="false">IDLR-PTS Platform | Nigeria stakeholder deck</text>
+  <text id="page-number" x="1210" y="689" width="24" height="14" font="caption" size="13" color="muted" align="right" wrap="false">8</text>
+</slide>

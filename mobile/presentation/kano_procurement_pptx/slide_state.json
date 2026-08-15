@@ -1,0 +1,100 @@
+{
+  "project_info": {
+    "title": "Kano procurement cover",
+    "created": 1784583852.178,
+    "last_updated": 1784584563.005,
+    "total_slides": 8
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "kano_context",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "kano_geospatial",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "kano_sltr",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "kano_field",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "kano_ai",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "kano_revenue",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "kano_rollout",
+      "state": "edited",
+      "pageNum": 8
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "Kano procurement cover",
+      "summary": "Introduce the Kano-focused procurement-grade platform for GIS-backed land administration, SLTR continuity, Certificate of Occupancy generation, and revenue modernization.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "kano_context",
+      "title": "Kano service and land-modernization challenge",
+      "summary": "Frame Kano-specific challenges around analogue records, field demarcation, title regularisation, and revenue-linked registry modernization.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "kano_geospatial",
+      "title": "Kano geospatial and parcel intelligence",
+      "summary": "Show the true web parcel map and explain how parcel intelligence, digitisation, and corridor overlays support land administration in Kano.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "kano_sltr",
+      "title": "Kano SLTR and C of O workflow continuity",
+      "summary": "Present how the platform supports SLTR-style field capture, parcel digitisation, C of O generation, and post-certificate workflow continuity.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "kano_field",
+      "title": "Kano field operations and evidence continuity",
+      "summary": "Show low-connectivity field execution, data capture, evidence photography, and verification continuity for field teams.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "kano_ai",
+      "title": "Kano AI-assisted intake and quality control",
+      "summary": "Explain how AI-assisted parsing and verification reduce manual bottlenecks while preserving officer oversight.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "kano_revenue",
+      "title": "Kano revenue modernization and post-title control",
+      "summary": "Show how Kano gains from better ground-rent visibility, post-C of O traceability, and GIS-enabled revenue assurance.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "kano_rollout",
+      "title": "Kano procurement and rollout path",
+      "summary": "Close with a phased Kano implementation path built around field operations, digitisation, registry discipline, and revenue modernization.",
+      "image_plan": "Use a suitable image if needed"
+    }
+  ]
+}

@@ -1,0 +1,750 @@
+export type PermitSector = "mining" | "oil_gas" | "multi_agency";
+export type PermitStage =
+  | "intake"
+  | "spatial_clearance"
+  | "technical_review"
+  | "environmental_review"
+  | "agency_coordination"
+  | "payment_pending"
+  | "approval"
+  | "issued"
+  | "active_monitoring";
+export type PermitPriority = "routine" | "elevated" | "critical";
+export type MiddlewareStatus = "planned" | "connected" | "degraded";
+export type ServiceLanguage = "typescript" | "python" | "go" | "rust";
+export type AgencyRole = "applicant" | "mining_reviewer" | "petroleum_reviewer" | "environment_reviewer" | "planning_supervisor";
+
+export type AgencyRecord = {
+  id: string;
+  name: string;
+  role: string;
+  jurisdiction: string;
+  reviewSlaHours: number;
+  queueDepth: number;
+  active: boolean;
+};
+
+export type AgencyUserRecord = {
+  id: string;
+  displayName: string;
+  role: AgencyRole;
+  agencyId: string | null;
+  email: string;
+  queueIds: string[];
+};
+
+export type PermitTimelineEntry = {
+  key: PermitStage;
+  label: string;
+  completed: boolean;
+  timestamp?: string;
+};
+
+export type PermitObligation = {
+  id: string;
+  title: string;
+  dueAt: string;
+  status: "pending" | "satisfied" | "at_risk";
+  owner: string;
+};
+
+export type PermitFormFieldRecord = {
+  key: string;
+  label: string;
+  value: string;
+  required: boolean;
+  fieldType: "text" | "textarea" | "number" | "date";
+  source: "manual" | "ai" | "heuristic";
+  viewableBy?: AgencyRole[];
+  editableBy?: AgencyRole[];
+};
+
+export type PermitFormSectionRecord = {
+  id: string;
+  title: string;
+  description: string;
+  fields: PermitFormFieldRecord[];
+};
+
+export type PermitReviewNoteRecord = {
+  id: string;
+  author: string;
+  role: AgencyRole;
+  agencyId: string | null;
+  decision: "comment" | "needs_changes" | "approved";
+  note: string;
+  createdAt: string;
+};
+
+export type PermitAuditEventRecord = {
+  id: string;
+  createdAt: string;
+  actor: string;
+  role: AgencyRole | "system";
+  type: "status_change" | "review_note" | "assignment" | "document_upload" | "ai_extraction";
+  summary: string;
+};
+
+export type PermitAssignmentRecord = {
+  assignedUserId: string;
+  assignedAt: string;
+  reason: string;
+  status: "active" | "accepted" | "completed";
+};
+
+export type PermitApprovalHandoffRecord = {
+  id: string;
+  fromRole: AgencyRole | "system";
+  toRole: AgencyRole;
+  startedAt: string;
+  dueAt: string;
+  status: "pending" | "accepted" | "escalated" | "completed";
+  reason: string;
+};
+
+export type PermitAuditPackageRecord = {
+  generatedAt: string;
+  format: "csv" | "pdf" | "markdown";
+  fileName: string;
+  sha256: string;
+  signature: string;
+  signedBy: string;
+  algorithm?: string;
+  publicKeyId?: string;
+  verifierHint: string;
+  signingStatus?: "configured" | "unavailable";
+};
+
+export type AuditSigningKeyRecord = {
+  keyId: string;
+  algorithm: "RSA-SHA256";
+  publicKeyPem: string;
+  createdAt: string;
+  active: boolean;
+  revokedAt?: string;
+  revocationReason?: string;
+};
+
+export type PermitCustodyEventRecord = {
+  id: string;
+  packageType: "audit" | "evidence";
+  packageRef: string;
+  occurredAt: string;
+  actor: string;
+  role: AgencyRole | "system";
+  action: "generated" | "downloaded" | "uploaded" | "verified" | "reassigned" | "revoked";
+  summary: string;
+};
+
+export type PermitReminderRecord = {
+  id: string;
+  caseId: string;
+  handoffId: string;
+  role: AgencyRole;
+  reminderAt: string;
+  dueAt: string;
+  severity: "info" | "warning" | "critical";
+  status: "scheduled" | "triggered" | "dismissed";
+  summary: string;
+};
+
+export type AIExtractionResultRecord = {
+  documentName: string;
+  extractedAt: string;
+  model: string | null;
+  populatedKeys: string[];
+  sourceType?: "text" | "image" | "pdf";
+  confidence?: number | null;
+  provenance?: "model" | "heuristic" | "unavailable";
+  status?: "processed" | "requires_review" | "unavailable" | "failed";
+  reason?: string | null;
+};
+
+export type PermitUploadedDocumentRecord = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  storagePath: string;
+  publicUrl: string;
+  uploadedAt: string;
+  uploadedByRole: AgencyRole;
+  extractedTextPreview: string;
+  extractionStatus: "pending" | "processed" | "requires_review" | "unavailable" | "failed";
+};
+
+export type ApprovalQueueRecord = {
+  id: string;
+  agencyId: string;
+  role: AgencyRole;
+  title: string;
+  description: string;
+  caseIds: string[];
+  pendingCount: number;
+  overdueCount: number;
+  avgSlaHours?: number;
+  breachedCaseIds?: string[];
+};
+
+export type QueueAnalyticsRecord = {
+  agencyId: string;
+  role: AgencyRole;
+  pendingCount: number;
+  overdueCount: number;
+  avgSlaHours: number;
+  breachedCaseIds: string[];
+  criticalCaseIds: string[];
+};
+
+export type SupervisorExceptionAnalyticsRecord = {
+  agencyId: string;
+  escalatedCount: number;
+  reassignmentCount: number;
+  avgHoursToAssignment: number;
+  atRiskCaseIds: string[];
+};
+
+export type SupervisorDigestRecord = {
+  id: string;
+  agencyId: string;
+  generatedAt: string;
+  channel: "email" | "in_app";
+  subject: string;
+  summary: string;
+  backlogCount: number;
+  overdueHandoffs: number;
+};
+
+export type PermitCaseRecord = {
+  id: string;
+  sector: PermitSector;
+  permitType: string;
+  title: string;
+  applicantName: string;
+  locationLabel: string;
+  assetReference: string;
+  stage: PermitStage;
+  priority: PermitPriority;
+  leadAgencyId: string;
+  participatingAgencyIds: string[];
+  updatedAt: string;
+  summary: string;
+  timeline: PermitTimelineEntry[];
+  obligations: PermitObligation[];
+  formSections: PermitFormSectionRecord[];
+  reviewNotes: PermitReviewNoteRecord[];
+  auditHistory?: PermitAuditEventRecord[];
+  activeAssignment?: PermitAssignmentRecord | null;
+  approvalHandoffs?: PermitApprovalHandoffRecord[];
+  latestAuditPackage?: PermitAuditPackageRecord | null;
+  custodyTimeline?: PermitCustodyEventRecord[];
+  lastAiExtraction: AIExtractionResultRecord | null;
+  uploadedDocuments?: PermitUploadedDocumentRecord[];
+};
+
+export type MiddlewareComponentRecord = {
+  key: string;
+  name: string;
+  purpose: string;
+  status: MiddlewareStatus;
+  ownerService: string;
+};
+
+export type ServiceTopologyRecord = {
+  id: string;
+  name: string;
+  language: ServiceLanguage;
+  responsibility: string;
+  runtimeMode: "webdev_backend" | "external_service" | "reserved_worker";
+  endpointPath: string;
+  health: "healthy" | "warning";
+  middlewareKeys: string[];
+};
+
+export type ProductParityRecord = {
+  surface: "native_mobile" | "pwa";
+  score: number;
+  strengths: string[];
+  nextFocus: string;
+};
+
+export type PermittingPlatformSnapshot = {
+  agencies: AgencyRecord[];
+  agencyUsers: AgencyUserRecord[];
+  activeAgencyUserId: string;
+  permitCases: PermitCaseRecord[];
+  approvalQueues: ApprovalQueueRecord[];
+  queueAnalytics?: QueueAnalyticsRecord[];
+  reminderQueue?: PermitReminderRecord[];
+  supervisorExceptionAnalytics?: SupervisorExceptionAnalyticsRecord[];
+  signingKeys?: AuditSigningKeyRecord[];
+  supervisorDigests?: SupervisorDigestRecord[];
+  middleware: MiddlewareComponentRecord[];
+  services: ServiceTopologyRecord[];
+  parity: ProductParityRecord[];
+};
+
+const orderedStages: Array<{ key: PermitStage; label: string }> = [
+  { key: "intake", label: "Unified intake" },
+  { key: "spatial_clearance", label: "Spatial clearance" },
+  { key: "technical_review", label: "Technical review" },
+  { key: "environmental_review", label: "Environmental review" },
+  { key: "agency_coordination", label: "Agency coordination" },
+  { key: "payment_pending", label: "Payment confirmation" },
+  { key: "approval", label: "Approval decision" },
+  { key: "issued", label: "Permit issued" },
+  { key: "active_monitoring", label: "Active monitoring" },
+];
+
+function buildTimeline(stage: PermitStage, updatedAt: string) {
+  const rank = orderedStages.findIndex((item) => item.key === stage);
+  return orderedStages.map((item, index) => ({
+    key: item.key,
+    label: item.label,
+    completed: index <= rank,
+    timestamp: index <= rank ? updatedAt : undefined,
+  } satisfies PermitTimelineEntry));
+}
+
+function miningFormSections(): PermitFormSectionRecord[] {
+  return [
+    {
+      id: "mining-applicant",
+      title: "Applicant profile",
+      description: "Corporate identity, licence references, and applicant contacts.",
+      fields: [
+        { key: "company_name", label: "Company name", value: "Plateau Critical Minerals Ltd", required: true, fieldType: "text", source: "manual" },
+        { key: "mineral_type", label: "Mineral commodity", value: "Lithium", required: true, fieldType: "text", source: "manual" },
+        { key: "cadastre_units", label: "Cadastre units", value: "144", required: true, fieldType: "number", source: "manual" },
+        { key: "contact_email", label: "Contact email", value: "permits@plateauminerals.ng", required: true, fieldType: "text", source: "manual" },
+      ],
+    },
+    {
+      id: "mining-work-programme",
+      title: "Work programme and compliance",
+      description: "Operational programme, landowner consent, and capability evidence.",
+      fields: [
+        { key: "work_programme_summary", label: "Work programme summary", value: "Phase 1 mapping and trenching across the northern concession boundary.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "financial_capability", label: "Financial capability evidence", value: "Bank guarantee and audited reserves available.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "landowner_consent", label: "Landowner consent status", value: "Attached with sworn affidavit", required: true, fieldType: "text", source: "manual" },
+      ],
+    },
+  ];
+}
+
+function oilGasFormSections(): PermitFormSectionRecord[] {
+  return [
+    {
+      id: "petroleum-asset",
+      title: "Asset and operator profile",
+      description: "Operator details, block reference, and well or facility identifiers.",
+      fields: [
+        { key: "operator_name", label: "Operator name", value: "Delta Frontier Energy", required: true, fieldType: "text", source: "manual" },
+        { key: "block_reference", label: "Block reference", value: "OML-118", required: true, fieldType: "text", source: "manual" },
+        { key: "well_identifier", label: "Well identifier", value: "WELL-DFE-A7", required: true, fieldType: "text", source: "manual" },
+        { key: "operation_type", label: "Operation type", value: "Appraisal well workover and drilling approval", required: true, fieldType: "textarea", source: "manual" },
+      ],
+    },
+    {
+      id: "petroleum-hse",
+      title: "HSE and environmental controls",
+      description: "Mitigation measures, abandonment security, and spill response readiness.",
+      fields: [
+        { key: "spill_response_plan", label: "Spill response plan", value: "Revision pending environmental review.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "abandonment_security", label: "Abandonment security", value: "Bond draft submitted to regulator.", required: true, fieldType: "textarea", source: "manual" },
+        { key: "local_approvals", label: "Local approvals", value: "Marine infrastructure dependency cleared.", required: true, fieldType: "textarea", source: "manual" },
+      ],
+    },
+  ];
+}
+
+export const seedPermittingPlatform: PermittingPlatformSnapshot = {
+  agencies: [
+    {
+      id: "mining-cadastre",
+      name: "Mining Cadastre Office",
+      role: "Mineral title administration and cadastre validation",
+      jurisdiction: "National",
+      reviewSlaHours: 72,
+      queueDepth: 18,
+      active: true,
+    },
+    {
+      id: "petroleum-regulator",
+      name: "Petroleum Licensing Authority",
+      role: "Operator licensing, drilling approvals, and abandonment oversight",
+      jurisdiction: "National",
+      reviewSlaHours: 96,
+      queueDepth: 11,
+      active: true,
+    },
+    {
+      id: "environment-agency",
+      name: "Environmental Compliance Agency",
+      role: "EIA, mitigation, and environmental condition review",
+      jurisdiction: "Federal and state",
+      reviewSlaHours: 120,
+      queueDepth: 24,
+      active: true,
+    },
+    {
+      id: "planning-authority",
+      name: "Regional Planning and Infrastructure Authority",
+      role: "Land-use conformity, rights-of-way, and cross-agency coordination",
+      jurisdiction: "Regional",
+      reviewSlaHours: 48,
+      queueDepth: 9,
+      active: true,
+    },
+  ],
+  agencyUsers: [
+    {
+      id: "user-applicant-1",
+      displayName: "Binta Abdul",
+      role: "applicant",
+      agencyId: null,
+      email: "binta@plateauminerals.ng",
+      queueIds: [],
+    },
+    {
+      id: "user-mining-1",
+      displayName: "Haruna Bello",
+      role: "mining_reviewer",
+      agencyId: "mining-cadastre",
+      email: "haruna.bello@cadastre.gov",
+      queueIds: ["queue-mining-review"],
+    },
+    {
+      id: "user-petroleum-1",
+      displayName: "Ijeoma Peters",
+      role: "petroleum_reviewer",
+      agencyId: "petroleum-regulator",
+      email: "ijeoma.peters@petroleum.gov",
+      queueIds: ["queue-petroleum-review"],
+    },
+    {
+      id: "user-env-1",
+      displayName: "Grace Ogbodo",
+      role: "environment_reviewer",
+      agencyId: "environment-agency",
+      email: "grace.ogbodo@environment.gov",
+      queueIds: ["queue-env-review"],
+    },
+    {
+      id: "user-planning-1",
+      displayName: "Tunde Solarin",
+      role: "planning_supervisor",
+      agencyId: "planning-authority",
+      email: "tunde.solarin@planning.gov",
+      queueIds: ["queue-multi-agency"],
+    },
+  ],
+  activeAgencyUserId: "user-mining-1",
+  permitCases: [
+    {
+      id: "permit-mining-001",
+      sector: "mining",
+      permitType: "Exploration Licence",
+      title: "North Plateau Lithium Exploration Licence",
+      applicantName: "Plateau Critical Minerals Ltd",
+      locationLabel: "Jos East, Plateau State",
+      assetReference: "MCU-PLT-EL-144",
+      stage: "technical_review",
+      priority: "elevated",
+      leadAgencyId: "mining-cadastre",
+      participatingAgencyIds: ["environment-agency"],
+      updatedAt: "2026-07-20T11:30:00Z",
+      summary: "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
+      timeline: buildTimeline("technical_review", "2026-07-20T11:30:00Z"),
+      obligations: [
+        {
+          id: "obl-mining-001",
+          title: "Submit signed exploration work programme",
+          dueAt: "2026-07-24T17:00:00Z",
+          status: "pending",
+          owner: "Applicant",
+        },
+        {
+          id: "obl-mining-002",
+          title: "Complete environmental baseline screening",
+          dueAt: "2026-07-26T17:00:00Z",
+          status: "at_risk",
+          owner: "Environmental Compliance Agency",
+        },
+      ],
+      formSections: miningFormSections(),
+      reviewNotes: [
+        {
+          id: "note-mining-001",
+          author: "Haruna Bello",
+          role: "mining_reviewer",
+          agencyId: "mining-cadastre",
+          decision: "needs_changes",
+          note: "Applicant should attach a more explicit signed minimum work programme and cadastre-unit coverage note.",
+          createdAt: "2026-07-20T11:35:00Z",
+        },
+      ],
+      lastAiExtraction: null,
+    },
+    {
+      id: "permit-oilgas-014",
+      sector: "oil_gas",
+      permitType: "Drilling and Workover Approval",
+      title: "Offshore Delta Appraisal Well Package",
+      applicantName: "Delta Frontier Energy",
+      locationLabel: "OML-118 Offshore Block",
+      assetReference: "WELL-DFE-A7",
+      stage: "environmental_review",
+      priority: "critical",
+      leadAgencyId: "petroleum-regulator",
+      participatingAgencyIds: ["environment-agency", "planning-authority"],
+      updatedAt: "2026-07-20T09:45:00Z",
+      summary: "Local infrastructure dependencies cleared, but mitigation conditions and abandonment security confirmation remain outstanding.",
+      timeline: buildTimeline("environmental_review", "2026-07-20T09:45:00Z"),
+      obligations: [
+        {
+          id: "obl-oil-001",
+          title: "Upload revised spill response plan",
+          dueAt: "2026-07-22T16:00:00Z",
+          status: "pending",
+          owner: "Applicant",
+        },
+        {
+          id: "obl-oil-002",
+          title: "Confirm abandonment bond receipt",
+          dueAt: "2026-07-23T12:00:00Z",
+          status: "pending",
+          owner: "Petroleum Licensing Authority",
+        },
+      ],
+      formSections: oilGasFormSections(),
+      reviewNotes: [
+        {
+          id: "note-oil-001",
+          author: "Ijeoma Peters",
+          role: "petroleum_reviewer",
+          agencyId: "petroleum-regulator",
+          decision: "comment",
+          note: "Operational sequence is acceptable, but abandonment security wording must match the latest regulator template.",
+          createdAt: "2026-07-20T10:05:00Z",
+        },
+      ],
+      lastAiExtraction: null,
+    },
+    {
+      id: "permit-multi-023",
+      sector: "multi_agency",
+      permitType: "Integrated Development and Right-of-Way Permit",
+      title: "Eastern Corridor Logistics Hub Approval",
+      applicantName: "TransitWorks Consortium",
+      locationLabel: "Aba–Port Harcourt corridor",
+      assetReference: "ROW-COR-2026-23",
+      stage: "agency_coordination",
+      priority: "elevated",
+      leadAgencyId: "planning-authority",
+      participatingAgencyIds: ["environment-agency", "mining-cadastre", "petroleum-regulator"],
+      updatedAt: "2026-07-20T08:10:00Z",
+      summary: "Unified intake completed. The case is in parallel agency review with one deficiency notice pending from environmental compliance.",
+      timeline: buildTimeline("agency_coordination", "2026-07-20T08:10:00Z"),
+      obligations: [
+        {
+          id: "obl-multi-001",
+          title: "Resolve environmental deficiency notice",
+          dueAt: "2026-07-21T14:00:00Z",
+          status: "at_risk",
+          owner: "Applicant",
+        },
+      ],
+      formSections: [
+        {
+          id: "multi-intake",
+          title: "Unified intake summary",
+          description: "Shared project overview for coordinated agency review.",
+          fields: [
+            { key: "project_name", label: "Project name", value: "Eastern Corridor Logistics Hub", required: true, fieldType: "text", source: "manual" },
+            { key: "corridor_scope", label: "Corridor scope", value: "Interstate logistics hub, right-of-way, and environmental coordination package.", required: true, fieldType: "textarea", source: "manual" },
+          ],
+        },
+      ],
+      reviewNotes: [
+        {
+          id: "note-multi-001",
+          author: "Tunde Solarin",
+          role: "planning_supervisor",
+          agencyId: "planning-authority",
+          decision: "comment",
+          note: "Parallel agency queues are active. Environmental deficiency response is the current blocker.",
+          createdAt: "2026-07-20T08:30:00Z",
+        },
+      ],
+      lastAiExtraction: null,
+    },
+  ],
+  approvalQueues: [
+    {
+      id: "queue-mining-review",
+      agencyId: "mining-cadastre",
+      role: "mining_reviewer",
+      title: "Mining cadastre review queue",
+      description: "Exploration, quarry, and mining lease cases awaiting cadastre and technical review.",
+      caseIds: ["permit-mining-001"],
+      pendingCount: 1,
+      overdueCount: 0,
+    },
+    {
+      id: "queue-petroleum-review",
+      agencyId: "petroleum-regulator",
+      role: "petroleum_reviewer",
+      title: "Petroleum licensing queue",
+      description: "Drilling, workover, abandonment, and field development packages awaiting review.",
+      caseIds: ["permit-oilgas-014"],
+      pendingCount: 1,
+      overdueCount: 1,
+    },
+    {
+      id: "queue-env-review",
+      agencyId: "environment-agency",
+      role: "environment_reviewer",
+      title: "Environmental compliance queue",
+      description: "EIA, mitigation, and deficiency review across all permit sectors.",
+      caseIds: ["permit-mining-001", "permit-oilgas-014", "permit-multi-023"],
+      pendingCount: 3,
+      overdueCount: 1,
+    },
+    {
+      id: "queue-multi-agency",
+      agencyId: "planning-authority",
+      role: "planning_supervisor",
+      title: "Multi-agency coordination queue",
+      description: "Unified intake, routing, and cross-agency decision queues for shared permits.",
+      caseIds: ["permit-multi-023"],
+      pendingCount: 1,
+      overdueCount: 0,
+    },
+  ],
+  middleware: [
+    {
+      key: "kafka",
+      name: "Kafka Event Bus",
+      purpose: "Permit, obligation, and review-state event streaming",
+      status: "connected",
+      ownerService: "go-event-gateway",
+    },
+    {
+      key: "temporal",
+      name: "Temporal Workflow Engine",
+      purpose: "Long-running agency review, escalation, and renewal workflows",
+      status: "connected",
+      ownerService: "typescript-orchestrator",
+    },
+    {
+      key: "keycloak",
+      name: "Keycloak Identity",
+      purpose: "SSO and federated user identity for applicants and agencies",
+      status: "planned",
+      ownerService: "typescript-orchestrator",
+    },
+    {
+      key: "permify",
+      name: "Permify Authorization",
+      purpose: "Fine-grained case, agency, and obligation access control",
+      status: "planned",
+      ownerService: "rust-policy-engine",
+    },
+    {
+      key: "redis",
+      name: "Redis Cache and Replay State",
+      purpose: "Notification fan-out, queue caching, and replay coordination",
+      status: "connected",
+      ownerService: "go-event-gateway",
+    },
+    {
+      key: "apisix",
+      name: "APISIX Gateway",
+      purpose: "Unified ingress, routing, and policy enforcement",
+      status: "planned",
+      ownerService: "typescript-orchestrator",
+    },
+    {
+      key: "tigerbeetle",
+      name: "TigerBeetle Ledger",
+      purpose: "Fee assessment, payment settlement, and inter-agency apportionment",
+      status: "planned",
+      ownerService: "go-event-gateway",
+    },
+    {
+      key: "lakehouse",
+      name: "Lakehouse Analytics",
+      purpose: "Cross-domain analytics, compliance scoring, and model features",
+      status: "planned",
+      ownerService: "python-compliance-api",
+    },
+  ],
+  services: [
+    {
+      id: "typescript-orchestrator",
+      name: "Permitting Orchestrator",
+      language: "typescript",
+      responsibility: "Unified permit APIs, case orchestration, mobile and PWA feature aggregation, and Temporal workflow coordination.",
+      runtimeMode: "webdev_backend",
+      endpointPath: "/api/permitting",
+      health: "healthy",
+      middlewareKeys: ["temporal", "keycloak", "apisix"],
+    },
+    {
+      id: "python-compliance-api",
+      name: "Compliance Intelligence Service",
+      language: "python",
+      responsibility: "Spatial suitability analytics, compliance scoring, document intelligence pipelines, and lakehouse export preparation.",
+      runtimeMode: "external_service",
+      endpointPath: "/services/python/compliance",
+      health: "healthy",
+      middlewareKeys: ["lakehouse", "redis"],
+    },
+    {
+      id: "go-event-gateway",
+      name: "Event Gateway",
+      language: "go",
+      responsibility: "Permit event publishing, middleware fan-out, replay processing, and ledger integration adapters.",
+      runtimeMode: "external_service",
+      endpointPath: "/services/go/events",
+      health: "healthy",
+      middlewareKeys: ["kafka", "redis", "tigerbeetle"],
+    },
+    {
+      id: "rust-policy-engine",
+      name: "Policy and Authorization Engine",
+      language: "rust",
+      responsibility: "Deterministic entitlement checks, cross-agency policy evaluation, and immutable policy decision traces.",
+      runtimeMode: "external_service",
+      endpointPath: "/services/rust/policy",
+      health: "warning",
+      middlewareKeys: ["permify", "apisix"],
+    },
+  ],
+  parity: [
+    {
+      surface: "native_mobile",
+      score: 86,
+      strengths: ["offline review continuity", "field-first notifications", "parcel and permit detail sheets"],
+      nextFocus: "deeper reviewer handoff and evidence upload flows for sector-specific permits",
+    },
+    {
+      surface: "pwa",
+      score: 85,
+      strengths: ["wider workflow overview layout", "agency and middleware dashboards", "shared permit timelines"],
+      nextFocus: "install experience, background sync visibility, and richer admin data tables",
+    },
+  ],
+};
+
+export function clonePermittingPlatform() {
+  return JSON.parse(JSON.stringify(seedPermittingPlatform)) as PermittingPlatformSnapshot;
+}
+
+export function findPermitCase(caseId: string, source: PermitCaseRecord[] = seedPermittingPlatform.permitCases) {
+  return source.find((item) => item.id === caseId) ?? null;
+}
+
+export function findAgency(agencyId: string, source: AgencyRecord[] = seedPermittingPlatform.agencies) {
+  return source.find((item) => item.id === agencyId) ?? null;
+}

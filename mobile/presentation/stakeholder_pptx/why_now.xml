@@ -1,0 +1,27 @@
+<slide id="why_now">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="40" width="4" height="620" fill="hairline"/>
+  <text id="title" x="86" y="52" width="760" height="46" font="heading" size="30" color="ink" wrap="false">Why this matters now</text>
+  <text id="subtitle" x="86" y="102" width="1070" height="56" font="body" size="20" color="muted" line-height="1.3"><p>Nigeria’s permit, land, housing, and extractives workflows are too important to remain fragmented across disconnected agencies and paper-heavy decision chains.</p></text>
+
+  <shape id="card-1" type="rect" x="86" y="190" width="346" height="270" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="card-1-number" x="112" y="222" width="290" height="60" font="display" size="40" color="primary" wrap="false">550,000</text>
+  <text id="card-1-title" x="112" y="286" width="290" height="48" font="body" size="20" color="ink"><p><strong>Housing units needed annually</strong></p></text>
+  <text id="card-1-body" x="112" y="344" width="286" height="90" font="body" size="18" color="muted" line-height="1.35"><p>The Federal Ministry of Housing says Nigeria must build 550,000 homes each year to curb the housing deficit. Delayed approvals directly slow supply. [1]</p></text>
+
+  <shape id="card-2" type="rect" x="467" y="190" width="346" height="270" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="card-2-number" x="493" y="222" width="290" height="60" font="display" size="40" color="accent" wrap="false">&lt;10% → 50%</text>
+  <text id="card-2-title" x="493" y="286" width="290" height="48" font="body" size="20" color="ink"><p><strong>Land formalisation target</strong></p></text>
+  <text id="card-2-body" x="493" y="344" width="286" height="90" font="body" size="18" color="muted" line-height="1.35"><p>The same ministry says land formalisation is below 10%, with a ten-year ambition to reach 50%. Digital workflow and records are central to that shift. [1]</p></text>
+
+  <shape id="card-3" type="rect" x="848" y="190" width="346" height="270" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="card-3-number" x="874" y="222" width="290" height="60" font="display" size="40" color="#B45309" wrap="false">5,000+ titles</text>
+  <text id="card-3-title" x="874" y="286" width="290" height="48" font="body" size="20" color="ink"><p><strong>Mining cadastre scale</strong></p></text>
+  <text id="card-3-body" x="874" y="344" width="286" height="90" font="body" size="18" color="muted" line-height="1.35"><p>Nigeria’s Mining Cadastre Office reports more than 5,000 mineral titles and over 2,000 applications processed annually, showing the scale of approval administration already in play. [2]</p></text>
+
+  <shape id="source-strip" type="rect" x="86" y="506" width="1108" height="118" fill="#F1F5F9" stroke="hairline" stroke-width="1"/>
+  <text id="source-note" x="108" y="530" width="1060" height="74" font="caption" size="15" color="muted" line-height="1.35"><p><strong>Interpretation:</strong> When housing, land formalisation, and high-volume licensing all depend on multiple agencies, the cost of delay becomes economic, social, and fiscal. A single workflow platform is no longer optional infrastructure.</p></text>
+
+  <text id="footer" x="70" y="684" width="520" height="18" font="caption" size="14" color="muted" wrap="false">IDLR-PTS Platform | Stakeholder PowerPoint deck</text>
+  <text id="page-number" x="1210" y="684" width="24" height="18" font="caption" size="14" color="muted" align="right" wrap="false">2</text>
+</slide>
