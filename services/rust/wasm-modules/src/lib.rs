@@ -27,11 +27,11 @@ pub fn verify_consent_hash(receipt_data: &str, expected_hash: &str) -> bool {
 pub fn compute_compliance_score(controls_json: &str) -> f64 {
     let controls: Vec<String> = serde_json::from_str(controls_json).unwrap_or_default();
 
-    let mut score = 0.0;
-    let mut count = 0.0;
+    let mut score: f64 = 0.0;
+    let mut count: f64 = 0.0;
 
     // Governance (0-100)
-    let mut gov = 40.0;
+    let mut gov: f64 = 40.0;
     for c in &["data_classification", "retention_policy", "dpo_appointed", "privacy_by_design"] {
         if controls.iter().any(|x| x == c) { gov += 15.0; }
     }
@@ -39,7 +39,7 @@ pub fn compute_compliance_score(controls_json: &str) -> f64 {
     count += 1.0;
 
     // Security (0-100)
-    let mut sec = 30.0;
+    let mut sec: f64 = 30.0;
     for c in &["encryption", "access_control", "audit_logging", "vulnerability_scanning", "incident_response"] {
         if controls.iter().any(|x| x == c) { sec += 14.0; }
     }
@@ -47,7 +47,7 @@ pub fn compute_compliance_score(controls_json: &str) -> f64 {
     count += 1.0;
 
     // Breach readiness (0-100)
-    let mut breach = 20.0;
+    let mut breach: f64 = 20.0;
     if controls.iter().any(|x| x == "incident_response_plan") { breach += 30.0; }
     if controls.iter().any(|x| x == "breach_notification_process") { breach += 25.0; }
     if controls.iter().any(|x| x == "forensics_capability") { breach += 25.0; }
@@ -55,7 +55,7 @@ pub fn compute_compliance_score(controls_json: &str) -> f64 {
     count += 1.0;
 
     // DSR (0-100)
-    let mut dsr = 20.0;
+    let mut dsr: f64 = 20.0;
     for c in &["access_request_process", "erasure_process", "portability", "objection_mechanism"] {
         if controls.iter().any(|x| x == c) { dsr += 20.0; }
     }

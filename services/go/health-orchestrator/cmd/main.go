@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,13 +19,13 @@ import (
 
 // ServiceHealth represents the health status of a single service
 type ServiceHealth struct {
-	Name         string    `json:"name"`
-	URL          string    `json:"url"`
-	Status       string    `json:"status"` // healthy, degraded, unhealthy, unknown
-	ResponseTime int64     `json:"response_time_ms"`
-	LastCheck    time.Time `json:"last_check"`
-	LastHealthy  time.Time `json:"last_healthy"`
-	Failures     int       `json:"consecutive_failures"`
+	Name         string                 `json:"name"`
+	URL          string                 `json:"url"`
+	Status       string                 `json:"status"` // healthy, degraded, unhealthy, unknown
+	ResponseTime int64                  `json:"response_time_ms"`
+	LastCheck    time.Time              `json:"last_check"`
+	LastHealthy  time.Time              `json:"last_healthy"`
+	Failures     int                    `json:"consecutive_failures"`
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 

@@ -548,7 +548,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", realFalkorHealthHandler)
-	mux.HandleFunc("/query", retiredGraphOperationHandler)
+	mux.HandleFunc("/query", falkorQueryHandler)
 	mux.HandleFunc("/rebuild", retiredGraphOperationHandler)
 
 	log.Printf("[KG] FalkorDB Knowledge Graph Worker listening on :%s", port)

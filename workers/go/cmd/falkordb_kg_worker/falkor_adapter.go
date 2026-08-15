@@ -96,3 +96,129 @@ func (a *FalkorAdapter) readOnlyQuery(cypher string, params map[string]interface
 	}
 	return result, nil
 }
+
+const maxGraphTraversalDepth = 8
+const maxGraphNeighbors = 100
+
+var allowedGraphRelations = map[string]struct{}{
+	"BELONGS_TO":        {},
+	"HAS_VIOLATION":     {},
+	"APPLIES_TO_SECTOR": {},
+	"FILED_AGAINST":     {},
+	"SECTOR_PEER":       {},
+}
+
+type falkorNodeView struct {
+	ID         string                 `json:"id"`
+	Labels     []string               `json:"labels"`
+	Properties map[string]interface{} `json:"properties"`
+}
+
+func graphNodeView(value interface{}) (falkorNodeView, error) {
+	node, ok := value.(*falkordb.Node)
+	if !ok || node == nil {
+		return falkorNodeView{}, fmt.Errorf("FalkorDB returned an unexpected node value")
+	}
+	identifier, ok := node.Properties["id"].(string)
+	if !ok || strings.TrimSpace(identifier) == "" {
+		return falkorNodeView{}, fmt.Errorf("FalkorDB node is missing its stable id property")
+	}
+	return falkorNodeView{ID: identifier, Labels: node.Labels, Properties: node.Properties}, nil
+}
+
+func validateGraphRelation(relation string) error {
+	if relation == "" {
+		return nil
+	}
+	if _, ok := allowedGraphRelations[relation]; !ok {
+		return fmt.Errorf("unsupported graph relationship %q", relation)
+	}
+	return nil
+}
+
+func neighborQuery(nodeID, relation string) (string, map[string]interface{}, error) {
+	if strings.TrimSpace(nodeID) == "" {
+		return "", nil, fmt.Errorf("node_id is required")
+	}
+	if err := validateGraphRelation(relation); err != nil {
+		return "", nil, err
+	}
+	const cypher = `MATCH (source {id: $node_id})-[edge]-(neighbor)
+WHERE $relation = '' OR type(edge) = $relation
+RETURN DISTINCT neighbor
+LIMIT $limit`
+	return cypher, map[string]interface{}{"node_id": nodeID, "relation": relation, "limit": maxGraphNeighbors}, nil
+}
+
+func (a *FalkorAdapter) neighbors(nodeID, relation string) ([]falkorNodeView, error) {
+	cypher, params, err := neighborQuery(nodeID, relation)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.readOnlyQuery(cypher, params)
+	if err != nil {
+		return nil, err
+	}
+	neighbors := make([]falkorNodeView, 0)
+	for result.Next() {
+		value, err := result.Record().GetByIndex(0)
+		if err != nil {
+			return nil, fmt.Errorf("read FalkorDB neighbor record: %w", err)
+		}
+		view, err := graphNodeView(value)
+		if err != nil {
+			return nil, err
+		}
+		neighbors = append(neighbors, view)
+	}
+	return neighbors, nil
+}
+
+func boundedPathQuery(fromID, toID string, maxDepth int) (string, map[string]interface{}, error) {
+	if strings.TrimSpace(fromID) == "" || strings.TrimSpace(toID) == "" {
+		return "", nil, fmt.Errorf("from_id and to_id are required")
+	}
+	if maxDepth <= 0 {
+		maxDepth = 5
+	}
+	if maxDepth > maxGraphTraversalDepth {
+		return "", nil, fmt.Errorf("max_depth must be between 1 and %d", maxGraphTraversalDepth)
+	}
+	// Cypher does not parameterize variable-length relationship bounds. maxDepth is
+	// validated before interpolation; all externally supplied identifiers remain
+	// parameters and cannot change the query structure.
+	cypher := fmt.Sprintf(`MATCH path = shortestPath((source {id: $from_id})-[*1..%d]-(target {id: $to_id}))
+RETURN [node IN nodes(path) | node.id] AS path`, maxDepth)
+	return cypher, map[string]interface{}{"from_id": fromID, "to_id": toID}, nil
+}
+
+func (a *FalkorAdapter) boundedPath(fromID, toID string, maxDepth int) ([]string, error) {
+	cypher, params, err := boundedPathQuery(fromID, toID, maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.readOnlyQuery(cypher, params)
+	if err != nil {
+		return nil, err
+	}
+	if !result.Next() {
+		return []string{}, nil
+	}
+	value, err := result.Record().GetByIndex(0)
+	if err != nil {
+		return nil, fmt.Errorf("read FalkorDB path record: %w", err)
+	}
+	rawPath, ok := value.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("FalkorDB returned an unexpected path value")
+	}
+	path := make([]string, 0, len(rawPath))
+	for _, entry := range rawPath {
+		id, ok := entry.(string)
+		if !ok || strings.TrimSpace(id) == "" {
+			return nil, fmt.Errorf("FalkorDB path contains an invalid node id")
+		}
+		path = append(path, id)
+	}
+	return path, nil
+}

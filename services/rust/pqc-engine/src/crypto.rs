@@ -34,7 +34,8 @@ impl PQCOps {
             _ => return Err(anyhow!("Unsupported algorithm: {}", algorithm)),
         };
 
-        let fingerprint = hex::encode(Sha3_256::digest(&pk));
+        let digest = Sha3_256::digest(&pk);
+        let fingerprint = hex::encode(digest.as_slice());
         let key_id = format!("ndsep_{}_{}", algorithm, &fingerprint[..16]);
 
         Ok(PQCKeyPair {

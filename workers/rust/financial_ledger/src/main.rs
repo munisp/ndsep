@@ -5,7 +5,7 @@ Processes Mojaloop payments, manages penalty lifecycle.
 Technology: Rust, TigerBeetle HTTP API, Mojaloop, NIBSS, Axum
 */
 use axum::{extract::State, response::Json, routing::get, Router};
-use log::info;
+use log::{info, warn};
 use serde_json::{json, Value};
 use std::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
