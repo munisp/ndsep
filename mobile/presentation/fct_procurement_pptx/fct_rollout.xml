@@ -1,0 +1,25 @@
+<slide id="fct_rollout">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="3" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">The FCT can phase implementation without losing control</text>
+  <text id="subtitle" x="58" y="86" width="1096" height="30" font="body" size="16" color="muted">The platform supports a phased rollout that starts with land-administration urgency and then extends into geospatial review, field continuity, AI-assisted throughput, and executive oversight.</text>
+
+  <shape id="phase1" type="rect" x="58" y="176" width="262" height="244" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="phase1t" x="82" y="202" width="214" height="178" font="body" size="18" color="ink" line-height="1.3"><p><strong color="brand">Phase 1</strong></p><p space-before="10"><strong>Land workflow backbone</strong></p><p space-before="10">Deploy parcel records, title-flow visibility, role-based queues, and signed audit control for core FCT land-administration workflows.</p></text>
+
+  <shape id="phase2" type="rect" x="342" y="176" width="262" height="244" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text id="phase2t" x="366" y="202" width="214" height="178" font="body" size="18" color="ink" line-height="1.3"><p><strong color="accent">Phase 2</strong></p><p space-before="10"><strong>Regularisation and geospatial review</strong></p><p space-before="10">Expand into desk-based map review, parcel overlays, mass-housing and area-council regularisation visibility, and exception monitoring.</p></text>
+
+  <shape id="phase3" type="rect" x="626" y="176" width="262" height="244" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="phase3t" x="650" y="202" width="214" height="178" font="body" size="18" color="ink" line-height="1.3"><p><strong color="brand">Phase 3</strong></p><p space-before="10"><strong>Field, intake, and verification acceleration</strong></p><p space-before="10">Add low-connectivity missions, evidence continuity, and AI-assisted intake to reduce friction and improve processing discipline.</p></text>
+
+  <shape id="phase4" type="rect" x="910" y="176" width="312" height="244" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text id="phase4t" x="934" y="202" width="264" height="178" font="body" size="18" color="ink" line-height="1.3"><p><strong color="accent">Phase 4</strong></p><p space-before="10"><strong>Executive oversight and scale-out</strong></p><p space-before="10">Layer in broader revenue visibility, supervisory digests, public verification controls, and expansion into wider federal or agency-linked workflows.</p></text>
+
+  <shape id="note-band" type="rect" x="58" y="548" width="1164" height="46" fill="#FEFCE8" stroke="#FDE68A" stroke-width="1"/>
+  <text id="note" x="84" y="562" width="1112" height="18" font="body" size="15" color="ink" align="center" wrap="false">This phased path lets the FCT start with title continuity and oversight priorities while preserving a credible route to deeper geospatial and governance modernization.</text>
+
+  <text id="outcome" x="58" y="620" width="1040" height="28" font="body" size="19" color="ink">The platform can begin where public risk is highest and expand without replacing the underlying operational backbone.</text>
+  <text id="footer" x="58" y="686" width="640" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Federal Capital Territory</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">8</text>
+</slide>

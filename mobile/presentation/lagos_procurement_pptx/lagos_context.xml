@@ -1,0 +1,23 @@
+<slide id="lagos_context">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="primary"/>
+  <text id="title" x="58" y="40" width="960" height="46" font="heading" size="30" color="ink" wrap="false">Lagos faces a scale and coordination challenge</text>
+  <text id="subtitle" x="58" y="86" width="1090" height="28" font="body" size="16" color="muted">For Lagos State, land administration is not a back-office issue. It shapes housing delivery, builder confidence, corridor management, service trust, and the visibility of land-linked public value.</text>
+  <shape id="left-card" type="rect" x="58" y="126" width="430" height="420" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="left-copy" x="82" y="152" width="382" height="366" font="body" size="19" color="ink" line-height="1.33">
+    <p>Lagos carries intense development pressure across housing estates, mixed-use sites, transport corridors, and fast-growing peri-urban districts. When parcel records, Certificate of Occupancy workflows, approvals, and field evidence remain fragmented, the state loses speed, visibility, and defensibility.</p>
+    <p space-before="16">The real institutional cost is broader than delay. It includes slower project conversion, lower applicant confidence, higher coordination burden between desks, and weaker visibility into the land-linked value that should be traceable through state workflows.</p>
+    <p space-before="16"><strong color="primary">This is why Lagos should procure workflow infrastructure that connects parcel context, legal progression, field verification, and revenue assurance in one operating environment.</strong></p>
+  </text>
+  <table id="pressure-table" x="520" y="126" width="702" height="420" columns="2.2,4.8" rows="58,90,90,90,92" font="body" size="16" color="ink" padding="12 14" header-fill="primary" header-border="2 solid primary" border-h="1 solid hairline" border-outer="1 solid hairline">
+    <tr color="#FFFFFF"><td>Pressure point</td><td>Why it matters in Lagos procurement terms</td></tr>
+    <tr><td><strong>High-volume C of O demand</strong></td><td>Backlogs or opaque progression weaken service confidence and make it harder for leadership to understand where intervention is needed.</td></tr>
+    <tr fill="mist"><td><strong>Dense parcel and corridor conflict</strong></td><td>Housing, transport, right-of-way, and utility projects require parcel-aware review rather than disconnected file-by-file decisions.</td></tr>
+    <tr><td><strong>Builder execution friction</strong></td><td>Slow or unclear approval chains increase idle capital, delay delivery, and raise the final cost of formal projects.</td></tr>
+    <tr fill="mist"><td><strong>Revenue visibility and leakage risk</strong></td><td>The state needs a clearer line of sight from application activity to formalisation, obligations, and auditable public value capture.</td></tr>
+  </table>
+  <shape id="bottom-band" type="rect" x="58" y="572" width="1164" height="74" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="closing" x="84" y="594" width="1112" height="28" font="body" size="19" color="ink" anchor="middle">For Lagos, the procurement case is simple: improve service speed, title continuity, project predictability, and state revenue assurance from the same platform backbone.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Lagos State</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">2</text>
+</slide>

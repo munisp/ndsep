@@ -1,0 +1,354 @@
+{
+  "parcels": [
+    {
+      "id": 6,
+      "parcelNumber": "LG-EPE-2026-006",
+      "owner": "Amina Yusuf",
+      "state": "Lagos",
+      "lga": "Epe",
+      "areaHectares": 1.42,
+      "titleStatus": "registered",
+      "workflowStage": "registered",
+      "latitude": 6.583,
+      "longitude": 3.983,
+      "riskScore": 18,
+      "lastAction": "GeoLibre parcel review prepared",
+      "geolibreReady": true
+    },
+    {
+      "id": 11,
+      "parcelNumber": "FC-AMAC-2026-011",
+      "owner": "Crest Holdings Ltd",
+      "state": "FCT",
+      "lga": "AMAC",
+      "areaHectares": 2.75,
+      "titleStatus": "pending",
+      "workflowStage": "issuance",
+      "latitude": 9.0765,
+      "longitude": 7.3986,
+      "riskScore": 42,
+      "lastAction": "Stakeholder onboarding still in progress",
+      "geolibreReady": true
+    },
+    {
+      "id": 15,
+      "parcelNumber": "KN-NASS-2026-015",
+      "owner": "Musa Garba",
+      "state": "Kano",
+      "lga": "Nassarawa",
+      "areaHectares": 0.88,
+      "titleStatus": "under_review",
+      "workflowStage": "verification",
+      "latitude": 11.988,
+      "longitude": 8.525,
+      "riskScore": 27,
+      "lastAction": "Field evidence queued for sync",
+      "geolibreReady": false
+    }
+  ],
+  "missions": [
+    {
+      "id": "mission-epe-6",
+      "parcelId": 6,
+      "title": "Boundary validation and issuance confirmation",
+      "status": "active",
+      "syncRisk": "low",
+      "evidenceCount": 5,
+      "lastUpdated": "2026-07-20T03:00:00Z"
+    },
+    {
+      "id": "mission-amac-11",
+      "parcelId": 11,
+      "title": "Corporate ownership verification package",
+      "status": "queued",
+      "syncRisk": "moderate",
+      "evidenceCount": 2,
+      "lastUpdated": "2026-07-20T01:30:00Z"
+    },
+    {
+      "id": "mission-kano-15",
+      "parcelId": 15,
+      "title": "Field evidence recovery and sync review",
+      "status": "queued",
+      "syncRisk": "high",
+      "evidenceCount": 3,
+      "lastUpdated": "2026-07-19T18:45:00Z"
+    }
+  ],
+  "onboarding": {
+    "stakeholder": "Crest Holdings Ltd",
+    "readiness": 71,
+    "ninStatus": "verified",
+    "bvnStatus": "verified",
+    "livenessStatus": "pending",
+    "kybStatus": "in_review",
+    "nextAction": "Complete liveness verification to finish stakeholder onboarding.",
+    "onboardingStatus": "in_review",
+    "checklist": [
+      {
+        "key": "nin",
+        "label": "NIN verification",
+        "completed": true
+      },
+      {
+        "key": "bvn",
+        "label": "BVN verification",
+        "completed": true
+      },
+      {
+        "key": "liveness",
+        "label": "Liveness verification",
+        "completed": false
+      },
+      {
+        "key": "kyc_documents",
+        "label": "KYC documents",
+        "completed": false
+      },
+      {
+        "key": "cac",
+        "label": "CAC verification",
+        "completed": true
+      },
+      {
+        "key": "tin",
+        "label": "TIN verification",
+        "completed": true
+      },
+      {
+        "key": "kyb_documents",
+        "label": "KYB documents",
+        "completed": true
+      }
+    ],
+    "identityDocuments": [
+      {
+        "id": "kyc-seed-11",
+        "type": "Corporate ID Verification",
+        "fileName": "crest-holdings-director-id.png",
+        "status": "pending",
+        "extractedSummary": "Director identity document uploaded for review.",
+        "confidence": 84,
+        "engine": "vlm",
+        "uploadedAt": "2026-07-20T01:15:00Z"
+      },
+      {
+        "id": "kyc-seed-12",
+        "type": "Proof of Address",
+        "fileName": "crest-holdings-proof-address.pdf",
+        "status": "verified",
+        "extractedSummary": "Registered office address confirmed.",
+        "confidence": 92,
+        "engine": "docling",
+        "uploadedAt": "2026-07-19T23:40:00Z"
+      }
+    ],
+    "businessProfile": {
+      "stakeholderType": "business",
+      "companyName": "Crest Holdings Ltd",
+      "cacNumber": "RC-449921",
+      "tinNumber": "TIN-9982711",
+      "businessEmail": "ops@crestholdings.ng",
+      "businessPhone": "+2348011111111",
+      "businessAddress": "Plot 22, Central Business District, Abuja",
+      "contactPerson": "Binta Abdul",
+      "onboardingStatus": "in_review",
+      "cacStatus": "verified",
+      "tinStatus": "verified",
+      "submittedAt": "2026-07-19T21:00:00Z",
+      "verifiedAt": null,
+      "documents": [
+        {
+          "id": 991,
+          "type": "Certificate of Incorporation",
+          "fileName": "crest-cac-certificate.pdf",
+          "documentUrl": null,
+          "status": "verified",
+          "engine": "docling",
+          "confidence": 93,
+          "extractedSummary": "Company incorporation certificate matched CAC reference.",
+          "uploadedAt": "2026-07-19T21:10:00Z"
+        },
+        {
+          "id": 992,
+          "type": "Board Resolution",
+          "fileName": "crest-board-resolution.pdf",
+          "documentUrl": null,
+          "status": "pending",
+          "engine": "docling",
+          "confidence": 74,
+          "extractedSummary": "Board resolution needs reviewer confirmation.",
+          "uploadedAt": "2026-07-20T00:45:00Z"
+        }
+      ]
+    },
+    "latestLivenessSession": null
+  },
+  "legalWorkflows": [
+    {
+      "id": "cofo-epe-6",
+      "parcelId": 6,
+      "transactionId": "TX-EPE-2026-006",
+      "type": "Certificate of Occupancy",
+      "status": "registered",
+      "registrationNumber": "COFO-LA-EPE-2026-0006",
+      "assignedDesk": "Registry Archive",
+      "preparedBy": "Registry Operations",
+      "reviewedBy": "Senior Registrar",
+      "updatedAt": "2026-07-20T02:55:00Z",
+      "timeline": [
+        {
+          "key": "draft",
+          "label": "Draft prepared",
+          "completed": true,
+          "timestamp": "2026-07-20T02:55:00Z"
+        },
+        {
+          "key": "pending_review",
+          "label": "Review in progress",
+          "completed": true,
+          "timestamp": "2026-07-20T02:55:00Z"
+        },
+        {
+          "key": "approved",
+          "label": "Approved",
+          "completed": true,
+          "timestamp": "2026-07-20T02:55:00Z"
+        },
+        {
+          "key": "signed",
+          "label": "Signed",
+          "completed": true,
+          "timestamp": "2026-07-20T02:55:00Z"
+        },
+        {
+          "key": "registered",
+          "label": "Registered",
+          "completed": true,
+          "timestamp": "2026-07-20T02:55:00Z"
+        }
+      ]
+    },
+    {
+      "id": "roo-amac-11",
+      "parcelId": 11,
+      "transactionId": "TX-AMAC-2026-011",
+      "type": "Right of Occupancy",
+      "status": "pending_review",
+      "assignedDesk": "Verification Desk",
+      "preparedBy": "Corporate Desk",
+      "reviewedBy": null,
+      "updatedAt": "2026-07-20T01:20:00Z",
+      "timeline": [
+        {
+          "key": "draft",
+          "label": "Draft prepared",
+          "completed": true,
+          "timestamp": "2026-07-20T01:20:00Z"
+        },
+        {
+          "key": "pending_review",
+          "label": "Review in progress",
+          "completed": true,
+          "timestamp": "2026-07-20T01:20:00Z"
+        },
+        {
+          "key": "approved",
+          "label": "Approved",
+          "completed": false
+        },
+        {
+          "key": "signed",
+          "label": "Signed",
+          "completed": false
+        },
+        {
+          "key": "registered",
+          "label": "Registered",
+          "completed": false
+        }
+      ]
+    },
+    {
+      "id": "legal-gc-15",
+      "parcelId": 15,
+      "transactionId": "TX-KN-2026-015",
+      "type": "Governor Consent",
+      "status": "approved",
+      "assignedDesk": "Legal Review",
+      "preparedBy": "Regional Desk",
+      "reviewedBy": "Senior Counsel",
+      "updatedAt": "2026-07-19T18:35:00Z",
+      "timeline": [
+        {
+          "key": "draft",
+          "label": "Draft prepared",
+          "completed": true,
+          "timestamp": "2026-07-19T18:35:00Z"
+        },
+        {
+          "key": "pending_review",
+          "label": "Review in progress",
+          "completed": true,
+          "timestamp": "2026-07-19T18:35:00Z"
+        },
+        {
+          "key": "approved",
+          "label": "Approved",
+          "completed": true,
+          "timestamp": "2026-07-19T18:35:00Z"
+        },
+        {
+          "key": "signed",
+          "label": "Signed",
+          "completed": false
+        },
+        {
+          "key": "registered",
+          "label": "Registered",
+          "completed": false
+        }
+      ]
+    }
+  ],
+  "notificationPreferences": {
+    "pushEnabled": true,
+    "fieldAlerts": true,
+    "onboardingAlerts": true,
+    "legalAlerts": true,
+    "geospatialAlerts": true,
+    "geofenceAlerts": true,
+    "onlyAssignedParcels": false,
+    "followedParcelIds": [
+      6,
+      11
+    ],
+    "parcelMutes": [],
+    "geofenceSubscriptions": [
+      {
+        "parcelId": 6,
+        "radiusMeters": 150,
+        "transition": "both",
+        "enabled": true,
+        "lastTriggeredAt": "2026-07-20T13:30:00Z",
+        "lastTransition": "enter"
+      },
+      {
+        "parcelId": 11,
+        "radiusMeters": 150,
+        "transition": "enter",
+        "enabled": true,
+        "lastTriggeredAt": null,
+        "lastTransition": null
+      }
+    ],
+    "updatedAt": "2026-08-14T00:54:15.475Z"
+  },
+  "syncMeta": {
+    "source": "live",
+    "lastSyncedAt": "2026-08-14T01:19:44.340Z",
+    "pendingMutations": 0,
+    "offlineReady": true
+  },
+  "syncQueue": []
+}

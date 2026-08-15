@@ -1,0 +1,28 @@
+<slide id="fct_ai">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="3" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">AI improves title intake quality and processing speed</text>
+  <text id="subtitle" x="58" y="86" width="1096" height="30" font="body" size="16" color="muted">For the FCT, AI adds value when it reduces repetitive document handling, improves consistency, and still leaves the final decision in the hands of authorized reviewers.</text>
+
+  <shape id="before-card" type="rect" x="58" y="154" width="576" height="388" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="before-title" x="84" y="182" width="528" height="28" font="body" size="22" color="ink"><p><strong>Manual intake alone</strong></p></text>
+  <text id="before-copy" x="84" y="228" width="528" height="252" font="body" size="18" color="ink" line-height="1.34">
+    <p>Title-related workflows can spend too much time re-entering parcel references, applicant details, and supporting-document content by hand.</p>
+    <p space-before="14">High-volume mass-housing or regularisation activity makes it harder to maintain intake consistency across desks.</p>
+    <p space-before="14">That increases the risk of slower queue progression, weaker verification quality, and more manual back-and-forth.</p>
+  </text>
+
+  <shape id="after-card" type="rect" x="646" y="154" width="576" height="388" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="after-title" x="672" y="182" width="528" height="28" font="body" size="22" color="ink"><p><strong>AI-assisted intake with review control</strong></p></text>
+  <text id="after-copy" x="672" y="228" width="528" height="252" font="body" size="18" color="ink" line-height="1.34">
+    <p>Uploaded PDFs and images can be parsed to prefill forms, helping FCT teams process more files with greater consistency.</p>
+    <p space-before="14">Side-by-side verification lets reviewers compare extracted content with the original evidence before approval or correction.</p>
+    <p space-before="14">Field provenance stays visible, so officials can distinguish human input from AI-assisted suggestions inside the audit trail.</p>
+  </text>
+
+  <shape id="assurance-band" type="rect" x="58" y="566" width="1164" height="42" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text id="assurance" x="84" y="579" width="1112" height="16" font="body" size="15" color="ink" align="center" wrap="false">The procurement value is controlled acceleration: better throughput, cleaner records, and stronger verification discipline.</text>
+
+  <text id="footer" x="58" y="686" width="640" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Federal Capital Territory</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">6</text>
+</slide>

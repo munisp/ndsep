@@ -1,0 +1,28 @@
+<slide id="lagos_ai">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="primary"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">AI reduces intake friction without removing human control</text>
+  <text id="subtitle" x="58" y="86" width="1090" height="30" font="body" size="16" color="muted">For Lagos, the value of AI is practical: faster document intake, cleaner form completion, and stronger review throughput, while reviewers still decide what enters the official record.</text>
+
+  <shape id="before-card" type="rect" x="58" y="154" width="576" height="388" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="before-title" x="84" y="182" width="528" height="28" font="body" size="22" color="ink"><p><strong>Without AI assistance</strong></p></text>
+  <text id="before-copy" x="84" y="228" width="528" height="252" font="body" size="18" color="ink" line-height="1.34">
+    <p>Officials spend more time re-entering parcel references, applicant details, and supporting-document data by hand.</p>
+    <p space-before="14">Queue quality depends heavily on clerical consistency, which becomes harder to maintain under large C of O and approval volumes.</p>
+    <p space-before="14">Builders and applicants feel the impact through slower intake confirmation, more back-and-forth, and weaker visibility into why files are held up.</p>
+  </text>
+
+  <shape id="after-card" type="rect" x="646" y="154" width="576" height="388" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="after-title" x="672" y="182" width="528" height="28" font="body" size="22" color="ink"><p><strong>With AI-assisted intake</strong></p></text>
+  <text id="after-copy" x="672" y="228" width="528" height="252" font="body" size="18" color="ink" line-height="1.34">
+    <p>Uploaded PDFs and images can prefill case fields, accelerating data entry and improving consistency across high-volume workflows.</p>
+    <p space-before="14">Side-by-side verification lets reviewers compare extracted data with the original evidence before saving changes.</p>
+    <p space-before="14">Each field retains provenance, so Lagos can distinguish human-entered values from AI-assisted suggestions inside the audit trail.</p>
+  </text>
+
+  <shape id="assurance-band" type="rect" x="58" y="566" width="1164" height="42" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text id="assurance" x="84" y="579" width="1112" height="16" font="body" size="15" color="ink" align="center" wrap="false">The procurement value is better throughput and cleaner records, not automation without accountability.</text>
+
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Lagos State</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">6</text>
+</slide>

@@ -1,0 +1,31 @@
+<slide id="economic_value">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Economic value and monetization in Nigeria</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="30" font="body" size="16" color="muted">The platform creates fiscal, operational, and market value by reducing delay, improving formalisation, strengthening trust, and increasing the conversion of approvals into economic activity.</text>
+  <shape id="metric-1" type="rect" x="58" y="126" width="270" height="142" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="metric-1-number" x="78" y="150" width="230" height="42" font="display" size="32" color="brand" align="center">More IGR</text>
+  <text id="metric-1-label" x="78" y="198" width="230" height="40" font="body" size="16" color="muted" align="center">through more traceable land, permit, and formalisation workflows</text>
+  <shape id="metric-2" type="rect" x="352" y="126" width="270" height="142" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="metric-2-number" x="372" y="150" width="230" height="42" font="display" size="32" color="accent" align="center">Lower Delay Cost</text>
+  <text id="metric-2-label" x="372" y="198" width="230" height="40" font="body" size="16" color="muted" align="center">for builders, infrastructure sponsors, and project delivery teams</text>
+  <shape id="metric-3" type="rect" x="646" y="126" width="270" height="142" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="metric-3-number" x="666" y="150" width="230" height="42" font="display" size="32" color="brand" align="center">Stronger Trust</text>
+  <text id="metric-3-label" x="666" y="198" width="230" height="40" font="body" size="16" color="muted" align="center">through verifiable records, chain of custody, and public-key audit proof</text>
+  <shape id="metric-4" type="rect" x="940" y="126" width="282" height="142" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="metric-4-number" x="960" y="150" width="242" height="42" font="display" size="32" color="accent" align="center">Faster Conversion</text>
+  <text id="metric-4-label" x="960" y="198" width="242" height="40" font="body" size="16" color="muted" align="center">from approval to project start, financing, sale, and compliance follow-through</text>
+  <table id="value-table" x="58" y="314" width="760" height="260" columns="2.1,4.3" rows="52,52,52,52,52" font="table" size="15" color="ink" padding="10 12" header-fill="brand" header-border="2 solid brand" border-h="1 solid border" border-v="1 solid border" border-outer="1 solid border">
+    <tr color="#FFFFFF"><td>Monetization channel</td><td>How value is captured</td></tr>
+    <tr><td><strong>State land and approval revenue</strong></td><td>States can improve internally generated revenue by making approvals, registration continuity, formalisation, and related fees more traceable and less leak-prone.[1]</td></tr>
+    <tr fill="surface"><td><strong>Federal governance and sector confidence</strong></td><td>Better extractives and public-approval oversight supports a stronger investment climate and more credible institutional supervision.[2] [3]</td></tr>
+    <tr><td><strong>Builder project economics</strong></td><td>Developers and delivery partners reduce financing drag, idle time, and coordination cost when approvals move with clearer status and fewer opaque handoffs.</td></tr>
+    <tr fill="surface"><td><strong>Buyer and lender confidence</strong></td><td>More trusted land, permit, and audit records can improve transaction confidence, reduce dispute risk, and increase market participation.</td></tr>
+  </table>
+  <shape id="closing-panel" type="rect" x="850" y="314" width="372" height="260" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="closing-panel-title" x="876" y="344" width="320" height="28" font="body" size="22" color="ink"><p><strong>Why this matters beyond one project</strong></p></text>
+  <text id="closing-panel-copy" x="876" y="384" width="320" height="132" font="body" size="17" color="ink" line-height="1.35">When a platform improves land certainty, speeds Certificate of Occupancy and permit progression, strengthens extractives governance, and reduces workflow leakage, it becomes economic infrastructure. That is what gives it premier-platform potential in Nigeria.</text>
+  <text id="closing-line" x="876" y="526" width="320" height="30" font="body" size="17" color="brand" line-height="1.25"><p><strong>Nigeria-first execution is the bridge to wider African scale.</strong></p></text>
+  <text id="footer" x="58" y="686" width="540" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform • Nigeria stakeholder deck</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">12</text>
+</slide>

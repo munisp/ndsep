@@ -1,0 +1,23 @@
+<slide id="fct_context">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="3" fill="brand"/>
+  <text id="title" x="58" y="40" width="960" height="46" font="heading" size="30" color="ink" wrap="false">FCT needs stronger title and oversight continuity</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="28" font="body" size="16" color="muted">In the FCT, land administration sits at the center of public trust, mass-housing title continuity, document regularisation, and capital-region investment confidence.</text>
+  <shape id="left-card" type="rect" x="58" y="126" width="430" height="420" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="left-copy" x="82" y="152" width="382" height="366" font="body" size="19" color="ink" line-height="1.33">
+    <p>The FCT operates in a high-visibility land-governance environment where title records, statutory rights, regularisation workflows, and mass-housing obligations all carry outsized public and investor importance.</p>
+    <p space-before="16">When parcel data, review queues, field evidence, and legal progression are fragmented, leadership loses visibility into where cases are delayed, where trust is weakened, and where oversight risk is growing.</p>
+    <p space-before="16"><strong color="brand">This makes the procurement case fundamentally about informed decisions, auditable continuity, and more credible land administration at capital scale.</strong></p>
+  </text>
+  <table id="pressure-table" x="520" y="126" width="702" height="420" columns="2.2,4.8" rows="58,90,90,90,92" font="body" size="16" color="ink" padding="12 14" header-fill="accent" header-border="2 solid accent" border-h="1 solid border" border-outer="1 solid border">
+    <tr color="#FFFFFF"><td>Pressure point</td><td>Why it matters in FCT procurement terms</td></tr>
+    <tr><td><strong>Mass-housing title continuity</strong></td><td>Large-scale title issuance and beneficiary workflows require clearer record discipline, queue visibility, and public confidence.</td></tr>
+    <tr fill="surface"><td><strong>Area-council regularisation</strong></td><td>Document re-commencement and regularisation efforts need stronger workflow traceability and coordination between desks.</td></tr>
+    <tr><td><strong>Statutory title obligations</strong></td><td>Reviewed terms, verification activity, and right-of-occupancy controls require auditable progression and better exception handling.</td></tr>
+    <tr fill="surface"><td><strong>Capital-region credibility</strong></td><td>FCT land decisions signal governance quality to residents, developers, lenders, and broader investment audiences.</td></tr>
+  </table>
+  <shape id="bottom-band" type="rect" x="58" y="572" width="1164" height="74" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="closing" x="84" y="594" width="1112" height="28" font="body" size="19" color="ink" anchor="middle">For the FCT, procurement value lies in better-informed land decisions, cleaner title continuity, and stronger public confidence in how high-value records move through the system.</text>
+  <text id="footer" x="58" y="686" width="640" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Federal Capital Territory</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">2</text>
+</slide>

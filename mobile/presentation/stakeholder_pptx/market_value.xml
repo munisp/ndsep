@@ -1,0 +1,33 @@
+<slide id="market_value">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="40" width="4" height="620" fill="hairline"/>
+  <text id="title" x="86" y="52" width="760" height="46" font="heading" size="30" color="ink" wrap="false">Builder, NGO, and end-buyer value</text>
+  <text id="subtitle" x="86" y="102" width="1060" height="48" font="body" size="20" color="muted" line-height="1.3"><p>The platform is not only an internal government tool; it also reduces friction for market actors and increases trust for the people affected by approval decisions.</p></text>
+
+  <shape id="builder-card" type="rect" x="86" y="182" width="338" height="360" fill="surface" stroke="hairline" stroke-width="1"/>
+  <icon id="builder-icon" name="building" x="112" y="210" width="30" height="30" color="primary"/>
+  <text id="builder-title" x="152" y="206" width="220" height="30" font="body" size="23" color="ink" wrap="false"><strong>Builders</strong></text>
+  <text id="builder-body" x="112" y="260" width="280" height="210" font="body" size="18" color="ink" line-height="1.38"><p>Builders get clearer approval paths, earlier visibility into missing evidence, and fewer avoidable review loops.</p><p color="muted">That means better project predictability, faster site mobilisation, and less capital trapped in administrative delay.</p></text>
+  <shape id="builder-tag" type="rect" x="112" y="484" width="260" height="32" fill="#DCFCE7"/>
+  <text id="builder-tag-text" x="126" y="491" width="234" height="18" font="caption" size="15" color="primary" wrap="false">Clearer approvals • Better project timing</text>
+
+  <shape id="ngo-card" type="rect" x="471" y="182" width="338" height="360" fill="surface" stroke="hairline" stroke-width="1"/>
+  <icon id="ngo-icon" name="heart-handshake" x="497" y="210" width="30" height="30" color="accent"/>
+  <text id="ngo-title" x="537" y="206" width="220" height="30" font="body" size="23" color="ink" wrap="false"><strong>NGOs and civic actors</strong></text>
+  <text id="ngo-body" x="497" y="260" width="280" height="210" font="body" size="18" color="ink" line-height="1.38"><p>NGOs can monitor escalation patterns, evidence integrity, and obligation follow-through with more confidence.</p><p color="muted">This improves transparency, social accountability, and constructive engagement with public institutions.</p></text>
+  <shape id="ngo-tag" type="rect" x="497" y="484" width="260" height="32" fill="#E0F2FE"/>
+  <text id="ngo-tag-text" x="511" y="491" width="234" height="18" font="caption" size="15" color="accent" wrap="false">Better transparency • Stronger accountability</text>
+
+  <shape id="buyer-card" type="rect" x="856" y="182" width="338" height="360" fill="surface" stroke="hairline" stroke-width="1"/>
+  <icon id="buyer-icon" name="house" x="882" y="210" width="30" height="30" color="#B45309"/>
+  <text id="buyer-title" x="922" y="206" width="220" height="30" font="body" size="23" color="ink" wrap="false"><strong>End buyers and households</strong></text>
+  <text id="buyer-body" x="882" y="260" width="280" height="210" font="body" size="18" color="ink" line-height="1.38"><p>Households gain more confidence that titles, permits, and evidence are consistent before they invest their savings.</p><p color="muted">That reduces uncertainty, supports formal transactions, and strengthens trust in the market.</p></text>
+  <shape id="buyer-tag" type="rect" x="882" y="484" width="260" height="32" fill="#FEF3C7"/>
+  <text id="buyer-tag-text" x="896" y="491" width="234" height="18" font="caption" size="15" color="#B45309" wrap="false">Higher trust • Safer property decisions</text>
+
+  <shape id="summary-strip" type="rect" x="86" y="584" width="1108" height="44" fill="#F8FAFC" stroke="hairline" stroke-width="1"/>
+  <text id="summary-text" x="110" y="596" width="1060" height="20" font="body" size="18" color="muted" wrap="false">The same workflow discipline that helps regulators also removes uncertainty for everyone who builds, finances, monitors, or buys.</text>
+
+  <text id="footer" x="70" y="684" width="520" height="18" font="caption" size="14" color="muted" wrap="false">IDLR-PTS Platform | Stakeholder PowerPoint deck</text>
+  <text id="page-number" x="1210" y="684" width="24" height="18" font="caption" size="14" color="muted" align="right" wrap="false">6</text>
+</slide>

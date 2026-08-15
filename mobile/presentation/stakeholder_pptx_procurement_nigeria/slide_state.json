@@ -1,0 +1,144 @@
+{
+  "project_info": {
+    "title": "IDLR-PTS Platform",
+    "created": 1784581784.6,
+    "last_updated": 1784583029.063,
+    "total_slides": 12
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "nigeria_problem",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "procurement_scope",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "geospatial",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "cofo_workflow",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "field_ops",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "ai_documents",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "governance",
+      "state": "edited",
+      "pageNum": 8
+    },
+    {
+      "id": "trust",
+      "state": "edited",
+      "pageNum": 9
+    },
+    {
+      "id": "revenue_assurance",
+      "state": "edited",
+      "pageNum": 10
+    },
+    {
+      "id": "stakeholder_value",
+      "state": "edited",
+      "pageNum": 11
+    },
+    {
+      "id": "rollout",
+      "state": "edited",
+      "pageNum": 12
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "IDLR-PTS Platform",
+      "summary": "Introduce the platform as procurement-grade public delivery infrastructure for Nigeria, centered on land administration, approvals, geospatial intelligence, and revenue assurance.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "nigeria_problem",
+      "title": "Nigeria’s Service and Revenue Challenge",
+      "summary": "Frame fragmented approvals, weak land formalisation, delayed C of O workflows, and disconnected evidence as service-delivery and revenue-assurance problems.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "procurement_scope",
+      "title": "What Government Is Procuring",
+      "summary": "Show the platform as operating infrastructure for parcel intelligence, Certificate of Occupancy workflows, approvals, field operations, AI-assisted intake, and trusted audit.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "geospatial",
+      "title": "Geospatial and Parcel Intelligence",
+      "summary": "Present real parcel and geo screenshots, explicit web-versus-native map labeling, and geofence-ready parcel intelligence relevant to Nigeria.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "cofo_workflow",
+      "title": "Certificate of Occupancy Workflow Continuity",
+      "summary": "Show the real legal workflow screenshot and explain C of O, Right of Occupancy, Governor Consent, review, signing, and registration continuity.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "field_ops",
+      "title": "Low-Connectivity Field Operations",
+      "summary": "Explain mission control, offline continuity, secure cache, replay, reconciliation, and field evidence access in low-connectivity environments.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "ai_documents",
+      "title": "AI-Assisted Intake and Document Review",
+      "summary": "Show how PDF and image parsing, form prefilling, side-by-side verification, and provenance reduce manual bottlenecks while keeping reviewers in control.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "governance",
+      "title": "Queues, Handoffs, and Multi-Agency Governance",
+      "summary": "Present role-based queues, timed handoffs, reminders, digests, overrides, and reassignment as execution controls for public delivery.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "trust",
+      "title": "Audit Integrity and Verification",
+      "summary": "Show signed audit packages, public-key verification, key rotation, revocation, custody timelines, and downloadable trust records.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "revenue_assurance",
+      "title": "Revenue Assurance and Monetization",
+      "summary": "Explain how states, federal institutions, builders, and market actors capture value through formalisation, lower leakage, faster approvals, and stronger conversion.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "stakeholder_value",
+      "title": "Stakeholder Value by Audience",
+      "summary": "Compare direct value for federal regulators, state land agencies, and builders, with supporting relevance for NGOs, lenders, and buyers.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "rollout",
+      "title": "Procurement and Rollout Case",
+      "summary": "Close with implementation credibility, portability, self-hosting readiness, and why this is a scalable Nigeria-first platform for procurement consideration.",
+      "image_plan": "Use a suitable image if needed"
+    }
+  ]
+}

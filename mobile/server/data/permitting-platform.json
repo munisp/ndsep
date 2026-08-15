@@ -1,0 +1,1341 @@
+{
+  "agencies": [
+    {
+      "id": "mining-cadastre",
+      "name": "Mining Cadastre Office",
+      "role": "Mineral title administration and cadastre validation",
+      "jurisdiction": "National",
+      "reviewSlaHours": 72,
+      "queueDepth": 18,
+      "active": true
+    },
+    {
+      "id": "petroleum-regulator",
+      "name": "Petroleum Licensing Authority",
+      "role": "Operator licensing, drilling approvals, and abandonment oversight",
+      "jurisdiction": "National",
+      "reviewSlaHours": 96,
+      "queueDepth": 11,
+      "active": true
+    },
+    {
+      "id": "environment-agency",
+      "name": "Environmental Compliance Agency",
+      "role": "EIA, mitigation, and environmental condition review",
+      "jurisdiction": "Federal and state",
+      "reviewSlaHours": 120,
+      "queueDepth": 24,
+      "active": true
+    },
+    {
+      "id": "planning-authority",
+      "name": "Regional Planning and Infrastructure Authority",
+      "role": "Land-use conformity, rights-of-way, and cross-agency coordination",
+      "jurisdiction": "Regional",
+      "reviewSlaHours": 48,
+      "queueDepth": 9,
+      "active": true
+    }
+  ],
+  "agencyUsers": [
+    {
+      "id": "user-applicant-1",
+      "displayName": "Binta Abdul",
+      "role": "applicant",
+      "agencyId": null,
+      "email": "binta@plateauminerals.ng",
+      "queueIds": []
+    },
+    {
+      "id": "user-mining-1",
+      "displayName": "Haruna Bello",
+      "role": "mining_reviewer",
+      "agencyId": "mining-cadastre",
+      "email": "haruna.bello@cadastre.gov",
+      "queueIds": [
+        "queue-mining-review"
+      ]
+    },
+    {
+      "id": "user-petroleum-1",
+      "displayName": "Ijeoma Peters",
+      "role": "petroleum_reviewer",
+      "agencyId": "petroleum-regulator",
+      "email": "ijeoma.peters@petroleum.gov",
+      "queueIds": [
+        "queue-petroleum-review"
+      ]
+    },
+    {
+      "id": "user-env-1",
+      "displayName": "Grace Ogbodo",
+      "role": "environment_reviewer",
+      "agencyId": "environment-agency",
+      "email": "grace.ogbodo@environment.gov",
+      "queueIds": [
+        "queue-env-review"
+      ]
+    },
+    {
+      "id": "user-planning-1",
+      "displayName": "Tunde Solarin",
+      "role": "planning_supervisor",
+      "agencyId": "planning-authority",
+      "email": "tunde.solarin@planning.gov",
+      "queueIds": [
+        "queue-multi-agency"
+      ]
+    }
+  ],
+  "activeAgencyUserId": "user-mining-1",
+  "permitCases": [
+    {
+      "id": "permit-mining-001",
+      "sector": "mining",
+      "permitType": "Exploration Licence",
+      "title": "North Plateau Lithium Exploration Licence",
+      "applicantName": "Plateau Critical Minerals Ltd",
+      "locationLabel": "Jos East, Plateau State",
+      "assetReference": "MCU-PLT-EL-144",
+      "stage": "technical_review",
+      "priority": "elevated",
+      "leadAgencyId": "mining-cadastre",
+      "participatingAgencyIds": [
+        "environment-agency"
+      ],
+      "updatedAt": "2026-08-14T00:54:12.699Z",
+      "summary": "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
+      "timeline": [
+        {
+          "key": "intake",
+          "label": "Unified intake",
+          "completed": true,
+          "timestamp": "2026-07-20T11:30:00Z"
+        },
+        {
+          "key": "spatial_clearance",
+          "label": "Spatial clearance",
+          "completed": true,
+          "timestamp": "2026-07-20T11:30:00Z"
+        },
+        {
+          "key": "technical_review",
+          "label": "Technical review",
+          "completed": true,
+          "timestamp": "2026-07-20T11:30:00Z"
+        },
+        {
+          "key": "environmental_review",
+          "label": "Environmental review",
+          "completed": false
+        },
+        {
+          "key": "agency_coordination",
+          "label": "Agency coordination",
+          "completed": false
+        },
+        {
+          "key": "payment_pending",
+          "label": "Payment confirmation",
+          "completed": false
+        },
+        {
+          "key": "approval",
+          "label": "Approval decision",
+          "completed": false
+        },
+        {
+          "key": "issued",
+          "label": "Permit issued",
+          "completed": false
+        },
+        {
+          "key": "active_monitoring",
+          "label": "Active monitoring",
+          "completed": false
+        }
+      ],
+      "obligations": [
+        {
+          "id": "obl-mining-001",
+          "title": "Submit signed exploration work programme",
+          "dueAt": "2026-07-24T17:00:00Z",
+          "status": "pending",
+          "owner": "Applicant"
+        },
+        {
+          "id": "obl-mining-002",
+          "title": "Complete environmental baseline screening",
+          "dueAt": "2026-07-26T17:00:00Z",
+          "status": "at_risk",
+          "owner": "Environmental Compliance Agency"
+        }
+      ],
+      "formSections": [
+        {
+          "id": "mining-applicant",
+          "title": "Applicant profile",
+          "description": "Corporate identity, licence references, and applicant contacts.",
+          "fields": [
+            {
+              "key": "company_name",
+              "label": "Company name",
+              "value": "Plateau Critical Minerals Ltd",
+              "required": true,
+              "fieldType": "text",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "mineral_type",
+              "label": "Mineral commodity",
+              "value": "Lithium",
+              "required": true,
+              "fieldType": "text",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "cadastre_units",
+              "label": "Cadastre units",
+              "value": "144",
+              "required": true,
+              "fieldType": "number",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "contact_email",
+              "label": "Contact email",
+              "value": "permits@plateauminerals.ng",
+              "required": true,
+              "fieldType": "text",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "mining-work-programme",
+          "title": "Work programme and compliance",
+          "description": "Operational programme, landowner consent, and capability evidence.",
+          "fields": [
+            {
+              "key": "work_programme_summary",
+              "label": "Work programme summary",
+              "value": "Phase 1 mapping and trenching across the northern concession boundary.",
+              "required": true,
+              "fieldType": "textarea",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "financial_capability",
+              "label": "Financial capability evidence",
+              "value": "Bank guarantee and audited reserves available.",
+              "required": true,
+              "fieldType": "textarea",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "mining_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "landowner_consent",
+              "label": "Landowner consent status",
+              "value": "Attached with sworn affidavit",
+              "required": true,
+              "fieldType": "text",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "mining_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            }
+          ]
+        }
+      ],
+      "reviewNotes": [
+        {
+          "id": "note-mining-001",
+          "author": "Haruna Bello",
+          "role": "mining_reviewer",
+          "agencyId": "mining-cadastre",
+          "decision": "needs_changes",
+          "note": "Applicant should attach a more explicit signed minimum work programme and cadastre-unit coverage note.",
+          "createdAt": "2026-07-20T11:35:00Z"
+        }
+      ],
+      "lastAiExtraction": null,
+      "uploadedDocuments": [],
+      "activeAssignment": {
+        "assignedUserId": "user-mining-1",
+        "assignedAt": "2026-08-14T00:54:12.699Z",
+        "reason": "Obligation risk triggered escalation",
+        "status": "active"
+      },
+      "approvalHandoffs": [
+        {
+          "id": "handoff-permit-mining-001-mining_reviewer",
+          "fromRole": "system",
+          "toRole": "mining_reviewer",
+          "startedAt": "2026-08-14T00:54:12.699Z",
+          "dueAt": "2026-08-15T00:54:12.699Z",
+          "status": "pending",
+          "reason": "Obligation risk triggered escalation"
+        }
+      ],
+      "latestAuditPackage": null,
+      "custodyTimeline": [],
+      "auditHistory": [
+        {
+          "id": "audit-1786668852699-ubgpku",
+          "createdAt": "2026-08-14T00:54:12.699Z",
+          "actor": "Haruna Bello",
+          "role": "mining_reviewer",
+          "type": "assignment",
+          "summary": "Auto-assigned escalated case to Haruna Bello for obligation risk triggered escalation."
+        },
+        {
+          "id": "audit-review-note-mining-001",
+          "createdAt": "2026-07-20T11:35:00Z",
+          "actor": "Haruna Bello",
+          "role": "mining_reviewer",
+          "type": "review_note",
+          "summary": "needs changes: Applicant should attach a more explicit signed minimum work programme and cadastre-unit coverage note."
+        },
+        {
+          "id": "audit-seed-permit-mining-001",
+          "createdAt": "2026-07-20T11:30:00Z",
+          "actor": "system",
+          "role": "system",
+          "type": "status_change",
+          "summary": "Permit case initialized at technical review."
+        }
+      ]
+    },
+    {
+      "id": "permit-oilgas-014",
+      "sector": "oil_gas",
+      "permitType": "Drilling and Workover Approval",
+      "title": "Offshore Delta Appraisal Well Package",
+      "applicantName": "Delta Frontier Energy",
+      "locationLabel": "OML-118 Offshore Block",
+      "assetReference": "WELL-DFE-A7",
+      "stage": "environmental_review",
+      "priority": "critical",
+      "leadAgencyId": "petroleum-regulator",
+      "participatingAgencyIds": [
+        "environment-agency",
+        "planning-authority"
+      ],
+      "updatedAt": "2026-08-14T00:54:13.921Z",
+      "summary": "Local infrastructure dependencies cleared, but mitigation conditions and abandonment security confirmation remain outstanding.",
+      "timeline": [
+        {
+          "key": "intake",
+          "label": "Unified intake",
+          "completed": true,
+          "timestamp": "2026-07-20T09:45:00Z"
+        },
+        {
+          "key": "spatial_clearance",
+          "label": "Spatial clearance",
+          "completed": true,
+          "timestamp": "2026-07-20T09:45:00Z"
+        },
+        {
+          "key": "technical_review",
+          "label": "Technical review",
+          "completed": true,
+          "timestamp": "2026-07-20T09:45:00Z"
+        },
+        {
+          "key": "environmental_review",
+          "label": "Environmental review",
+          "completed": true,
+          "timestamp": "2026-07-20T09:45:00Z"
+        },
+        {
+          "key": "agency_coordination",
+          "label": "Agency coordination",
+          "completed": false
+        },
+        {
+          "key": "payment_pending",
+          "label": "Payment confirmation",
+          "completed": false
+        },
+        {
+          "key": "approval",
+          "label": "Approval decision",
+          "completed": false
+        },
+        {
+          "key": "issued",
+          "label": "Permit issued",
+          "completed": false
+        },
+        {
+          "key": "active_monitoring",
+          "label": "Active monitoring",
+          "completed": false
+        }
+      ],
+      "obligations": [
+        {
+          "id": "obl-oil-001",
+          "title": "Upload revised spill response plan",
+          "dueAt": "2026-07-22T16:00:00Z",
+          "status": "pending",
+          "owner": "Applicant"
+        },
+        {
+          "id": "obl-oil-002",
+          "title": "Confirm abandonment bond receipt",
+          "dueAt": "2026-07-23T12:00:00Z",
+          "status": "pending",
+          "owner": "Petroleum Licensing Authority"
+        }
+      ],
+      "formSections": [
+        {
+          "id": "petroleum-asset",
+          "title": "Asset and operator profile",
+          "description": "Operator details, block reference, and well or facility identifiers.",
+          "fields": [
+            {
+              "key": "operator_name",
+              "label": "Operator name",
+              "value": "Delta Frontier Energy",
+              "required": true,
+              "fieldType": "text",
+              "source": "heuristic",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "block_reference",
+              "label": "Block reference",
+              "value": "OML-500",
+              "required": true,
+              "fieldType": "text",
+              "source": "heuristic",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "well_identifier",
+              "label": "Well identifier",
+              "value": "WELL-55",
+              "required": true,
+              "fieldType": "text",
+              "source": "heuristic",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "operation_type",
+              "label": "Operation type",
+              "value": "Offshore intervention",
+              "required": true,
+              "fieldType": "textarea",
+              "source": "heuristic",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "petroleum-hse",
+          "title": "HSE and environmental controls",
+          "description": "Mitigation measures, abandonment security, and spill response readiness.",
+          "fields": [
+            {
+              "key": "spill_response_plan",
+              "label": "Spill response plan",
+              "value": "Revision pending environmental review.",
+              "required": true,
+              "fieldType": "textarea",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "abandonment_security",
+              "label": "Abandonment security",
+              "value": "Bond draft submitted to regulator.",
+              "required": true,
+              "fieldType": "textarea",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            },
+            {
+              "key": "local_approvals",
+              "label": "Local approvals",
+              "value": "Marine infrastructure dependency cleared.",
+              "required": true,
+              "fieldType": "textarea",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ]
+            }
+          ]
+        }
+      ],
+      "reviewNotes": [
+        {
+          "id": "note-oil-001",
+          "author": "Ijeoma Peters",
+          "role": "petroleum_reviewer",
+          "agencyId": "petroleum-regulator",
+          "decision": "comment",
+          "note": "Operational sequence is acceptable, but abandonment security wording must match the latest regulator template.",
+          "createdAt": "2026-07-20T10:05:00Z"
+        }
+      ],
+      "lastAiExtraction": {
+        "documentName": "petroleum.txt",
+        "extractedAt": "2026-08-14T00:54:13.921Z",
+        "model": "gpt-5-nano",
+        "populatedKeys": [
+          "operator_name",
+          "block_reference",
+          "well_identifier",
+          "operation_type"
+        ],
+        "sourceType": "text",
+        "confidence": null,
+        "provenance": "heuristic",
+        "status": "requires_review",
+        "reason": "Structured extraction failed: LLM extraction timeout. Values were derived only from visible label-pattern rules."
+      },
+      "uploadedDocuments": [
+        {
+          "id": "doc-1786668853922",
+          "fileName": "petroleum.txt",
+          "mimeType": "text/plain",
+          "storagePath": "permits/permit-oilgas-014/petroleum_66d5a988.txt",
+          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_66d5a988.txt",
+          "uploadedAt": "2026-08-14T00:54:13.921Z",
+          "uploadedByRole": "petroleum_reviewer",
+          "extractedTextPreview": "Operator: Delta Frontier Energy\nBlock: OML-500\nWell: WELL-55\nOperation Type: Offshore intervention",
+          "extractionStatus": "requires_review"
+        }
+      ],
+      "activeAssignment": {
+        "assignedUserId": "user-petroleum-1",
+        "assignedAt": "2026-08-14T00:54:12.699Z",
+        "reason": "Critical permit priority escalation",
+        "status": "active"
+      },
+      "approvalHandoffs": [
+        {
+          "id": "handoff-permit-oilgas-014-petroleum_reviewer",
+          "fromRole": "system",
+          "toRole": "petroleum_reviewer",
+          "startedAt": "2026-08-14T00:54:12.699Z",
+          "dueAt": "2026-08-15T00:54:12.699Z",
+          "status": "escalated",
+          "reason": "Critical permit priority escalation"
+        }
+      ],
+      "latestAuditPackage": null,
+      "custodyTimeline": [],
+      "auditHistory": [
+        {
+          "id": "audit-1786668853922-994nl7",
+          "createdAt": "2026-08-14T00:54:13.921Z",
+          "actor": "system",
+          "role": "system",
+          "type": "ai_extraction",
+          "summary": "Rule-based extraction completed for petroleum.txt; this is not an AI-verified result and requires reviewer confirmation."
+        },
+        {
+          "id": "audit-1786668853922-sb5gn7",
+          "createdAt": "2026-08-14T00:54:13.921Z",
+          "actor": "petroleum_reviewer",
+          "role": "petroleum_reviewer",
+          "type": "document_upload",
+          "summary": "Uploaded petroleum.txt; extraction status is requires_review with 4 populated fields."
+        },
+        {
+          "id": "audit-1786668852699-zyrgj2",
+          "createdAt": "2026-08-14T00:54:12.699Z",
+          "actor": "Ijeoma Peters",
+          "role": "petroleum_reviewer",
+          "type": "assignment",
+          "summary": "Auto-assigned escalated case to Ijeoma Peters for critical permit priority escalation."
+        },
+        {
+          "id": "audit-review-note-oil-001",
+          "createdAt": "2026-07-20T10:05:00Z",
+          "actor": "Ijeoma Peters",
+          "role": "petroleum_reviewer",
+          "type": "review_note",
+          "summary": "comment: Operational sequence is acceptable, but abandonment security wording must match the latest regulator template."
+        },
+        {
+          "id": "audit-seed-permit-oilgas-014",
+          "createdAt": "2026-07-20T09:45:00Z",
+          "actor": "system",
+          "role": "system",
+          "type": "status_change",
+          "summary": "Permit case initialized at environmental review."
+        }
+      ]
+    },
+    {
+      "id": "permit-multi-023",
+      "sector": "multi_agency",
+      "permitType": "Integrated Development and Right-of-Way Permit",
+      "title": "Eastern Corridor Logistics Hub Approval",
+      "applicantName": "TransitWorks Consortium",
+      "locationLabel": "Aba–Port Harcourt corridor",
+      "assetReference": "ROW-COR-2026-23",
+      "stage": "agency_coordination",
+      "priority": "elevated",
+      "leadAgencyId": "planning-authority",
+      "participatingAgencyIds": [
+        "environment-agency",
+        "mining-cadastre",
+        "petroleum-regulator"
+      ],
+      "updatedAt": "2026-08-14T00:54:12.699Z",
+      "summary": "Unified intake completed. The case is in parallel agency review with one deficiency notice pending from environmental compliance.",
+      "timeline": [
+        {
+          "key": "intake",
+          "label": "Unified intake",
+          "completed": true,
+          "timestamp": "2026-07-20T08:10:00Z"
+        },
+        {
+          "key": "spatial_clearance",
+          "label": "Spatial clearance",
+          "completed": true,
+          "timestamp": "2026-07-20T08:10:00Z"
+        },
+        {
+          "key": "technical_review",
+          "label": "Technical review",
+          "completed": true,
+          "timestamp": "2026-07-20T08:10:00Z"
+        },
+        {
+          "key": "environmental_review",
+          "label": "Environmental review",
+          "completed": true,
+          "timestamp": "2026-07-20T08:10:00Z"
+        },
+        {
+          "key": "agency_coordination",
+          "label": "Agency coordination",
+          "completed": true,
+          "timestamp": "2026-07-20T08:10:00Z"
+        },
+        {
+          "key": "payment_pending",
+          "label": "Payment confirmation",
+          "completed": false
+        },
+        {
+          "key": "approval",
+          "label": "Approval decision",
+          "completed": false
+        },
+        {
+          "key": "issued",
+          "label": "Permit issued",
+          "completed": false
+        },
+        {
+          "key": "active_monitoring",
+          "label": "Active monitoring",
+          "completed": false
+        }
+      ],
+      "obligations": [
+        {
+          "id": "obl-multi-001",
+          "title": "Resolve environmental deficiency notice",
+          "dueAt": "2026-07-21T14:00:00Z",
+          "status": "at_risk",
+          "owner": "Applicant"
+        }
+      ],
+      "formSections": [
+        {
+          "id": "multi-intake",
+          "title": "Unified intake summary",
+          "description": "Shared project overview for coordinated agency review.",
+          "fields": [
+            {
+              "key": "project_name",
+              "label": "Project name",
+              "value": "Eastern Corridor Logistics Hub",
+              "required": true,
+              "fieldType": "text",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "planning_supervisor",
+                "environment_reviewer"
+              ]
+            },
+            {
+              "key": "corridor_scope",
+              "label": "Corridor scope",
+              "value": "Interstate logistics hub, right-of-way, and environmental coordination package.",
+              "required": true,
+              "fieldType": "textarea",
+              "source": "manual",
+              "viewableBy": [
+                "applicant",
+                "mining_reviewer",
+                "petroleum_reviewer",
+                "environment_reviewer",
+                "planning_supervisor"
+              ],
+              "editableBy": [
+                "applicant",
+                "planning_supervisor",
+                "environment_reviewer"
+              ]
+            }
+          ]
+        }
+      ],
+      "reviewNotes": [
+        {
+          "id": "note-multi-001",
+          "author": "Tunde Solarin",
+          "role": "planning_supervisor",
+          "agencyId": "planning-authority",
+          "decision": "comment",
+          "note": "Parallel agency queues are active. Environmental deficiency response is the current blocker.",
+          "createdAt": "2026-07-20T08:30:00Z"
+        }
+      ],
+      "lastAiExtraction": null,
+      "uploadedDocuments": [],
+      "activeAssignment": {
+        "assignedUserId": "user-env-1",
+        "assignedAt": "2026-08-14T00:54:12.699Z",
+        "reason": "Obligation risk triggered escalation",
+        "status": "active"
+      },
+      "approvalHandoffs": [
+        {
+          "id": "handoff-permit-multi-023-environment_reviewer",
+          "fromRole": "system",
+          "toRole": "environment_reviewer",
+          "startedAt": "2026-08-14T00:54:12.699Z",
+          "dueAt": "2026-08-15T00:54:12.699Z",
+          "status": "pending",
+          "reason": "Obligation risk triggered escalation"
+        }
+      ],
+      "latestAuditPackage": null,
+      "custodyTimeline": [],
+      "auditHistory": [
+        {
+          "id": "audit-1786668852699-pzf98y",
+          "createdAt": "2026-08-14T00:54:12.699Z",
+          "actor": "Grace Ogbodo",
+          "role": "environment_reviewer",
+          "type": "assignment",
+          "summary": "Auto-assigned escalated case to Grace Ogbodo for obligation risk triggered escalation."
+        },
+        {
+          "id": "audit-review-note-multi-001",
+          "createdAt": "2026-07-20T08:30:00Z",
+          "actor": "Tunde Solarin",
+          "role": "planning_supervisor",
+          "type": "review_note",
+          "summary": "comment: Parallel agency queues are active. Environmental deficiency response is the current blocker."
+        },
+        {
+          "id": "audit-seed-permit-multi-023",
+          "createdAt": "2026-07-20T08:10:00Z",
+          "actor": "system",
+          "role": "system",
+          "type": "status_change",
+          "summary": "Permit case initialized at agency coordination."
+        }
+      ]
+    }
+  ],
+  "approvalQueues": [
+    {
+      "id": "queue-mining-review",
+      "agencyId": "mining-cadastre",
+      "role": "mining_reviewer",
+      "title": "Mining cadastre review queue",
+      "description": "Exploration, quarry, and mining lease cases awaiting cadastre and technical review.",
+      "caseIds": [
+        "permit-mining-001"
+      ],
+      "pendingCount": 1,
+      "overdueCount": 1,
+      "avgSlaHours": 72,
+      "breachedCaseIds": [
+        "permit-mining-001"
+      ]
+    },
+    {
+      "id": "queue-petroleum-review",
+      "agencyId": "petroleum-regulator",
+      "role": "petroleum_reviewer",
+      "title": "Petroleum licensing queue",
+      "description": "Drilling, workover, abandonment, and field development packages awaiting review.",
+      "caseIds": [
+        "permit-oilgas-014"
+      ],
+      "pendingCount": 1,
+      "overdueCount": 0,
+      "avgSlaHours": 96,
+      "breachedCaseIds": []
+    },
+    {
+      "id": "queue-env-review",
+      "agencyId": "environment-agency",
+      "role": "environment_reviewer",
+      "title": "Environmental compliance queue",
+      "description": "EIA, mitigation, and deficiency review across all permit sectors.",
+      "caseIds": [
+        "permit-mining-001",
+        "permit-oilgas-014",
+        "permit-multi-023"
+      ],
+      "pendingCount": 3,
+      "overdueCount": 2,
+      "avgSlaHours": 120,
+      "breachedCaseIds": [
+        "permit-mining-001",
+        "permit-multi-023"
+      ]
+    },
+    {
+      "id": "queue-multi-agency",
+      "agencyId": "planning-authority",
+      "role": "planning_supervisor",
+      "title": "Multi-agency coordination queue",
+      "description": "Unified intake, routing, and cross-agency decision queues for shared permits.",
+      "caseIds": [
+        "permit-multi-023"
+      ],
+      "pendingCount": 1,
+      "overdueCount": 1,
+      "avgSlaHours": 48,
+      "breachedCaseIds": [
+        "permit-multi-023"
+      ]
+    }
+  ],
+  "middleware": [
+    {
+      "key": "kafka",
+      "name": "Kafka Event Bus",
+      "purpose": "Permit, obligation, and review-state event streaming",
+      "status": "connected",
+      "ownerService": "go-event-gateway"
+    },
+    {
+      "key": "temporal",
+      "name": "Temporal Workflow Engine",
+      "purpose": "Long-running agency review, escalation, and renewal workflows",
+      "status": "connected",
+      "ownerService": "typescript-orchestrator"
+    },
+    {
+      "key": "keycloak",
+      "name": "Keycloak Identity",
+      "purpose": "SSO and federated user identity for applicants and agencies",
+      "status": "planned",
+      "ownerService": "typescript-orchestrator"
+    },
+    {
+      "key": "permify",
+      "name": "Permify Authorization",
+      "purpose": "Fine-grained case, agency, and obligation access control",
+      "status": "planned",
+      "ownerService": "rust-policy-engine"
+    },
+    {
+      "key": "redis",
+      "name": "Redis Cache and Replay State",
+      "purpose": "Notification fan-out, queue caching, and replay coordination",
+      "status": "connected",
+      "ownerService": "go-event-gateway"
+    },
+    {
+      "key": "apisix",
+      "name": "APISIX Gateway",
+      "purpose": "Unified ingress, routing, and policy enforcement",
+      "status": "planned",
+      "ownerService": "typescript-orchestrator"
+    },
+    {
+      "key": "tigerbeetle",
+      "name": "TigerBeetle Ledger",
+      "purpose": "Fee assessment, payment settlement, and inter-agency apportionment",
+      "status": "planned",
+      "ownerService": "go-event-gateway"
+    },
+    {
+      "key": "lakehouse",
+      "name": "Lakehouse Analytics",
+      "purpose": "Cross-domain analytics, compliance scoring, and model features",
+      "status": "planned",
+      "ownerService": "python-compliance-api"
+    }
+  ],
+  "services": [
+    {
+      "id": "typescript-orchestrator",
+      "name": "Permitting Orchestrator",
+      "language": "typescript",
+      "responsibility": "Unified permit APIs, case orchestration, mobile and PWA feature aggregation, and Temporal workflow coordination.",
+      "runtimeMode": "webdev_backend",
+      "endpointPath": "/api/permitting",
+      "health": "healthy",
+      "middlewareKeys": [
+        "temporal",
+        "keycloak",
+        "apisix"
+      ]
+    },
+    {
+      "id": "python-compliance-api",
+      "name": "Compliance Intelligence Service",
+      "language": "python",
+      "responsibility": "Spatial suitability analytics, compliance scoring, document intelligence pipelines, and lakehouse export preparation.",
+      "runtimeMode": "external_service",
+      "endpointPath": "/services/python/compliance",
+      "health": "healthy",
+      "middlewareKeys": [
+        "lakehouse",
+        "redis"
+      ]
+    },
+    {
+      "id": "go-event-gateway",
+      "name": "Event Gateway",
+      "language": "go",
+      "responsibility": "Permit event publishing, middleware fan-out, replay processing, and ledger integration adapters.",
+      "runtimeMode": "external_service",
+      "endpointPath": "/services/go/events",
+      "health": "healthy",
+      "middlewareKeys": [
+        "kafka",
+        "redis",
+        "tigerbeetle"
+      ]
+    },
+    {
+      "id": "rust-policy-engine",
+      "name": "Policy and Authorization Engine",
+      "language": "rust",
+      "responsibility": "Deterministic entitlement checks, cross-agency policy evaluation, and immutable policy decision traces.",
+      "runtimeMode": "external_service",
+      "endpointPath": "/services/rust/policy",
+      "health": "warning",
+      "middlewareKeys": [
+        "permify",
+        "apisix"
+      ]
+    }
+  ],
+  "parity": [
+    {
+      "surface": "native_mobile",
+      "score": 86,
+      "strengths": [
+        "offline review continuity",
+        "field-first notifications",
+        "parcel and permit detail sheets"
+      ],
+      "nextFocus": "deeper reviewer handoff and evidence upload flows for sector-specific permits"
+    },
+    {
+      "surface": "pwa",
+      "score": 85,
+      "strengths": [
+        "wider workflow overview layout",
+        "agency and middleware dashboards",
+        "shared permit timelines"
+      ],
+      "nextFocus": "install experience, background sync visibility, and richer admin data tables"
+    }
+  ],
+  "signingKeys": [],
+  "reminderQueue": [
+    {
+      "id": "reminder-permit-mining-001-handoff-permit-mining-001-mining_reviewer",
+      "caseId": "permit-mining-001",
+      "handoffId": "handoff-permit-mining-001-mining_reviewer",
+      "role": "mining_reviewer",
+      "reminderAt": "2026-08-14T18:54:12.699Z",
+      "dueAt": "2026-08-15T00:54:12.699Z",
+      "severity": "warning",
+      "status": "scheduled",
+      "summary": "North Plateau Lithium Exploration Licence is due for mining reviewer review in 24h."
+    },
+    {
+      "id": "reminder-permit-oilgas-014-handoff-permit-oilgas-014-petroleum_reviewer",
+      "caseId": "permit-oilgas-014",
+      "handoffId": "handoff-permit-oilgas-014-petroleum_reviewer",
+      "role": "petroleum_reviewer",
+      "reminderAt": "2026-08-14T18:54:12.699Z",
+      "dueAt": "2026-08-15T00:54:12.699Z",
+      "severity": "critical",
+      "status": "triggered",
+      "summary": "Offshore Delta Appraisal Well Package is due for petroleum reviewer review in 24h."
+    },
+    {
+      "id": "reminder-permit-multi-023-handoff-permit-multi-023-environment_reviewer",
+      "caseId": "permit-multi-023",
+      "handoffId": "handoff-permit-multi-023-environment_reviewer",
+      "role": "environment_reviewer",
+      "reminderAt": "2026-08-14T18:54:12.699Z",
+      "dueAt": "2026-08-15T00:54:12.699Z",
+      "severity": "warning",
+      "status": "scheduled",
+      "summary": "Eastern Corridor Logistics Hub Approval is due for environment reviewer review in 24h."
+    }
+  ],
+  "supervisorExceptionAnalytics": [
+    {
+      "agencyId": "mining-cadastre",
+      "escalatedCount": 0,
+      "reassignmentCount": 0,
+      "avgHoursToAssignment": 0,
+      "atRiskCaseIds": [
+        "permit-mining-001",
+        "permit-multi-023"
+      ]
+    },
+    {
+      "agencyId": "petroleum-regulator",
+      "escalatedCount": 1,
+      "reassignmentCount": 0,
+      "avgHoursToAssignment": 0,
+      "atRiskCaseIds": [
+        "permit-multi-023"
+      ]
+    },
+    {
+      "agencyId": "environment-agency",
+      "escalatedCount": 1,
+      "reassignmentCount": 0,
+      "avgHoursToAssignment": 0,
+      "atRiskCaseIds": [
+        "permit-mining-001",
+        "permit-multi-023"
+      ]
+    },
+    {
+      "agencyId": "planning-authority",
+      "escalatedCount": 1,
+      "reassignmentCount": 0,
+      "avgHoursToAssignment": 0,
+      "atRiskCaseIds": [
+        "permit-multi-023"
+      ]
+    }
+  ],
+  "supervisorDigests": [
+    {
+      "id": "digest-email-mining-cadastre",
+      "agencyId": "mining-cadastre",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "email",
+      "subject": "Mining Cadastre Office queue digest",
+      "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
+      "backlogCount": 1,
+      "overdueHandoffs": 0
+    },
+    {
+      "id": "digest-inapp-mining-cadastre",
+      "agencyId": "mining-cadastre",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "in_app",
+      "subject": "Mining Cadastre Office supervisor digest",
+      "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
+      "backlogCount": 1,
+      "overdueHandoffs": 0
+    },
+    {
+      "id": "digest-email-petroleum-regulator",
+      "agencyId": "petroleum-regulator",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "email",
+      "subject": "Petroleum Licensing Authority queue digest",
+      "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
+      "backlogCount": 1,
+      "overdueHandoffs": 1
+    },
+    {
+      "id": "digest-inapp-petroleum-regulator",
+      "agencyId": "petroleum-regulator",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "in_app",
+      "subject": "Petroleum Licensing Authority supervisor digest",
+      "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
+      "backlogCount": 1,
+      "overdueHandoffs": 1
+    },
+    {
+      "id": "digest-email-environment-agency",
+      "agencyId": "environment-agency",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "email",
+      "subject": "Environmental Compliance Agency queue digest",
+      "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
+      "backlogCount": 3,
+      "overdueHandoffs": 1
+    },
+    {
+      "id": "digest-inapp-environment-agency",
+      "agencyId": "environment-agency",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "in_app",
+      "subject": "Environmental Compliance Agency supervisor digest",
+      "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
+      "backlogCount": 3,
+      "overdueHandoffs": 1
+    },
+    {
+      "id": "digest-email-planning-authority",
+      "agencyId": "planning-authority",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "email",
+      "subject": "Regional Planning and Infrastructure Authority queue digest",
+      "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
+      "backlogCount": 1,
+      "overdueHandoffs": 1
+    },
+    {
+      "id": "digest-inapp-planning-authority",
+      "agencyId": "planning-authority",
+      "generatedAt": "2026-08-14T01:19:44.341Z",
+      "channel": "in_app",
+      "subject": "Regional Planning and Infrastructure Authority supervisor digest",
+      "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
+      "backlogCount": 1,
+      "overdueHandoffs": 1
+    }
+  ],
+  "queueAnalytics": [
+    {
+      "agencyId": "mining-cadastre",
+      "role": "mining_reviewer",
+      "pendingCount": 1,
+      "overdueCount": 1,
+      "avgSlaHours": 72,
+      "breachedCaseIds": [
+        "permit-mining-001"
+      ],
+      "criticalCaseIds": []
+    },
+    {
+      "agencyId": "petroleum-regulator",
+      "role": "petroleum_reviewer",
+      "pendingCount": 1,
+      "overdueCount": 0,
+      "avgSlaHours": 96,
+      "breachedCaseIds": [],
+      "criticalCaseIds": [
+        "permit-oilgas-014"
+      ]
+    },
+    {
+      "agencyId": "environment-agency",
+      "role": "environment_reviewer",
+      "pendingCount": 3,
+      "overdueCount": 2,
+      "avgSlaHours": 120,
+      "breachedCaseIds": [
+        "permit-mining-001",
+        "permit-multi-023"
+      ],
+      "criticalCaseIds": [
+        "permit-oilgas-014"
+      ]
+    },
+    {
+      "agencyId": "planning-authority",
+      "role": "planning_supervisor",
+      "pendingCount": 1,
+      "overdueCount": 1,
+      "avgSlaHours": 48,
+      "breachedCaseIds": [
+        "permit-multi-023"
+      ],
+      "criticalCaseIds": []
+    }
+  ]
+}

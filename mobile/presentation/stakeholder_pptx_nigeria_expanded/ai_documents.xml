@@ -1,0 +1,20 @@
+<slide id="ai_documents">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="940" height="46" font="heading" size="30" color="ink" wrap="false">AI-assisted document extraction and review</text>
+  <text id="subtitle" x="58" y="86" width="1080" height="30" font="body" size="16" color="muted">The platform uses AI to reduce manual document work while keeping reviewers in control of approval quality and evidence interpretation.</text>
+  <shape id="shot-frame" type="rect" x="58" y="132" width="620" height="470" fill="paper" stroke="border" stroke-width="1" shadow="true"/>
+  <image id="permit-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784580227475_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL3Blcm1pdF9kZXRhaWxfc2VlZGVkX3Yz.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODAyMjc0NzVfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwzQmxjbTFwZEY5a1pYUmhhV3hmYzJWbFpHVmtYM1l6LnBuZz94LW9zcy1wcm9jZXNzPWltYWdlL3Jlc2l6ZSx3XzE1NjAsaF8xNTYwL2Zvcm1hdCx3ZWJwIiwiQ29uZGl0aW9uIjp7IkRhdGVMZXNzVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNzg2NzUyMDAwfX19XX0_&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEUCIQDTOZ6R7kPp8ZocBaA0WnNRmkgTkQZT4TqrPKEPR059YQIgN14K346wMBsPQmPNTY1j2YEnoUvntr~tYVHxplMP568_" x="68" y="142" width="600" height="430" fit="cover"/>
+  <text id="shot-caption" x="82" y="578" width="572" height="18" font="caption" size="12" color="muted" align="center">Real web screenshot: permit detail workflow with AI-assisted extraction, review controls, audit visibility, and approval context</text>
+  <table id="ai-table" x="712" y="152" width="510" height="340" columns="2.3,3.7" rows="52,72,72,72,72" font="table" size="15" color="ink" padding="10 12" header-fill="brand" header-border="2 solid brand" border-h="1 solid border" border-v="1 solid border" border-outer="1 solid border">
+    <tr color="#FFFFFF"><td>AI capability</td><td>Practical reviewer value</td></tr>
+    <tr><td><strong>PDF and image parsing</strong></td><td>Uploaded permit documents can be read and transformed into structured intake values.</td></tr>
+    <tr fill="surface"><td><strong>Form prefilling</strong></td><td>Reviewers and applicants spend less time retyping routine details and more time checking quality.</td></tr>
+    <tr><td><strong>Side-by-side verification</strong></td><td>Extracted values can be checked against the original evidence instead of being accepted blindly.</td></tr>
+    <tr fill="surface"><td><strong>Field-level provenance</strong></td><td>The workflow can distinguish what came from AI and what was confirmed or corrected by a human.</td></tr>
+  </table>
+  <shape id="summary-card" type="rect" x="712" y="516" width="510" height="86" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="summary-copy" x="734" y="536" width="466" height="44" font="body" size="17" color="ink" line-height="1.3">In practice, AI here is not replacing decision makers. It is reducing intake friction, shortening turnaround time, and helping agencies maintain quality at scale.</text>
+  <text id="footer" x="58" y="686" width="540" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform • Nigeria stakeholder deck</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">6</text>
+</slide>

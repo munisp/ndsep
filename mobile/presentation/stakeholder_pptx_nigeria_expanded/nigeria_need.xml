@@ -1,0 +1,22 @@
+<slide id="nigeria_need">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="860" height="46" font="heading" size="30" color="ink" wrap="false">Why Nigeria needs this now</text>
+  <text id="subtitle" x="58" y="86" width="980" height="28" font="body" size="16" color="muted">Housing delivery, land formalisation, extractives governance, and agency coordination all depend on faster and more trusted workflows.</text>
+  <shape id="left-card" type="rect" x="58" y="120" width="430" height="430" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="left-copy" x="82" y="146" width="382" height="378" font="body" size="19" color="ink" line-height="1.35">
+    <p>Nigeria’s biggest delivery bottlenecks are rarely caused by lack of demand alone. They are caused by fragmented records, disconnected approvals, weak evidence continuity, and slow coordination between field teams and decision desks.</p>
+    <p space-before="16">For federal institutions, this creates weak oversight across land, housing, mining, oil and gas, and infrastructure-linked approvals. For states and builders, it translates into slower project starts, uncertain compliance status, weaker revenue visibility, and lower citizen confidence.</p>
+    <p space-before="16"><strong color="brand">The platform matters because it connects approvals to place, evidence, deadlines, and accountability in one operating model.</strong></p>
+  </text>
+  <table id="pressure-table" x="520" y="120" width="702" height="430" columns="2.2,4.8" rows="58,124,124,124" font="table" size="16" color="ink" padding="12 14" header-fill="brand" header-border="2 solid brand" border-h="1 solid border" border-v="1 solid border" border-outer="1 solid border">
+    <tr color="#FFFFFF"><td>Pressure point</td><td>Why it matters</td></tr>
+    <tr><td><strong>Nigeria needs 550,000 housing units annually</strong></td><td>Approval delays directly affect housing supply, affordability, project mobilisation, and the pace at which formal developments can move to market.[1]</td></tr>
+    <tr fill="surface"><td><strong>Land formalisation remains below 10%, with ambition to reach 50% in 10 years</strong></td><td>Weak records limit mortgage depth, investor confidence, land-based revenue, and the efficiency of state land administration.[1]</td></tr>
+    <tr><td><strong>The mining cadastre already manages 5,000+ mineral titles and 2,000+ applications annually</strong></td><td>High-volume approvals require transparent workflow, stronger evidence handling, and clearer coordination across technical and regulatory review functions.[2]</td></tr>
+  </table>
+  <shape id="closing-band" type="rect" x="58" y="574" width="1164" height="74" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="closing" x="82" y="594" width="1116" height="34" font="body" size="19" color="ink" anchor="middle">This is why the platform is positioned as delivery infrastructure for Nigeria, not just software for forms.</text>
+  <text id="footer" x="58" y="686" width="540" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform • Nigeria stakeholder deck</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">2</text>
+</slide>

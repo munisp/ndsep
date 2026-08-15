@@ -1,0 +1,28 @@
+<slide id="governance">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Queues, handoffs, and multi-agency governance</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="30" font="body" size="16" color="muted">Complex approvals fail most often between desks. The platform makes queue ownership, deadlines, escalation logic, and exception handling visible and enforceable.</text>
+  <shape id="c1" type="rect" x="58" y="144" width="360" height="176" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="c1t" x="82" y="168" width="312" height="24" font="body" size="20" color="ink"><p><strong>Role-based queues</strong></p></text>
+  <text id="c1c" x="82" y="206" width="312" height="86" font="body" size="16" color="muted" line-height="1.35">Each agency or desk sees the work relevant to its role, reducing ambiguity and making queue ownership more transparent.</text>
+  <shape id="c2" type="rect" x="460" y="144" width="360" height="176" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="c2t" x="484" y="168" width="312" height="24" font="body" size="20" color="ink"><p><strong>Timed handoffs</strong></p></text>
+  <text id="c2c" x="484" y="206" width="312" height="86" font="body" size="16" color="muted" line-height="1.35">Workflow transitions are linked to deadlines, helping reviewers and supervisors see when work is nearing escalation rather than discovering delay too late.</text>
+  <shape id="c3" type="rect" x="862" y="144" width="360" height="176" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="c3t" x="886" y="168" width="312" height="24" font="body" size="20" color="ink"><p><strong>Reminder scheduling</strong></p></text>
+  <text id="c3c" x="886" y="206" width="312" height="86" font="body" size="16" color="muted" line-height="1.35">Near-due cases can trigger reminders and notification-center prompts before the workflow becomes overdue.</text>
+  <shape id="c4" type="rect" x="58" y="348" width="360" height="176" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="c4t" x="82" y="372" width="312" height="24" font="body" size="20" color="ink"><p><strong>Supervisor overrides</strong></p></text>
+  <text id="c4c" x="82" y="410" width="312" height="86" font="body" size="16" color="muted" line-height="1.35">Managers can intervene in stalled or misrouted work while preserving an audit trail of the reason, actor, and timing of intervention.</text>
+  <shape id="c5" type="rect" x="460" y="348" width="360" height="176" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="c5t" x="484" y="372" width="312" height="24" font="body" size="20" color="ink"><p><strong>Reassignment controls</strong></p></text>
+  <text id="c5c" x="484" y="410" width="312" height="86" font="body" size="16" color="muted" line-height="1.35">Escalated or overloaded cases can be reassigned safely, which helps agencies deal with bottlenecks without losing accountability.</text>
+  <shape id="c6" type="rect" x="862" y="348" width="360" height="176" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="c6t" x="886" y="372" width="312" height="24" font="body" size="20" color="ink"><p><strong>Digest and exception oversight</strong></p></text>
+  <text id="c6c" x="886" y="410" width="312" height="86" font="body" size="16" color="muted" line-height="1.35">Scheduled digests and supervisor dashboards make backlog, reassignment patterns, and escalation trends visible to leadership.</text>
+  <shape id="bottom-band" type="rect" x="58" y="580" width="1164" height="42" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="bottom-copy" x="82" y="592" width="1116" height="18" font="body" size="16" color="ink" align="center" wrap="false">For procurement teams, this governance layer is what turns workflow software into an enforceable public-delivery operating model.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">8</text>
+</slide>

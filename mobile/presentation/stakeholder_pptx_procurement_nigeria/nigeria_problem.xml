@@ -1,0 +1,23 @@
+<slide id="nigeria_problem">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="940" height="46" font="heading" size="30" color="ink" wrap="false">Nigeria’s service and revenue challenge</text>
+  <text id="subtitle" x="58" y="86" width="1060" height="28" font="body" size="16" color="muted">The procurement case is not only about digitization. It is about reducing friction in land administration, Certificate of Occupancy processing, approvals, and public revenue capture.</text>
+  <shape id="left-card" type="rect" x="58" y="120" width="430" height="430" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="left-copy" x="82" y="146" width="382" height="378" font="body" size="19" color="ink" line-height="1.35">
+    <p>Across Nigeria, delays in land and approval workflows do not only slow service delivery. They weaken formalisation, reduce confidence in records, raise project costs, and make it harder for states to convert approvals into reliable internally generated revenue.</p>
+    <p space-before="16">The most persistent bottlenecks sit at the boundaries between parcel context, agency review, field evidence, legal progression, and supervisory follow-through. When those boundaries remain manual or disconnected, Certificate of Occupancy pipelines, planning approvals, and extractives workflows become harder to govern and harder to trust.</p>
+    <p space-before="16"><strong color="brand">That is why this should be treated as procurement of delivery infrastructure, not merely procurement of software screens.</strong></p>
+  </text>
+  <table id="pressure-table" x="520" y="120" width="702" height="430" columns="2.2,4.8" rows="58,92,92,92,96" font="body" size="16" color="ink" padding="12 14" header-fill="brand" header-border="2 solid brand" border-h="1 solid hairline" border-outer="1 solid hairline">
+    <tr color="#FFFFFF"><td>Pressure point</td><td>Why it matters in procurement terms</td></tr>
+    <tr><td><strong>Housing and urban growth pressure</strong></td><td>Slow approvals directly affect housing supply, developer confidence, and the speed at which formal projects can reach market.[1]</td></tr>
+    <tr fill="mist"><td><strong>Weak land formalisation</strong></td><td>Low formalisation constrains mortgage depth, land-market confidence, and the visibility of fee and registration value for states.[1]</td></tr>
+    <tr><td><strong>High-volume extractives workflows</strong></td><td>Mining and energy approvals need transparent review, evidence continuity, and stronger supervisory traceability.[2]</td></tr>
+    <tr fill="mist"><td><strong>Fragmented service and revenue chains</strong></td><td>Disconnected parcel, legal, field, and approval records create leakage, slower turnaround, and weaker defensibility of public decisions.</td></tr>
+  </table>
+  <shape id="bottom-band" type="rect" x="58" y="574" width="1164" height="74" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="closing" x="82" y="594" width="1116" height="34" font="body" size="19" color="ink" anchor="middle">A procurement-grade platform must therefore improve service speed, revenue assurance, land certainty, and institutional trust at the same time.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">2</text>
+</slide>

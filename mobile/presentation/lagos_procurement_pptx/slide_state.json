@@ -1,0 +1,100 @@
+{
+  "project_info": {
+    "title": "Lagos procurement cover",
+    "created": 1784583728.986,
+    "last_updated": 1784584180.387,
+    "total_slides": 8
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "lagos_context",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "lagos_geospatial",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "lagos_cofo",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "lagos_field",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "lagos_ai",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "lagos_revenue",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "lagos_rollout",
+      "state": "edited",
+      "pageNum": 8
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "Lagos procurement cover",
+      "summary": "Introduce the Lagos-focused procurement-grade platform for land administration, Certificate of Occupancy workflow continuity, parcel intelligence, and revenue assurance.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "lagos_context",
+      "title": "Lagos service and land-administration challenge",
+      "summary": "Frame Lagos-specific pressures around development intensity, land workflow speed, title regularisation, and service trust.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "lagos_geospatial",
+      "title": "Lagos geospatial and parcel intelligence",
+      "summary": "Show the true web parcel map and explain how parcel intelligence and corridor overlays support planning, housing, and right-of-way review in Lagos.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "lagos_cofo",
+      "title": "Lagos Certificate of Occupancy workflow",
+      "summary": "Present how the platform improves C of O progression visibility, desk coordination, and applicant confidence in Lagos.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "lagos_field",
+      "title": "Lagos field and corridor operations",
+      "summary": "Show low-connectivity field execution, inspection continuity, and evidence handling for corridor-sensitive delivery environments.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "lagos_ai",
+      "title": "Lagos AI-assisted intake and review",
+      "summary": "Explain how AI document extraction and side-by-side verification reduce intake friction and improve throughput.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "lagos_revenue",
+      "title": "Lagos revenue assurance and builder value",
+      "summary": "Show how Lagos State and builders capture value through faster approvals, lower leakage, and stronger conversion into real projects.",
+      "image_plan": "Use a suitable image if needed"
+    },
+    {
+      "id": "lagos_rollout",
+      "title": "Lagos procurement and rollout path",
+      "summary": "Close with a phased Lagos implementation path built around land administration, C of O improvement, geospatial review, and oversight discipline.",
+      "image_plan": "Use a suitable image if needed"
+    }
+  ]
+}
