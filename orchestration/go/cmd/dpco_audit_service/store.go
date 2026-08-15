@@ -59,9 +59,21 @@ func saveAuditRecord(ctx context.Context, auditID string, payload map[string]int
 		return fmt.Errorf("encode audit record: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO dpco_audit_service_records (audit_id, payload)
-		VALUES ($1::uuid, $2::jsonb)
-		ON CONFLICT (audit_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`, auditID, string(encoded)); err != nil {
+		WITH input AS (SELECT $2::jsonb AS payload)
+		INSERT INTO dpco_audit_service_records (audit_id, payload, dpco_organisation_id, organisation_id, audit_engagement_id)
+		SELECT $1::uuid, payload,
+		  CASE WHEN COALESCE(payload ->> 'dpco_organisation_id', payload ->> 'dpco_org_id') ~ '^[0-9]+$'
+		       THEN COALESCE(payload ->> 'dpco_organisation_id', payload ->> 'dpco_org_id')::integer END,
+		  CASE WHEN payload ->> 'org_id' ~ '^[0-9]+$' THEN (payload ->> 'org_id')::integer END,
+		  CASE WHEN COALESCE(payload ->> 'audit_engagement_id', payload ->> 'audit_id') ~ '^[0-9]+$'
+		       THEN COALESCE(payload ->> 'audit_engagement_id', payload ->> 'audit_id')::integer END
+		FROM input
+		ON CONFLICT (audit_id) DO UPDATE SET
+		  payload = EXCLUDED.payload,
+		  dpco_organisation_id = EXCLUDED.dpco_organisation_id,
+		  organisation_id = EXCLUDED.organisation_id,
+		  audit_engagement_id = EXCLUDED.audit_engagement_id,
+		  updated_at = now()`, auditID, string(encoded)); err != nil {
 		return fmt.Errorf("persist audit record: %w", err)
 	}
 	return nil

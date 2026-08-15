@@ -57,9 +57,16 @@ func saveRegistryRecord(ctx context.Context, registryID string, payload map[stri
 		return fmt.Errorf("encode DPCO registry record: %w", err)
 	}
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO dpco_registry_service_records (registry_id, payload)
-		VALUES ($1::uuid, $2::jsonb)
-		ON CONFLICT (registry_id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`, registryID, string(encoded))
+		WITH input AS (SELECT $2::jsonb AS payload)
+		INSERT INTO dpco_registry_service_records (registry_id, payload, dpco_organisation_id)
+		SELECT $1::uuid, payload,
+		  CASE WHEN COALESCE(payload ->> 'dpco_organisation_id', payload ->> 'dpco_org_id') ~ '^[0-9]+$'
+		       THEN COALESCE(payload ->> 'dpco_organisation_id', payload ->> 'dpco_org_id')::integer END
+		FROM input
+		ON CONFLICT (registry_id) DO UPDATE SET
+		  payload = EXCLUDED.payload,
+		  dpco_organisation_id = EXCLUDED.dpco_organisation_id,
+		  updated_at = now()`, registryID, string(encoded))
 	if err != nil {
 		return fmt.Errorf("persist DPCO registry record: %w", err)
 	}

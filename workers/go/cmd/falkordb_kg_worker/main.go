@@ -23,6 +23,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -37,11 +38,13 @@ import (
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 var (
-	dbURL       = os.Getenv("DATABASE_URL")
-	falkorURL   = getEnv("FALKORDB_URL", "redis://localhost:6379")
-	relayURL    = getEnv("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-	port        = getEnv("FALKORDB_PORT", "8210")
-	workerStart = time.Now()
+	dbURL           = os.Getenv("DATABASE_URL")
+	falkorURL       = os.Getenv("FALKORDB_URL")
+	falkorGraphName = getEnv("FALKORDB_GRAPH_NAME", "ndsep_compliance")
+	relayURL        = getEnv("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
+	port            = getEnv("FALKORDB_PORT", "8210")
+	workerStart     = time.Now()
+	falkorAdapter   *FalkorAdapter
 )
 
 // ── State ──────────────────────────────────────────────────────────────────────
@@ -503,9 +506,17 @@ func rebuildHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	log.Printf("[KG] Starting NDSEP FalkorDB Knowledge Graph Worker on port %s", port)
 	if dbURL == "" {
-		log.Fatal("[KG] DATABASE_URL is required; refusing to start an in-memory graph fallback")
+		log.Fatal("[KG] DATABASE_URL is required")
 	}
-	log.Fatal("[KG] Real FalkorDB client integration is required; refusing to serve the retired in-memory graph implementation")
+	adapter, err := newFalkorAdapter(context.Background(), falkorURL, falkorGraphName, 5000)
+	if err != nil {
+		log.Fatalf("[KG] Real FalkorDB adapter unavailable: %v", err)
+	}
+	falkorAdapter = adapter
+	defer func() { _ = falkorAdapter.close() }()
+
+	// The retired adjacency-list build/query functions are intentionally not routed.
+	// A subsequent adapter phase will route them to parameterized FalkorDB queries.
 
 	// Initial graph build
 	go func() {
@@ -536,9 +547,9 @@ func main() {
 	}()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/query", queryHandler)
-	mux.HandleFunc("/rebuild", rebuildHandler)
+	mux.HandleFunc("/health", realFalkorHealthHandler)
+	mux.HandleFunc("/query", retiredGraphOperationHandler)
+	mux.HandleFunc("/rebuild", retiredGraphOperationHandler)
 
 	log.Printf("[KG] FalkorDB Knowledge Graph Worker listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
