@@ -299,3 +299,6 @@
 - [ ] Add a dedicated senior-admin escalated alert history tab with filtering
 - [ ] Run focused end-to-end review and fix all confirmed findings across the affected payment operations flows
 - [x] Validate, commit, and push the current verified project state to GitHub
+- [ ] Add loading skeleton and actionable error state to the Operations retry-success chart
+- [ ] Add a Clear Filters action to reset calendar date-range export selections
+- [ ] Preserve queue state while clearing date-range selections without reloading the screen
