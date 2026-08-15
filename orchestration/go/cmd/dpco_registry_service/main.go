@@ -248,30 +248,39 @@ func initTigerBeetle() {
 	}()
 }
 
-func recordFeeEntry(dpcoID, feeType string, amountNGN float64) string {
+func recordFeeEntry(dpcoID, feeType string, amountNGN float64) (string, error) {
 	mu.RLock()
 	ok := tigerbeetleOK
 	mu.RUnlock()
-	txID := fmt.Sprintf("dpco-fee-%s-%d", dpcoID, time.Now().UnixNano())
 	if !ok {
-		logger.Printf("[TigerBeetle] Stub fee entry: %s %.2f NGN for DPCO %s", feeType, amountNGN, dpcoID)
-		return txID
+		return "", fmt.Errorf("TigerBeetle ledger is unavailable for %s fee", feeType)
 	}
 	body := map[string]interface{}{
 		"org_id":       dpcoID,
 		"violation_id": fmt.Sprintf("dpco-%s-%s", feeType, dpcoID),
-		"amount_usd":   amountNGN / 1500.0, // approximate NGN→USD
+		"amount_usd":   amountNGN / 1500.0,
 		"currency":     "NGN",
 	}
-	b, _ := json.Marshal(body)
+	b, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("encode TigerBeetle fee entry: %w", err)
+	}
 	resp, err := http.Post(fmt.Sprintf("%s/penalty/issue", tigerbeetleURL), "application/json", bytes.NewReader(b))
 	if err != nil {
-		logger.Printf("[TigerBeetle] Fee entry error: %v", err)
-		return txID
+		return "", fmt.Errorf("post TigerBeetle fee entry: %w", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("TigerBeetle fee entry rejected with status %d", resp.StatusCode)
+	}
+	var result struct {
+		TransactionID string `json:"transaction_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.TransactionID == "" {
+		return "", fmt.Errorf("TigerBeetle fee entry returned no durable transaction identifier")
+	}
 	atomic.AddInt64(&tbEntries, 1)
-	return txID
+	return result.TransactionID, nil
 }
 
 // ─── APISIX Route Registration ────────────────────────────────────────────────
@@ -409,7 +418,13 @@ func registerDpco(w http.ResponseWriter, r *http.Request) {
 		"registered_at": time.Now().UTC(),
 	}
 	// TigerBeetle fee ledger
-	txID := recordFeeEntry(id, "registration", req.FeeNGN)
+	txID, err := recordFeeEntry(id, "registration", req.FeeNGN)
+	if err != nil {
+		logger.Printf("[TigerBeetle] Registration fee entry failed: %v", err)
+		http.Error(w, `{"error":"durable registration fee ledger unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	// Persist the confirmed durable ledger transaction ID.
 	dpco["fee_tx_id"] = txID
 	if err := saveRegistryRecord(r.Context(), id, dpco); err != nil {
 		logger.Printf("[Storage] Persist DPCO failed: %v", err)
@@ -460,7 +475,13 @@ func renewLicence(w http.ResponseWriter, r *http.Request) {
 	dpco["status"] = "active"
 	dpco["expiry_date"] = time.Now().AddDate(1, 0, 0).UTC().Format("2006-01-02")
 	dpco["renewed_at"] = time.Now().UTC()
-	txID := recordFeeEntry(id, "renewal", req.FeeNGN)
+	txID, err := recordFeeEntry(id, "renewal", req.FeeNGN)
+	if err != nil {
+		logger.Printf("[TigerBeetle] Renewal fee entry failed: %v", err)
+		http.Error(w, `{"error":"durable renewal fee ledger unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	// Persist the confirmed durable ledger transaction ID.
 	dpco["fee_tx_id"] = txID
 	if err := saveRegistryRecord(r.Context(), id, dpco); err != nil {
 		logger.Printf("[Storage] Persist DPCO renewal failed: %v", err)
