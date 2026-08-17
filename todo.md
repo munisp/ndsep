@@ -364,3 +364,6 @@
 - [x] Safely reconcile validated GitHub backup changes with the repository default branch
 - [x] Prepare and validate a file-level integration branch based on GitHub production
 - [x] Review every GitHub branch and pull request for safe compatibility with the production branch
+- [x] Add pre-request protected-session expiry interception with a user-facing warning modal
+- [x] Surface a user-visible session-cleared notification after rejected biometric refresh
+- [x] Build a stakeholder profile and document offline synchronization queue status component

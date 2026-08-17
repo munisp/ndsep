@@ -8,6 +8,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 import { trpc } from "@/lib/trpc";
 import { validateStakeholderProfile, type StakeholderErrors } from "@/lib/stakeholder-validation";
+import { StakeholderSyncQueue } from "@/components/stakeholder-sync-queue";
 
 export default function OnboardingScreen() {
   const { bundle, submitBusinessProfile, analyzeIdentityDocument, analyzeBusinessDocument, startLiveness, completeLiveness } = useMobilePlatformBundle();
@@ -148,6 +149,8 @@ export default function OnboardingScreen() {
           <Text className="mt-2 text-3xl font-bold text-white">{bundle.onboarding.readiness}%</Text>
           <Text className="mt-2 text-sm text-white/85">{bundle.onboarding.nextAction}</Text>
         </View>
+
+        <StakeholderSyncQueue />
 
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Verification checklist</Text>

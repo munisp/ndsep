@@ -5,6 +5,8 @@ import { Platform } from "react-native";
 export type OidcConfig = { issuer: string; clientId: string; redirectUri: string };
 export type OidcSession = { accessToken: string; refreshToken?: string; idToken?: string; expiresAt: number; subject: string; email?: string; name?: string };
 const SESSION_KEY = "idlr.oidc.session.v1";
+const SESSION_METADATA_KEY = "idlr.oidc.session_metadata.v1";
+export type OidcSessionMetadata = Pick<OidcSession, "expiresAt" | "subject">;
 
 export function assertOidcConfig(config: OidcConfig) {
   if (!config.issuer.startsWith("https://") || !config.clientId || !config.redirectUri) throw new Error("Enterprise sign-in is unavailable until a HTTPS OIDC issuer, public client ID, and redirect URI are configured.");
@@ -35,6 +37,15 @@ export async function signInWithPkce(config: OidcConfig, registration = false): 
 export async function saveBiometricSession(session: OidcSession) {
   if (Platform.OS === "web") throw new Error("Browser sessions must be server-cookie based; native token storage is unavailable on web.");
   await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(session), { requireAuthentication: true, authenticationPrompt: "Unlock your IDLR-PTS session" });
+  await SecureStore.setItemAsync(SESSION_METADATA_KEY, JSON.stringify({ expiresAt: session.expiresAt, subject: session.subject } satisfies OidcSessionMetadata));
+}
+export async function getBiometricSessionMetadata(): Promise<OidcSessionMetadata | null> {
+  if (Platform.OS === "web") return null;
+  try { const raw = await SecureStore.getItemAsync(SESSION_METADATA_KEY); return raw ? JSON.parse(raw) as OidcSessionMetadata : null; } catch { return null; }
+}
+export async function clearLocalBiometricSession() {
+  if (Platform.OS === "web") return;
+  await Promise.all([SecureStore.deleteItemAsync(SESSION_KEY), SecureStore.deleteItemAsync(SESSION_METADATA_KEY)]);
 }
 export async function loadBiometricSession(): Promise<OidcSession | null> {
   if (Platform.OS === "web") return null;
@@ -52,12 +63,12 @@ export async function refreshBiometricSession(config: OidcConfig): Promise<OidcS
     await saveBiometricSession(next);
     return next;
   } catch (error) {
-    if (Platform.OS !== "web") await SecureStore.deleteItemAsync(SESSION_KEY);
+    await clearLocalBiometricSession();
     throw new Error(error instanceof Error ? `Session refresh was rejected: ${error.message}` : "Session refresh was rejected. Please sign in again.");
   }
 }
 export async function revokeAndClearSession(config: OidcConfig) {
   const session = await loadBiometricSession();
   if (session?.refreshToken) { const d = await AuthSession.fetchDiscoveryAsync(config.issuer); if (d.revocationEndpoint) await fetch(d.revocationEndpoint, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: config.clientId, token: session.refreshToken, token_type_hint: "refresh_token" }).toString() }); }
-  if (Platform.OS !== "web") await SecureStore.deleteItemAsync(SESSION_KEY);
+  await clearLocalBiometricSession();
 }

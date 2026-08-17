@@ -17,6 +17,7 @@ import {
 import type { EdgeInsets, Metrics, Rect } from "react-native-safe-area-context";
 
 import { trpc, createTRPCClient } from "@/lib/trpc";
+import { SessionExpiryNotice } from "@/components/session-expiry-notice";
 import { initManusRuntime, subscribeSafeAreaInsets } from "@/lib/_core/manus-runtime";
 import "@/lib/background-sync";
 import "@/lib/mobile-geofencing";
@@ -92,6 +93,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="oauth/callback" />
           </Stack>
+          <SessionExpiryNotice />
           <StatusBar style="auto" />
         </QueryClientProvider>
       </trpc.Provider>
