@@ -359,7 +359,7 @@
 - [ ] Provide cross-region KMS monitoring, staging chaos harness, and regional-outage disaster recovery failover tests
 - [ ] Implement OIDC PKCE sign-up/login, biometric session binding, Keycloak realm/client artifacts, and stakeholder onboarding screens
 - [ ] Add token exchange, refresh rotation, session revocation, and onboarding lifecycle integration tests
-- [ ] Implement field-level stakeholder validation and offline profile/document queue synchronization
+- [x] Implement field-level stakeholder validation and offline profile/document queue synchronization
 - [ ] Add OIDC loading, error, refresh rotation, and secure session revocation UI behavior
 - [x] Safely reconcile validated GitHub backup changes with the repository default branch
 - [x] Prepare and validate a file-level integration branch based on GitHub production
@@ -367,3 +367,6 @@
 - [x] Add pre-request protected-session expiry interception with a user-facing warning modal
 - [x] Surface a user-visible session-cleared notification after rejected biometric refresh
 - [x] Build a stakeholder profile and document offline synchronization queue status component
+- [x] Implement AES-GCM encrypted, idempotent stakeholder profile and document replay queue
+- [x] Add stakeholder synchronization dead-letter inspection and manual retry controls
+- [x] Add exact session-expiry countdown to the biometric confirmation modal

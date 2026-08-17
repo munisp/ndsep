@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 
 import {
@@ -26,7 +27,17 @@ type SyncMutation = {
 
 type StoredBundle = MobilePlatformBundle & {
   syncQueue: SyncMutation[];
+  stakeholderReplayReceipts?: Array<{ idempotencyKey: string; payloadHash: string; kind: "profile" | "identity_document" | "business_document"; processedAt: string }>;
 };
+export type StakeholderReplayInput = {
+  idempotencyKey: string;
+  payloadHash: string;
+  payload:
+    | { kind: "profile"; profile: BusinessProfileRecord }
+    | { kind: "identity_document"; type: string; fileName: string; mimeType: string; base64Data: string }
+    | { kind: "business_document"; type: string; fileName: string; mimeType: string; base64Data: string };
+};
+const stakeholderReplayInFlight = new Map<string, { payloadHash: string; promise: Promise<{ status: "accepted" | "already_processed"; idempotencyKey: string }> }>();
 
 type DocumentAnalysisResult = {
   engine: BusinessDocumentRecord["engine"];
@@ -89,6 +100,7 @@ function defaultStore(): StoredBundle {
   return {
     ...cloneSeedBundle(),
     syncQueue: [],
+    stakeholderReplayReceipts: [],
   };
 }
 
@@ -133,6 +145,7 @@ function readStore(): StoredBundle {
       followedParcelIds: parsed.notificationPreferences?.followedParcelIds ?? [],
       geofenceSubscriptions: parsed.notificationPreferences?.geofenceSubscriptions ?? defaultStore().notificationPreferences.geofenceSubscriptions,
     };
+    parsed.stakeholderReplayReceipts = parsed.stakeholderReplayReceipts ?? [];
     purgeResolvedMutes(parsed);
     return parsed;
   } catch {
@@ -793,6 +806,56 @@ export function appendBusinessDocument(document: BusinessDocumentRecord) {
   store.syncMeta = buildSyncMeta(store, "live");
   writeStore(store);
   return document;
+}
+
+function canonicalReplayJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalReplayJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${canonicalReplayJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+function stakeholderPayloadHash(payload: StakeholderReplayInput["payload"]) { return crypto.createHash("sha256").update(canonicalReplayJson(payload)).digest("hex"); }
+function existingReplayReceipt(store: StoredBundle, key: string, hash: string) {
+  const receipt = store.stakeholderReplayReceipts?.find((item) => item.idempotencyKey === key);
+  if (receipt && receipt.payloadHash !== hash) throw new Error("IDEMPOTENCY_KEY_COLLISION");
+  return receipt;
+}
+function recordReplayReceipt(store: StoredBundle, input: StakeholderReplayInput) {
+  store.stakeholderReplayReceipts = [{ idempotencyKey: input.idempotencyKey, payloadHash: input.payloadHash, kind: input.payload.kind, processedAt: new Date().toISOString() }, ...(store.stakeholderReplayReceipts ?? [])].slice(0, 1000);
+}
+async function executeStakeholderReplay(input: StakeholderReplayInput): Promise<{ status: "accepted" | "already_processed"; idempotencyKey: string }> {
+  if (stakeholderPayloadHash(input.payload) !== input.payloadHash) throw new Error("IDEMPOTENCY_PAYLOAD_HASH_MISMATCH");
+  const initialStore = readStore();
+  if (existingReplayReceipt(initialStore, input.idempotencyKey, input.payloadHash)) return { status: "already_processed", idempotencyKey: input.idempotencyKey };
+  if (input.payload.kind === "profile") {
+    initialStore.onboarding.businessProfile = input.payload.profile;
+    initialStore.onboarding.stakeholder = input.payload.profile.companyName ?? initialStore.onboarding.stakeholder;
+    queueMutation(initialStore, { type: "onboarding_document", recordId: input.idempotencyKey, queuedAt: new Date().toISOString() });
+    recordReplayReceipt(initialStore, input); refreshReadiness(initialStore); initialStore.syncMeta = buildSyncMeta(initialStore, "live"); writeStore(initialStore);
+    return { status: "accepted", idempotencyKey: input.idempotencyKey };
+  }
+  const analysis = await analyzeDocumentImage({ ...input.payload, documentType: input.payload.type });
+  const store = readStore();
+  if (existingReplayReceipt(store, input.idempotencyKey, input.payloadHash)) return { status: "already_processed", idempotencyKey: input.idempotencyKey };
+  const uploadedAt = new Date().toISOString();
+  if (input.payload.kind === "identity_document") {
+    store.onboarding.identityDocuments.unshift({ id: `identity-${input.idempotencyKey}`, type: input.payload.type, fileName: input.payload.fileName, status: analysis.status, extractedSummary: analysis.summary, confidence: analysis.confidence, engine: analysis.engine, analysisProvenance: analysis.provenance, analysisReason: analysis.reason, uploadedAt });
+  } else {
+    const id = Number.parseInt(input.idempotencyKey.replace(/-/g, "").slice(0, 8), 16) % 2_000_000_000;
+    store.onboarding.businessProfile.documents.unshift({ id, type: input.payload.type, fileName: input.payload.fileName, documentUrl: null, status: analysis.status, engine: analysis.engine, confidence: analysis.confidence, extractedSummary: analysis.summary, analysisProvenance: analysis.provenance, analysisReason: analysis.reason, uploadedAt });
+  }
+  queueMutation(store, { type: "onboarding_document", recordId: input.idempotencyKey, queuedAt: uploadedAt });
+  recordReplayReceipt(store, input); refreshReadiness(store); store.syncMeta = buildSyncMeta(store, "live"); writeStore(store);
+  return { status: "accepted", idempotencyKey: input.idempotencyKey };
+}
+export async function replayStakeholderSubmission(input: StakeholderReplayInput) {
+  const inFlight = stakeholderReplayInFlight.get(input.idempotencyKey);
+  if (inFlight) {
+    if (inFlight.payloadHash !== input.payloadHash) throw new Error("IDEMPOTENCY_KEY_COLLISION");
+    return inFlight.promise;
+  }
+  const promise = executeStakeholderReplay(input).finally(() => stakeholderReplayInFlight.delete(input.idempotencyKey));
+  stakeholderReplayInFlight.set(input.idempotencyKey, { payloadHash: input.payloadHash, promise });
+  return promise;
 }
 
 export function startLivenessSession() {

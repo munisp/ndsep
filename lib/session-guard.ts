@@ -6,9 +6,10 @@ import {
   refreshBiometricSession,
   type OidcConfig,
 } from "@/lib/oidc-session";
+export { secondsUntilSessionExpiry } from "@/lib/session-countdown";
 
 export type SessionNotice =
-  | { kind: "refresh_confirmation"; message: string }
+  | { kind: "refresh_confirmation"; message: string; expiresAt: number }
   | { kind: "session_cleared"; message: string };
 
 type Listener = (notice: SessionNotice) => void;
@@ -34,11 +35,12 @@ export function notifySessionCleared(message: string) {
   publish({ kind: "session_cleared", message });
 }
 
-async function requestSessionRefreshConfirmation() {
+async function requestSessionRefreshConfirmation(expiresAt: number) {
   if (listeners.size === 0) return null;
   publish({
     kind: "refresh_confirmation",
     message: "Your biometric session is about to expire. Confirm with your device biometrics to continue securely before this request is sent.",
+    expiresAt,
   });
   return new Promise<boolean>((resolve) => {
     refreshDecision = resolve;
@@ -51,7 +53,7 @@ export async function ensureFreshBiometricSession(config: OidcConfig) {
   const session = await getBiometricSessionMetadata();
   if (!session || session.expiresAt > Date.now() + 60_000) return;
 
-  const proceed = await requestSessionRefreshConfirmation();
+  const proceed = await requestSessionRefreshConfirmation(session.expiresAt);
   if (proceed === false) {
     await clearLocalBiometricSession();
     notifySessionCleared("Your local biometric session was cleared. Sign in again before making protected changes.");

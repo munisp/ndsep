@@ -26,6 +26,7 @@ import {
   updateNotificationPreferences,
   updateParcelGeofencePreference,
   reconcileParcelGeofenceReplay,
+  replayStakeholderSubmission,
 } from "./mobilePlatformRepository";
 import {
   appendPermitReviewNote,
@@ -94,6 +95,15 @@ const businessProfileSchema = z.object({
       uploadedAt: z.string(),
     }),
   ),
+});
+const stakeholderReplaySchema = z.object({
+  idempotencyKey: z.string().uuid(),
+  payloadHash: z.string().regex(/^[a-f0-9]{64}$/),
+  payload: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("profile"), profile: businessProfileSchema }),
+    z.object({ kind: z.literal("identity_document"), type: z.string().min(1), fileName: z.string().min(1), mimeType: z.string().min(1), base64Data: z.string().min(32) }),
+    z.object({ kind: z.literal("business_document"), type: z.string().min(1), fileName: z.string().min(1), mimeType: z.string().min(1), base64Data: z.string().min(32) }),
+  ]),
 });
 
 export const appRouter = router({
@@ -571,6 +581,7 @@ export const appRouter = router({
   onboarding: router({
     getProfile: publicProcedure.query(() => getMobilePlatformBundle().onboarding),
     submitBusinessProfile: publicProcedure.input(businessProfileSchema).mutation(({ input }) => submitBusinessProfile(input)),
+    replayStakeholderSubmission: publicProcedure.input(stakeholderReplaySchema).mutation(({ input }) => replayStakeholderSubmission(input)),
     analyzeIdentityDocument: publicProcedure
       .input(
         z.object({
