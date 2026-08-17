@@ -88,6 +88,10 @@ const config: ExpoConfig = {
     "expo-font",
     "expo-web-browser",
     [
+      "expo-local-authentication",
+      { "faceIDPermission": "Allow $(PRODUCT_NAME) to unlock your protected IDLR-PTS session." }
+    ],
+    [
       "expo-camera",
       {
         cameraPermission: "Allow $(PRODUCT_NAME) to capture identity, field, and payment receipt evidence.",

@@ -1,0 +1,22 @@
+{
+  "realm": "idlrpts",
+  "enabled": true,
+  "registrationAllowed": true,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "sslRequired": "external",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "clients": [{
+    "clientId": "idlrpts-mobile",
+    "enabled": true,
+    "publicClient": true,
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "implicitFlowEnabled": false,
+    "redirectUris": ["idlrpts://oauth/callback"],
+    "webOrigins": ["https://staging.idlr.example.ng"],
+    "attributes": {"pkce.code.challenge.method":"S256","post.logout.redirect.uris":"idlrpts:///*"}
+  }],
+  "roles": {"realm":[{"name":"applicant"},{"name":"planning_supervisor"},{"name":"mining_reviewer"},{"name":"petroleum_reviewer"},{"name":"environment_reviewer"}]}
+}

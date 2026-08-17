@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Namespace
+metadata: { name: idlr-staging }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: recovery-worker
+  namespace: idlr-staging
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/idlr-staging-recovery-worker
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audit-signer
+  namespace: idlr-staging
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/idlr-staging-audit-signer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: recovery-worker, namespace: idlr-staging }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: recovery-worker } }
+  template:
+    metadata: { labels: { app: recovery-worker } }
+    spec:
+      serviceAccountName: recovery-worker
+      automountServiceAccountToken: true
+      containers:
+        - name: worker
+          image: REGISTRY/IDLR_RECOVERY_WORKER@sha256:REPLACE
+          env:
+            - { name: AWS_REGION, value: eu-west-1 }
+            - { name: KMS_RECOVERY_KEY_ALIAS, value: alias/idlr/staging/recovery-encryption }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true }

@@ -302,3 +302,63 @@
 - [ ] Add loading skeleton and actionable error state to the Operations retry-success chart
 - [ ] Add a Clear Filters action to reset calendar date-range export selections
 - [ ] Preserve queue state while clearing date-range selections without reloading the screen
+- [ ] Replace reconciliation date fields with a visual calendar range picker
+- [ ] Render interactive daily retry-success percentage bars with exact outcome tooltips
+- [ ] Add quick-select date-range presets for reconciliation exports
+- [ ] Animate retry-success bars when trend data changes
+- [ ] Add Operations chart export to PNG or PDF
+- [ ] Include This Month and Year to Date quick date presets
+- [ ] Include export timestamp and active filters in chart PDF output
+- [ ] Verify quick presets, PDF metadata, and chart transitions with deterministic UI coverage
+- [ ] Add saved custom date-range management to reconciliation export presets
+- [ ] Add company branding and styling to chart PDF exports
+- [ ] Add branded PDF export preview before download
+- [ ] Add confirmation toast for saved-range creation and deletion
+- [ ] Add a company-logo inclusion toggle to PDF preview
+- [ ] Add saved date-range preset rename controls
+- [ ] Add a PDF preview generation spinner
+- [ ] Enable inline custom date-range renaming from the preset menu
+- [x] Render and verify the completed payment operations PWA screens in the live preview
+- [x] Resolve or document the current unavailable PWA preview environment before visual acceptance
+- [x] Repair PWA preview routing for visual payment workflow verification
+- [ ] Add validated payment UI loading, error, and success-feedback states
+- [ ] Verify branded export, saved ranges, presets, and animated retry bars in the rendered PWA
+- [x] Capture rendered PWA payment operations screens for visible verification
+- [ ] Render and document public, workflow, and administrator PWA routes including login boundaries
+- [ ] Document the KYB screening, manual-review routing, readiness, trust status, and onboarding source implementation
+- [ ] Document reviewer-decision trust updates and stakeholder profile validation/error-state implementation
+- [ ] Provide and validate field-level CAC, TIN, email, and phone validation patch with stakeholder review-persistence walkthrough
+- [ ] Document router validation and persistence-error handling with PostgreSQL stakeholder review-ledger migration steps
+- [ ] Provide complete PostgreSQL Drizzle schema, migration SQL, and tRPC-to-mobile error-contract code walkthrough
+- [ ] Document mobile optimistic cache behavior and offline submission queueing
+- [ ] Provide a PostgreSQL live-staging migration runbook with rollback controls
+- [ ] Inventory and add stakeholder validation and review-ledger transition tests
+- [ ] Produce a prioritized, evidence-based production-gap remediation program
+- [ ] Implement encrypted idempotent offline queueing for stakeholder profile and document submissions
+- [ ] Add network-failure and replay tests for the PostgreSQL stakeholder review-ledger transition
+- [ ] Implement dead-letter inspection and corruption-quarantine workflow for stakeholder submission replays
+- [ ] Provide native SQLCipher plus Expo SecureStore queue-storage adapter and deployment configuration
+- [ ] Provide SQLCipher offline queue replay integration test suite
+- [ ] Document secure key rotation and recovery for SecureStore invalidation
+- [ ] Provide replay API contract, backend idempotency implementation, and production KMS recovery configuration
+- [ ] Provide secure device-side decrypt-and-revalidate replay implementation
+- [ ] Document KMS envelope and device-key compromise incident response
+- [ ] Provide end-to-end KMS rewrap and idempotency-collision integration tests
+- [ ] Provide production rollout pipeline, monitoring dashboards, log query templates, and SQLCipher client migration strategy
+- [ ] Provide staged rollout CI/CD pipeline, recovery drill, native validation, and workload identity configuration artifacts
+- [ ] Provide staging network/KMS fault mocks and progressive rollout rollback gate scripts
+- [ ] Provide rollback-trigger Prometheus/Grafana configuration and controlled KMS dead-letter recovery workflow
+- [ ] Provide complete rollout error-budget dashboard and dual-approval cryptographic replay authorization implementation
+- [ ] Provide PostgreSQL dual-approval recovery controller, replay-worker enforcement, and staging end-to-end test artifacts
+- [ ] Provide dual-approval threat model, React Native passkey signing UI, and enterprise attestation/AAGUID configuration
+- [ ] Provide WebAuthn/AAGUID/quorum integration tests and tamper-evident replay audit streaming implementation
+- [ ] Assess remaining production gaps and provide complete audit hash-chain, outbox, and incident response implementation guidance
+- [ ] Implement codebase-resolvable production hardening and prepare external production activation evidence checklist
+- [ ] Provide staging PITR failure recovery and multi-region KMS workload identity federation configuration
+- [ ] Provide Terraform/Kubernetes two-region workload identity and KMS failover verification artifacts
+- [ ] Provide cross-region KMS monitoring, staging chaos harness, and regional-outage disaster recovery failover tests
+- [ ] Implement OIDC PKCE sign-up/login, biometric session binding, Keycloak realm/client artifacts, and stakeholder onboarding screens
+- [ ] Add token exchange, refresh rotation, session revocation, and onboarding lifecycle integration tests
+- [x] Safely reconcile validated GitHub backup changes with the repository default branch
+- [x] Prepare and validate a file-level integration branch based on GitHub production
+- [x] Review every GitHub branch and pull request for safe compatibility with the production branch

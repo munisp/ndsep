@@ -65,6 +65,7 @@ function ActionCard({
     | "/(tabs)/permits"
     | "/(tabs)/profile"
     | "/onboarding"
+    | "/login"
     | "/legal-workflow"
     | "/notifications";
 }) {
@@ -242,6 +243,7 @@ export default function HomeScreen() {
             <ActionCard title="Parcel lookup" description="Search recent parcels and open the detail context for field, geo, and legal work." href="/(tabs)/parcels" />
             <ActionCard title="Geospatial review" description="Inspect parcel intelligence, location context, and GeoLibre readiness on mobile and web." href="/(tabs)/geo" />
             <ActionCard title="Stakeholder onboarding" description="Review realistic KYC, KYB, document analysis, and liveness workflows for builders and cooperatives." href="/onboarding" />
+            <ActionCard title="Secure stakeholder sign-in" description="Use an approved enterprise identity to sign in, bind the native session to device biometrics, or begin authorised registration." href="/login" />
             <ActionCard title="Notifications center" description="See deadline alerts, supervisor digests, and AI-prioritized field plus workflow events in one activity feed." href="/notifications" />
           </View>
         </View>
