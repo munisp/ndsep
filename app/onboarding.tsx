@@ -7,6 +7,7 @@ import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-nativ
 import { ScreenContainer } from "@/components/screen-container";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 import { trpc } from "@/lib/trpc";
+import { validateStakeholderProfile, type StakeholderErrors } from "@/lib/stakeholder-validation";
 
 export default function OnboardingScreen() {
   const { bundle, submitBusinessProfile, analyzeIdentityDocument, analyzeBusinessDocument, startLiveness, completeLiveness } = useMobilePlatformBundle();
@@ -25,6 +26,8 @@ export default function OnboardingScreen() {
     businessAddress: bundle.onboarding.businessProfile.businessAddress ?? "",
     contactPerson: bundle.onboarding.businessProfile.contactPerson ?? "",
   });
+  const [formErrors, setFormErrors] = useState<StakeholderErrors>({});
+  const [profileSaving, setProfileSaving] = useState(false);
 
   async function readAssetAsBase64(uri: string) {
     return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
@@ -98,6 +101,13 @@ export default function OnboardingScreen() {
   }
 
   async function submitBusiness() {
+    const errors = validateStakeholderProfile(form);
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      Alert.alert("Check the business profile", "Correct the highlighted fields before submitting for KYB review.");
+      return;
+    }
+    setProfileSaving(true);
     try {
       await submitBusinessProfile({
         stakeholderType: form.stakeholderType,
@@ -118,6 +128,8 @@ export default function OnboardingScreen() {
       Alert.alert("Business profile saved", "The KYB profile has been synchronized to the live mobile API.");
     } catch (error) {
       Alert.alert("Profile save failed", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      setProfileSaving(false);
     }
   }
 
@@ -169,16 +181,10 @@ export default function OnboardingScreen() {
           <Text className="text-lg font-semibold text-foreground">Business profile</Text>
           {!providerHealthQuery.data?.some((provider) => provider.provider === "cac_vas_bridge" && provider.state === "ready") ? <Text className="mt-2 text-sm leading-5 text-warning">CAC verification is unavailable. You may save the profile, but no registration claim will be verified until an authorized bridge is configured.</Text> : null}
           <View className="mt-4 gap-3">
-            <TextInput value={form.companyName} onChangeText={(value) => setForm((current) => ({ ...current, companyName: value }))} placeholder="Company name" placeholderTextColor="#94A3B8" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
-            <TextInput value={form.cacNumber} onChangeText={(value) => setForm((current) => ({ ...current, cacNumber: value }))} placeholder="CAC / RC number" placeholderTextColor="#94A3B8" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
-            <TextInput value={form.tinNumber} onChangeText={(value) => setForm((current) => ({ ...current, tinNumber: value }))} placeholder="TIN" placeholderTextColor="#94A3B8" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
-            <TextInput value={form.businessEmail} onChangeText={(value) => setForm((current) => ({ ...current, businessEmail: value }))} placeholder="Business email" placeholderTextColor="#94A3B8" keyboardType="email-address" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
-            <TextInput value={form.businessPhone} onChangeText={(value) => setForm((current) => ({ ...current, businessPhone: value }))} placeholder="Business phone" placeholderTextColor="#94A3B8" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
-            <TextInput value={form.businessAddress} onChangeText={(value) => setForm((current) => ({ ...current, businessAddress: value }))} placeholder="Business address" placeholderTextColor="#94A3B8" multiline className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
-            <TextInput value={form.contactPerson} onChangeText={(value) => setForm((current) => ({ ...current, contactPerson: value }))} placeholder="Contact person" placeholderTextColor="#94A3B8" className="rounded-2xl border border-border bg-background px-4 py-3 text-foreground" />
-            <Pressable onPress={submitBusiness} style={{ opacity: 1 }}>
+            {(["companyName", "cacNumber", "tinNumber", "businessEmail", "businessPhone", "businessAddress", "contactPerson"] as const).map((field) => <View key={field}><TextInput value={form[field]} onChangeText={(value) => { setForm((current) => ({ ...current, [field]: value })); setFormErrors((current) => ({ ...current, [field]: undefined })); }} placeholder={{ companyName: "Company name", cacNumber: "CAC / RC number", tinNumber: "TIN", businessEmail: "Business email", businessPhone: "Business phone", businessAddress: "Business address", contactPerson: "Contact person" }[field]} placeholderTextColor="#94A3B8" keyboardType={field === "businessEmail" ? "email-address" : "default"} multiline={field === "businessAddress"} className={`rounded-2xl border ${formErrors[field] ? "border-error" : "border-border"} bg-background px-4 py-3 text-foreground`} />{formErrors[field] ? <Text className="mt-1 text-xs text-error">{formErrors[field]}</Text> : null}</View>)}
+            <Pressable disabled={profileSaving} onPress={submitBusiness} style={{ opacity: profileSaving ? 0.65 : 1 }}>
               <View className="rounded-2xl bg-foreground px-4 py-4">
-                <Text className="text-center font-semibold text-background">Sync business profile</Text>
+                <Text className="text-center font-semibold text-background">{profileSaving ? "Saving business profile…" : "Sync business profile"}</Text>
               </View>
             </Pressable>
           </View>

@@ -359,6 +359,8 @@
 - [ ] Provide cross-region KMS monitoring, staging chaos harness, and regional-outage disaster recovery failover tests
 - [ ] Implement OIDC PKCE sign-up/login, biometric session binding, Keycloak realm/client artifacts, and stakeholder onboarding screens
 - [ ] Add token exchange, refresh rotation, session revocation, and onboarding lifecycle integration tests
+- [ ] Implement field-level stakeholder validation and offline profile/document queue synchronization
+- [ ] Add OIDC loading, error, refresh rotation, and secure session revocation UI behavior
 - [x] Safely reconcile validated GitHub backup changes with the repository default branch
 - [x] Prepare and validate a file-level integration branch based on GitHub production
 - [x] Review every GitHub branch and pull request for safe compatibility with the production branch

@@ -40,6 +40,22 @@ export async function loadBiometricSession(): Promise<OidcSession | null> {
   if (Platform.OS === "web") return null;
   try { const raw = await SecureStore.getItemAsync(SESSION_KEY, { requireAuthentication: true, authenticationPrompt: "Unlock your IDLR-PTS session" }); return raw ? JSON.parse(raw) as OidcSession : null; } catch { return null; }
 }
+export async function refreshBiometricSession(config: OidcConfig): Promise<OidcSession> {
+  assertOidcConfig(config);
+  const current = await loadBiometricSession();
+  if (!current?.refreshToken) throw new Error("Your session cannot be refreshed. Please sign in again.");
+  const discovery = await AuthSession.fetchDiscoveryAsync(config.issuer);
+  if (!discovery.tokenEndpoint) throw new Error("OIDC token endpoint is unavailable.");
+  try {
+    const token = await AuthSession.refreshAsync({ clientId: config.clientId, refreshToken: current.refreshToken }, discovery);
+    const next: OidcSession = { ...current, accessToken: token.accessToken, refreshToken: token.refreshToken ?? current.refreshToken, idToken: token.idToken ?? current.idToken, expiresAt: Date.now() + (token.expiresIn ?? 300) * 1000 };
+    await saveBiometricSession(next);
+    return next;
+  } catch (error) {
+    if (Platform.OS !== "web") await SecureStore.deleteItemAsync(SESSION_KEY);
+    throw new Error(error instanceof Error ? `Session refresh was rejected: ${error.message}` : "Session refresh was rejected. Please sign in again.");
+  }
+}
 export async function revokeAndClearSession(config: OidcConfig) {
   const session = await loadBiometricSession();
   if (session?.refreshToken) { const d = await AuthSession.fetchDiscoveryAsync(config.issuer); if (d.revocationEndpoint) await fetch(d.revocationEndpoint, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: config.clientId, token: session.refreshToken, token_type_hint: "refresh_token" }).toString() }); }
