@@ -49,8 +49,14 @@ expect_status() {
 compose up -d --wait
 
 # The test uses a dedicated graph and deletes only its own nodes.
-compose exec -T falkordb redis-cli -a "$FALKORDB_PASSWORD" GRAPH.QUERY "$GRAPH_NAME" 'MATCH (n) DETACH DELETE n' >/dev/null
-compose exec -T falkordb redis-cli -a "$FALKORDB_PASSWORD" GRAPH.QUERY "$GRAPH_NAME" "CREATE (org:Organization {id: 'org:42', name: 'Acme Data', status: 'active'}), (sector:Sector {id: 'sector:finance', name: 'finance'}), (violation:Violation {id: 'violation:7', severity: 'high'}), (policy:Policy {id: 'policy:5', status: 'active'}), (org)-[:BELONGS_TO]->(sector), (org)-[:HAS_VIOLATION]->(violation), (policy)-[:APPLIES_TO_SECTOR]->(sector)" >/dev/null
+run_graph_query() {
+  query=$1
+  compose exec -T falkordb sh -ec 'REDISCLI_AUTH="$FALKORDB_PASSWORD" redis-cli GRAPH.QUERY "$1" "$2"' sh "$GRAPH_NAME" "$query"
+}
+
+# The test uses a dedicated graph and deletes only its own nodes.
+run_graph_query 'MATCH (n) DETACH DELETE n' >/dev/null
+run_graph_query "CREATE (org:Organization {id: 'org:42', name: 'Acme Data', status: 'active'}), (sector:Sector {id: 'sector:finance', name: 'finance'}), (violation:Violation {id: 'violation:7', severity: 'high'}), (policy:Policy {id: 'policy:5', status: 'active'}), (org)-[:BELONGS_TO]->(sector), (org)-[:HAS_VIOLATION]->(violation), (policy)-[:APPLIES_TO_SECTOR]->(sector)" >/dev/null
 
 health=$(compose exec -T runner curl -sS -o /tmp/health.json -w '%{http_code}' http://graph-worker:8090/health)
 expect_status 200 "$health" "initial graph-worker health"
