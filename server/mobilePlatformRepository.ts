@@ -31,13 +31,11 @@ type StoredBundle = MobilePlatformBundle & {
 };
 export type StakeholderReplayInput = {
   idempotencyKey: string;
-  payloadHash: string;
   payload:
     | { kind: "profile"; profile: BusinessProfileRecord }
     | { kind: "identity_document"; type: string; fileName: string; mimeType: string; base64Data: string }
     | { kind: "business_document"; type: string; fileName: string; mimeType: string; base64Data: string };
 };
-const stakeholderReplayInFlight = new Map<string, { payloadHash: string; promise: Promise<{ status: "accepted" | "already_processed"; idempotencyKey: string }> }>();
 
 type DocumentAnalysisResult = {
   engine: BusinessDocumentRecord["engine"];
@@ -808,54 +806,38 @@ export function appendBusinessDocument(document: BusinessDocumentRecord) {
   return document;
 }
 
-function canonicalReplayJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalReplayJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${canonicalReplayJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+function canonicalReplayPayload(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalReplayPayload).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${canonicalReplayPayload((value as Record<string, unknown>)[key])}`).join(",")}}`;
   return JSON.stringify(value);
 }
-function stakeholderPayloadHash(payload: StakeholderReplayInput["payload"]) { return crypto.createHash("sha256").update(canonicalReplayJson(payload)).digest("hex"); }
-function existingReplayReceipt(store: StoredBundle, key: string, hash: string) {
-  const receipt = store.stakeholderReplayReceipts?.find((item) => item.idempotencyKey === key);
-  if (receipt && receipt.payloadHash !== hash) throw new Error("IDEMPOTENCY_KEY_COLLISION");
-  return receipt;
-}
-function recordReplayReceipt(store: StoredBundle, input: StakeholderReplayInput) {
-  store.stakeholderReplayReceipts = [{ idempotencyKey: input.idempotencyKey, payloadHash: input.payloadHash, kind: input.payload.kind, processedAt: new Date().toISOString() }, ...(store.stakeholderReplayReceipts ?? [])].slice(0, 1000);
-}
-async function executeStakeholderReplay(input: StakeholderReplayInput): Promise<{ status: "accepted" | "already_processed"; idempotencyKey: string }> {
-  if (stakeholderPayloadHash(input.payload) !== input.payloadHash) throw new Error("IDEMPOTENCY_PAYLOAD_HASH_MISMATCH");
-  const initialStore = readStore();
-  if (existingReplayReceipt(initialStore, input.idempotencyKey, input.payloadHash)) return { status: "already_processed", idempotencyKey: input.idempotencyKey };
-  if (input.payload.kind === "profile") {
-    initialStore.onboarding.businessProfile = input.payload.profile;
-    initialStore.onboarding.stakeholder = input.payload.profile.companyName ?? initialStore.onboarding.stakeholder;
-    queueMutation(initialStore, { type: "onboarding_document", recordId: input.idempotencyKey, queuedAt: new Date().toISOString() });
-    recordReplayReceipt(initialStore, input); refreshReadiness(initialStore); initialStore.syncMeta = buildSyncMeta(initialStore, "live"); writeStore(initialStore);
-    return { status: "accepted", idempotencyKey: input.idempotencyKey };
-  }
-  const analysis = await analyzeDocumentImage({ ...input.payload, documentType: input.payload.type });
-  const store = readStore();
-  if (existingReplayReceipt(store, input.idempotencyKey, input.payloadHash)) return { status: "already_processed", idempotencyKey: input.idempotencyKey };
-  const uploadedAt = new Date().toISOString();
-  if (input.payload.kind === "identity_document") {
-    store.onboarding.identityDocuments.unshift({ id: `identity-${input.idempotencyKey}`, type: input.payload.type, fileName: input.payload.fileName, status: analysis.status, extractedSummary: analysis.summary, confidence: analysis.confidence, engine: analysis.engine, analysisProvenance: analysis.provenance, analysisReason: analysis.reason, uploadedAt });
-  } else {
-    const id = Number.parseInt(input.idempotencyKey.replace(/-/g, "").slice(0, 8), 16) % 2_000_000_000;
-    store.onboarding.businessProfile.documents.unshift({ id, type: input.payload.type, fileName: input.payload.fileName, documentUrl: null, status: analysis.status, engine: analysis.engine, confidence: analysis.confidence, extractedSummary: analysis.summary, analysisProvenance: analysis.provenance, analysisReason: analysis.reason, uploadedAt });
-  }
-  queueMutation(store, { type: "onboarding_document", recordId: input.idempotencyKey, queuedAt: uploadedAt });
-  recordReplayReceipt(store, input); refreshReadiness(store); store.syncMeta = buildSyncMeta(store, "live"); writeStore(store);
-  return { status: "accepted", idempotencyKey: input.idempotencyKey };
-}
+function replayPayloadHash(payload: StakeholderReplayInput["payload"]) { return crypto.createHash("sha256").update(canonicalReplayPayload(payload)).digest("hex"); }
+
 export async function replayStakeholderSubmission(input: StakeholderReplayInput) {
-  const inFlight = stakeholderReplayInFlight.get(input.idempotencyKey);
-  if (inFlight) {
-    if (inFlight.payloadHash !== input.payloadHash) throw new Error("IDEMPOTENCY_KEY_COLLISION");
-    return inFlight.promise;
+  const payloadHash = replayPayloadHash(input.payload);
+  const store = readStore();
+  const existing = store.stakeholderReplayReceipts?.find((receipt) => receipt.idempotencyKey === input.idempotencyKey);
+  if (existing) {
+    if (existing.payloadHash !== payloadHash) throw new Error("IDEMPOTENCY_KEY_COLLISION");
+    return { status: "already_processed" as const, idempotencyKey: input.idempotencyKey };
   }
-  const promise = executeStakeholderReplay(input).finally(() => stakeholderReplayInFlight.delete(input.idempotencyKey));
-  stakeholderReplayInFlight.set(input.idempotencyKey, { payloadHash: input.payloadHash, promise });
-  return promise;
+  const processedAt = new Date().toISOString();
+  if (input.payload.kind === "profile") {
+    store.onboarding.businessProfile = input.payload.profile;
+    store.onboarding.stakeholder = input.payload.profile.companyName ?? store.onboarding.stakeholder;
+  } else {
+    const analysis = await analyzeDocumentImage({ ...input.payload, documentType: input.payload.type });
+    if (input.payload.kind === "identity_document") {
+      store.onboarding.identityDocuments.unshift({ id: `identity-${input.idempotencyKey}`, type: input.payload.type, fileName: input.payload.fileName, status: analysis.status, extractedSummary: analysis.summary, confidence: analysis.confidence, engine: analysis.engine, analysisProvenance: analysis.provenance, analysisReason: analysis.reason, uploadedAt: processedAt });
+    } else {
+      const id = Number.parseInt(input.idempotencyKey.replace(/-/g, "").slice(0, 8), 16) % 2_000_000_000;
+      store.onboarding.businessProfile.documents.unshift({ id, type: input.payload.type, fileName: input.payload.fileName, documentUrl: null, status: analysis.status, engine: analysis.engine, confidence: analysis.confidence, extractedSummary: analysis.summary, analysisProvenance: analysis.provenance, analysisReason: analysis.reason, uploadedAt: processedAt });
+    }
+  }
+  queueMutation(store, { type: "onboarding_document", recordId: input.idempotencyKey, queuedAt: processedAt });
+  store.stakeholderReplayReceipts = [{ idempotencyKey: input.idempotencyKey, payloadHash, kind: input.payload.kind, processedAt }, ...(store.stakeholderReplayReceipts ?? [])].slice(0, 1000);
+  refreshReadiness(store); store.syncMeta = buildSyncMeta(store, "live"); writeStore(store);
+  return { status: "accepted" as const, idempotencyKey: input.idempotencyKey };
 }
 
 export function startLivenessSession() {

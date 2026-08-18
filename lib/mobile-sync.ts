@@ -8,14 +8,11 @@ import { syncParcelGeofences, type GeofenceRuntimeResult } from "@/lib/mobile-ge
 import { buildActivityInteractionProfile, prependActivity, updateActivityInsight, type ActivityRecord } from "@/lib/mobile-activity";
 import { ensureNotificationPermissions, scheduleFieldUpdateNotification } from "@/lib/mobile-notifications";
 import { getQueuedFieldMutations, queueMissionStatusMutation, replayQueuedFieldMutations } from "@/lib/mobile-sync-replay";
-import { queueStakeholderDocument, queueStakeholderProfile, replayPendingStakeholderSyncItems } from "@/lib/stakeholder-sync-queue";
+import { enqueueStakeholderSubmission } from "@/lib/stakeholder-sync-queue";
 import { trpc } from "@/lib/trpc";
 
 const CACHE_KEY = "idlr_pts_mobile.platform_bundle.v1";
-function isTransientTransportFailure(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /network|fetch|offline|timeout|connection|econn|502|503|504/i.test(message);
-}
+const isTransportFailure = (error: unknown) => /network|fetch|offline|timeout|connection|econn|502|503|504/i.test(error instanceof Error ? error.message : String(error));
 
 async function loadCachedBundle() {
   try {
@@ -66,14 +63,6 @@ export function useMobilePlatformBundle() {
             tone: "success",
             route: "/(tabs)/field",
           });
-          await utils.sync.getBundle.invalidate();
-        }
-      })
-      .catch(() => undefined);
-    replayPendingStakeholderSyncItems()
-      .then(async (result) => {
-        if (result.replayed > 0) {
-          await prependActivity({ title: "Stakeholder submissions synchronized", description: `${result.replayed} encrypted stakeholder submission${result.replayed === 1 ? " was" : "s were"} replayed successfully.`, category: "onboarding", tone: "success", route: "/onboarding" });
           await utils.sync.getBundle.invalidate();
         }
       })
@@ -349,31 +338,13 @@ export function useMobilePlatformBundle() {
     updateParcelGeofence,
     analyzeActivities,
     submitBusinessProfile: async (profile: BusinessProfileRecord) => {
-      try {
-        const result = await submitBusinessProfile.mutateAsync(profile);
-        await prependActivity({ title: "Business onboarding submitted", description: `${profile.companyName ?? "Business profile"} was submitted for KYB review and onboarding readiness recalculation.`, category: "onboarding", tone: "info", route: "/onboarding" });
-        await scheduleFieldUpdateNotification({ title: "Business onboarding updated", body: `${profile.companyName ?? "Business profile"} was submitted for review.`, category: "onboarding" });
-        return { result, queuedOffline: false };
-      } catch (error) {
-        if (!isTransientTransportFailure(error)) throw error;
-        const queued = await queueStakeholderProfile(profile);
-        await prependActivity({ title: "Business profile queued securely", description: "The encrypted profile submission will replay automatically when a network connection returns.", category: "onboarding", tone: "warning", route: "/onboarding" });
-        return { result: null, queuedOffline: true, queueId: queued.id };
-      }
+      try { const result = await submitBusinessProfile.mutateAsync(profile); await prependActivity({ title: "Business onboarding submitted", description: `${profile.companyName ?? "Business profile"} was submitted for KYB review and onboarding readiness recalculation.`, category: "onboarding", tone: "info", route: "/onboarding" }); await scheduleFieldUpdateNotification({ title: "Business onboarding updated", body: `${profile.companyName ?? "Business profile"} was submitted for review.`, category: "onboarding" }); return { result, queuedOffline: false }; }
+      catch (error) { if (!isTransportFailure(error)) throw error; const queued = await enqueueStakeholderSubmission({ kind: "profile", profile }); await prependActivity({ title: "Business profile queued securely", description: "The encrypted profile submission will replay when connectivity returns.", category: "onboarding", tone: "warning", route: "/onboarding" }); return { result: null, queuedOffline: true, queueId: queued.id }; }
     },
     submitStakeholderDocument: async (kind: "identity_document" | "business_document", input: { type: string; fileName: string; mimeType: string; base64Data: string }) => {
-      try {
-        const result = kind === "identity_document" ? await analyzeIdentityDocument.mutateAsync(input) : await analyzeBusinessDocument.mutateAsync(input);
-        return { result, queuedOffline: false };
-      } catch (error) {
-        if (!isTransientTransportFailure(error)) throw error;
-        const queued = await queueStakeholderDocument(kind, input);
-        await prependActivity({ title: "Document queued securely", description: "The encrypted document submission will replay automatically when a network connection returns.", category: "onboarding", tone: "warning", route: "/onboarding" });
-        return { result: null, queuedOffline: true, queueId: queued.id };
-      }
+      try { const result = kind === "identity_document" ? await analyzeIdentityDocument.mutateAsync(input) : await analyzeBusinessDocument.mutateAsync(input); return { result, queuedOffline: false }; }
+      catch (error) { if (!isTransportFailure(error)) throw error; const queued = await enqueueStakeholderSubmission({ kind, ...input }); await prependActivity({ title: "Document queued securely", description: "The encrypted document submission will replay when connectivity returns.", category: "onboarding", tone: "warning", route: "/onboarding" }); return { result: null, queuedOffline: true, queueId: queued.id }; }
     },
-    analyzeIdentityDocument,
-    analyzeBusinessDocument,
     startLiveness,
     completeLiveness: {
       ...completeLiveness,

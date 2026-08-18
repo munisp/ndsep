@@ -98,7 +98,6 @@ const businessProfileSchema = z.object({
 });
 const stakeholderReplaySchema = z.object({
   idempotencyKey: z.string().uuid(),
-  payloadHash: z.string().regex(/^[a-f0-9]{64}$/),
   payload: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("profile"), profile: businessProfileSchema }),
     z.object({ kind: z.literal("identity_document"), type: z.string().min(1), fileName: z.string().min(1), mimeType: z.string().min(1), base64Data: z.string().min(32) }),

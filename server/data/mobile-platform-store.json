@@ -77,12 +77,12 @@
   ],
   "onboarding": {
     "stakeholder": "Crest Holdings Ltd",
-    "readiness": 76,
+    "readiness": 71,
     "ninStatus": "verified",
     "bvnStatus": "verified",
     "livenessStatus": "pending",
     "kybStatus": "in_review",
-    "nextAction": "Complete liveness verification and upload incorporation evidence for parcel 11.",
+    "nextAction": "Complete liveness verification to finish stakeholder onboarding.",
     "onboardingStatus": "in_review",
     "checklist": [
       {
@@ -103,7 +103,7 @@
       {
         "key": "kyc_documents",
         "label": "KYC documents",
-        "completed": true
+        "completed": false
       },
       {
         "key": "cac",
@@ -118,7 +118,7 @@
       {
         "key": "kyb_documents",
         "label": "KYB documents",
-        "completed": false
+        "completed": true
       }
     ],
     "identityDocuments": [
@@ -342,14 +342,13 @@
         "lastTransition": null
       }
     ],
-    "updatedAt": "2026-08-17T22:35:43.279Z"
+    "updatedAt": "2026-08-14T00:54:15.475Z"
   },
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-08-17T22:35:43.279Z",
+    "lastSyncedAt": "2026-08-17T17:59:36.357Z",
     "pendingMutations": 0,
     "offlineReady": true
   },
-  "syncQueue": [],
-  "stakeholderReplayReceipts": []
+  "syncQueue": []
 }

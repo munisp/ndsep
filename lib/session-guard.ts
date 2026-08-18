@@ -6,10 +6,9 @@ import {
   refreshBiometricSession,
   type OidcConfig,
 } from "@/lib/oidc-session";
-export { secondsUntilSessionExpiry } from "@/lib/session-countdown";
 
 export type SessionNotice =
-  | { kind: "refresh_confirmation"; message: string; expiresAt: number }
+  | { kind: "refresh_confirmation"; message: string; expiresAt: number; promptedAt: number }
   | { kind: "session_cleared"; message: string };
 
 type Listener = (notice: SessionNotice) => void;
@@ -41,6 +40,7 @@ async function requestSessionRefreshConfirmation(expiresAt: number) {
     kind: "refresh_confirmation",
     message: "Your biometric session is about to expire. Confirm with your device biometrics to continue securely before this request is sent.",
     expiresAt,
+    promptedAt: Date.now(),
   });
   return new Promise<boolean>((resolve) => {
     refreshDecision = resolve;

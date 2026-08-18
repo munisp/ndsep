@@ -6,112 +6,46 @@ import { Platform } from "react-native";
 import type { BusinessProfileRecord } from "@/lib/mobile-data";
 import { createTRPCClient } from "@/lib/trpc";
 import { readStakeholderSyncIndex, writeStakeholderSyncIndex, type PendingStakeholderSyncItem, type StakeholderSyncKind, type StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
-
 export type { PendingStakeholderSyncItem, StakeholderSyncKind, StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
 
 type StakeholderSyncPayload =
   | { kind: "profile"; profile: BusinessProfileRecord }
   | { kind: "identity_document"; type: string; fileName: string; mimeType: string; base64Data: string }
   | { kind: "business_document"; type: string; fileName: string; mimeType: string; base64Data: string };
+export type EditableStakeholderPayload = { kind: StakeholderSyncKind; profile?: Pick<BusinessProfileRecord, "companyName" | "cacNumber" | "tinNumber" | "businessEmail" | "businessPhone" | "businessAddress" | "contactPerson">; document?: { type: string; fileName: string; mimeType: string } };
+type Envelope = { version: 1; nonce: string; ciphertext: string };
+const KEY_NAME = "idlr_pts_mobile.stakeholder_queue_key.v1";
+const DIRECTORY = `${FileSystem.documentDirectory ?? ""}idlr-pts/stakeholder-sync/`;
+const MAX_SERIALIZED_BYTES = 8 * 1024 * 1024;
+const label = (kind: StakeholderSyncKind) => kind === "profile" ? "Stakeholder profile submission" : kind === "identity_document" ? "Identity document submission" : "Business document submission";
 
-type SealedPayload = { version: 1; nonce: string; ciphertext: string };
-const KEY_KEY = "idlr_pts_mobile.stakeholder_sync.aes_key.v1";
-const DIRECTORY = `${FileSystem.documentDirectory ?? ""}idlr_pts/stakeholder-sync/`;
-const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
-
-async function cipherSupport() {
-  const [aes, codecs] = await Promise.all([import("@noble/ciphers/aes.js"), import("@noble/ciphers/utils.js")]);
-  return { gcm: aes.gcm, bytesToHex: codecs.bytesToHex, bytesToUtf8: codecs.bytesToUtf8, hexToBytes: codecs.hexToBytes, utf8ToBytes: codecs.utf8ToBytes };
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function labelFor(payload: StakeholderSyncPayload) {
-  if (payload.kind === "profile") return "Stakeholder profile submission";
-  return payload.kind === "identity_document" ? "Identity document submission" : "Business document submission";
-}
-
-async function getEncryptionKey() {
-  if (Platform.OS === "web") throw new Error("Encrypted stakeholder replay is available only in the native application.");
-  const { bytesToHex, hexToBytes } = await cipherSupport();
-  const existing = await SecureStore.getItemAsync(KEY_KEY);
-  if (existing) return hexToBytes(existing);
-  const key = Crypto.getRandomBytes(32);
-  await SecureStore.setItemAsync(KEY_KEY, bytesToHex(key));
-  return key;
-}
-async function seal(payload: StakeholderSyncPayload, aad: string): Promise<SealedPayload> {
-  const { gcm, bytesToHex, utf8ToBytes } = await cipherSupport();
-  const plaintext = canonicalJson(payload);
-  if (utf8ToBytes(plaintext).byteLength > MAX_PAYLOAD_BYTES) throw new Error("This offline submission is too large to encrypt safely on this device.");
-  const key = await getEncryptionKey();
-  const nonce = Crypto.getRandomBytes(12);
-  const ciphertext = gcm(key, nonce, utf8ToBytes(aad)).encrypt(utf8ToBytes(plaintext));
-  return { version: 1, nonce: bytesToHex(nonce), ciphertext: bytesToHex(ciphertext) };
-}
-async function unseal(envelope: SealedPayload, aad: string): Promise<StakeholderSyncPayload> {
-  const { gcm, bytesToUtf8, hexToBytes, utf8ToBytes } = await cipherSupport();
-  if (envelope.version !== 1) throw new Error("Unsupported encrypted queue payload version.");
-  const key = await getEncryptionKey();
-  const plaintext = gcm(key, hexToBytes(envelope.nonce), utf8ToBytes(aad)).decrypt(hexToBytes(envelope.ciphertext));
-  return JSON.parse(bytesToUtf8(plaintext)) as StakeholderSyncPayload;
-}
-async function setStatus(id: string, update: Partial<PendingStakeholderSyncItem>) {
-  const queue = await readStakeholderSyncIndex();
-  const next = queue.map((item) => item.id === id ? { ...item, ...update } : item);
-  await writeStakeholderSyncIndex(next);
-  return next.find((item) => item.id === id) ?? null;
-}
+async function cipher() { const [aes, codecs] = await Promise.all([import("@noble/ciphers/aes.js"), import("@noble/ciphers/utils.js")]); return { ...aes, ...codecs }; }
+async function key() { if (Platform.OS === "web") throw new Error("Encrypted queue operations are available only in the native application."); const c = await cipher(); const stored = await SecureStore.getItemAsync(KEY_NAME); if (stored) return c.hexToBytes(stored); const generated = Crypto.getRandomBytes(32); await SecureStore.setItemAsync(KEY_NAME, c.bytesToHex(generated)); return generated; }
+async function seal(payload: StakeholderSyncPayload, aad: string): Promise<Envelope> { const c = await cipher(); const plaintext = JSON.stringify(payload); if (c.utf8ToBytes(plaintext).byteLength > MAX_SERIALIZED_BYTES) throw new Error("This offline submission is too large to store securely on this device."); const nonce = Crypto.getRandomBytes(12); return { version: 1, nonce: c.bytesToHex(nonce), ciphertext: c.bytesToHex(c.gcm(await key(), nonce, c.utf8ToBytes(aad)).encrypt(c.utf8ToBytes(plaintext))) }; }
+async function unseal(envelope: Envelope, aad: string): Promise<StakeholderSyncPayload> { if (envelope.version !== 1) throw new Error("Unsupported encrypted queue format."); const c = await cipher(); const bytes = c.gcm(await key(), c.hexToBytes(envelope.nonce), c.utf8ToBytes(aad)).decrypt(c.hexToBytes(envelope.ciphertext)); return JSON.parse(c.bytesToUtf8(bytes)) as StakeholderSyncPayload; }
+async function loadPayload(item: PendingStakeholderSyncItem) { const raw = await FileSystem.readAsStringAsync(item.payloadPath, { encoding: FileSystem.EncodingType.UTF8 }); return unseal(JSON.parse(raw) as Envelope, `${item.id}|${item.idempotencyKey}`); }
+async function replaceItem(id: string, update: Partial<PendingStakeholderSyncItem>) { const items = await readStakeholderSyncIndex(); const next = items.map((item) => item.id === id ? { ...item, ...update } : item); await writeStakeholderSyncIndex(next); return next.find((item) => item.id === id); }
 
 export async function enqueueStakeholderSubmission(payload: StakeholderSyncPayload) {
-  if (Platform.OS === "web") throw new Error("Offline stakeholder replay is unavailable in the browser because local encrypted key storage is not supported.");
-  const id = Crypto.randomUUID();
-  const idempotencyKey = Crypto.randomUUID();
-  const payloadHash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, canonicalJson(payload));
+  if (Platform.OS === "web") throw new Error("Offline encrypted stakeholder submissions are unavailable in the browser.");
+  const id = Crypto.randomUUID(); const idempotencyKey = Crypto.randomUUID(); const payloadPath = `${DIRECTORY}${id}.sealed`;
   await FileSystem.makeDirectoryAsync(DIRECTORY, { intermediates: true });
-  const payloadPath = `${DIRECTORY}${id}.sealed`;
-  const aad = `${id}|${idempotencyKey}|${payloadHash}`;
-  await FileSystem.writeAsStringAsync(payloadPath, JSON.stringify(await seal(payload, aad)), { encoding: FileSystem.EncodingType.UTF8 });
-  const item: PendingStakeholderSyncItem = { id, idempotencyKey, kind: payload.kind, label: labelFor(payload), queuedAt: new Date().toISOString(), status: "pending", retryCount: 0, payloadPath, payloadHash };
-  await writeStakeholderSyncIndex([item, ...(await readStakeholderSyncIndex())]);
-  return item;
+  await FileSystem.writeAsStringAsync(payloadPath, JSON.stringify(await seal(payload, `${id}|${idempotencyKey}`)), { encoding: FileSystem.EncodingType.UTF8 });
+  const item: PendingStakeholderSyncItem = { id, idempotencyKey, kind: payload.kind, label: label(payload.kind), queuedAt: new Date().toISOString(), status: "pending", retryCount: 0, payloadPath };
+  await writeStakeholderSyncIndex([item, ...(await readStakeholderSyncIndex())]); return item;
 }
-
-export async function queueStakeholderProfile(profile: BusinessProfileRecord) { return enqueueStakeholderSubmission({ kind: "profile", profile }); }
-export async function queueStakeholderDocument(kind: "identity_document" | "business_document", document: Omit<Extract<StakeholderSyncPayload, { kind: "identity_document" }> | Extract<StakeholderSyncPayload, { kind: "business_document" }>, "kind">) { return enqueueStakeholderSubmission({ kind, ...document } as StakeholderSyncPayload); }
 export async function getPendingStakeholderSyncItems() { return readStakeholderSyncIndex(); }
-
-export async function replayQueuedStakeholderSyncItem(id: string) {
-  const item = (await readStakeholderSyncIndex()).find((candidate) => candidate.id === id);
-  if (!item) throw new Error("The requested stakeholder synchronization item no longer exists.");
-  await setStatus(id, { status: "retrying" });
-  try {
-    const raw = await FileSystem.readAsStringAsync(item.payloadPath, { encoding: FileSystem.EncodingType.UTF8 });
-    const payload = await unseal(JSON.parse(raw) as SealedPayload, `${item.id}|${item.idempotencyKey}|${item.payloadHash}`);
-    const response = await createTRPCClient().onboarding.replayStakeholderSubmission.mutate({ idempotencyKey: item.idempotencyKey, payloadHash: item.payloadHash, payload });
-    await FileSystem.deleteAsync(item.payloadPath, { idempotent: true });
-    await writeStakeholderSyncIndex((await readStakeholderSyncIndex()).filter((candidate) => candidate.id !== item.id));
-    return response;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Synchronization failed.";
-    const decryptionFailure = /decrypt|cipher|encrypted|payload version/i.test(message);
-    const rejected = /idempotency|invalid|reject/i.test(message);
-    const retryCount = item.retryCount + 1;
-    await setStatus(item.id, { retryCount, status: decryptionFailure || retryCount >= 3 ? "dead_letter" : "failed", lastErrorCode: decryptionFailure ? "payload_decryption_failed" : rejected ? "replay_rejected" : "transport_failed" });
-    throw new Error(decryptionFailure ? "The encrypted payload could not be opened and was moved to dead-letter inspection." : rejected ? "The server rejected this replay and it was retained for inspection." : "The submission could not be synchronized. It remains in the queue for retry.");
-  }
+export async function getDeadLetterForEditing(id: string): Promise<EditableStakeholderPayload> { const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item || item.status !== "dead_letter") throw new Error("Only quarantined dead-letter items can be edited."); const payload = await loadPayload(item); return payload.kind === "profile" ? { kind: payload.kind, profile: { companyName: payload.profile.companyName, cacNumber: payload.profile.cacNumber, tinNumber: payload.profile.tinNumber, businessEmail: payload.profile.businessEmail, businessPhone: payload.profile.businessPhone, businessAddress: payload.profile.businessAddress, contactPerson: payload.profile.contactPerson } } : { kind: payload.kind, document: { type: payload.type, fileName: payload.fileName, mimeType: payload.mimeType } }; }
+export async function updateDeadLetterForRetry(id: string, edit: EditableStakeholderPayload) {
+  const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item || item.status !== "dead_letter") throw new Error("Only quarantined dead-letter items can be edited."); const existing = await loadPayload(item); let payload: StakeholderSyncPayload;
+  if (existing.kind === "profile" && edit.profile) payload = { kind: "profile", profile: { ...existing.profile, ...edit.profile } };
+  else if (existing.kind !== "profile" && edit.document) payload = { ...existing, ...edit.document };
+  else throw new Error("The edited data does not match the quarantined submission type.");
+  const idempotencyKey = Crypto.randomUUID(); await FileSystem.writeAsStringAsync(item.payloadPath, JSON.stringify(await seal(payload, `${item.id}|${idempotencyKey}`)), { encoding: FileSystem.EncodingType.UTF8 });
+  await replaceItem(item.id, { idempotencyKey, status: "failed", retryCount: 0, lastErrorCode: undefined });
 }
-export async function replayPendingStakeholderSyncItems() {
-  const queue = await readStakeholderSyncIndex();
-  let replayed = 0; let failed = 0;
-  for (const item of queue.filter((candidate) => candidate.status !== "dead_letter")) {
-    try { await replayQueuedStakeholderSyncItem(item.id); replayed += 1; } catch { failed += 1; }
-  }
-  return { replayed, failed };
+export async function retryStakeholderSyncItem(id: string) {
+  const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item) throw new Error("Queue item not found."); await replaceItem(id, { status: "retrying" });
+  try { const payload = await loadPayload(item); const result = await createTRPCClient().onboarding.replayStakeholderSubmission.mutate({ idempotencyKey: item.idempotencyKey, payload }); await FileSystem.deleteAsync(item.payloadPath, { idempotent: true }); await writeStakeholderSyncIndex((await readStakeholderSyncIndex()).filter((entry) => entry.id !== id)); return result; }
+  catch (error) { const message = error instanceof Error ? error.message : String(error); const nextRetry = item.retryCount + 1; const decryptFailed = /decrypt|cipher|key|encrypted/i.test(message); await replaceItem(id, { retryCount: nextRetry, status: decryptFailed || nextRetry >= 3 ? "dead_letter" : "failed", lastErrorCode: decryptFailed ? "payload_decryption_failed" : /idempotency|invalid|reject/i.test(message) ? "replay_rejected" : "transport_failed" }); throw error; }
 }

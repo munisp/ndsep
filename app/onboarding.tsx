@@ -29,7 +29,6 @@ export default function OnboardingScreen() {
   });
   const [formErrors, setFormErrors] = useState<StakeholderErrors>({});
   const [profileSaving, setProfileSaving] = useState(false);
-  const [queueRefreshKey, setQueueRefreshKey] = useState(0);
 
   async function readAssetAsBase64(uri: string) {
     return FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
@@ -47,7 +46,7 @@ export default function OnboardingScreen() {
       const base64Data = await readAssetAsBase64(asset.uri);
 
       const outcome = await submitStakeholderDocument(kind === "identity" ? "identity_document" : "business_document", { type, fileName: asset.name, mimeType: asset.mimeType ?? "image/jpeg", base64Data });
-      if (outcome.queuedOffline) { setQueueRefreshKey((value) => value + 1); Alert.alert("Document queued securely", "The encrypted submission is pending synchronization and is listed in the offline queue."); }
+      if (outcome.queuedOffline) Alert.alert("Document queued securely", "The encrypted document is now available in the offline synchronization queue.");
     } catch (error) {
       Alert.alert("Document processing failed", error instanceof Error ? error.message : "Please try again.");
     }
@@ -114,8 +113,7 @@ export default function OnboardingScreen() {
         verifiedAt: bundle.onboarding.businessProfile.verifiedAt,
         documents: bundle.onboarding.businessProfile.documents,
       });
-      if (outcome.queuedOffline) setQueueRefreshKey((value) => value + 1);
-      Alert.alert(outcome.queuedOffline ? "Profile queued securely" : "Business profile saved", outcome.queuedOffline ? "The encrypted submission is pending synchronization and is listed in the offline queue." : "The KYB profile has been synchronized to the live mobile API.");
+      Alert.alert(outcome.queuedOffline ? "Profile queued securely" : "Business profile saved", outcome.queuedOffline ? "The encrypted profile is now available in the offline synchronization queue." : "The KYB profile has been synchronized to the live mobile API.");
     } catch (error) {
       Alert.alert("Profile save failed", error instanceof Error ? error.message : "Please try again.");
     } finally {
@@ -139,7 +137,7 @@ export default function OnboardingScreen() {
           <Text className="mt-2 text-sm text-white/85">{bundle.onboarding.nextAction}</Text>
         </View>
 
-        <StakeholderSyncQueue refreshKey={queueRefreshKey} />
+        <StakeholderSyncQueue />
 
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Verification checklist</Text>
