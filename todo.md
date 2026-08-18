@@ -388,3 +388,6 @@
 - [x] Display the active administrative support public-key fingerprint in diagnostic export controls
 - [x] Generate downloadable verifiable receipts for stakeholder diagnostic exports
 - [x] Add a simplified queue view that hides technical retry audit detail for standard users
+- [x] Add in-app upload and verification for diagnostic export receipts
+- [x] Require explicit authorization before enabling Technical queue view
+- [x] Add animated success feedback and package summary after diagnostic receipt export
