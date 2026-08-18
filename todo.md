@@ -379,3 +379,6 @@
 - [x] Add per-item stakeholder synchronization retry scheduling with visible next-attempt time
 - [x] Add a Wi-Fi-only preference for stakeholder document uploads
 - [x] Add privacy-safe queue diagnostics export for support sharing
+- [x] Add per-item cancellation for scheduled stakeholder synchronization retries
+- [x] Extend the Wi-Fi-only setting to all queued stakeholder mutations
+- [x] Add encrypted diagnostics package export for authorized support escalation

@@ -10,6 +10,7 @@ const items = [
 describe("stakeholder synchronization queue view", () => {
   it("filters each recoverable queue state", () => expect(filterAndSortStakeholderSyncItems(items, "dead_letter", "newest").map((item) => item.id)).toEqual(["b"]));
   it("sorts known queue records deterministically", () => expect(filterAndSortStakeholderSyncItems(items, "all", "oldest").map((item) => item.id)).toEqual(["a", "b", "c"]));
+  it("filters paused items separately from recoverable failures", () => expect(filterAndSortStakeholderSyncItems([{ ...items[0], status: "paused" }, ...items.slice(1)], "paused", "newest").map((item) => item.id)).toEqual(["a"]));
   it("excludes quarantined items from bulk retry", () => expect(getBulkRetryEligibleStakeholderItems(items).map((item) => item.id)).toEqual(["a"]));
   it("explains the recorded failure category without concealing the server detail", () => expect(describeStakeholderSyncFailure({ ...items[0], lastErrorCode: "replay_rejected", lastErrorMessage: "CAC number format invalid" })).toContain("CAC number format invalid"));
 });

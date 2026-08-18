@@ -61,7 +61,7 @@ export default function RootLayout() {
     const replayIfReachable = async (state: { isInternetReachable?: boolean | null; type?: Network.NetworkStateType }) => {
       if (!active || state.isInternetReachable !== true) return;
       const preference = await getStakeholderSyncPreferences();
-      if (preference.pauseOnCellular && state.type === Network.NetworkStateType.CELLULAR) return;
+      if ((preference.pauseOnCellular || preference.wifiOnlyAllQueuedMutations) && state.type === Network.NetworkStateType.CELLULAR) return;
       await replayPendingStakeholderSyncItems();
     };
     void Network.getNetworkStateAsync().then(replayIfReachable);

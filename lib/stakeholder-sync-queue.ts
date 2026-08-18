@@ -54,6 +54,11 @@ export async function retryStakeholderSyncItem(id: string) {
   try { const payload = await loadPayload(item); const result = await createTRPCClient().onboarding.replayStakeholderSubmission.mutate({ idempotencyKey: item.idempotencyKey, payload }); await FileSystem.deleteAsync(item.payloadPath, { idempotent: true }); await writeStakeholderSyncIndex((await readStakeholderSyncIndex()).filter((entry) => entry.id !== id)); return result; }
   catch (error) { const message = error instanceof Error ? error.message : String(error); const nextRetry = item.retryCount + 1; const decryptFailed = /decrypt|cipher|key|encrypted/i.test(message); const deadLetter = decryptFailed || nextRetry >= 3; await replaceItem(id, { retryCount: nextRetry, status: deadLetter ? "dead_letter" : "failed", nextRetryAt: deadLetter ? undefined : getNextStakeholderRetryAt(nextRetry), lastErrorCode: decryptFailed ? "payload_decryption_failed" : /idempotency|invalid|reject/i.test(message) ? "replay_rejected" : "transport_failed", lastErrorMessage: message.slice(0, 280) }); throw error; }
 }
+export async function cancelScheduledStakeholderRetry(id: string) {
+  const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id);
+  if (!item || item.status !== "failed" || !item.nextRetryAt) throw new Error("Only a scheduled failed synchronization can be paused.");
+  await replaceItem(id, { status: "paused", nextRetryAt: undefined });
+}
 let automaticReplayInFlight = false;
 export async function replayPendingStakeholderSyncItems() {
   if (automaticReplayInFlight) return { synchronized: 0, failed: 0 };
