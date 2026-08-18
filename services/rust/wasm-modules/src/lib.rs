@@ -96,7 +96,7 @@ pub fn compute_risk_score(
     let history = (incident_history as f64).min(10.0) * 3.0;
     let audit_decay = if days_since_audit > 365 { 15.0 } else { (days_since_audit as f64 / 365.0) * 15.0 };
 
-    (base + controls + history + audit_decay).min(100.0).max(0.0)
+    (base + controls + history + audit_decay).clamp(0.0, 100.0)
 }
 
 #[cfg(test)]
