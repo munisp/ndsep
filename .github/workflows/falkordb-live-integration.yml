@@ -1,0 +1,75 @@
+name: FalkorDB Live Integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'workers/go/cmd/falkordb_kg_worker/**'
+      - 'infra/integration/**'
+      - 'scripts/integration/run-falkordb-roundtrip.sh'
+      - '.github/workflows/falkordb-live-integration.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'workers/go/cmd/falkordb_kg_worker/**'
+      - 'infra/integration/**'
+      - 'scripts/integration/run-falkordb-roundtrip.sh'
+      - '.github/workflows/falkordb-live-integration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  falkordb-roundtrip:
+    # This label is a deployment requirement, not a cosmetic selector. The
+    # runner must expose Docker bridge networking and iptables raw-table support.
+    runs-on: [self-hosted, linux, docker-bridge]
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify Docker bridge prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker info >/dev/null
+          docker compose version >/dev/null
+          docker buildx version >/dev/null
+
+          # Modular Linux hosts may need this module loaded. The subsequent
+          # raw-table assertion is mandatory even if modprobe is unavailable.
+          sudo modprobe iptable_raw 2>/dev/null || true
+          sudo iptables -t raw -S PREROUTING >/dev/null
+          test "$(sysctl -n net.ipv4.ip_forward)" = "1"
+
+          network="ndsep-falkor-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { docker network rm "$network" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker network create "$network"
+          docker run --rm --network "$network" alpine:3.20 true
+
+      - name: Generate ephemeral FalkorDB password
+        shell: bash
+        run: |
+          set -euo pipefail
+          password="$(openssl rand -base64 36 | tr -d '\n')"
+          test -n "$password"
+          echo "FALKORDB_PASSWORD=$password" >> "$GITHUB_ENV"
+
+      - name: Run real FalkorDB round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/integration/run-falkordb-roundtrip.sh 2>&1 | tee falkordb-roundtrip.log
+
+      - name: Upload integration output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: falkordb-roundtrip-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            falkordb-roundtrip.log
+          if-no-files-found: warn
+          retention-days: 14
