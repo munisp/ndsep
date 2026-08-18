@@ -373,3 +373,6 @@
 - [x] Automatically replay pending stakeholder queue items after device connectivity is restored
 - [x] Add a success toast for recovered dead-letter synchronization items
 - [x] Validate edited dead-letter stakeholder profile and document metadata before secure retry
+- [x] Add a user setting to pause automatic stakeholder synchronization on cellular data
+- [x] Display explicit synchronization failure explanations in stakeholder queue items
+- [x] Add a safeguarded Retry All action for recoverable stakeholder queue items

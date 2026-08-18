@@ -20,6 +20,7 @@ import type { EdgeInsets, Metrics, Rect } from "react-native-safe-area-context";
 import { trpc, createTRPCClient } from "@/lib/trpc";
 import { SessionExpiryNotice } from "@/components/session-expiry-notice";
 import { replayPendingStakeholderSyncItems } from "@/lib/stakeholder-sync-queue";
+import { getStakeholderSyncPreferences } from "@/lib/stakeholder-sync-settings";
 import { initManusRuntime, subscribeSafeAreaInsets } from "@/lib/_core/manus-runtime";
 import "@/lib/background-sync";
 import "@/lib/mobile-geofencing";
@@ -57,11 +58,14 @@ export default function RootLayout() {
 
   useEffect(() => {
     let active = true;
-    const replayIfReachable = async (reachable: boolean | null | undefined) => {
-      if (active && reachable === true) await replayPendingStakeholderSyncItems();
+    const replayIfReachable = async (state: { isInternetReachable?: boolean | null; type?: Network.NetworkStateType }) => {
+      if (!active || state.isInternetReachable !== true) return;
+      const preference = await getStakeholderSyncPreferences();
+      if (preference.pauseOnCellular && state.type === Network.NetworkStateType.CELLULAR) return;
+      await replayPendingStakeholderSyncItems();
     };
-    void Network.getNetworkStateAsync().then((state) => replayIfReachable(state.isInternetReachable));
-    const subscription = Network.addNetworkStateListener((state) => { void replayIfReachable(state.isInternetReachable); });
+    void Network.getNetworkStateAsync().then(replayIfReachable);
+    const subscription = Network.addNetworkStateListener((state) => { void replayIfReachable(state); });
     return () => { active = false; subscription.remove(); };
   }, []);
 

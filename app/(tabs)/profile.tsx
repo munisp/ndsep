@@ -1,9 +1,11 @@
 import { Link } from "expo-router";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { useEffect, useState } from "react";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 import { trpc } from "@/lib/trpc";
+import { getStakeholderSyncPreferences, setStakeholderSyncPreferences } from "@/lib/stakeholder-sync-settings";
 
 function ActionTile({ label, onPress, active = false }: { label: string; onPress: () => void; active?: boolean }) {
   return (
@@ -17,6 +19,9 @@ function ActionTile({ label, onPress, active = false }: { label: string; onPress
 
 export default function ProfileScreen() {
   const { bundle, hasLiveConnection } = useMobilePlatformBundle();
+  const [pauseOnCellular, setPauseOnCellular] = useState(false);
+  useEffect(() => { void getStakeholderSyncPreferences().then((preferences) => setPauseOnCellular(preferences.pauseOnCellular)); }, []);
+  const updateCellularPreference = async (value: boolean) => { setPauseOnCellular(value); try { await setStakeholderSyncPreferences({ pauseOnCellular: value }); } catch { setPauseOnCellular(!value); } };
   const utils = trpc.useUtils();
   const platformQuery = trpc.permitting.getPlatform.useQuery();
   const paymentAlerts = trpc.paymentOperations.myAlerts.useQuery(undefined, { retry: false });
@@ -112,6 +117,11 @@ export default function ProfileScreen() {
               <Text className="text-center font-semibold text-foreground">Open onboarding workflow</Text>
             </View>
           </Link>
+        </View>
+
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <View className="flex-row items-center justify-between gap-4"><View className="flex-1"><Text className="text-lg font-semibold text-foreground">Offline synchronization</Text><Text className="mt-2 text-sm leading-5 text-muted">Pause automatic encrypted stakeholder replay while using cellular data. Manual retry remains available from the queue.</Text></View><Switch value={pauseOnCellular} onValueChange={updateCellularPreference} /></View>
+          <Text className="mt-3 text-xs text-muted">{pauseOnCellular ? "Automatic replay waits for Wi-Fi or another non-cellular connection." : "Automatic replay may use cellular data when internet access is available."}</Text>
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">
