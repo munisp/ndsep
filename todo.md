@@ -394,3 +394,6 @@
 - [x] Match uploaded encrypted diagnostic packages to verified receipt digests
 - [x] Add server-attested verifiable receipts for diagnostic package exports
 - [x] Expire Technical queue view after inactivity and require re-authorization
+- [x] Add prominent Technical view lease countdown and pre-lock warning feedback
+- [x] Add administrator receipt-attestation status and revocation management dashboard
+- [x] Display clear local versus server-attested origin badges during receipt verification

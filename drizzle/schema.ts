@@ -90,6 +90,21 @@ export const serviceTopology = mysqlTable("serviceTopology", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const diagnosticAttestationReceipts = mysqlTable("diagnosticAttestationReceipts", {
+  receiptId: varchar("receiptId", { length: 80 }).primaryKey(),
+  packageType: mysqlEnum("packageType", ["passphrase_encrypted", "administrative_public_key"]).notNull(),
+  packageSha256: varchar("packageSha256", { length: 64 }).notNull(),
+  attestedForSubject: varchar("attestedForSubject", { length: 255 }).notNull(),
+  signerKeyId: varchar("signerKeyId", { length: 120 }).notNull(),
+  signerFingerprint: varchar("signerFingerprint", { length: 64 }).notNull(),
+  receiptJson: text("receiptJson").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  revokedBy: varchar("revokedBy", { length: 255 }),
+  revocationReason: text("revocationReason"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type PermittingAgency = typeof permittingAgencies.$inferSelect;
@@ -102,3 +117,5 @@ export type MiddlewareComponent = typeof middlewareComponents.$inferSelect;
 export type InsertMiddlewareComponent = typeof middlewareComponents.$inferInsert;
 export type ServiceTopology = typeof serviceTopology.$inferSelect;
 export type InsertServiceTopology = typeof serviceTopology.$inferInsert;
+export type DiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferSelect;
+export type InsertDiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferInsert;

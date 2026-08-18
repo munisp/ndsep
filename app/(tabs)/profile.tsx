@@ -178,6 +178,9 @@ export default function ProfileScreen() {
           <Link href={"/operations" as never} asChild>
             <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open operations control center</Text></View>
           </Link>
+          <Link href={"/diagnostic-attestations" as never} asChild>
+            <View className="mt-3 rounded-2xl border border-primary bg-background px-4 py-4"><Text className="text-center font-semibold text-primary">Manage organization diagnostic receipts</Text></View>
+          </Link>
         </View>
       </ScrollView>
     </ScreenContainer>

@@ -15,6 +15,13 @@
       "when": 1784555093806,
       "tag": "0001_brown_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787096118502,
+      "tag": "0002_chief_stryfe",
+      "breakpoints": true
     }
   ]
 }
