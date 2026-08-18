@@ -65,6 +65,7 @@ import { acknowledgeFieldEvidenceEscalation, assignFieldEvidenceSupervisor, esca
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
 import { acknowledgeHighRiskReconciliationAlert, getOfflinePaymentSummary, getPaymentGatewayOperationalHealth, getReconciliationRetryOutcomeTrend, listHighRiskReconciliationAlerts, listPaymentAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, listPaymentStateApprovalPolicies, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, PAYMENT_APPROVAL_ROLES, PAYMENT_JURISDICTIONS, processDueGatewayVerificationRetries, processDueHighRiskAlertEscalations, recordPaymentAuditExport, recordReconciliationExceptionExport, resolvePaymentReconciliationException, reviewOfflinePayment, submitOfflinePayment, triggerManualGatewayVerificationRetry, updatePaymentStateApprovalPolicy, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
 import { getGatewayActivationStatus } from "./paymentGatewayConfig";
+import { attestDiagnosticExport, getDiagnosticAttestationStatus } from "./diagnosticExportAttestation";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -254,6 +255,12 @@ export const appRouter = router({
     save: adminProcedure
       .input(z.object(Object.fromEntries(INTEGRATION_FIELDS.map((field) => [field, z.string().max(5000).optional()]))))
       .mutation(({ input }) => saveIntegrationSettings(input)),
+  }),
+  diagnosticExports: router({
+    attestationStatus: publicProcedure.query(() => getDiagnosticAttestationStatus()),
+    attest: protectedProcedure
+      .input(z.object({ packageType: z.enum(["passphrase_encrypted", "administrative_public_key"]), packageSha256: z.string().regex(/^[a-f0-9]{64}$/i) }))
+      .mutation(({ ctx, input }) => attestDiagnosticExport({ ...input, packageSha256: input.packageSha256.toLowerCase(), attestedForSubject: ctx.user.openId })),
   }),
   notifications: router({
     getPreferences: publicProcedure.query(() => getMobilePlatformBundle().notificationPreferences),

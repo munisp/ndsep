@@ -391,3 +391,6 @@
 - [x] Add in-app upload and verification for diagnostic export receipts
 - [x] Require explicit authorization before enabling Technical queue view
 - [x] Add animated success feedback and package summary after diagnostic receipt export
+- [x] Match uploaded encrypted diagnostic packages to verified receipt digests
+- [x] Add server-attested verifiable receipts for diagnostic package exports
+- [x] Expire Technical queue view after inactivity and require re-authorization

@@ -1,0 +1,3 @@
+import { describe, expect, it } from "vitest";
+import { TECHNICAL_VIEW_INACTIVITY_MS, isTechnicalViewExpired, technicalViewExpiresAt, technicalViewRemainingSeconds } from "../lib/technical-view-session";
+describe("technical queue view inactivity", () => { it("expires after the configured inactive window", () => { const started = 1_000_000; const expiry = technicalViewExpiresAt(started); expect(expiry).toBe(started + TECHNICAL_VIEW_INACTIVITY_MS); expect(isTechnicalViewExpired(expiry, expiry - 1)).toBe(false); expect(isTechnicalViewExpired(expiry, expiry)).toBe(true); }); it("reports a non-negative remaining time", () => { expect(technicalViewRemainingSeconds(1000, 0)).toBe(1); expect(technicalViewRemainingSeconds(1000, 2000)).toBe(0); }); });
