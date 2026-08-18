@@ -19,9 +19,10 @@ function ActionTile({ label, onPress, active = false }: { label: string; onPress
 
 export default function ProfileScreen() {
   const { bundle, hasLiveConnection } = useMobilePlatformBundle();
-  const [pauseOnCellular, setPauseOnCellular] = useState(false);
-  useEffect(() => { void getStakeholderSyncPreferences().then((preferences) => setPauseOnCellular(preferences.pauseOnCellular)); }, []);
+  const [pauseOnCellular, setPauseOnCellular] = useState(false); const [wifiOnlyDocuments, setWifiOnlyDocuments] = useState(false);
+  useEffect(() => { void getStakeholderSyncPreferences().then((preferences) => { setPauseOnCellular(preferences.pauseOnCellular); setWifiOnlyDocuments(preferences.wifiOnlyDocumentUpload); }); }, []);
   const updateCellularPreference = async (value: boolean) => { setPauseOnCellular(value); try { await setStakeholderSyncPreferences({ pauseOnCellular: value }); } catch { setPauseOnCellular(!value); } };
+  const updateWifiDocumentPreference = async (value: boolean) => { setWifiOnlyDocuments(value); try { await setStakeholderSyncPreferences({ wifiOnlyDocumentUpload: value }); } catch { setWifiOnlyDocuments(!value); } };
   const utils = trpc.useUtils();
   const platformQuery = trpc.permitting.getPlatform.useQuery();
   const paymentAlerts = trpc.paymentOperations.myAlerts.useQuery(undefined, { retry: false });
@@ -122,6 +123,7 @@ export default function ProfileScreen() {
         <View className="rounded-3xl border border-border bg-surface p-5">
           <View className="flex-row items-center justify-between gap-4"><View className="flex-1"><Text className="text-lg font-semibold text-foreground">Offline synchronization</Text><Text className="mt-2 text-sm leading-5 text-muted">Pause automatic encrypted stakeholder replay while using cellular data. Manual retry remains available from the queue.</Text></View><Switch value={pauseOnCellular} onValueChange={updateCellularPreference} /></View>
           <Text className="mt-3 text-xs text-muted">{pauseOnCellular ? "Automatic replay waits for Wi-Fi or another non-cellular connection." : "Automatic replay may use cellular data when internet access is available."}</Text>
+          <View className="mt-4 border-t border-border pt-4"><View className="flex-row items-center justify-between gap-4"><View className="flex-1"><Text className="text-sm font-semibold text-foreground">Wi-Fi-only document uploads</Text><Text className="mt-1 text-xs leading-4 text-muted">Queue selected stakeholder documents until Wi-Fi is available instead of uploading them over cellular data.</Text></View><Switch value={wifiOnlyDocuments} onValueChange={updateWifiDocumentPreference} /></View></View>
         </View>
 
         <View className="rounded-3xl border border-border bg-surface p-5">

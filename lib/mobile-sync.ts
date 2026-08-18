@@ -9,6 +9,8 @@ import { buildActivityInteractionProfile, prependActivity, updateActivityInsight
 import { ensureNotificationPermissions, scheduleFieldUpdateNotification } from "@/lib/mobile-notifications";
 import { getQueuedFieldMutations, queueMissionStatusMutation, replayQueuedFieldMutations } from "@/lib/mobile-sync-replay";
 import { enqueueStakeholderSubmission } from "@/lib/stakeholder-sync-queue";
+import { getStakeholderSyncPreferences } from "@/lib/stakeholder-sync-settings";
+import * as Network from "expo-network";
 import { trpc } from "@/lib/trpc";
 
 const CACHE_KEY = "idlr_pts_mobile.platform_bundle.v1";
@@ -342,6 +344,8 @@ export function useMobilePlatformBundle() {
       catch (error) { if (!isTransportFailure(error)) throw error; const queued = await enqueueStakeholderSubmission({ kind: "profile", profile }); await prependActivity({ title: "Business profile queued securely", description: "The encrypted profile submission will replay when connectivity returns.", category: "onboarding", tone: "warning", route: "/onboarding" }); return { result: null, queuedOffline: true, queueId: queued.id }; }
     },
     submitStakeholderDocument: async (kind: "identity_document" | "business_document", input: { type: string; fileName: string; mimeType: string; base64Data: string }) => {
+      const network = await Network.getNetworkStateAsync(); const preference = await getStakeholderSyncPreferences();
+      if (preference.wifiOnlyDocumentUpload && network.type === Network.NetworkStateType.CELLULAR) { const queued = await enqueueStakeholderSubmission({ kind, ...input }); await prependActivity({ title: "Document deferred for Wi-Fi", description: "The encrypted document was queued locally because Wi-Fi-only upload is enabled.", category: "onboarding", tone: "warning", route: "/onboarding" }); return { result: null, queuedOffline: true, queueId: queued.id }; }
       try { const result = kind === "identity_document" ? await analyzeIdentityDocument.mutateAsync(input) : await analyzeBusinessDocument.mutateAsync(input); return { result, queuedOffline: false }; }
       catch (error) { if (!isTransportFailure(error)) throw error; const queued = await enqueueStakeholderSubmission({ kind, ...input }); await prependActivity({ title: "Document queued securely", description: "The encrypted document submission will replay when connectivity returns.", category: "onboarding", tone: "warning", route: "/onboarding" }); return { result: null, queuedOffline: true, queueId: queued.id }; }
     },

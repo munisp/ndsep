@@ -1,0 +1,3 @@
+import type { PendingStakeholderSyncItem } from "./stakeholder-sync-index";
+
+export function buildStakeholderSyncDiagnostics(items: PendingStakeholderSyncItem[]) { return { schema: "idlr-pts.stakeholder-sync-diagnostics.v1", generatedAt: new Date().toISOString(), privacyNotice: "This support file excludes names, registration identifiers, addresses, document payloads, encryption keys, local paths, and idempotency keys.", items: items.map(({ kind, label, queuedAt, status, retryCount, nextRetryAt, lastErrorCode, lastErrorMessage }) => ({ kind, label, queuedAt, status, retryCount, nextRetryAt: nextRetryAt ?? null, lastErrorCode: lastErrorCode ?? null, lastErrorMessage: lastErrorMessage ?? null })) }; }

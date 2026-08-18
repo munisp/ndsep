@@ -8,6 +8,7 @@ import { createTRPCClient } from "@/lib/trpc";
 import { readStakeholderSyncIndex, writeStakeholderSyncIndex, type PendingStakeholderSyncItem, type StakeholderSyncKind, type StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
 import { validateDeadLetterEdit } from "@/lib/stakeholder-sync-validation";
 import { describeStakeholderSyncFailure } from "@/lib/stakeholder-sync-error-details";
+import { getNextStakeholderRetryAt, isStakeholderItemDueForAutomaticRetry } from "@/lib/stakeholder-sync-retry";
 export { describeStakeholderSyncFailure } from "@/lib/stakeholder-sync-error-details";
 export type { PendingStakeholderSyncItem, StakeholderSyncKind, StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
 
@@ -46,19 +47,19 @@ export async function updateDeadLetterForRetry(id: string, edit: EditableStakeho
   else if (existing.kind !== "profile" && edit.document) payload = { ...existing, ...edit.document };
   else throw new Error("The edited data does not match the quarantined submission type.");
   const idempotencyKey = Crypto.randomUUID(); await FileSystem.writeAsStringAsync(item.payloadPath, JSON.stringify(await seal(payload, `${item.id}|${idempotencyKey}`)), { encoding: FileSystem.EncodingType.UTF8 });
-  await replaceItem(item.id, { idempotencyKey, status: "failed", retryCount: 0, lastErrorCode: undefined });
+  await replaceItem(item.id, { idempotencyKey, status: "failed", retryCount: 0, nextRetryAt: undefined, lastErrorCode: undefined, lastErrorMessage: undefined });
 }
 export async function retryStakeholderSyncItem(id: string) {
   const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item) throw new Error("Queue item not found."); await replaceItem(id, { status: "retrying" });
   try { const payload = await loadPayload(item); const result = await createTRPCClient().onboarding.replayStakeholderSubmission.mutate({ idempotencyKey: item.idempotencyKey, payload }); await FileSystem.deleteAsync(item.payloadPath, { idempotent: true }); await writeStakeholderSyncIndex((await readStakeholderSyncIndex()).filter((entry) => entry.id !== id)); return result; }
-  catch (error) { const message = error instanceof Error ? error.message : String(error); const nextRetry = item.retryCount + 1; const decryptFailed = /decrypt|cipher|key|encrypted/i.test(message); await replaceItem(id, { retryCount: nextRetry, status: decryptFailed || nextRetry >= 3 ? "dead_letter" : "failed", lastErrorCode: decryptFailed ? "payload_decryption_failed" : /idempotency|invalid|reject/i.test(message) ? "replay_rejected" : "transport_failed", lastErrorMessage: message.slice(0, 280) }); throw error; }
+  catch (error) { const message = error instanceof Error ? error.message : String(error); const nextRetry = item.retryCount + 1; const decryptFailed = /decrypt|cipher|key|encrypted/i.test(message); const deadLetter = decryptFailed || nextRetry >= 3; await replaceItem(id, { retryCount: nextRetry, status: deadLetter ? "dead_letter" : "failed", nextRetryAt: deadLetter ? undefined : getNextStakeholderRetryAt(nextRetry), lastErrorCode: decryptFailed ? "payload_decryption_failed" : /idempotency|invalid|reject/i.test(message) ? "replay_rejected" : "transport_failed", lastErrorMessage: message.slice(0, 280) }); throw error; }
 }
 let automaticReplayInFlight = false;
 export async function replayPendingStakeholderSyncItems() {
   if (automaticReplayInFlight) return { synchronized: 0, failed: 0 };
   automaticReplayInFlight = true;
   try {
-    const candidates = (await readStakeholderSyncIndex()).filter((item) => item.status === "pending" || item.status === "failed"); let synchronized = 0; let failed = 0;
+    const candidates = (await readStakeholderSyncIndex()).filter((item) => isStakeholderItemDueForAutomaticRetry(item)); let synchronized = 0; let failed = 0;
     for (const item of candidates) { try { await retryStakeholderSyncItem(item.id); synchronized += 1; } catch { failed += 1; } }
     return { synchronized, failed };
   } finally { automaticReplayInFlight = false; }

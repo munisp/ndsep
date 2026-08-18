@@ -376,3 +376,6 @@
 - [x] Add a user setting to pause automatic stakeholder synchronization on cellular data
 - [x] Display explicit synchronization failure explanations in stakeholder queue items
 - [x] Add a safeguarded Retry All action for recoverable stakeholder queue items
+- [x] Add per-item stakeholder synchronization retry scheduling with visible next-attempt time
+- [x] Add a Wi-Fi-only preference for stakeholder document uploads
+- [x] Add privacy-safe queue diagnostics export for support sharing

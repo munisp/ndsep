@@ -66,7 +66,8 @@ export default function RootLayout() {
     };
     void Network.getNetworkStateAsync().then(replayIfReachable);
     const subscription = Network.addNetworkStateListener((state) => { void replayIfReachable(state); });
-    return () => { active = false; subscription.remove(); };
+    const timer = setInterval(() => { void Network.getNetworkStateAsync().then(replayIfReachable); }, 60_000);
+    return () => { active = false; subscription.remove(); clearInterval(timer); };
   }, []);
 
   // Create clients once and reuse them
