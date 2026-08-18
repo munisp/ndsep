@@ -37,6 +37,7 @@ func falkorQueryHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"FalkorDB adapter unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var req falkorQueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid graph query request"}`, http.StatusBadRequest)
@@ -78,11 +79,17 @@ func falkorQueryHandler(w http.ResponseWriter, r *http.Request) {
 func writeFalkorQueryError(w http.ResponseWriter, err error) {
 	atomicAddError()
 	message := err.Error()
-	if message == "node_id is required" || message == "from_id and to_id are required" || len(message) >= 9 && message[:9] == "max_depth" || len(message) >= 8 && message[:8] == "unsupported" {
-		http.Error(w, `{"error":"`+message+`"}`, http.StatusBadRequest)
+	if message == "node_id is required" || message == "from_id is required" || message == "to_id is required" || len(message) >= 9 && message[:9] == "max_depth" || len(message) >= 8 && message[:8] == "unsupported" || len(message) >= 7 && (message[:7] == "node_id" || message[:7] == "from_id" || message[:5] == "to_id") {
+		writeFalkorJSONError(w, http.StatusBadRequest, message)
 		return
 	}
-	http.Error(w, `{"error":"FalkorDB graph query unavailable"}`, http.StatusServiceUnavailable)
+	writeFalkorJSONError(w, http.StatusServiceUnavailable, "FalkorDB graph query unavailable")
+}
+
+func writeFalkorJSONError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 // Rebuild remains deliberately disabled until the durable PostgreSQL snapshot and

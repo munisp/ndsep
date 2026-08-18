@@ -98,3 +98,18 @@ pub fn compute_risk_score(
 
     (base + controls + history + audit_decay).min(100.0).max(0.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::compute_compliance_score;
+
+    #[test]
+    fn compliance_score_uses_f64_clamps_and_average() {
+        let empty = compute_compliance_score("[]");
+        assert!((empty - 27.5).abs() < f64::EPSILON);
+
+        let controls = r#"["data_classification","retention_policy","dpo_appointed","privacy_by_design","encryption","access_control","audit_logging","vulnerability_scanning","incident_response","incident_response_plan","breach_notification_process","forensics_capability","access_request_process","erasure_process","portability","objection_mechanism"]"#;
+        let complete = compute_compliance_score(controls);
+        assert!((complete - 100.0).abs() < f64::EPSILON);
+    }
+}

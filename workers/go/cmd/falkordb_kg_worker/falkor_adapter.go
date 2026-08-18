@@ -126,6 +126,17 @@ func graphNodeView(value interface{}) (falkorNodeView, error) {
 	return falkorNodeView{ID: identifier, Labels: node.Labels, Properties: node.Properties}, nil
 }
 
+func validateGraphIdentifier(name, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%s is required", name)
+	}
+	if len(value) > 256 {
+		return "", fmt.Errorf("%s exceeds 256 characters", name)
+	}
+	return value, nil
+}
+
 func validateGraphRelation(relation string) error {
 	if relation == "" {
 		return nil
@@ -137,8 +148,10 @@ func validateGraphRelation(relation string) error {
 }
 
 func neighborQuery(nodeID, relation string) (string, map[string]interface{}, error) {
-	if strings.TrimSpace(nodeID) == "" {
-		return "", nil, fmt.Errorf("node_id is required")
+	var err error
+	nodeID, err = validateGraphIdentifier("node_id", nodeID)
+	if err != nil {
+		return "", nil, err
 	}
 	if err := validateGraphRelation(relation); err != nil {
 		return "", nil, err
@@ -175,8 +188,14 @@ func (a *FalkorAdapter) neighbors(nodeID, relation string) ([]falkorNodeView, er
 }
 
 func boundedPathQuery(fromID, toID string, maxDepth int) (string, map[string]interface{}, error) {
-	if strings.TrimSpace(fromID) == "" || strings.TrimSpace(toID) == "" {
-		return "", nil, fmt.Errorf("from_id and to_id are required")
+	var err error
+	fromID, err = validateGraphIdentifier("from_id", fromID)
+	if err != nil {
+		return "", nil, err
+	}
+	toID, err = validateGraphIdentifier("to_id", toID)
+	if err != nil {
+		return "", nil, err
 	}
 	if maxDepth <= 0 {
 		maxDepth = 5
