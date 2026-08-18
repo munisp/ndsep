@@ -4,7 +4,7 @@ import * as Crypto from "expo-crypto";
 import { Platform } from "react-native";
 import { readStakeholderSyncIndex } from "./stakeholder-sync-index";
 import { buildStakeholderSyncDiagnostics } from "./stakeholder-sync-diagnostics-format";
-import { encryptAuthorizedSupportDiagnostics } from "./stakeholder-support-crypto";
+import { encryptAuthorizedSupportDiagnostics, encryptForAdministrativeSupport } from "./stakeholder-support-crypto";
 async function shareJson(document: unknown, fileName: string, title: string) {
   const serialized = JSON.stringify(document, null, 2);
   if (Platform.OS === "web") { const blob = new Blob([serialized], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = globalThis.document.createElement("a"); anchor.href = url; anchor.download = fileName; anchor.click(); URL.revokeObjectURL(url); return; }
@@ -17,3 +17,4 @@ export async function exportStakeholderSyncDiagnostics() {
   await shareJson(document, `idlr-pts-stakeholder-sync-diagnostics-${Date.now()}.json`, "Share queue diagnostics");
 }
 export async function exportEncryptedStakeholderSyncDiagnostics(passphrase: string) { const document = buildStakeholderSyncDiagnostics(await readStakeholderSyncIndex(), true); const encrypted = await encryptAuthorizedSupportDiagnostics(JSON.stringify(document), passphrase, Crypto.getRandomBytes); await shareJson(encrypted, `idlr-pts-encrypted-sync-diagnostics-${Date.now()}.json`, "Share encrypted queue diagnostics"); }
+export async function exportAdministrativePublicKeyStakeholderDiagnostics(administratorPublicKeyHex: string) { if (!administratorPublicKeyHex.trim()) throw new Error("Administrative support encryption is unavailable because no public key has been configured."); const document = buildStakeholderSyncDiagnostics(await readStakeholderSyncIndex(), true); const encrypted = await encryptForAdministrativeSupport(JSON.stringify(document), administratorPublicKeyHex, Crypto.getRandomBytes); await shareJson(encrypted, `idlr-pts-admin-encrypted-sync-diagnostics-${Date.now()}.json`, "Share administrative support package"); }

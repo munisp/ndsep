@@ -5,7 +5,7 @@ import { Platform } from "react-native";
 
 import type { BusinessProfileRecord } from "@/lib/mobile-data";
 import { createTRPCClient } from "@/lib/trpc";
-import { readStakeholderSyncIndex, writeStakeholderSyncIndex, type PendingStakeholderSyncItem, type StakeholderSyncKind, type StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
+import { readStakeholderSyncIndex, writeStakeholderSyncIndex, type PendingStakeholderSyncItem, type StakeholderRetryAuditEvent, type StakeholderSyncKind, type StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
 import { validateDeadLetterEdit } from "@/lib/stakeholder-sync-validation";
 import { describeStakeholderSyncFailure } from "@/lib/stakeholder-sync-error-details";
 import { getNextStakeholderRetryAt, isStakeholderItemDueForAutomaticRetry } from "@/lib/stakeholder-sync-retry";
@@ -47,17 +47,19 @@ export async function updateDeadLetterForRetry(id: string, edit: EditableStakeho
   else if (existing.kind !== "profile" && edit.document) payload = { ...existing, ...edit.document };
   else throw new Error("The edited data does not match the quarantined submission type.");
   const idempotencyKey = Crypto.randomUUID(); await FileSystem.writeAsStringAsync(item.payloadPath, JSON.stringify(await seal(payload, `${item.id}|${idempotencyKey}`)), { encoding: FileSystem.EncodingType.UTF8 });
-  await replaceItem(item.id, { idempotencyKey, status: "failed", retryCount: 0, nextRetryAt: undefined, lastErrorCode: undefined, lastErrorMessage: undefined });
+  const auditEvent: StakeholderRetryAuditEvent = { at: new Date().toISOString(), action: "dead_letter_corrected", detail: "User corrected quarantined metadata and created a new encrypted envelope." };
+  await replaceItem(item.id, { idempotencyKey, status: "failed", retryCount: 0, nextRetryAt: undefined, lastErrorCode: undefined, lastErrorMessage: undefined, retryAudit: [...(item.retryAudit ?? []), auditEvent].slice(-20) });
 }
 export async function retryStakeholderSyncItem(id: string) {
-  const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item) throw new Error("Queue item not found."); await replaceItem(id, { status: "retrying" });
+  const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item) throw new Error("Queue item not found."); const auditEvent: StakeholderRetryAuditEvent = { at: new Date().toISOString(), action: "manual_retry_started", detail: item.status === "paused" ? "User resumed a previously cancelled retry." : "User manually started synchronization." }; await replaceItem(id, { status: "retrying", retryAudit: [...(item.retryAudit ?? []), auditEvent].slice(-20) });
   try { const payload = await loadPayload(item); const result = await createTRPCClient().onboarding.replayStakeholderSubmission.mutate({ idempotencyKey: item.idempotencyKey, payload }); await FileSystem.deleteAsync(item.payloadPath, { idempotent: true }); await writeStakeholderSyncIndex((await readStakeholderSyncIndex()).filter((entry) => entry.id !== id)); return result; }
-  catch (error) { const message = error instanceof Error ? error.message : String(error); const nextRetry = item.retryCount + 1; const decryptFailed = /decrypt|cipher|key|encrypted/i.test(message); const deadLetter = decryptFailed || nextRetry >= 3; await replaceItem(id, { retryCount: nextRetry, status: deadLetter ? "dead_letter" : "failed", nextRetryAt: deadLetter ? undefined : getNextStakeholderRetryAt(nextRetry), lastErrorCode: decryptFailed ? "payload_decryption_failed" : /idempotency|invalid|reject/i.test(message) ? "replay_rejected" : "transport_failed", lastErrorMessage: message.slice(0, 280) }); throw error; }
+  catch (error) { const message = error instanceof Error ? error.message : String(error); const nextRetry = item.retryCount + 1; const decryptFailed = /decrypt|cipher|key|encrypted/i.test(message); const deadLetter = decryptFailed || nextRetry >= 3; const auditEvent: StakeholderRetryAuditEvent = { at: new Date().toISOString(), action: deadLetter ? "dead_letter_created" : "retry_scheduled", detail: deadLetter ? "Automatic retry was stopped because the item requires inspection." : "Retry attempt failed; the next attempt is scheduled with bounded backoff." }; await replaceItem(id, { retryCount: nextRetry, status: deadLetter ? "dead_letter" : "failed", nextRetryAt: deadLetter ? undefined : getNextStakeholderRetryAt(nextRetry), lastErrorCode: decryptFailed ? "payload_decryption_failed" : /idempotency|invalid|reject/i.test(message) ? "replay_rejected" : "transport_failed", lastErrorMessage: message.slice(0, 280), retryAudit: [...(item.retryAudit ?? []), auditEvent].slice(-20) }); throw error; }
 }
 export async function cancelScheduledStakeholderRetry(id: string) {
   const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id);
   if (!item || item.status !== "failed" || !item.nextRetryAt) throw new Error("Only a scheduled failed synchronization can be paused.");
-  await replaceItem(id, { status: "paused", nextRetryAt: undefined });
+  const auditEvent: StakeholderRetryAuditEvent = { at: new Date().toISOString(), action: "retry_cancelled", detail: "User cancelled the scheduled automatic retry. The encrypted payload remains queued." };
+  await replaceItem(id, { status: "paused", nextRetryAt: undefined, retryAudit: [...(item.retryAudit ?? []), auditEvent].slice(-20) });
 }
 let automaticReplayInFlight = false;
 export async function replayPendingStakeholderSyncItems() {

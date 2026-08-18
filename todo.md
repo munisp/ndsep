@@ -382,3 +382,6 @@
 - [x] Add per-item cancellation for scheduled stakeholder synchronization retries
 - [x] Extend the Wi-Fi-only setting to all queued stakeholder mutations
 - [x] Add encrypted diagnostics package export for authorized support escalation
+- [x] Require biometric confirmation before encrypted stakeholder diagnostics export
+- [x] Display a visible audit trail for paused, resumed, and cancelled stakeholder retries
+- [x] Add administrative public-key encryption for stakeholder support diagnostics packages
