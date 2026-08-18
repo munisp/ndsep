@@ -385,3 +385,6 @@
 - [x] Require biometric confirmation before encrypted stakeholder diagnostics export
 - [x] Display a visible audit trail for paused, resumed, and cancelled stakeholder retries
 - [x] Add administrative public-key encryption for stakeholder support diagnostics packages
+- [x] Display the active administrative support public-key fingerprint in diagnostic export controls
+- [x] Generate downloadable verifiable receipts for stakeholder diagnostic exports
+- [x] Add a simplified queue view that hides technical retry audit detail for standard users

@@ -1,0 +1,3 @@
+import { describe, expect, it } from "vitest";
+import { shouldShowTechnicalRetryAudit } from "../lib/stakeholder-sync-audit-visibility";
+describe("queue audit visibility", () => { const item = { retryAudit: [{ at: "2026-08-18T00:00:00.000Z", action: "retry_cancelled" as const, detail: "User paused retry." }] }; it("hides detailed retry history in standard view", () => expect(shouldShowTechnicalRetryAudit(true, item)).toBe(false)); it("shows retry history only in technical view when events exist", () => { expect(shouldShowTechnicalRetryAudit(false, item)).toBe(true); expect(shouldShowTechnicalRetryAudit(false, { retryAudit: [] })).toBe(false); }); });
