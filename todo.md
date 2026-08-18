@@ -370,3 +370,6 @@
 - [x] Add secure dead-letter payload editing with re-encryption and idempotent retry safeguards
 - [x] Add a smoothly depleting visual progress indicator to the biometric renewal modal
 - [x] Add pending/failed/dead-letter filters and deterministic sorting to the stakeholder sync queue
+- [x] Automatically replay pending stakeholder queue items after device connectivity is restored
+- [x] Add a success toast for recovered dead-letter synchronization items
+- [x] Validate edited dead-letter stakeholder profile and document metadata before secure retry

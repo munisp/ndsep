@@ -346,9 +346,10 @@
   },
   "syncMeta": {
     "source": "live",
-    "lastSyncedAt": "2026-08-17T17:59:36.357Z",
+    "lastSyncedAt": "2026-08-18T02:57:34.342Z",
     "pendingMutations": 0,
     "offlineReady": true
   },
-  "syncQueue": []
+  "syncQueue": [],
+  "stakeholderReplayReceipts": []
 }

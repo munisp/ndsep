@@ -1,6 +1,7 @@
 import "@/global.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
+import * as Network from "expo-network";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -18,6 +19,7 @@ import type { EdgeInsets, Metrics, Rect } from "react-native-safe-area-context";
 
 import { trpc, createTRPCClient } from "@/lib/trpc";
 import { SessionExpiryNotice } from "@/components/session-expiry-notice";
+import { replayPendingStakeholderSyncItems } from "@/lib/stakeholder-sync-queue";
 import { initManusRuntime, subscribeSafeAreaInsets } from "@/lib/_core/manus-runtime";
 import "@/lib/background-sync";
 import "@/lib/mobile-geofencing";
@@ -52,6 +54,16 @@ export default function RootLayout() {
     const unsubscribe = subscribeSafeAreaInsets(handleSafeAreaUpdate);
     return () => unsubscribe();
   }, [handleSafeAreaUpdate]);
+
+  useEffect(() => {
+    let active = true;
+    const replayIfReachable = async (reachable: boolean | null | undefined) => {
+      if (active && reachable === true) await replayPendingStakeholderSyncItems();
+    };
+    void Network.getNetworkStateAsync().then((state) => replayIfReachable(state.isInternetReachable));
+    const subscription = Network.addNetworkStateListener((state) => { void replayIfReachable(state.isInternetReachable); });
+    return () => { active = false; subscription.remove(); };
+  }, []);
 
   // Create clients once and reuse them
   const [queryClient] = useState(

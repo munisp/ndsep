@@ -6,6 +6,7 @@ import { Platform } from "react-native";
 import type { BusinessProfileRecord } from "@/lib/mobile-data";
 import { createTRPCClient } from "@/lib/trpc";
 import { readStakeholderSyncIndex, writeStakeholderSyncIndex, type PendingStakeholderSyncItem, type StakeholderSyncKind, type StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
+import { validateDeadLetterEdit } from "@/lib/stakeholder-sync-validation";
 export type { PendingStakeholderSyncItem, StakeholderSyncKind, StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
 
 type StakeholderSyncPayload =
@@ -37,6 +38,7 @@ export async function enqueueStakeholderSubmission(payload: StakeholderSyncPaylo
 export async function getPendingStakeholderSyncItems() { return readStakeholderSyncIndex(); }
 export async function getDeadLetterForEditing(id: string): Promise<EditableStakeholderPayload> { const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item || item.status !== "dead_letter") throw new Error("Only quarantined dead-letter items can be edited."); const payload = await loadPayload(item); return payload.kind === "profile" ? { kind: payload.kind, profile: { companyName: payload.profile.companyName, cacNumber: payload.profile.cacNumber, tinNumber: payload.profile.tinNumber, businessEmail: payload.profile.businessEmail, businessPhone: payload.profile.businessPhone, businessAddress: payload.profile.businessAddress, contactPerson: payload.profile.contactPerson } } : { kind: payload.kind, document: { type: payload.type, fileName: payload.fileName, mimeType: payload.mimeType } }; }
 export async function updateDeadLetterForRetry(id: string, edit: EditableStakeholderPayload) {
+  const validationErrors = validateDeadLetterEdit(edit); if (Object.keys(validationErrors).length > 0) throw new Error(Object.values(validationErrors)[0]);
   const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item || item.status !== "dead_letter") throw new Error("Only quarantined dead-letter items can be edited."); const existing = await loadPayload(item); let payload: StakeholderSyncPayload;
   if (existing.kind === "profile" && edit.profile) payload = { kind: "profile", profile: { ...existing.profile, ...edit.profile } };
   else if (existing.kind !== "profile" && edit.document) payload = { ...existing, ...edit.document };
@@ -48,4 +50,14 @@ export async function retryStakeholderSyncItem(id: string) {
   const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item) throw new Error("Queue item not found."); await replaceItem(id, { status: "retrying" });
   try { const payload = await loadPayload(item); const result = await createTRPCClient().onboarding.replayStakeholderSubmission.mutate({ idempotencyKey: item.idempotencyKey, payload }); await FileSystem.deleteAsync(item.payloadPath, { idempotent: true }); await writeStakeholderSyncIndex((await readStakeholderSyncIndex()).filter((entry) => entry.id !== id)); return result; }
   catch (error) { const message = error instanceof Error ? error.message : String(error); const nextRetry = item.retryCount + 1; const decryptFailed = /decrypt|cipher|key|encrypted/i.test(message); await replaceItem(id, { retryCount: nextRetry, status: decryptFailed || nextRetry >= 3 ? "dead_letter" : "failed", lastErrorCode: decryptFailed ? "payload_decryption_failed" : /idempotency|invalid|reject/i.test(message) ? "replay_rejected" : "transport_failed" }); throw error; }
+}
+let automaticReplayInFlight = false;
+export async function replayPendingStakeholderSyncItems() {
+  if (automaticReplayInFlight) return { synchronized: 0, failed: 0 };
+  automaticReplayInFlight = true;
+  try {
+    const candidates = (await readStakeholderSyncIndex()).filter((item) => item.status === "pending" || item.status === "failed"); let synchronized = 0; let failed = 0;
+    for (const item of candidates) { try { await retryStakeholderSyncItem(item.id); synchronized += 1; } catch { failed += 1; } }
+    return { synchronized, failed };
+  } finally { automaticReplayInFlight = false; }
 }
