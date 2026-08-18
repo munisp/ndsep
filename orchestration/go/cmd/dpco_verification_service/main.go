@@ -453,6 +453,14 @@ func signStatement(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func requireStatementReference(stmt map[string]interface{}) error {
+	refNumber, ok := stmt["ref_number"].(string)
+	if !ok || strings.TrimSpace(refNumber) == "" {
+		return fmt.Errorf("ref_number is required before final statement issuance")
+	}
+	return nil
+}
+
 func issueStatement(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
@@ -464,6 +472,10 @@ func issueStatement(w http.ResponseWriter, r *http.Request) {
 	}
 	if stmt["status"] != "signed" {
 		http.Error(w, `{"error":"statement must be signed before issuing"}`, http.StatusBadRequest)
+		return
+	}
+	if err := requireStatementReference(stmt); err != nil {
+		http.Error(w, `{"error":"ref_number is required before statement issuance"}`, http.StatusBadRequest)
 		return
 	}
 	stmt["status"] = "issued"

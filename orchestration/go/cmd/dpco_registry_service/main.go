@@ -386,6 +386,15 @@ func getDpco(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(dpco)
 }
 
+func requireLifecycleString(record map[string]interface{}, key string) (string, error) {
+	value, ok := record[key].(string)
+	value = strings.TrimSpace(value)
+	if !ok || value == "" {
+		return "", fmt.Errorf("%s is required before final lifecycle activation", key)
+	}
+	return value, nil
+}
+
 func registerDpco(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name          string  `json:"name"`
@@ -416,6 +425,10 @@ func registerDpco(w http.ResponseWriter, r *http.Request) {
 		"licence_date":  time.Now().UTC().Format("2006-01-02"),
 		"expiry_date":   time.Now().AddDate(1, 0, 0).UTC().Format("2006-01-02"),
 		"registered_at": time.Now().UTC(),
+	}
+	if _, err := requireLifecycleString(dpco, "licence_number"); err != nil {
+		http.Error(w, `{"error":"licence_number is required before active registration"}`, http.StatusBadRequest)
+		return
 	}
 	// TigerBeetle fee ledger
 	txID, err := recordFeeEntry(id, "registration", req.FeeNGN)
@@ -470,6 +483,10 @@ func renewLicence(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logger.Printf("[Storage] Load DPCO failed: %v", err)
 		http.Error(w, `{"error":"DPCO not found or durable registry storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := requireLifecycleString(dpco, "licence_number"); err != nil {
+		http.Error(w, `{"error":"licence_number is required before active renewal"}`, http.StatusBadRequest)
 		return
 	}
 	dpco["status"] = "active"

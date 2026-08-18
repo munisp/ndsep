@@ -2,7 +2,7 @@ name: ndsep-falkordb-integration
 
 services:
   falkordb:
-    image: falkordb/falkordb-server:4.12.0
+    image: falkordb/falkordb-server:v4.20.3
     environment:
       REDIS_ARGS: >-
         --requirepass ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD is required}
