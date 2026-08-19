@@ -234,33 +234,10 @@ export async function executeBatchTransfers(items: BatchTransferItem[]): Promise
   failCount: number;
   errors: string[];
 }> {
-  const pool = getPool();
-  if (!pool) return { ok: false, successCount: 0, failCount: items.length, errors: ["Database unavailable"] };
-
-  const errors: string[] = [];
-  let successCount = 0;
-
-  // Use PostgreSQL transaction for atomicity (TigerBeetle SDK fallback)
-  try {
-    await pool.query("BEGIN");
-    for (const item of items) {
-      try {
-        await pool.query(
-          `INSERT INTO financial_ledger (debit_account_id, credit_account_id, amount, ledger, code, reference, status, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, 'committed', NOW())`,
-          [item.debitAccountId, item.creditAccountId, item.amount.toString(), item.ledger, item.code, item.reference ?? null]
-        );
-        successCount++;
-      } catch (e) {
-        errors.push(`Transfer ${item.debitAccountId} → ${item.creditAccountId}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-    await pool.query("COMMIT");
-    return { ok: errors.length === 0, successCount, failCount: errors.length, errors };
-  } catch (e) {
-    await pool.query("ROLLBACK").catch(() => {});
-    return { ok: false, successCount: 0, failCount: items.length, errors: [e instanceof Error ? e.message : String(e)] };
-  }
+  // PostgreSQL cannot emulate TigerBeetle's double-entry semantics. Callers must
+  // use the authoritative ledger adapter and may not record a pseudo-committed
+  // transfer in the application database.
+  throw new Error(`TIGERBEETLE_BATCH_TRANSFER_UNAVAILABLE: ${items.length} transfer(s) require the authoritative ledger adapter`);
 }
 
 // ─── G14: Database Indexes on Hot Paths ──────────────────────────────────────
@@ -404,19 +381,19 @@ export async function registerApisixRoutes(): Promise<void> {
 // ─── G20: Lakehouse Query Interface ──────────────────────────────────────────
 
 export async function queryLakehouse(table: string, filters?: Record<string, string>, limit = 100): Promise<unknown[]> {
-  const lakehouseUrl = process.env.LAKEHOUSE_REST_URL ?? "http://localhost:8181";
-  try {
-    const params = new URLSearchParams({ table, limit: String(limit), ...filters });
-    const res = await fetch(`${lakehouseUrl}/v1/namespaces/ndsep/tables/${table}/scan?${params}`, {
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data) ? data : (data as any)?.records ?? [];
-  } catch {
-    return [];
+  const lakehouseUrl = process.env.LAKEHOUSE_REST_URL;
+  if (!lakehouseUrl) throw new Error("LAKEHOUSE_REST_URL is required for analytical queries");
+  const params = new URLSearchParams({ table, limit: String(limit), ...filters });
+  const res = await fetch(`${lakehouseUrl}/v1/namespaces/ndsep/tables/${table}/scan?${params}`, {
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Lakehouse query failed with HTTP ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data) && !Array.isArray((data as { records?: unknown }).records)) {
+    throw new Error("Lakehouse query returned an invalid record payload");
   }
+  return Array.isArray(data) ? data : (data as { records: unknown[] }).records;
 }
 
 // ─── G23: Dapr Service Invocation ────────────────────────────────────────────
@@ -442,18 +419,18 @@ export async function invokeDaprService(appId: string, method: string, body?: un
 // ─── G24: Keycloak Session Management ────────────────────────────────────────
 
 export async function getKeycloakActiveSessions(userId: string): Promise<unknown[]> {
-  const keycloakUrl = process.env.KEYCLOAK_URL ?? "http://localhost:8080";
-  const realm = process.env.KEYCLOAK_REALM ?? "ndsep";
-  try {
-    const res = await fetch(`${keycloakUrl}/admin/realms/${realm}/users/${userId}/sessions`, {
-      headers: { Authorization: `Bearer ${process.env.KEYCLOAK_ADMIN_TOKEN ?? ""}` },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
+  const keycloakUrl = process.env.KEYCLOAK_URL;
+  const realm = process.env.KEYCLOAK_REALM;
+  const token = process.env.KEYCLOAK_ADMIN_TOKEN;
+  if (!keycloakUrl || !realm || !token) throw new Error("Keycloak administrative session query is not configured");
+  const res = await fetch(`${keycloakUrl}/admin/realms/${realm}/users/${userId}/sessions`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`Keycloak session query failed with HTTP ${res.status}`);
+  const sessions = await res.json();
+  if (!Array.isArray(sessions)) throw new Error("Keycloak session query returned an invalid payload");
+  return sessions;
 }
 
 export async function revokeKeycloakSession(sessionId: string): Promise<boolean> {

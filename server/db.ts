@@ -555,8 +555,9 @@ export async function createFinancialPenalty(data: {
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const tigerBeetleId = `TB-${Date.now()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
-  const mojaloopId = `ML-${crypto.randomBytes(6).toString("hex").toUpperCase()}`;
+  // External settlement identifiers are authoritative receipts. They must be
+  // written only after TigerBeetle/Mojaloop confirms the corresponding transfer.
+  // A newly issued penalty is therefore intentionally receipt-free and pending.
   const result = await db.insert(financialPenalties).values({
     organizationId: data.organizationId,
     violationId: data.violationId ?? null,
@@ -565,8 +566,6 @@ export async function createFinancialPenalty(data: {
     currency: data.currency,
     description: data.description,
     paymentStatus: "pending",
-    tigerBeetleTransferId: tigerBeetleId,
-    mojaloopTransferId: mojaloopId,
     dueDate: data.dueDate ?? null,
   }).returning();
   return result[0];
