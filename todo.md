@@ -403,3 +403,6 @@
 - [x] Add safeguarded bulk receipt selection, export, and revocation actions for administrators
 - [x] Record notification acknowledgment events in organization receipt history
 - [x] Add a navigation notification center for past organization receipt revocation alerts
+- [x] Require a final confirmation for administrator bulk organization receipt revocations
+- [x] Allow users to archive acknowledged organization receipt alerts
+- [x] Add date and read-status filtering to the organization receipt alert center

@@ -1,0 +1,1 @@
+ALTER TABLE `diagnosticReceiptRevocationNotifications` ADD `archivedAt` timestamp;

@@ -112,6 +112,7 @@ export const diagnosticReceiptRevocationNotifications = mysqlTable("diagnosticRe
   revocationReason: text("revocationReason").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   readAt: timestamp("readAt"),
+  archivedAt: timestamp("archivedAt"),
 });
 
 export type User = typeof users.$inferSelect;

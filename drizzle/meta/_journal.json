@@ -29,6 +29,13 @@
       "when": 1787106823733,
       "tag": "0003_daily_ozymandias",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1787162836443,
+      "tag": "0004_silly_midnight",
+      "breakpoints": true
     }
   ]
 }
