@@ -43,21 +43,24 @@ export const TEMPORAL_CRON_SCHEDULES = [
 ];
 
 export async function registerTemporalCronSchedules(): Promise<void> {
-  try {
-    const { startWorkflow } = await import("./temporal");
-    for (const schedule of TEMPORAL_CRON_SCHEDULES) {
+  const { startWorkflow } = await import("./temporal");
+  const failures: Error[] = [];
+  for (const schedule of TEMPORAL_CRON_SCHEDULES) {
+    try {
       await startWorkflow(schedule.workflowType, {
         workflowId: schedule.workflowId,
         taskQueue: schedule.taskQueue,
         input: { ...schedule.input, cronSchedule: schedule.cronSchedule },
-      }).catch((e: unknown) => {
-        logger.debug({ err: e instanceof Error ? e.message : String(e), schedule: schedule.workflowId }, "[Temporal] Cron registration skipped");
       });
+    } catch (error) {
+      const cause = error instanceof Error ? error : new Error(String(error));
+      failures.push(new Error(`Temporal schedule ${schedule.workflowId} failed: ${cause.message}`, { cause }));
     }
-    logger.info({ count: TEMPORAL_CRON_SCHEDULES.length }, "[Temporal] Cron schedules registered");
-  } catch (e) {
-    logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Temporal] Cron schedules unavailable");
   }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Temporal schedule registration failed");
+  }
+  logger.info({ count: TEMPORAL_CRON_SCHEDULES.length }, "[Temporal] Cron schedules registered");
 }
 
 // ─── G10: OpenSearch Index Lifecycle ─────────────────────────────────────────
