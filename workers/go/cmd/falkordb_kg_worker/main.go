@@ -518,38 +518,13 @@ func main() {
 	// The retired adjacency-list build/query functions are intentionally not routed.
 	// A subsequent adapter phase will route them to parameterized FalkorDB queries.
 
-	// Initial graph build
-	go func() {
-		time.Sleep(10 * time.Second)
-		db, err := sql.Open("postgres", dbURL)
-		if err != nil {
-			log.Printf("[KG] DB connect failed: %v", err)
-			return
-		}
-		defer db.Close()
-		if err := buildGraph(db); err != nil {
-			log.Printf("[KG] Initial build failed: %v", err)
-			atomic.AddInt64(&errors, 1)
-		}
-	}()
-
-	// Periodic rebuild every 10 minutes
-	go func() {
-		for {
-			time.Sleep(10 * time.Minute)
-			db, err := sql.Open("postgres", dbURL)
-			if err != nil {
-				continue
-			}
-			buildGraph(db)
-			db.Close()
-		}
-	}()
+	// Rebuilds are initiated only through the durable real-adapter path. The
+	// retired adjacency-list builder is intentionally never scheduled or served.
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", realFalkorHealthHandler)
 	mux.HandleFunc("/query", falkorQueryHandler)
-	mux.HandleFunc("/rebuild", retiredGraphOperationHandler)
+	mux.HandleFunc("/rebuild", falkorRebuildHandler)
 
 	log.Printf("[KG] FalkorDB Knowledge Graph Worker listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {

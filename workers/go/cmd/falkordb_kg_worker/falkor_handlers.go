@@ -1,11 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 func realFalkorHealthHandler(w http.ResponseWriter, r *http.Request) {
@@ -110,19 +114,47 @@ func writeFalkorJSONError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-// Rebuild remains deliberately disabled until the durable PostgreSQL snapshot and
-// idempotent MERGE writer are implemented; it must never rebuild an in-memory graph.
-func retiredGraphOperationHandler(w http.ResponseWriter, r *http.Request) {
+// falkorRebuildHandler materializes the bounded PostgreSQL source snapshot into
+// the real FalkorDB graph. It is disabled unless explicitly enabled by deployment
+// configuration because it replaces the complete NDSEP-labelled graph snapshot.
+func falkorRebuildHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeFalkorJSONError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	if os.Getenv("FALKORDB_REBUILD_ENABLED") != "true" {
+		writeFalkorJSONError(w, http.StatusForbidden, "FalkorDB rebuild is disabled by configuration")
+		return
+	}
 	if falkorAdapter == nil {
-		http.Error(w, `{"error":"FalkorDB adapter unavailable"}`, http.StatusServiceUnavailable)
+		writeFalkorJSONError(w, http.StatusServiceUnavailable, "FalkorDB adapter unavailable")
 		return
 	}
-	if err := falkorAdapter.health(r.Context()); err != nil {
+	if dbURL == "" {
+		writeFalkorJSONError(w, http.StatusServiceUnavailable, "PostgreSQL source is not configured")
+		return
+	}
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
 		atomicAddError()
-		http.Error(w, `{"error":"FalkorDB dependency unavailable"}`, http.StatusServiceUnavailable)
+		writeFalkorJSONError(w, http.StatusServiceUnavailable, "PostgreSQL source unavailable")
 		return
 	}
-	http.Error(w, `{"error":"graph rebuild is disabled until durable FalkorDB snapshot writes are implemented"}`, http.StatusNotImplemented)
+	defer db.Close()
+	if err := db.PingContext(r.Context()); err != nil {
+		atomicAddError()
+		writeFalkorJSONError(w, http.StatusServiceUnavailable, "PostgreSQL source unavailable")
+		return
+	}
+	stats, err := falkorAdapter.rebuildFromPostgres(db)
+	if err != nil {
+		atomicAddError()
+		writeFalkorQueryError(w, err)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "rebuilt", "nodes": stats.Nodes, "relationships": stats.Relationships, "rebuilt_at": lastBuildTime,
+	})
 }
 
 func atomicAddError() {
