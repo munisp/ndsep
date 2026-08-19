@@ -25,7 +25,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -387,121 +386,6 @@ func computeGNNEmbedding(nodeID string, depth int) []float64 {
 	return embedding
 }
 
-// ── HTTP Handlers ──────────────────────────────────────────────────────────────
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":         "healthy",
-		"worker":         "falkordb_kg_worker",
-		"nodes":          atomic.LoadInt64(&nodesCreated),
-		"edges":          atomic.LoadInt64(&edgesCreated),
-		"queries_run":    atomic.LoadInt64(&queriesRun),
-		"errors":         atomic.LoadInt64(&errors),
-		"last_build":     lastBuildTime,
-		"falkor_status":  "in_memory_fallback",
-		"uptime_seconds": time.Since(workerStart).Seconds(),
-	})
-}
-
-func queryHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	var req struct {
-		QueryType string `json:"query_type"`
-		NodeID    string `json:"node_id"`
-		Relation  string `json:"relation"`
-		FromID    string `json:"from_id"`
-		ToID      string `json:"to_id"`
-		MaxDepth  int    `json:"max_depth"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	atomic.AddInt64(&queriesRun, 1)
-	w.Header().Set("Content-Type", "application/json")
-
-	switch req.QueryType {
-	case "neighbors":
-		neighbors := graph.GetNeighbors(req.NodeID, req.Relation)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"node_id":   req.NodeID,
-			"relation":  req.Relation,
-			"neighbors": neighbors,
-			"count":     len(neighbors),
-		})
-	case "path":
-		depth := req.MaxDepth
-		if depth == 0 {
-			depth = 5
-		}
-		path := graph.FindPath(req.FromID, req.ToID, depth)
-		pathNodes := []GraphNode{}
-		for _, id := range path {
-			if n, ok := graph.Nodes[id]; ok {
-				pathNodes = append(pathNodes, n)
-			}
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"from":       req.FromID,
-			"to":         req.ToID,
-			"path":       path,
-			"path_nodes": pathNodes,
-			"length":     len(path),
-		})
-	case "gnn_embedding":
-		embedding := computeGNNEmbedding(req.NodeID, 1)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"node_id":   req.NodeID,
-			"embedding": embedding,
-			"dim":       len(embedding),
-		})
-	case "node":
-		node, ok := graph.Nodes[req.NodeID]
-		if !ok {
-			http.Error(w, "node not found", http.StatusNotFound)
-			return
-		}
-		json.NewEncoder(w).Encode(node)
-	case "stats":
-		typeCounts := map[string]int{}
-		for _, n := range graph.Nodes {
-			typeCounts[n.Type]++
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"total_nodes": len(graph.Nodes),
-			"total_edges": len(graph.Edges),
-			"node_types":  typeCounts,
-			"last_build":  lastBuildTime,
-		})
-	default:
-		http.Error(w, "unknown query_type", http.StatusBadRequest)
-	}
-}
-
-func rebuildHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST required", http.StatusMethodNotAllowed)
-		return
-	}
-	go func() {
-		db, err := sql.Open("postgres", dbURL)
-		if err != nil {
-			log.Printf("[KG] DB connect failed: %v", err)
-			return
-		}
-		defer db.Close()
-		if err := buildGraph(db); err != nil {
-			log.Printf("[KG] Build failed: %v", err)
-			atomic.AddInt64(&errors, 1)
-		}
-	}()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "rebuild_started"})
-}
-
 // ── Main ───────────────────────────────────────────────────────────────────────
 func main() {
 	log.Printf("[KG] Starting NDSEP FalkorDB Knowledge Graph Worker on port %s", port)
@@ -515,11 +399,8 @@ func main() {
 	falkorAdapter = adapter
 	defer func() { _ = falkorAdapter.close() }()
 
-	// The retired adjacency-list build/query functions are intentionally not routed.
-	// A subsequent adapter phase will route them to parameterized FalkorDB queries.
-
-	// Rebuilds are initiated only through the durable real-adapter path. The
-	// retired adjacency-list builder is intentionally never scheduled or served.
+	// Real-adapter handlers are the only served graph interface. PostgreSQL is used
+	// solely as the authoritative snapshot source for explicitly enabled rebuilds.
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", realFalkorHealthHandler)
