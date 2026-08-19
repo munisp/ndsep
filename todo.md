@@ -414,3 +414,6 @@
 - [ ] Produce deployment, recovery, monitoring, and governance code artifacts for target-environment activation
 - [x] Add repeatable PostgreSQL payment-test, runtime readiness, simulator-boundary, and deployment artifact code
 - [x] Add explicit fail-closed emulator labelling across TypeScript, Go, Python, and Rust service boundaries
+- [x] Add administrator infrastructure status dashboard with simulation/staging readiness detail
+- [x] Add a user-friendly fail-closed runtime recovery screen with next-step guidance
+- [x] Add guarded administrator configuration controls for simulation versus real staging provider modes

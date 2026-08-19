@@ -20,6 +20,7 @@ import type { EdgeInsets, Metrics, Rect } from "react-native-safe-area-context";
 import { trpc, createTRPCClient } from "@/lib/trpc";
 import { SessionExpiryNotice } from "@/components/session-expiry-notice";
 import { ReceiptRevocationAlert } from "@/components/receipt-revocation-alert";
+import { RuntimeUnavailableNotice } from "@/components/runtime-unavailable-notice";
 import { replayPendingStakeholderSyncItems } from "@/lib/stakeholder-sync-queue";
 import { getStakeholderSyncPreferences } from "@/lib/stakeholder-sync-settings";
 import { initManusRuntime, subscribeSafeAreaInsets } from "@/lib/_core/manus-runtime";
@@ -110,9 +111,11 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="oauth/callback" />
+            <Stack.Screen name="runtime-unavailable" />
           </Stack>
           <SessionExpiryNotice />
           <ReceiptRevocationAlert />
+          <RuntimeUnavailableNotice />
           <StatusBar style="auto" />
         </QueryClientProvider>
       </trpc.Provider>

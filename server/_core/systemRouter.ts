@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router } from "./trpc";
+import { readinessReport } from "../productionRuntime";
+import { getAdministratorInfrastructureStatus } from "../infrastructureStatus";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -12,6 +14,8 @@ export const systemRouter = router({
     .query(() => ({
       ok: true,
     })),
+  runtimeReadiness: publicProcedure.query(() => readinessReport()),
+  infrastructureStatus: adminProcedure.query(() => getAdministratorInfrastructureStatus()),
 
   notifyOwner: adminProcedure
     .input(

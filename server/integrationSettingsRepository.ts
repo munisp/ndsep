@@ -21,9 +21,11 @@ export const INTEGRATION_FIELDS = [
   "PAYSTACK_SECRET_KEY",
   "FLUTTERWAVE_WEBHOOK_SECRET_HASH",
   "FLUTTERWAVE_SECRET_KEY",
+  "INTEGRATION_EXECUTION_MODE",
 ] as const;
 
 export type IntegrationField = (typeof INTEGRATION_FIELDS)[number];
+export type IntegrationExecutionMode = "staging" | "simulation";
 type StoredCiphertext = { iv: string; tag: string; ciphertext: string; updatedAt: string };
 type StoredSettings = Partial<Record<IntegrationField, StoredCiphertext>>;
 
@@ -86,12 +88,28 @@ export function getIntegrationSettingsStatus() {
       source: store[field] ? "encrypted_settings" : process.env[field] ? "server_environment" : "unconfigured",
       updatedAt: store[field]?.updatedAt ?? null,
     })),
+    executionMode: getIntegrationExecutionMode(),
+    simulationAllowed: isSimulationModeAllowed(),
   };
+}
+
+export function isSimulationModeAllowed(env: NodeJS.ProcessEnv = process.env) {
+  return env.NODE_ENV !== "production" && env.ENABLE_DEVELOPMENT_PROVIDER_EMULATORS === "true";
+}
+
+export function getIntegrationExecutionMode(): IntegrationExecutionMode {
+  return getConfiguredIntegrationValue("INTEGRATION_EXECUTION_MODE") === "simulation" ? "simulation" : "staging";
 }
 
 export function saveIntegrationSettings(input: Partial<Record<IntegrationField, string>>) {
   const key = encryptionKey();
   if (!key) throw new Error("Secure integration settings storage is unavailable. Configure INTEGRATION_SETTINGS_ENCRYPTION_KEY on the server first.");
+  if (input.INTEGRATION_EXECUTION_MODE === "simulation" && !isSimulationModeAllowed()) {
+    throw new Error("Simulation mode is permitted only in non-production environments with ENABLE_DEVELOPMENT_PROVIDER_EMULATORS=true. Production integrations remain fail closed.");
+  }
+  if (input.INTEGRATION_EXECUTION_MODE && input.INTEGRATION_EXECUTION_MODE !== "simulation" && input.INTEGRATION_EXECUTION_MODE !== "staging") {
+    throw new Error("Integration execution mode must be either staging or simulation.");
+  }
   const store = readStore();
   for (const field of INTEGRATION_FIELDS) {
     const value = input[field];

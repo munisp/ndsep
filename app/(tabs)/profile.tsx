@@ -167,8 +167,11 @@ export default function ProfileScreen() {
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Platform integrations</Text>
           <Text className="mt-2 text-sm leading-5 text-muted">Review Keycloak, document intelligence, and authority-bridge availability. Unconfigured services stay unavailable rather than returning sample results.</Text>
+          <Link href={"/infrastructure-status" as never} asChild>
+            <View className="mt-4 rounded-2xl border border-primary bg-primary/5 px-4 py-4"><Text className="text-center font-semibold text-primary">Review infrastructure readiness</Text></View>
+          </Link>
           <Link href={"/integration-settings" as never} asChild>
-            <View className="mt-4 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open integration settings</Text></View>
+            <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open integration settings</Text></View>
           </Link>
         </View>
 
