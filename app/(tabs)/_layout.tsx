@@ -7,6 +7,7 @@ import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { getUnreadActivityCount, subscribeActivityFeed } from "@/lib/mobile-activity";
+import { ReceiptNotificationCenter } from "@/components/receipt-notification-center";
 
 function InboxBadge({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -36,6 +37,7 @@ export default function TabLayout() {
   }, []);
 
   return (
+    <View style={{ flex: 1 }}>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -104,5 +106,7 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    <ReceiptNotificationCenter />
+    </View>
   );
 }

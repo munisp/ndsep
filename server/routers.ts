@@ -66,7 +66,7 @@ import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } fro
 import { acknowledgeHighRiskReconciliationAlert, getOfflinePaymentSummary, getPaymentGatewayOperationalHealth, getReconciliationRetryOutcomeTrend, listHighRiskReconciliationAlerts, listPaymentAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, listPaymentStateApprovalPolicies, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, PAYMENT_APPROVAL_ROLES, PAYMENT_JURISDICTIONS, processDueGatewayVerificationRetries, processDueHighRiskAlertEscalations, recordPaymentAuditExport, recordReconciliationExceptionExport, resolvePaymentReconciliationException, reviewOfflinePayment, submitOfflinePayment, triggerManualGatewayVerificationRetry, updatePaymentStateApprovalPolicy, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
 import { getGatewayActivationStatus } from "./paymentGatewayConfig";
 import { attestDiagnosticExport, getDiagnosticAttestationStatus } from "./diagnosticExportAttestation";
-import { getDiagnosticAttestationDetail, getDiagnosticAttestationStatusByReceiptId, listDiagnosticAttestations, listReceiptRevocationNotifications, markReceiptRevocationNotificationRead, revokeDiagnosticAttestation } from "./diagnosticAttestationRepository";
+import { bulkRevokeDiagnosticAttestations, exportDiagnosticAttestations, getDiagnosticAttestationDetail, getDiagnosticAttestationStatusByReceiptId, listDiagnosticAttestations, listReceiptRevocationNotifications, markReceiptRevocationNotificationRead, revokeDiagnosticAttestation } from "./diagnosticAttestationRepository";
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -263,6 +263,8 @@ export const appRouter = router({
     listAttestations: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).default(100), query: z.string().max(255).optional(), status: z.enum(["all", "active", "revoked"]).default("all"), from: z.string().datetime().nullable().optional(), to: z.string().datetime().nullable().optional() })).query(({ input }) => listDiagnosticAttestations(input)),
     attestationDetail: adminProcedure.input(z.object({ receiptId: z.string().uuid() })).query(({ input }) => getDiagnosticAttestationDetail(input.receiptId)),
     revokeAttestation: adminProcedure.input(z.object({ receiptId: z.string().uuid(), reason: z.string().min(3).max(1000) })).mutation(({ ctx, input }) => revokeDiagnosticAttestation({ ...input, actorOpenId: ctx.user.openId })),
+    bulkRevokeAttestations: adminProcedure.input(z.object({ receiptIds: z.array(z.string().uuid()).min(1).max(50), reason: z.string().min(3).max(1000) })).mutation(({ ctx, input }) => bulkRevokeDiagnosticAttestations({ ...input, actorOpenId: ctx.user.openId })),
+    exportAttestations: adminProcedure.input(z.object({ receiptIds: z.array(z.string().uuid()).min(1).max(250) })).mutation(({ input }) => exportDiagnosticAttestations(input.receiptIds)),
     myRevocationNotifications: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(25) })).query(({ ctx, input }) => listReceiptRevocationNotifications(ctx.user.openId, input.limit)),
     markRevocationNotificationRead: protectedProcedure.input(z.object({ notificationId: z.string().uuid() })).mutation(({ ctx, input }) => markReceiptRevocationNotificationRead({ ...input, recipientSubject: ctx.user.openId })),
     attest: protectedProcedure

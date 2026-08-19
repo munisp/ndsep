@@ -1,0 +1,6 @@
+import { describe, expect, it } from "vitest";
+import { activeAttestationIds, toggleAttestationSelection } from "../lib/diagnostic-attestation-bulk";
+import { buildReceiptNotificationHistory } from "../server/diagnosticAttestationRepository";
+
+describe("bulk organization receipt selection", () => { it("toggles selection and excludes revoked records from bulk revocation", () => { const selected = toggleAttestationSelection(["active-1"], "revoked-1"); expect(selected).toEqual(["active-1", "revoked-1"]); expect(activeAttestationIds([{ receiptId: "active-1", status: "active" }, { receiptId: "revoked-1", status: "revoked" }], selected)).toEqual(["active-1"]); expect(toggleAttestationSelection(selected, "active-1")).toEqual(["revoked-1"]); }); });
+describe("revocation acknowledgment audit history", () => { it("records issuance and recipient acknowledgment without exposing the revocation payload", () => { const history = buildReceiptNotificationHistory([{ recipientSubject: "subject-1", createdAt: new Date("2026-08-19T00:00:00.000Z"), readAt: new Date("2026-08-19T00:01:00.000Z") }]); expect(history).toHaveLength(2); expect(history[1]).toMatchObject({ action: "notification_acknowledged", actor: "subject-1" }); }); });

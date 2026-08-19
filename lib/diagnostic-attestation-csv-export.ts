@@ -1,0 +1,4 @@
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import { Platform } from "react-native";
+export async function downloadDiagnosticAttestationCsv(input: { filename: string; csv: string }) { if (Platform.OS === "web") { const blob = new Blob([input.csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const anchor = globalThis.document.createElement("a"); anchor.href = url; anchor.download = input.filename; anchor.click(); URL.revokeObjectURL(url); return; } const uri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${input.filename}`; await FileSystem.writeAsStringAsync(uri, input.csv, { encoding: FileSystem.EncodingType.UTF8 }); if (!(await Sharing.isAvailableAsync())) throw new Error("CSV was prepared, but sharing is unavailable on this device."); await Sharing.shareAsync(uri, { mimeType: "text/csv", dialogTitle: "Export organization receipts" }); }

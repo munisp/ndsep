@@ -400,3 +400,6 @@
 - [x] Notify affected users when an organization diagnostic receipt is revoked
 - [x] Add administrator receipt dashboard search and user/date/status filters
 - [x] Add administrator receipt detail modal with complete metadata and revocation history
+- [x] Add safeguarded bulk receipt selection, export, and revocation actions for administrators
+- [x] Record notification acknowledgment events in organization receipt history
+- [x] Add a navigation notification center for past organization receipt revocation alerts
