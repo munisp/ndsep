@@ -105,6 +105,15 @@ export const diagnosticAttestationReceipts = mysqlTable("diagnosticAttestationRe
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const diagnosticReceiptRevocationNotifications = mysqlTable("diagnosticReceiptRevocationNotifications", {
+  notificationId: varchar("notificationId", { length: 80 }).primaryKey(),
+  receiptId: varchar("receiptId", { length: 80 }).notNull(),
+  recipientSubject: varchar("recipientSubject", { length: 255 }).notNull(),
+  revocationReason: text("revocationReason").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  readAt: timestamp("readAt"),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type PermittingAgency = typeof permittingAgencies.$inferSelect;
@@ -119,3 +128,4 @@ export type ServiceTopology = typeof serviceTopology.$inferSelect;
 export type InsertServiceTopology = typeof serviceTopology.$inferInsert;
 export type DiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferSelect;
 export type InsertDiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferInsert;
+export type DiagnosticReceiptRevocationNotification = typeof diagnosticReceiptRevocationNotifications.$inferSelect;

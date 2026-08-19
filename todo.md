@@ -397,3 +397,6 @@
 - [x] Add prominent Technical view lease countdown and pre-lock warning feedback
 - [x] Add administrator receipt-attestation status and revocation management dashboard
 - [x] Display clear local versus server-attested origin badges during receipt verification
+- [x] Notify affected users when an organization diagnostic receipt is revoked
+- [x] Add administrator receipt dashboard search and user/date/status filters
+- [x] Add administrator receipt detail modal with complete metadata and revocation history

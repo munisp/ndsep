@@ -1,0 +1,6 @@
+import { describe, expect, it } from "vitest";
+import { firstUnreadReceiptRevocation, receiptRevocationSummary } from "../lib/receipt-revocation-notification";
+import { buildDiagnosticAttestationHistory } from "../server/diagnosticAttestationRepository";
+
+describe("receipt revocation alert selection", () => { it("selects the first unread recipient notification and produces an accountable summary", () => { const first = { notificationId: "n-1", receiptId: "r-1", revocationReason: "Authorization withdrawn", createdAt: "2026-08-19T00:00:00.000Z", readAt: null }; expect(firstUnreadReceiptRevocation([{ ...first, readAt: "2026-08-19T00:01:00.000Z" }, first])).toEqual(first); expect(receiptRevocationSummary(first)).toContain("Authorization withdrawn"); }); });
+describe("receipt attestation history", () => { it("retains issuance and the accountable revocation record", () => { const history = buildDiagnosticAttestationHistory({ createdAt: new Date("2026-08-01T00:00:00.000Z"), revokedAt: new Date("2026-08-02T00:00:00.000Z"), revokedBy: "admin-1", revocationReason: "Package mismatch", signerKeyId: "key-2026" }); expect(history).toHaveLength(2); expect(history[1]).toMatchObject({ action: "revoked", actor: "admin-1", note: "Package mismatch" }); }); });

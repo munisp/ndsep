@@ -22,6 +22,13 @@
       "when": 1787096118502,
       "tag": "0002_chief_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787106823733,
+      "tag": "0003_daily_ozymandias",
+      "breakpoints": true
     }
   ]
 }
