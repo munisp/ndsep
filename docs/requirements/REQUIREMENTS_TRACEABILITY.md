@@ -18,14 +18,14 @@
 
 | ID | Requirement | Code status | Verification target | Current boundary |
 |---|---|---|---|---|
-| T01 | PostgreSQL schema, constraints, migrations, foreign-key indexes | CODED | Fresh migration and catalog tests | Live staging rehearsal required. |
-| T02 | Keycloak identity and invalid-token rejection | CODED | Unit/contract outage tests | Real Keycloak realm round trip required. |
-| T03 | Permify policy authorization and outage denial | CODED | Contract tests | Real tenant/schema/tuple enforcement required. |
-| T04 | TigerBeetle ledger posting and settlement | CODED | Network-failure tests | Real ledger transfer/reconciliation required. |
-| T05 | Redis sessions, revocation, rate limiting | CODED | Unit/contract tests | Real clustered Redis outage/recovery required. |
-| T06 | Kafka, Dapr, and Temporal durable delivery/workflows | CODED | Explicit failure contracts | Real broker/sidecar/workflow execution required. |
-| T07 | Lakehouse and ML risk scoring | CODED fail-closed | Artifact/unavailable tests | Approved model artifact, training data, and live lakehouse required. |
-| T08 | OpenSearch and FalkorDB search/graph | CODED partial | Adapter unit tests | Real OpenSearch/FalkorDB round trips required; Falkor rebuild/embedding/node operations incomplete. |
+| T01 | PostgreSQL schema, constraints, migrations, foreign-key indexes | CODED | Fresh journal-ordered migration run: 35 files, 168 public tables | Live staging rehearsal still required. |
+| T02 | Keycloak identity and invalid-token rejection | CODED; SIMULATED contract | Unit/contract outage and request-shape tests | Real Keycloak realm round trip required. |
+| T03 | Permify policy authorization and outage denial | CODED; SIMULATED contract | Contract tests | Real tenant/schema/tuple enforcement required. |
+| T04 | TigerBeetle ledger posting and settlement | CODED; SIMULATED refusal contract | Network-failure tests | Real ledger transfer/reconciliation required. |
+| T05 | Redis sessions, revocation, rate limiting | CODED; SIMULATED contract | Unit/contract tests | Real clustered Redis outage/recovery required. |
+| T06 | Kafka, Dapr, and Temporal durable delivery/workflows | CODED; SIMULATED contract | Explicit failure contracts and journey matrix | Real broker/sidecar/workflow execution required. |
+| T07 | Lakehouse and ML risk scoring | CODED fail-closed; SIMULATED contract | Artifact/unavailable and request-shape tests | Approved model artifact, training data, and live lakehouse required. |
+| T08 | OpenSearch and FalkorDB search/graph | CODED partial | Adapter tests; real PostgreSQL-to-FalkorDB rebuild implementation; Compose structural validation | Real OpenSearch/FalkorDB round trips and GNN embedding endpoint remain required. |
 | T09 | APISIX, OpenAppSec, observability, secrets | CODED partial | Compose/config checks | Live gateway/WAF/telemetry validation required. |
 | T10 | CI/CD deployment and Docker bridge preflight | CODED | actionlint and mock runner dry run | Self-hosted bridge-capable runner required. |
 
@@ -33,28 +33,15 @@
 
 | Journey | Primary coded boundaries | Simulation acceptance target | Current status |
 |---|---|---|---|
-| J01 Registration | Portal/API, DPCO registry, durable PostgreSQL | Keycloak, Kafka, Dapr, lakehouse success/failure contracts | CODED; ENVIRONMENT-BLOCKED live dependencies |
-| J02 Assessment | Compliance/ML API and Redis cache | Persisted-model required vs unavailable responses | CODED fail-closed; INCOMPLETE real model/data |
-| J03 Violation detection | Compliance, Temporal, Kafka, Dapr | Workflow/event failure propagation | CODED; ENVIRONMENT-BLOCKED live workflow |
-| J04–J05 Penalty issue/payment | Registry/financial paths, TigerBeetle errors | Ledger refusal/network/malformed-response contracts | CODED; ENVIRONMENT-BLOCKED real ledger |
-| J06 Transfer approval | Transfer routes, workflow boundary | Keycloak/Temporal/Kafka outcome contracts | CODED; ENVIRONMENT-BLOCKED live dependencies |
-| J07–J08 Blocking/BGP response | DPI/BGP workers and events | Command/event contract fixtures | INCOMPLETE end-to-end enforcement validation |
-| J09–J10 Threat intelligence/incidents | SIEM, incident/workflow paths | Event/workflow failure contracts | CODED partial; ENVIRONMENT-BLOCKED live sources |
-| J11–J14 Residency/ML/score updates | Residency/ML workers, events | Approved-artifact and persistence contracts | CODED fail-closed; INCOMPLETE real ML operation |
-| J15–J16 Audit/reporting | Audit records, lakehouse/report routes | Durable audit/event contracts | CODED partial; ENVIRONMENT-BLOCKED lakehouse |
-| J17 Certificate | Certificate issuance and DPCO verification | Identifier/issuance constraints | CODED; live signing/notification pending |
-| J18 Revenue distribution | TigerBeetle revenue route | Multi-leg posting/refusal tests | CODED partial; live ledger pending |
-| J19–J20 Workflows/disputes | Temporal and financial boundaries | Broker/ledger failure contracts | CODED partial; live workflow/ledger pending |
-| J21–J24 IXP/metrics/PCAP | Go/Rust worker sources | Worker build and event contract tests | INCOMPLETE end-to-end telemetry/network hardware validation |
-| J25 Reconciliation | Ledger integration | Balance/query/refusal tests | CODED partial; live ledger reconciliation pending |
-| J26–J29 Escalation/streaming/remediation/SLA | Temporal, Kafka, Dapr, ML routes | Explicit dependency-loss behavior | CODED partial; live integration/model pending |
-| J30 Regulatory submission | Gateway, Keycloak, reporting/event routes | Gateway/auth/report contract tests | CODED partial; live regulator API and lakehouse pending |
+| J01–J30 | Journey-specific portal, worker, workflow, and middleware code paths | One deterministic fixture per journey; exact documented dependency matrix; simulated outage refusal | SIMULATED acceptance complete; live evidence remains environment-blocked by the required external services and hardware. |
+
+> The all-journey simulation proves contract coverage only. It does not substitute for a live environment in which Keycloak, Permify, TigerBeetle, Kafka, Dapr, Fluvio, OpenSearch, Temporal, Redis, Lakehouse, APISIX, OpenAppSec, and network enforcement systems are provisioned. |
 
 ## Explicit scope gaps to implement or test
 
-1. Real FalkorDB graph rebuild, embedding, node-inspection, and graph-statistics operations remain intentionally unsupported.
-2. The documented mobile parity gap remains: DPCO, banking, AI, sector, and many compliance/enforcement screens are not implemented in both mobile clients.
-3. The 18-router middleware-event emission gap needs current static and acceptance-test verification; imported middleware is not sufficient evidence.
+1. FalkorDB rebuild, node inspection, and statistics are implemented against the real adapter; the GNN embedding endpoint still needs a real-backed implementation and deployment-environment round trip.
+2. DPCO, banking, and React Native AI advisory summaries are now backend-wired. Full mobile route-for-route parity, especially sector-specific and transactional detail flows, remains incomplete.
+3. The former 18-router mutation-emission finding is closed by current source scan; router behavior still needs live middleware delivery evidence.
 4. Real ML requires a persisted approved model artifact and governed training/validation data; simulation must not fabricate predictions.
-5. All 30 journeys need deterministic simulated acceptance tests and separate live-environment acceptance evidence.
+5. Deterministic acceptance fixtures exist for all 30 journeys; separate live-environment acceptance evidence remains required.
 6. Full repository lint remediation remains required before declaring a clean release baseline.

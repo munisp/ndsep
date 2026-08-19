@@ -23,6 +23,9 @@ members = [
     "monte_carlo",
     "agent_sim",
     "system_dynamics",
+    "audit_chain",
+    "quantum_crypto",
+    "wasm_edge",
 ]
 resolver = "2"
 
