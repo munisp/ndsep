@@ -304,18 +304,27 @@ export const ollamaRouter = router({
         if (input.system) messages.push({ role: "system", content: input.system });
         messages.push({ role: "user", content: input.prompt });
         const llmResp = await invokeLLM({ messages });
+        const rawResponse = llmResp.choices?.[0]?.message?.content;
+        const response = typeof rawResponse === "string" ? rawResponse.trim() : "";
+        if (!response) {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Authoritative AI inference returned no response" });
+        }
         emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
         return {
-          response: llmResp.choices?.[0]?.message?.content || "",
+          response,
           model: "built-in",
           source: "builtin_llm",
           done: true,
         };
       }
 
+      const response = typeof ollamaResult.response === "string" ? ollamaResult.response.trim() : "";
+      if (!response) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Authoritative Ollama inference returned no response" });
+      }
       emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return {
-        response: ollamaResult.response || "",
+        response,
         model: ollamaResult.model || input.model,
         source: "ollama",
         done: ollamaResult.done,
@@ -361,8 +370,13 @@ ${context ? `\nRelevant context from compliance documents:\n${context}` : ""}`;
         ],
       });
 
+      const rawAnswer = llmResp.choices?.[0]?.message?.content;
+      const answer = typeof rawAnswer === "string" ? rawAnswer.trim() : "";
+      if (!answer) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Authoritative compliance inference returned no response" });
+      }
       return {
-        answer: llmResp.choices?.[0]?.message?.content || "Unable to answer",
+        answer,
         question: input.question,
         rag_context_used: !!context,
         context_snippets: context ? context.split("\n\n").length : 0,
