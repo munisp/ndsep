@@ -71,8 +71,26 @@ func falkorQueryHandler(w http.ResponseWriter, r *http.Request) {
 			"path":   path,
 			"length": len(path),
 		})
+	case "node":
+		node, err := falkorAdapter.node(req.NodeID)
+		if err != nil {
+			writeFalkorQueryError(w, err)
+			return
+		}
+		if node == nil {
+			writeFalkorJSONError(w, http.StatusNotFound, "graph node not found")
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"node": node})
+	case "stats":
+		stats, err := falkorAdapter.stats()
+		if err != nil {
+			writeFalkorQueryError(w, err)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(stats)
 	default:
-		http.Error(w, `{"error":"only neighbors and path queries are implemented against the real FalkorDB adapter"}`, http.StatusNotImplemented)
+		http.Error(w, `{"error":"supported query types are neighbors, path, node, and stats"}`, http.StatusNotImplemented)
 	}
 }
 

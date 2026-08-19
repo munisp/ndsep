@@ -241,3 +241,71 @@ func (a *FalkorAdapter) boundedPath(fromID, toID string, maxDepth int) ([]string
 	}
 	return path, nil
 }
+
+func (a *FalkorAdapter) node(nodeID string) (*falkorNodeView, error) {
+	nodeID, err := validateGraphIdentifier("node_id", nodeID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.readOnlyQuery(`MATCH (node {id: $node_id}) RETURN node LIMIT 1`, map[string]interface{}{"node_id": nodeID})
+	if err != nil {
+		return nil, err
+	}
+	if !result.Next() {
+		return nil, nil
+	}
+	value, err := result.Record().GetByIndex(0)
+	if err != nil {
+		return nil, fmt.Errorf("read FalkorDB node record: %w", err)
+	}
+	view, err := graphNodeView(value)
+	if err != nil {
+		return nil, err
+	}
+	return &view, nil
+}
+
+type falkorGraphStats struct {
+	Nodes         int64 `json:"nodes"`
+	Relationships int64 `json:"relationships"`
+}
+
+func graphCount(value interface{}) (int64, error) {
+	switch v := value.(type) {
+	case int64:
+		return v, nil
+	case int:
+		return int64(v), nil
+	case int32:
+		return int64(v), nil
+	default:
+		return 0, fmt.Errorf("FalkorDB returned an unexpected graph count value")
+	}
+}
+
+func (a *FalkorAdapter) stats() (falkorGraphStats, error) {
+	result, err := a.readOnlyQuery(`MATCH (node) WITH count(node) AS nodes MATCH ()-[edge]->() RETURN nodes, count(edge) AS relationships`, nil)
+	if err != nil {
+		return falkorGraphStats{}, err
+	}
+	if !result.Next() {
+		return falkorGraphStats{}, fmt.Errorf("FalkorDB statistics query returned no record")
+	}
+	nodesRaw, err := result.Record().GetByIndex(0)
+	if err != nil {
+		return falkorGraphStats{}, fmt.Errorf("read FalkorDB node count: %w", err)
+	}
+	relationshipsRaw, err := result.Record().GetByIndex(1)
+	if err != nil {
+		return falkorGraphStats{}, fmt.Errorf("read FalkorDB relationship count: %w", err)
+	}
+	nodes, err := graphCount(nodesRaw)
+	if err != nil {
+		return falkorGraphStats{}, err
+	}
+	relationships, err := graphCount(relationshipsRaw)
+	if err != nil {
+		return falkorGraphStats{}, err
+	}
+	return falkorGraphStats{Nodes: nodes, Relationships: relationships}, nil
+}
