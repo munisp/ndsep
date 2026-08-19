@@ -1,0 +1,5 @@
+type MetricKey = `${string}|${string}|${number}`;
+const requests = new Map<MetricKey, number>();
+export function recordHttpRequest(method: string, route: string, status: number) { const key: MetricKey = `${method}|${route}|${status}`; requests.set(key, (requests.get(key) ?? 0) + 1); }
+export function structuredLog(event: string, fields: Record<string, unknown> = {}) { console.log(JSON.stringify({ timestamp: new Date().toISOString(), service: "idlr-pts-api", event, ...fields })); }
+export function prometheusMetrics(readiness: { ok: boolean }) { const lines = ["# HELP idlr_pts_runtime_ready Runtime configuration readiness (not external evidence)", "# TYPE idlr_pts_runtime_ready gauge", `idlr_pts_runtime_ready ${readiness.ok ? 1 : 0}`, "# HELP idlr_pts_http_requests_total HTTP requests observed by this process", "# TYPE idlr_pts_http_requests_total counter"]; for (const [key, count] of requests) { const [method, route, status] = key.split("|"); lines.push(`idlr_pts_http_requests_total{method="${method}",route="${route}",status="${status}"} ${count}`); } return `${lines.join("\n")}\n`; }

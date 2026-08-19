@@ -1,0 +1,18 @@
+# TEST ONLY. Provides the actual PostgreSQL dependency used by payment integration tests.
+# It is not a payment gateway, settlement system, backup topology, or production database.
+services:
+  payment-audit-postgres:
+    image: postgres:16.4-bookworm
+    environment:
+      POSTGRES_DB: idlr_payment
+      POSTGRES_USER: idlr_tests
+      POSTGRES_PASSWORD: idlr_tests
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U idlr_tests -d idlr_payment"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data

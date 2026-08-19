@@ -1,0 +1,16 @@
+groups:
+  - name: idlr-pts-runtime
+    rules:
+      - alert: IDLRRuntimeNotReady
+        expr: idlr_pts_runtime_ready == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "IDLR-PTS runtime configuration is not ready"
+          runbook: "Inspect /readyz and resolve missing required configuration. This alert does not validate external provider authority or settlement."
+      - alert: IDLRApiErrorRate
+        expr: sum(rate(idlr_pts_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(idlr_pts_http_requests_total[5m])), 1) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "IDLR-PTS API 5xx rate exceeds 5%"

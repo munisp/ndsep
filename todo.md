@@ -333,10 +333,10 @@
 - [ ] Document mobile optimistic cache behavior and offline submission queueing
 - [ ] Provide a PostgreSQL live-staging migration runbook with rollback controls
 - [ ] Inventory and add stakeholder validation and review-ledger transition tests
-- [ ] Produce a prioritized, evidence-based production-gap remediation program
-- [ ] Implement encrypted idempotent offline queueing for stakeholder profile and document submissions
+- [x] Produce a prioritized, evidence-based production-gap remediation program
+- [x] Implement encrypted idempotent offline queueing for stakeholder profile and document submissions
 - [ ] Add network-failure and replay tests for the PostgreSQL stakeholder review-ledger transition
-- [ ] Implement dead-letter inspection and corruption-quarantine workflow for stakeholder submission replays
+- [x] Implement dead-letter inspection and corruption-quarantine workflow for stakeholder submission replays
 - [ ] Provide native SQLCipher plus Expo SecureStore queue-storage adapter and deployment configuration
 - [ ] Provide SQLCipher offline queue replay integration test suite
 - [ ] Document secure key rotation and recovery for SecureStore invalidation
@@ -357,10 +357,10 @@
 - [ ] Provide staging PITR failure recovery and multi-region KMS workload identity federation configuration
 - [ ] Provide Terraform/Kubernetes two-region workload identity and KMS failover verification artifacts
 - [ ] Provide cross-region KMS monitoring, staging chaos harness, and regional-outage disaster recovery failover tests
-- [ ] Implement OIDC PKCE sign-up/login, biometric session binding, Keycloak realm/client artifacts, and stakeholder onboarding screens
+- [x] Implement OIDC PKCE sign-up/login, biometric session binding, Keycloak realm/client artifacts, and stakeholder onboarding screens
 - [ ] Add token exchange, refresh rotation, session revocation, and onboarding lifecycle integration tests
-- [ ] Implement field-level stakeholder validation and offline profile/document queue synchronization
-- [ ] Add OIDC loading, error, refresh rotation, and secure session revocation UI behavior
+- [x] Implement field-level stakeholder validation and offline profile/document queue synchronization
+- [x] Add OIDC loading, error, refresh rotation, and secure session revocation UI behavior
 - [x] Safely reconcile validated GitHub backup changes with the repository default branch
 - [x] Prepare and validate a file-level integration branch based on GitHub production
 - [x] Review every GitHub branch and pull request for safe compatibility with the production branch
@@ -407,3 +407,10 @@
 - [x] Allow users to archive acknowledged organization receipt alerts
 - [x] Add date and read-status filtering to the organization receipt alert center
 - [x] Complete an evidence-based production readiness audit against all stated business and technical requirements
+- [x] Classify all remaining requirements into code-resolvable work and external evidence gates
+- [ ] Restore local payment validation infrastructure and achieve a fully green repeatable test suite
+- [ ] Implement remaining code-resolvable production controls with explicit fail-closed boundaries
+- [ ] Add clearly labelled local emulators for infrastructure assumed available in target environments
+- [ ] Produce deployment, recovery, monitoring, and governance code artifacts for target-environment activation
+- [x] Add repeatable PostgreSQL payment-test, runtime readiness, simulator-boundary, and deployment artifact code
+- [x] Add explicit fail-closed emulator labelling across TypeScript, Go, Python, and Rust service boundaries

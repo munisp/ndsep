@@ -8,6 +8,22 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04
+    services:
+      payment-audit-postgres:
+        image: postgres:16.4-bookworm
+        env:
+          POSTGRES_DB: idlr_payment
+          POSTGRES_USER: idlr_tests
+          POSTGRES_PASSWORD: idlr_tests
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U idlr_tests -d idlr_payment"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PAYMENT_AUDIT_POSTGRES_URL: postgresql://idlr_tests:idlr_tests@127.0.0.1:5432/idlr_payment
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

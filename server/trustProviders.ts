@@ -1,4 +1,4 @@
-export type ProviderState = "ready" | "unavailable" | "failed";
+export type ProviderState = "ready" | "unavailable" | "failed" | "emulator";
 import { getConfiguredIntegrationValue } from "./integrationSettingsRepository";
 
 export type ProviderHealth = {
@@ -22,6 +22,7 @@ type AuthoritativeBridgeResponse = {
 function nonEmpty(value: string | undefined | null) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
+function isDevelopmentEmulator(value: string | null) { return Boolean(value?.includes("/api/dev-emulators/")); }
 
 function doclingConfig() {
   const baseUrl = nonEmpty(getConfiguredIntegrationValue("DOCLING_SERVICE_URL"));
@@ -71,8 +72,8 @@ export function getProviderHealth(): ProviderHealth[] {
   return [
     {
       provider: "docling",
-      state: docling.baseUrl ? "ready" : "unavailable",
-      reason: docling.baseUrl ? null : "Set DOCLING_SERVICE_URL to a secured Docling Serve endpoint.",
+      state: isDevelopmentEmulator(docling.baseUrl) ? "emulator" : docling.baseUrl ? "ready" : "unavailable",
+      reason: isDevelopmentEmulator(docling.baseUrl) ? "A labelled development Docling emulator is configured; it cannot verify production document intelligence." : docling.baseUrl ? null : "Set DOCLING_SERVICE_URL to a secured Docling Serve endpoint.",
       configuredAtRuntime: Boolean(docling.baseUrl),
     },
     {
@@ -83,20 +84,20 @@ export function getProviderHealth(): ProviderHealth[] {
     },
     {
       provider: "nimc_nvs_bridge",
-      state: nimc.endpoint && nimc.token ? "ready" : "unavailable",
-      reason: nimc.endpoint && nimc.token ? null : "NIMC NVS access requires an approved VPN-connected bridge and its service token.",
+      state: isDevelopmentEmulator(nimc.endpoint) ? "emulator" : nimc.endpoint && nimc.token ? "ready" : "unavailable",
+      reason: isDevelopmentEmulator(nimc.endpoint) ? "A labelled development NIMC bridge emulator is configured; it cannot verify a NIN." : nimc.endpoint && nimc.token ? null : "NIMC NVS access requires an approved VPN-connected bridge and its service token.",
       configuredAtRuntime: Boolean(nimc.endpoint && nimc.token),
     },
     {
       provider: "cac_vas_bridge",
-      state: cac.endpoint && cac.token ? "ready" : "unavailable",
-      reason: cac.endpoint && cac.token ? null : "CAC verification requires a contracted CAC VAS or authorized NIBSS/CAC bridge endpoint.",
+      state: isDevelopmentEmulator(cac.endpoint) ? "emulator" : cac.endpoint && cac.token ? "ready" : "unavailable",
+      reason: isDevelopmentEmulator(cac.endpoint) ? "A labelled development CAC bridge emulator is configured; it cannot verify company registration." : cac.endpoint && cac.token ? null : "CAC verification requires a contracted CAC VAS or authorized NIBSS/CAC bridge endpoint.",
       configuredAtRuntime: Boolean(cac.endpoint && cac.token),
     },
     {
       provider: "state_registry_bridge",
-      state: registry.endpoint && registry.token ? "ready" : "unavailable",
-      reason: registry.endpoint && registry.token ? null : "No official unified Nigerian land-registry API is configured; connect an authorized state registry bridge.",
+      state: isDevelopmentEmulator(registry.endpoint) ? "emulator" : registry.endpoint && registry.token ? "ready" : "unavailable",
+      reason: isDevelopmentEmulator(registry.endpoint) ? "A labelled development state-registry bridge emulator is configured; it cannot verify title ownership." : registry.endpoint && registry.token ? null : "No official unified Nigerian land-registry API is configured; connect an authorized state registry bridge.",
       configuredAtRuntime: Boolean(registry.endpoint && registry.token),
     },
   ];

@@ -5,7 +5,7 @@ import { Platform } from "react-native";
 
 import type { BusinessProfileRecord } from "@/lib/mobile-data";
 import { createTRPCClient } from "@/lib/trpc";
-import { readStakeholderSyncIndex, writeStakeholderSyncIndex, type PendingStakeholderSyncItem, type StakeholderRetryAuditEvent, type StakeholderSyncKind, type StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
+import { getPendingStakeholderSyncItems as readPendingStakeholderSyncItems, readStakeholderSyncIndex, writeStakeholderSyncIndex, type PendingStakeholderSyncItem, type StakeholderRetryAuditEvent, type StakeholderSyncKind, type StakeholderSyncStatus } from "@/lib/stakeholder-sync-index";
 import { validateDeadLetterEdit } from "@/lib/stakeholder-sync-validation";
 import { describeStakeholderSyncFailure } from "@/lib/stakeholder-sync-error-details";
 import { getNextStakeholderRetryAt, isStakeholderItemDueForAutomaticRetry } from "@/lib/stakeholder-sync-retry";
@@ -38,7 +38,7 @@ export async function enqueueStakeholderSubmission(payload: StakeholderSyncPaylo
   const item: PendingStakeholderSyncItem = { id, idempotencyKey, kind: payload.kind, label: label(payload.kind), queuedAt: new Date().toISOString(), status: "pending", retryCount: 0, payloadPath };
   await writeStakeholderSyncIndex([item, ...(await readStakeholderSyncIndex())]); return item;
 }
-export async function getPendingStakeholderSyncItems() { return readStakeholderSyncIndex(); }
+export async function getPendingStakeholderSyncItems() { return readPendingStakeholderSyncItems(); }
 export async function getDeadLetterForEditing(id: string): Promise<EditableStakeholderPayload> { const item = (await readStakeholderSyncIndex()).find((entry) => entry.id === id); if (!item || item.status !== "dead_letter") throw new Error("Only quarantined dead-letter items can be edited."); const payload = await loadPayload(item); return payload.kind === "profile" ? { kind: payload.kind, profile: { companyName: payload.profile.companyName, cacNumber: payload.profile.cacNumber, tinNumber: payload.profile.tinNumber, businessEmail: payload.profile.businessEmail, businessPhone: payload.profile.businessPhone, businessAddress: payload.profile.businessAddress, contactPerson: payload.profile.contactPerson } } : { kind: payload.kind, document: { type: payload.type, fileName: payload.fileName, mimeType: payload.mimeType } }; }
 export async function updateDeadLetterForRetry(id: string, edit: EditableStakeholderPayload) {
   const validationErrors = validateDeadLetterEdit(edit); if (Object.keys(validationErrors).length > 0) throw new Error(Object.values(validationErrors)[0]);

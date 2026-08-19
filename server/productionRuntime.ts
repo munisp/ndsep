@@ -1,0 +1,16 @@
+export type RuntimeCheck = { name: string; configured: boolean; required: boolean; detail: string };
+
+function present(value: string | undefined) { return Boolean(value?.trim()); }
+export function parseAllowedOrigins(value: string | undefined) { return new Set((value ?? "").split(",").map((origin) => origin.trim()).filter(Boolean)); }
+export function isAllowedOrigin(input: { origin: string | undefined; nodeEnv: string | undefined; allowedOrigins: Set<string> }) { if (!input.origin) return true; if (input.nodeEnv !== "production") return true; return input.allowedOrigins.has(input.origin); }
+export function productionRuntimeChecks(env: NodeJS.ProcessEnv = process.env): RuntimeCheck[] { const production = env.NODE_ENV === "production"; return [
+  { name: "cors_allowlist", configured: !production || parseAllowedOrigins(env.CORS_ALLOWED_ORIGINS).size > 0, required: production, detail: "CORS_ALLOWED_ORIGINS must be an explicit comma-separated allowlist in production." },
+  { name: "primary_database", configured: present(env.DATABASE_URL), required: production, detail: "DATABASE_URL is required for primary application data." },
+  { name: "payment_audit_postgres", configured: present(env.PAYMENT_AUDIT_POSTGRES_URL), required: production, detail: "PAYMENT_AUDIT_POSTGRES_URL is required for payment operations." },
+  { name: "oidc", configured: present(env.EXPO_PUBLIC_OIDC_ISSUER) && present(env.EXPO_PUBLIC_OIDC_CLIENT_ID), required: production, detail: "OIDC issuer and client ID are required for enterprise authentication." },
+  { name: "object_storage", configured: present(env.OBJECT_STORAGE_ENDPOINT) && present(env.OBJECT_STORAGE_BUCKET) && present(env.OBJECT_STORAGE_ACCESS_KEY_ID) && present(env.OBJECT_STORAGE_SECRET_ACCESS_KEY) && present(env.OBJECT_STORAGE_PUBLIC_BASE_URL), required: production, detail: "S3-compatible object storage and a controlled public base URL are required for production evidence retention." },
+  { name: "server_attestation", configured: present(env.DIAGNOSTIC_ATTESTATION_ED25519_PRIVATE_KEY) && present(env.DIAGNOSTIC_ATTESTATION_KEY_ID), required: production, detail: "Organization receipt signing requires a configured server signing key in production." },
+  { name: "metrics_auth", configured: present(env.METRICS_BEARER_TOKEN), required: production, detail: "METRICS_BEARER_TOKEN is required before production metrics are exposed." },
+  { name: "local_uploads_disabled", configured: env.SERVE_LOCAL_UPLOADS !== "true", required: production, detail: "Local upload serving must be disabled in production in favor of authenticated object storage." },
+]; }
+export function readinessReport(env: NodeJS.ProcessEnv = process.env) { const checks = productionRuntimeChecks(env); const production = env.NODE_ENV === "production"; const missing = checks.filter((check) => check.required && !check.configured).map((check) => check.name); return { ok: missing.length === 0, mode: production ? "production" : "development", checks, missingRequiredChecks: missing, externalEvidence: "Provider credentials, authority contracts, disaster-recovery evidence, and governance approval cannot be established by this endpoint." }; }

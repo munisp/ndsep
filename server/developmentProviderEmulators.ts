@@ -76,4 +76,13 @@ export function registerDevelopmentProviderEmulators(app: Express) {
     }));
     return res.json({ documents, emulator: true, productionUseProhibited: true, warning: "TEST-ONLY DOCUMENT CONVERSION. NOT A DOCLING PRODUCTION RESULT." });
   });
+
+  app.post("/api/dev-emulators/bridges/:provider", async (req, res) => {
+    if (!enabled()) return res.status(404).json({ error: "development_emulator_disabled" });
+    const authorization = await requireDevelopmentToken(req);
+    if (!authorization.ok) return res.status(401).json({ error: "development_emulator_auth_required", message: authorization.reason, emulator: true, productionUseProhibited: true });
+    const provider = req.params.provider;
+    if (!["nimc", "cac", "state-registry"].includes(provider)) return res.status(404).json({ error: "unsupported_development_bridge", emulator: true });
+    return res.json({ status: "requires_review", providerReference: `development-emulator-${provider}`, reason: "TEST-ONLY BRIDGE RESPONSE. It does not verify identity, company registration, title ownership, or registry authority.", attributes: { emulator: true, verified: false }, emulator: true, productionUseProhibited: true });
+  });
 }

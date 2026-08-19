@@ -9,6 +9,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { registerDevelopmentProviderEmulators } from "../developmentProviderEmulators";
 import { GatewayWebhookSignatureError, GatewayWebhookUnavailableError, reconcileGatewayWebhook, type GatewayProvider } from "../offlinePaymentRepository";
+import { isAllowedOrigin, parseAllowedOrigins, readinessReport } from "../productionRuntime";
+import { prometheusMetrics, recordHttpRequest, structuredLog } from "../observability";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -32,10 +34,16 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  const allowedOrigins = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
+  app.use((req, res, next) => { const started = Date.now(); res.on("finish", () => { const route = req.path === "/api/trpc" ? "/api/trpc" : req.path; recordHttpRequest(req.method, route, res.statusCode); structuredLog("http_request", { method: req.method, route, status: res.statusCode, durationMs: Date.now() - started }); }); next(); });
 
   // Enable CORS for all routes - reflect the request origin to support credentials
   app.use((req, res, next) => {
     const origin = req.headers.origin;
+    if (!isAllowedOrigin({ origin, nodeEnv: process.env.NODE_ENV, allowedOrigins })) {
+      res.status(403).json({ error: "Origin is not allowed." });
+      return;
+    }
     if (origin) {
       res.header("Access-Control-Allow-Origin", origin);
     }
@@ -74,14 +82,19 @@ async function startServer() {
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  registerDevelopmentProviderEmulators(app);
+  if (process.env.NODE_ENV !== "production") registerDevelopmentProviderEmulators(app);
 
-  app.use("/uploads", express.static(path.join(process.cwd(), "server", "uploads")));
+  if (process.env.NODE_ENV !== "production" || process.env.SERVE_LOCAL_UPLOADS === "true") {
+    app.use("/uploads", express.static(path.join(process.cwd(), "server", "uploads")));
+  }
   registerOAuthRoutes(app);
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, timestamp: Date.now() });
   });
+  app.get("/healthz", (_req, res) => { res.status(200).json({ ok: true, timestamp: new Date().toISOString() }); });
+  app.get("/readyz", (_req, res) => { const report = readinessReport(); res.status(report.ok ? 200 : 503).json(report); });
+  app.get("/metrics", (req, res) => { const token = process.env.METRICS_BEARER_TOKEN; if (process.env.NODE_ENV === "production" && (!token || req.header("authorization") !== `Bearer ${token}`)) return res.status(404).end(); const report = readinessReport(); return res.type("text/plain; version=0.0.4").send(prometheusMetrics(report)); });
 
   app.use(
     "/api/trpc",

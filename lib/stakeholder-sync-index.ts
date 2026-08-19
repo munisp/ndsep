@@ -8,4 +8,5 @@ const KEY = "idlr_pts_mobile.pending_stakeholder_sync.v2";
 export async function readStakeholderSyncIndex(): Promise<PendingStakeholderSyncItem[]> {
   try { const raw = await AsyncStorage.getItem(KEY); const value = raw ? JSON.parse(raw) : []; return Array.isArray(value) ? value.filter((item): item is PendingStakeholderSyncItem => Boolean(item && typeof item.id === "string" && typeof item.idempotencyKey === "string" && typeof item.payloadPath === "string" && typeof item.status === "string")) : []; } catch { return []; }
 }
+export async function getPendingStakeholderSyncItems() { return readStakeholderSyncIndex(); }
 export async function writeStakeholderSyncIndex(items: PendingStakeholderSyncItem[]) { await AsyncStorage.setItem(KEY, JSON.stringify(items)); }

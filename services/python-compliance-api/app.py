@@ -1,8 +1,12 @@
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timezone
 
 app = FastAPI(title="Compliance Intelligence Service")
+
+def emulator_enabled() -> bool:
+    return os.getenv("IDLR_EMULATOR_MODE", "false").lower() == "true"
 
 
 class PermitCaseInput(BaseModel):
@@ -20,13 +24,17 @@ def health():
         "service": "python-compliance-api",
         "language": "python",
         "middleware": ["lakehouse", "redis"],
-        "status": "healthy",
+        "status": "emulator" if emulator_enabled() else "unconfigured",
+        "mode": "development_only" if emulator_enabled() else "fail_closed",
+        "disclaimer": "This service does not prove lakehouse, Redis, regulatory, or production compliance-model connectivity.",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @app.post("/score")
 def score_case(case: PermitCaseInput):
+    if not emulator_enabled():
+        raise HTTPException(status_code=503, detail="Compliance scoring is unconfigured. IDLR_EMULATOR_MODE=true is permitted only for labelled local simulation.")
     priority_weight = {"routine": 0.2, "elevated": 0.5, "critical": 0.85}.get(case.priority, 0.3)
     stage_weight = {
         "intake": 0.15,
@@ -49,4 +57,7 @@ def score_case(case: PermitCaseInput):
         "complianceScore": score,
         "riskBand": risk_band,
         "recommendedAction": "Escalate cross-agency review" if risk_band in {"critical", "high"} else "Continue standard monitoring",
+        "provenance": "deterministic_development_emulator",
+        "requiresReview": True,
+        "disclaimer": "This is not an authoritative compliance decision or a connected lakehouse/Redis result.",
     }

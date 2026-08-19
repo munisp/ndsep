@@ -1,0 +1,25 @@
+# Template only. Replace image, secret references, resources, namespaces, TLS ingress, and identity bindings before deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: idlr-pts-api, namespace: idlr-pts }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: idlr-pts-api } }
+  template:
+    metadata: { labels: { app: idlr-pts-api } }
+    spec:
+      serviceAccountName: idlr-pts-api
+      containers:
+        - name: api
+          image: REPLACE_WITH_APPROVED_REGISTRY/idlr-pts:REPLACE_WITH_DIGEST
+          ports: [{ containerPort: 3000 }]
+          envFrom: [{ secretRef: { name: idlr-pts-runtime } }]
+          readinessProbe: { httpGet: { path: /readyz, port: 3000 }, initialDelaySeconds: 10, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /healthz, port: 3000 }, initialDelaySeconds: 10, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "1", memory: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: idlr-pts-api, namespace: idlr-pts }
+spec: { selector: { app: idlr-pts-api }, ports: [{ port: 80, targetPort: 3000 }] }
