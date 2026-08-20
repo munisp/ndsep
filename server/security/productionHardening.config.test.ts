@@ -42,6 +42,9 @@ describe("production security configuration", () => {
     expect(apisix).toContain("key: http_x_forwarded_for");
     expect(apisix).toContain("limit-req:");
     expect(apisix).toContain("limit-count:");
+    expect(apisix).toContain("prometheus: {}");
+    expect(apisix).toContain("export_uri: /apisix/prometheus/metrics");
+    expect(apisix.trimEnd()).toMatch(/#END$/);
     expect(apisix).toContain("# No catch-all anonymous route");
   });
 

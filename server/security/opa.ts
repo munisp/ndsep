@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { logger } from "../logger";
+import { recordOpaDecision } from "./opaMetrics";
 
 /**
  * Open Policy Agent (OPA) decision client for high-risk NDSEP actions.
@@ -43,9 +44,11 @@ function opaConfigured(): boolean {
  * false on transport, HTTP, parsing, or decision-shape failure.
  */
 export async function opaAllows(input: OpaDecisionInput): Promise<boolean> {
+  const startedAt = performance.now();
   if (!opaConfigured()) {
     if (IS_PRODUCTION) {
       logger.error("[opa] Production authorization is not configured; denying privileged action");
+      recordOpaDecision("unconfigured", performance.now() - startedAt);
       return false;
     }
     // Local development and isolated unit tests use the in-process PBAC layer.
@@ -65,18 +68,24 @@ export async function opaAllows(input: OpaDecisionInput): Promise<boolean> {
 
     if (!response.ok) {
       logger.warn({ status: response.status }, "[opa] Policy decision request failed");
+      recordOpaDecision("http_error", performance.now() - startedAt);
       return false;
     }
 
     const body: unknown = await response.json();
-    if (!body || typeof body !== "object" || !("result" in body)) {
+    if (!body || typeof body !== "object" || !("result" in body) || typeof (body as { result?: unknown }).result !== "boolean") {
       logger.warn("[opa] Policy decision response was malformed");
+      recordOpaDecision("malformed", performance.now() - startedAt);
       return false;
     }
 
-    return (body as { result?: unknown }).result === true;
+    const allowed = (body as { result: boolean }).result;
+    recordOpaDecision(allowed ? "allow" : "deny", performance.now() - startedAt);
+    return allowed;
   } catch (error) {
-    logger.warn({ err: error }, "[opa] Policy decision unavailable; denying request");
+    const timeout = error instanceof DOMException && error.name === "TimeoutError";
+    logger.warn({ err: error, timeout }, "[opa] Policy decision unavailable; denying request");
+    recordOpaDecision(timeout ? "timeout" : "unavailable", performance.now() - startedAt);
     return false;
   }
 }

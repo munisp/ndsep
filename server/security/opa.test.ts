@@ -25,26 +25,33 @@ describe("OPA privileged authorization", () => {
     await expect(opaAllows(adminInput)).resolves.toBe(false);
   });
 
-  it("denies an unavailable OPA decision endpoint", async () => {
+  it("denies an unavailable OPA decision endpoint and records a bounded metric", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("unavailable")));
     const { opaAllows } = await loadOpa({ NODE_ENV: "production", OPA_ENABLED: "true", OPA_URL: "http://opa:8181" });
+    const { getOpaMetrics } = await import("./opaMetrics");
     await expect(opaAllows(adminInput)).resolves.toBe(false);
+    expect(getOpaMetrics().decisionCounts.unavailable).toBe(1);
+    expect(getOpaMetrics().durationSecondsCount).toBe(1);
   });
 
   it("accepts only an explicit boolean allow and carries verified MFA assurance", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: true }) });
     vi.stubGlobal("fetch", fetchMock);
     const { opaAllows } = await loadOpa({ NODE_ENV: "production", OPA_ENABLED: "true", OPA_URL: "http://opa:8181" });
+    const { getOpaMetrics } = await import("./opaMetrics");
 
     await expect(opaAllows(adminInput)).resolves.toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
     const options = fetchMock.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(String(options.body))).toMatchObject({ input: { context: { mfaVerified: true } } });
+    expect(getOpaMetrics().decisionCounts.allow).toBe(1);
   });
 
   it("denies a malformed OPA response instead of treating it as an allow", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: "allow" }) }));
     const { opaAllows } = await loadOpa({ NODE_ENV: "production", OPA_ENABLED: "true", OPA_URL: "http://opa:8181" });
+    const { getOpaMetrics } = await import("./opaMetrics");
     await expect(opaAllows(adminInput)).resolves.toBe(false);
+    expect(getOpaMetrics().decisionCounts.malformed).toBe(1);
   });
 });
