@@ -423,3 +423,6 @@
 - [x] Add administrator audit-chain integrity verification with explicit broken-chain evidence
 - [x] Add guarded Keycloak administrator session-revocation controls with fail-closed IdP boundaries
 - [x] Add verified WAF interval tooltips for threat categories and redacted source-address details
+- [x] Add visual audit-chain timeline that isolates invalid integrity records
+- [x] Add confirmation-protected bulk Keycloak session revocation for administrators
+- [x] Add threat-category search and filtering within WAF interval details

@@ -39,7 +39,7 @@ export function recordSiemCorrelationOpen(input: { actor: string; auditEventId: 
 
 export function recordIntegrationSettingsSaved(input: { actor: string; configuredFields: string[] }) { return appendEvent({ type: "integration_settings_saved", actor: input.actor, payload: { configuredFields: [...input.configuredFields].sort() } }); }
 export function listSecurityAuditEvents(limit = 100) { return readEvents().slice(-Math.max(1, Math.min(limit, 250))).reverse(); }
-export function recordKeycloakSessionRevocation(input: { actor: string; sessionHash: string; outcome: "revoked" | "unavailable" | "rejected" }) { return appendEvent({ type: "keycloak_session_revocation_requested", actor: input.actor, payload: { sessionHash: input.sessionHash, outcome: input.outcome } }); }
+export function recordKeycloakSessionRevocation(input: { actor: string; sessionHash: string; outcome: "revoked" | "unavailable" | "rejected"; reason?: string; batchId?: string }) { return appendEvent({ type: "keycloak_session_revocation_requested", actor: input.actor, payload: { sessionHash: input.sessionHash, outcome: input.outcome, ...(input.reason ? { reason: input.reason } : {}), ...(input.batchId ? { batchId: input.batchId } : {}) } }); }
 
 export function verifySecurityAuditChain() {
   const events = readEvents(); const key = process.env.SECURITY_AUDIT_HMAC_KEY?.trim() || null; let previousHash: string | null = null;

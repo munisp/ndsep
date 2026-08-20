@@ -6,6 +6,7 @@ import { getAdministratorInfrastructureStatus } from "../infrastructureStatus";
 import { getWafBlockTrend } from "../securityTelemetry";
 import { keycloakAdminStatus, revokeKeycloakSession, sessionFingerprint } from "../keycloakAdmin";
 import { recordKeycloakSessionRevocation, verifySecurityAuditChain } from "../securityOperations";
+import { validateBulkSessionRevocation } from "../../lib/keycloak-bulk-revocation";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -23,6 +24,12 @@ export const systemRouter = router({
   wafBlockTrend: adminProcedure.query(() => getWafBlockTrend()),
   verifySecurityAuditChain: adminProcedure.query(() => verifySecurityAuditChain()),
   revokeKeycloakSession: adminProcedure.input(z.object({ sessionId: z.string().min(8).max(512) })).mutation(async ({ ctx, input }) => { const fingerprint = sessionFingerprint(input.sessionId); try { const result = await revokeKeycloakSession(input.sessionId); recordKeycloakSessionRevocation({ actor: ctx.user.openId, sessionHash: fingerprint, outcome: result.revoked ? "revoked" : "unavailable" }); if (!result.revoked) throw new Error(result.reason); return result; } catch (error) { recordKeycloakSessionRevocation({ actor: ctx.user.openId, sessionHash: fingerprint, outcome: "rejected" }); throw error; } }),
+  revokeKeycloakSessionsBulk: adminProcedure.input(z.object({ sessionIds: z.array(z.string().min(8).max(512)).min(1).max(20), confirmation: z.string().max(64), reason: z.string().min(10).max(240) })).mutation(async ({ ctx, input }) => {
+    const validated = validateBulkSessionRevocation(input); if (!validated.valid) throw new Error(validated.reason);
+    const batchId = crypto.randomUUID(); const outcomes: Array<{ sessionHash: string; revoked: boolean; reason: string }> = [];
+    for (const sessionId of validated.sessionIds) { const sessionHash = sessionFingerprint(sessionId); try { const result = await revokeKeycloakSession(sessionId); recordKeycloakSessionRevocation({ actor: ctx.user.openId, sessionHash, outcome: result.revoked ? "revoked" : "unavailable", reason: validated.reason, batchId }); outcomes.push({ sessionHash, revoked: result.revoked, reason: result.reason ?? "Keycloak accepted the revocation request." }); } catch (error) { const reason = error instanceof Error ? error.message : "Keycloak revocation request failed."; recordKeycloakSessionRevocation({ actor: ctx.user.openId, sessionHash, outcome: "rejected", reason: validated.reason, batchId }); outcomes.push({ sessionHash, revoked: false, reason }); } }
+    return { batchId, outcomes, allRevoked: outcomes.every((item) => item.revoked) };
+  }),
 
   notifyOwner: adminProcedure
     .input(
