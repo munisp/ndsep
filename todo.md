@@ -417,15 +417,6 @@
 - [x] Add administrator infrastructure status dashboard with simulation/staging readiness detail
 - [x] Add a user-friendly fail-closed runtime recovery screen with next-step guidance
 - [x] Add guarded administrator configuration controls for simulation versus real staging provider modes
-- [x] Define and document enterprise threat model, security trust boundaries, and residual-risk acceptance criteria
-- [x] Add authenticated staging health probes and administrator runtime-health change alerts
-- [x] Add tamper-evident configuration-change audit records for simulation/staging mode changes
-- [x] Add Caddy, APISIX, OpenAppSec, Keycloak MFA, and OPA policy target-environment deployment artifacts
-- [x] Add DDoS, external credential-abuse, and insider-risk resilience controls with fail-closed enforcement
-- [x] Validate defense-in-depth artifacts and document target-environment evidence requirements without claiming absolute security
-- [x] Add an administrator UI to review and filter the HMAC hash-chained security configuration audit trail
-- [x] Add administrator MFA preference and authenticated-session management interface with truthful IdP boundaries
-- [x] Add security posture widget distinguishing application rate limiting from live gateway/WAF telemetry
-- [x] Add safe, allowlisted SIEM correlation pivots to the administrator configuration audit explorer
-- [x] Add guarded APISIX/OpenAppSec telemetry endpoint configuration for authenticated WAF block statistics
-- [x] Add visual MFA enrollment guidance and direct Keycloak account-console links for administrators
+- [x] Display verified Keycloak passkey enrollment status in administrator active-session security views
+- [x] Record signed configuration-audit events when administrators open allowlisted SIEM correlation links
+- [x] Add a truthful 24-hour WAF block trend visualization that remains unavailable without live history telemetry

@@ -27,7 +27,7 @@ function contextFor(openId: string, role: "user" | "admin", enterprise = false):
     },
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
     res: { clearCookie: () => undefined } as unknown as TrpcContext["res"],
-    enterprise: enterprise ? { subject: openId, issuer: "https://issuer.example.test", agencyId: "lagos-land", agencyRoles: ["planning_supervisor"], authMethod: "local_development", mfaAuthenticated: true } : undefined,
+    enterprise: enterprise ? { subject: openId, issuer: "https://issuer.example.test", agencyId: "lagos-land", agencyRoles: ["planning_supervisor"], authMethod: "local_development", passkeyAuthenticated: false } : undefined,
   };
 }
 

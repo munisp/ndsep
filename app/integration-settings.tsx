@@ -68,12 +68,12 @@ const groups: Array<{ title: string; note: string; fields: Array<{ key: FieldNam
   },
   {
     title: "APISIX and OpenAppSec telemetry",
-    note: "Configure only an HTTPS, allowlisted telemetry endpoint that returns blockedRequestsLast5m. The application will show unavailable/degraded rather than fabricate WAF statistics.",
+    note: "Configure only an HTTPS, allowlisted endpoint that returns a WAF history array. The app shows unavailable rather than fabricated WAF statistics when this contract cannot be verified.",
     fields: [
       { key: "WAF_TELEMETRY_URL", label: "Telemetry URL" },
       { key: "WAF_TELEMETRY_BEARER_TOKEN", label: "Telemetry bearer token", secret: true },
-      { key: "SECURITY_TELEMETRY_ALLOWED_HOSTS", label: "Allowed telemetry/SIEM hosts (comma-separated)" },
-      { key: "SIEM_CORRELATION_URL_TEMPLATE", label: "SIEM correlation URL template (use {eventId})" },
+      { key: "SECURITY_TELEMETRY_ALLOWED_HOSTS", label: "Allowed telemetry and SIEM hosts" },
+      { key: "SIEM_CORRELATION_URL_TEMPLATE", label: "SIEM URL template using {eventId}" },
     ],
   },
 ];
@@ -81,6 +81,7 @@ const groups: Array<{ title: string; note: string; fields: Array<{ key: FieldNam
 export default function IntegrationSettingsScreen() {
   const utils = trpc.useUtils();
   const statusQuery = trpc.integrationSettings.status.useQuery();
+  const securityAudit = trpc.integrationSettings.audit.useQuery({ limit: 25 }, { retry: false });
   const gatewayActivation = trpc.paymentOperations.gatewayActivation.useQuery({}, { retry: false });
   const [values, setValues] = useState<Partial<Record<FieldName, string>>>({});
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -93,11 +94,11 @@ export default function IntegrationSettingsScreen() {
     },
     onError: (error) => setFeedback(error.message.includes("FORBIDDEN") || error.message.includes("admin") ? "Only an authenticated platform administrator can save integration settings." : error.message),
   });
+  const openSiem = trpc.integrationSettings.openSiemCorrelation.useMutation({ onSuccess: ({ url }) => { void WebBrowser.openBrowserAsync(url); void securityAudit.refetch(); }, onError: (error) => setFeedback(error.message) });
 
   const status = statusQuery.data;
   const statusByField = new Map(status?.fields.map((field) => [field.field, field]));
   const secureStorageAvailable = Boolean(status?.secureStorageAvailable);
-  const securityAudit = trpc.integrationSettings.audit.useQuery({ limit: 25 }, { retry: false });
   const executionMode = values.INTEGRATION_EXECUTION_MODE ?? status?.executionMode ?? "staging";
 
   return (
@@ -120,8 +121,8 @@ export default function IntegrationSettingsScreen() {
         <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Gateway callback status</Text><Text className={`mt-2 text-sm font-semibold ${gatewayActivation.data?.ready ? "text-success" : "text-warning"}`}>{gatewayActivation.data?.ready ? "Configuration complete; provider transaction re-verification is still required for settlement evidence." : "Gateway settlement is unavailable"}</Text><Text className="mt-2 text-sm leading-5 text-muted">{gatewayActivation.data?.callbackUrl ? `Register this callback with the selected provider: ${gatewayActivation.data.callbackUrl}` : gatewayActivation.data?.reason ?? "Authenticate as an administrator to inspect gateway activation status."}</Text></View>
 
         <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Integration execution mode</Text><Text className="mt-2 text-sm leading-5 text-muted">Staging uses the approved endpoints entered below. Simulation is a development-only emulator lab and cannot verify identity, registry, document, or payment outcomes.</Text><View className="mt-4 flex-row gap-3"><Pressable onPress={() => setValues((current) => ({ ...current, INTEGRATION_EXECUTION_MODE: "staging" }))} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.78 : 1 }]}><View className={`rounded-2xl border px-4 py-3 ${executionMode === "staging" ? "border-success bg-success/10" : "border-border bg-background"}`}><Text className="text-center font-semibold text-foreground">Staging</Text></View></Pressable><Pressable disabled={!status?.simulationAllowed} onPress={() => setValues((current) => ({ ...current, INTEGRATION_EXECUTION_MODE: "simulation" }))} style={({ pressed }) => [{ flex: 1, opacity: !status?.simulationAllowed ? 0.4 : pressed ? 0.78 : 1 }]}><View className={`rounded-2xl border px-4 py-3 ${executionMode === "simulation" ? "border-warning bg-warning/10" : "border-border bg-background"}`}><Text className="text-center font-semibold text-foreground">Simulation</Text></View></Pressable></View><Text className="mt-3 text-xs leading-5 text-muted">{status?.simulationAllowed ? "Simulation is permitted only because this server explicitly enabled development emulators. Saving requires administrator access." : "Simulation is disabled in this environment, including production."}</Text></View>
-
-        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Signed configuration audit</Text><Text className={`mt-2 text-sm font-semibold ${securityAudit.data?.integrity.valid ? "text-success" : "text-warning"}`}>{securityAudit.data?.integrity.valid ? "Integrity chain valid" : securityAudit.isError ? "Administrator access required" : "Integrity key or events unavailable"}</Text><Text className="mt-1 text-xs leading-5 text-muted">Only configuration metadata and actor identifiers are retained here; secret values are never included. Production requires a dedicated audit HMAC key.</Text>{securityAudit.data?.events.length ? <View className="mt-3 gap-2">{securityAudit.data.events.slice(0, 25).map((event) => <View key={event.eventId} className="rounded-xl border border-border bg-background p-3"><Text className="text-xs font-semibold text-foreground">{event.type.replace(/_/g, " ")}</Text><Text className="mt-1 text-xs text-muted">{event.actor} · {new Date(event.occurredAt).toLocaleString()}</Text>{event.siemCorrelationUrl ? <Pressable onPress={() => { const url = event.siemCorrelationUrl; if (url) void WebBrowser.openBrowserAsync(url); }}><Text className="mt-2 text-xs font-semibold text-primary">Open correlated SIEM event</Text></Pressable> : <Text className="mt-2 text-xs text-muted">No allowlisted SIEM correlation is configured.</Text>}</View>)}</View> : null}</View>
+        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Integration execution mode</Text><Text className="mt-2 text-sm leading-5 text-muted">Staging uses the approved endpoints entered below. Simulation is a development-only emulator lab and cannot verify identity, registry, document, or payment outcomes.</Text><View className="mt-4 flex-row gap-3"><Pressable onPress={() => setValues((current) => ({ ...current, INTEGRATION_EXECUTION_MODE: "staging" }))} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.78 : 1 }]}><View className={`rounded-2xl border px-4 py-3 ${executionMode === "staging" ? "border-success bg-success/10" : "border-border bg-background"}`}><Text className="text-center font-semibold text-foreground">Staging</Text></View></Pressable><Pressable disabled={!status?.simulationAllowed} onPress={() => setValues((current) => ({ ...current, INTEGRATION_EXECUTION_MODE: "simulation" }))} style={({ pressed }) => [{ flex: 1, opacity: !status?.simulationAllowed ? 0.4 : pressed ? 0.78 : 1 }]}><View className={`rounded-2xl border px-4 py-3 ${executionMode === "simulation" ? "border-warning bg-warning/10" : "border-border bg-background"}`}><Text className="text-center font-semibold text-foreground">Simulation</Text></View></Pressable></View><Text className="mt-3 text-xs leading-5 text-muted">{status?.simulationAllowed ? "Simulation is permitted only because this server explicitly enabled development emulators. Saving requires administrator access." : "Simulation is disabled in this environment, including production."}</Text></View>
+        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Security configuration audit</Text><Text className="mt-2 text-sm leading-5 text-muted">Secret values are never stored in the event payload. Opening an allowlisted SIEM pivot creates a signed click event in this local audit chain.</Text>{securityAudit.data?.length ? <View className="mt-4 gap-2">{securityAudit.data.map((event) => <View key={event.eventId} className="rounded-2xl border border-border bg-background p-3"><Text className="text-xs font-semibold text-foreground">{event.type.replace(/_/g, " ")}</Text><Text className="mt-1 text-xs text-muted">{event.actor} · {new Date(event.occurredAt).toLocaleString()}</Text>{event.type === "integration_settings_saved" ? <Pressable disabled={openSiem.isPending} onPress={() => openSiem.mutate({ auditEventId: event.eventId })}><Text className="mt-2 text-xs font-semibold text-primary">Open correlated SIEM event</Text></Pressable> : null}</View>)}</View> : <Text className="mt-3 text-sm text-muted">No signed configuration events are available yet.</Text>}</View>
 
         {groups.map((group) => (
           <View key={group.title} className="rounded-3xl border border-border bg-surface p-5">

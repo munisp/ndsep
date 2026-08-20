@@ -16,7 +16,8 @@ export type EnterprisePrincipal = {
   agencyId: string;
   agencyRoles: EnterpriseAgencyRole[];
   authMethod: "oidc" | "local_development";
-  mfaAuthenticated: boolean;
+  /** True only when the verified OIDC access token's AMR claim reports a WebAuthn/passkey method. */
+  passkeyAuthenticated: boolean;
 };
 
 export function isEnterpriseAgencyRole(value: unknown): value is EnterpriseAgencyRole {
@@ -29,11 +30,5 @@ export function assertEnterpriseRole(principal: EnterprisePrincipal, allowedRole
       code: "FORBIDDEN",
       message: `Enterprise authorization denied. Required agency role: ${allowedRoles.join(" or ")}.`,
     });
-  }
-}
-
-export function assertMfaAuthenticated(principal: EnterprisePrincipal | null | undefined) {
-  if (!principal?.mfaAuthenticated) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Step-up MFA is required before this privileged action. Complete the configured Keycloak MFA flow and try again." });
   }
 }

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { appendSecurityEvent, listSecurityEvents, verifySecurityLedger } from "./securityOperations";
+import { recordIntegrationSettingsSaved } from "./securityOperations";
 
 const SETTINGS_PATH = path.join(process.cwd(), "server", "data", "integration-settings.enc.json");
 
@@ -106,18 +106,7 @@ export function getIntegrationExecutionMode(): IntegrationExecutionMode {
   return getConfiguredIntegrationValue("INTEGRATION_EXECUTION_MODE") === "simulation" ? "simulation" : "staging";
 }
 
-export function getAllowlistedSiemCorrelationUrl(eventId: string) {
-  const template = getConfiguredIntegrationValue("SIEM_CORRELATION_URL_TEMPLATE")?.trim();
-  if (!template || !template.includes("{eventId}")) return null;
-  try {
-    const resolved = template.replaceAll("{eventId}", encodeURIComponent(eventId));
-    const url = new URL(resolved);
-    const allowlist = (getConfiguredIntegrationValue("SECURITY_TELEMETRY_ALLOWED_HOSTS") ?? process.env.SECURITY_TELEMETRY_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
-    return url.protocol === "https:" && allowlist.includes(url.hostname.toLowerCase()) ? url.toString() : null;
-  } catch { return null; }
-}
-
-export function saveIntegrationSettings(input: Partial<Record<IntegrationField, string>>, actorOpenId = "unknown-administrator") {
+export function saveIntegrationSettings(input: Partial<Record<IntegrationField, string>>, actor = "unknown-administrator") {
   const key = encryptionKey();
   if (!key) throw new Error("Secure integration settings storage is unavailable. Configure INTEGRATION_SETTINGS_ENCRYPTION_KEY on the server first.");
   if (input.INTEGRATION_EXECUTION_MODE === "simulation" && !isSimulationModeAllowed()) {
@@ -126,15 +115,12 @@ export function saveIntegrationSettings(input: Partial<Record<IntegrationField, 
   if (input.INTEGRATION_EXECUTION_MODE && input.INTEGRATION_EXECUTION_MODE !== "simulation" && input.INTEGRATION_EXECUTION_MODE !== "staging") {
     throw new Error("Integration execution mode must be either staging or simulation.");
   }
-  const store = readStore(); const previousMode = getIntegrationExecutionMode();
+  const store = readStore();
   for (const field of INTEGRATION_FIELDS) {
     const value = input[field];
     if (typeof value === "string" && value.trim()) store[field] = encrypt(value.trim(), key);
   }
   writeStore(store);
-  const nextMode = getIntegrationExecutionMode();
-  if (input.INTEGRATION_EXECUTION_MODE && previousMode !== nextMode) appendSecurityEvent({ type: "integration_mode_changed", actor: actorOpenId, payload: { previousMode, nextMode, environment: process.env.NODE_ENV ?? "development" } });
+  recordIntegrationSettingsSaved({ actor, configuredFields: Object.entries(input).filter(([, value]) => typeof value === "string" && value.trim()).map(([field]) => field) });
   return getIntegrationSettingsStatus();
 }
-
-export function listIntegrationSecurityAudit(limit = 100) { return { integrity: verifySecurityLedger(), events: listSecurityEvents(limit) }; }

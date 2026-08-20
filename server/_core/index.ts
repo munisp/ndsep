@@ -11,7 +11,6 @@ import { registerDevelopmentProviderEmulators } from "../developmentProviderEmul
 import { GatewayWebhookSignatureError, GatewayWebhookUnavailableError, reconcileGatewayWebhook, type GatewayProvider } from "../offlinePaymentRepository";
 import { isAllowedOrigin, parseAllowedOrigins, readinessReport } from "../productionRuntime";
 import { prometheusMetrics, recordHttpRequest, structuredLog } from "../observability";
-import { applySecurityHeaders, fallbackApiRateLimitMiddleware } from "../httpSecurity";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -35,8 +34,6 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  app.disable("x-powered-by");
-  app.use(applySecurityHeaders);
   const allowedOrigins = parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS);
   app.use((req, res, next) => { const started = Date.now(); res.on("finish", () => { const route = req.path === "/api/trpc" ? "/api/trpc" : req.path; recordHttpRequest(req.method, route, res.statusCode); structuredLog("http_request", { method: req.method, route, status: res.statusCode, durationMs: Date.now() - started }); }); next(); });
 
@@ -83,9 +80,8 @@ async function startServer() {
     }
   });
 
-  app.use(fallbackApiRateLimitMiddleware);
-  app.use(express.json({ limit: process.env.MAX_APPLICATION_BODY_SIZE ?? "10mb" }));
-  app.use(express.urlencoded({ limit: process.env.MAX_APPLICATION_BODY_SIZE ?? "10mb", extended: true }));
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
   if (process.env.NODE_ENV !== "production") registerDevelopmentProviderEmulators(app);
 
   if (process.env.NODE_ENV !== "production" || process.env.SERVE_LOCAL_UPLOADS === "true") {

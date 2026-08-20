@@ -3,7 +3,7 @@ import { notifyOwner } from "./notification";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./trpc";
 import { readinessReport } from "../productionRuntime";
 import { getAdministratorInfrastructureStatus } from "../infrastructureStatus";
-import { getSecurityPosture } from "../securityPosture";
+import { getWafBlockTrend } from "../securityTelemetry";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -17,8 +17,8 @@ export const systemRouter = router({
     })),
   runtimeReadiness: publicProcedure.query(() => readinessReport()),
   infrastructureStatus: adminProcedure.query(() => getAdministratorInfrastructureStatus()),
-  securityPosture: adminProcedure.query(() => getSecurityPosture()),
-  identitySecurity: protectedProcedure.query(({ ctx }) => ({ loginMethod: ctx.user.loginMethod, lastSignedIn: ctx.user.lastSignedIn.toISOString(), mfaVerified: Boolean(ctx.enterprise?.mfaAuthenticated), accountConsoleUrl: process.env.KEYCLOAK_ACCOUNT_CONSOLE_URL?.trim() || null, sessionManagement: process.env.KEYCLOAK_ACCOUNT_CONSOLE_URL?.trim() ? "external_keycloak_account_console" : "unavailable_until_keycloak_account_console_is_configured" })),
+  identitySecurity: protectedProcedure.query(({ ctx }) => ({ activeSessions: [{ sessionId: "current", label: "Current authenticated session", signedInAt: ctx.user.lastSignedIn?.toISOString?.() ?? new Date().toISOString(), loginMethod: ctx.user.loginMethod ?? "unknown", passkeyStatus: ctx.enterprise?.authMethod === "oidc" ? (ctx.enterprise.passkeyAuthenticated ? "verified_in_this_session" : "not_reported_by_token") : "not_available_for_local_session" }], accountConsoleUrl: process.env.KEYCLOAK_ACCOUNT_CONSOLE_URL?.trim() || null })),
+  wafBlockTrend: adminProcedure.query(() => getWafBlockTrend()),
 
   notifyOwner: adminProcedure
     .input(
