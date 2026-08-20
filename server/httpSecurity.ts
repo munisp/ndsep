@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
+let rejectedRequests = 0;
 
 export function applySecurityHeaders(req: Request, res: Response, next: NextFunction) {
   res.removeHeader("X-Powered-By");
@@ -18,8 +19,10 @@ export function fallbackApiRateLimit(input: { remoteAddress: string; now?: numbe
   const bucket = buckets.get(input.remoteAddress);
   if (!bucket || bucket.resetAt <= now) { buckets.set(input.remoteAddress, { count: 1, resetAt: now + windowMs }); return { allowed: true, retryAfterSeconds: 0 }; }
   bucket.count += 1; if (bucket.count <= limit) return { allowed: true, retryAfterSeconds: 0 };
-  return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000)) };
+  rejectedRequests += 1; return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000)) };
 }
+
+export function fallbackRateLimitTelemetry() { return { source: "application_local_fallback" as const, rejectedRequests, activeBuckets: buckets.size, distributedGatewayTelemetry: "not_available_from_application_process" as const }; }
 
 export function fallbackApiRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
   if (req.path === "/healthz" || req.path === "/readyz" || req.path === "/metrics") return next();

@@ -170,6 +170,12 @@ export default function ProfileScreen() {
           <Link href={"/infrastructure-status" as never} asChild>
             <View className="mt-4 rounded-2xl border border-primary bg-primary/5 px-4 py-4"><Text className="text-center font-semibold text-primary">Review infrastructure readiness</Text></View>
           </Link>
+          <Link href={"/security-posture" as never} asChild>
+            <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Review security posture</Text></View>
+          </Link>
+          <Link href={"/security-identity" as never} asChild>
+            <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Manage MFA and sessions</Text></View>
+          </Link>
           <Link href={"/integration-settings" as never} asChild>
             <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Open integration settings</Text></View>
           </Link>

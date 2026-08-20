@@ -423,3 +423,6 @@
 - [x] Add Caddy, APISIX, OpenAppSec, Keycloak MFA, and OPA policy target-environment deployment artifacts
 - [x] Add DDoS, external credential-abuse, and insider-risk resilience controls with fail-closed enforcement
 - [x] Validate defense-in-depth artifacts and document target-environment evidence requirements without claiming absolute security
+- [x] Add an administrator UI to review and filter the HMAC hash-chained security configuration audit trail
+- [x] Add administrator MFA preference and authenticated-session management interface with truthful IdP boundaries
+- [x] Add security posture widget distinguishing application rate limiting from live gateway/WAF telemetry
