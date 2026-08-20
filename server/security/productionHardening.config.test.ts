@@ -50,13 +50,25 @@ describe("production security configuration", () => {
       accessTokenLifespan: number;
       ssoSessionIdleTimeout: number;
       requiredActions: Array<{ alias: string; defaultAction: boolean }>;
-      clients: Array<{ redirectUris: string[]; directAccessGrantsEnabled: boolean; attributes: Record<string, string> }>;
+      clients: Array<{
+        redirectUris: string[];
+        directAccessGrantsEnabled: boolean;
+        attributes: Record<string, string>;
+        protocolMappers: Array<{ name: string; protocolMapper: string; config: Record<string, string> }>;
+      }>;
     };
     expect(realm.accessTokenLifespan).toBeLessThanOrEqual(600);
     expect(realm.ssoSessionIdleTimeout).toBeLessThanOrEqual(900);
     expect(realm.requiredActions).toContainEqual(expect.objectContaining({ alias: "CONFIGURE_TOTP", defaultAction: true }));
     expect(realm.clients[0].directAccessGrantsEnabled).toBe(false);
     expect(realm.clients[0].attributes["pkce.code.challenge.method"]).toBe("S256");
+    expect(realm.clients[0].protocolMappers).toContainEqual(
+      expect.objectContaining({
+        name: "ndsep-access-token-amr",
+        protocolMapper: "oidc-amr-mapper",
+        config: expect.objectContaining({ "access.token.claim": "true" }),
+      }),
+    );
     expect(realm.clients[0].redirectUris.join("\n")).not.toContain("localhost");
     expect(realm.clients[0].redirectUris.join("\n")).not.toContain("*.manus");
   });

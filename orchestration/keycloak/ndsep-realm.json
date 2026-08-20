@@ -132,6 +132,20 @@
         "https://staging.ndsep.nitda.gov.ng"
       ],
       "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "ndsep-access-token-amr",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-amr-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        }
+      ],
       "attributes": {
         "saml.assertion.signature": "false",
         "saml.force.post.binding": "false",
@@ -308,7 +322,8 @@
             "saml-user-attribute-mapper",
             "saml-role-list-mapper",
             "saml-user-property-mapper",
-            "oidc-usermodel-attribute-mapper"
+            "oidc-usermodel-attribute-mapper",
+            "oidc-amr-mapper"
           ]
         }
       }
