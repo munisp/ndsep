@@ -16,6 +16,8 @@ export type EnterprisePrincipal = {
   agencyId: string;
   agencyRoles: EnterpriseAgencyRole[];
   authMethod: "oidc" | "local_development";
+  /** Optional session identifier only when a verified OIDC token supplied sid or session_state. */
+  sessionId?: string;
   /** True only when the verified OIDC access token's AMR claim reports a WebAuthn/passkey method. */
   passkeyAuthenticated: boolean;
 };

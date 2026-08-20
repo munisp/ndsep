@@ -65,6 +65,7 @@ class SDKServer {
     });
     const claims = payload as Record<string, unknown>;
     const subject = typeof claims.sub === "string" ? claims.sub : null;
+    const sessionId = typeof claims.sid === "string" ? claims.sid : typeof claims.session_state === "string" ? claims.session_state : undefined;
     const agencyId = resolveClaim(claims, ENV.oidcAgencyIdClaim);
     const agencyRoles = toAgencyRoles(resolveClaim(claims, ENV.oidcAgencyRolesClaim));
     if (!subject || typeof agencyId !== "string" || !agencyId || agencyRoles.length === 0) return null;
@@ -85,6 +86,7 @@ class SDKServer {
         agencyId,
         agencyRoles,
         authMethod: "oidc",
+        sessionId,
         passkeyAuthenticated: isPasskeyAuthenticated(claims.amr),
       },
     };
@@ -214,6 +216,7 @@ class SDKServer {
             agencyId: "local-development-agency",
             agencyRoles: ["planning_supervisor"],
             authMethod: "local_development",
+            sessionId: undefined,
             passkeyAuthenticated: false,
           }
         : undefined;

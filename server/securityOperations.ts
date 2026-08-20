@@ -4,7 +4,7 @@ import path from "node:path";
 
 export type SecurityAuditEvent = {
   eventId: string;
-  type: "siem_correlation_opened" | "integration_settings_saved";
+  type: "siem_correlation_opened" | "integration_settings_saved" | "keycloak_session_revocation_requested";
   actor: string;
   occurredAt: string;
   payload: Record<string, string | string[]>;
@@ -39,3 +39,17 @@ export function recordSiemCorrelationOpen(input: { actor: string; auditEventId: 
 
 export function recordIntegrationSettingsSaved(input: { actor: string; configuredFields: string[] }) { return appendEvent({ type: "integration_settings_saved", actor: input.actor, payload: { configuredFields: [...input.configuredFields].sort() } }); }
 export function listSecurityAuditEvents(limit = 100) { return readEvents().slice(-Math.max(1, Math.min(limit, 250))).reverse(); }
+export function recordKeycloakSessionRevocation(input: { actor: string; sessionHash: string; outcome: "revoked" | "unavailable" | "rejected" }) { return appendEvent({ type: "keycloak_session_revocation_requested", actor: input.actor, payload: { sessionHash: input.sessionHash, outcome: input.outcome } }); }
+
+export function verifySecurityAuditChain() {
+  const events = readEvents(); const key = process.env.SECURITY_AUDIT_HMAC_KEY?.trim() || null; let previousHash: string | null = null;
+  for (const event of events) {
+    const draft: Omit<SecurityAuditEvent, "eventHash" | "hmac"> = { eventId: event.eventId, type: event.type, actor: event.actor, occurredAt: event.occurredAt, payload: event.payload, previousHash: event.previousHash };
+    const expectedHash: string = crypto.createHash("sha256").update(`${previousHash ?? "genesis"}:${canonical(draft)}`).digest("hex");
+    if (event.previousHash !== previousHash || event.eventHash !== expectedHash) return { valid: false, totalEvents: events.length, hmacStatus: key ? "invalid" : "not_configured", firstInvalidEventId: event.eventId, reason: "Hash-chain link or event digest does not match." } as const;
+    const expectedHmac = key ? crypto.createHmac("sha256", key).update(event.eventHash).digest("hex") : null;
+    if (expectedHmac && (!event.hmac || event.hmac.length !== expectedHmac.length || !crypto.timingSafeEqual(Buffer.from(event.hmac, "hex"), Buffer.from(expectedHmac, "hex")))) return { valid: false, totalEvents: events.length, hmacStatus: "invalid", firstInvalidEventId: event.eventId, reason: "HMAC does not match the configured integrity key." } as const;
+    previousHash = event.eventHash;
+  }
+  return { valid: true, totalEvents: events.length, hmacStatus: key ? "verified" : "not_configured", firstInvalidEventId: null, reason: events.length ? null : "No security audit events have been recorded yet." } as const;
+}

@@ -420,3 +420,6 @@
 - [x] Display verified Keycloak passkey enrollment status in administrator active-session security views
 - [x] Record signed configuration-audit events when administrators open allowlisted SIEM correlation links
 - [x] Add a truthful 24-hour WAF block trend visualization that remains unavailable without live history telemetry
+- [x] Add administrator audit-chain integrity verification with explicit broken-chain evidence
+- [x] Add guarded Keycloak administrator session-revocation controls with fail-closed IdP boundaries
+- [x] Add verified WAF interval tooltips for threat categories and redacted source-address details
