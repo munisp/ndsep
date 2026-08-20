@@ -60,7 +60,7 @@ import {
   advancePermitHandoff,
 } from "./permittingPlatformRepository";
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
-import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, listIntegrationSecurityAudit, saveIntegrationSettings } from "./integrationSettingsRepository";
+import { INTEGRATION_FIELDS, getAllowlistedSiemCorrelationUrl, getIntegrationSettingsStatus, listIntegrationSecurityAudit, saveIntegrationSettings } from "./integrationSettingsRepository";
 import { acknowledgeRuntimeStatusAlert, listRuntimeStatusAlerts, probeApprovedStagingEndpoint } from "./securityOperations";
 import { acknowledgeFieldEvidenceEscalation, assignFieldEvidenceSupervisor, escalateFieldEvidence, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
@@ -254,7 +254,7 @@ export const appRouter = router({
   }),
   integrationSettings: router({
     status: publicProcedure.query(() => getIntegrationSettingsStatus()),
-    audit: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).default(100) })).query(({ input }) => listIntegrationSecurityAudit(input.limit)),
+    audit: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).default(100) })).query(({ input }) => { const audit = listIntegrationSecurityAudit(input.limit); return { ...audit, events: audit.events.map((event) => ({ ...event, siemCorrelationUrl: getAllowlistedSiemCorrelationUrl(event.eventId) })) }; }),
     probe: mfaAdminProcedure.input(z.object({ service: z.string().min(2).max(100), probeUrl: z.string().url().max(1000) })).mutation(({ ctx, input }) => probeApprovedStagingEndpoint({ ...input, actor: ctx.user!.openId })),
     runtimeAlerts: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).default(100) })).query(({ input }) => listRuntimeStatusAlerts(input.limit)),
     acknowledgeRuntimeAlert: adminProcedure.input(z.object({ alertEventId: z.string().uuid() })).mutation(({ ctx, input }) => acknowledgeRuntimeStatusAlert({ ...input, actor: ctx.user.openId })),

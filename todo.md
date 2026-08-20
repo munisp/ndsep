@@ -426,3 +426,6 @@
 - [x] Add an administrator UI to review and filter the HMAC hash-chained security configuration audit trail
 - [x] Add administrator MFA preference and authenticated-session management interface with truthful IdP boundaries
 - [x] Add security posture widget distinguishing application rate limiting from live gateway/WAF telemetry
+- [x] Add safe, allowlisted SIEM correlation pivots to the administrator configuration audit explorer
+- [x] Add guarded APISIX/OpenAppSec telemetry endpoint configuration for authenticated WAF block statistics
+- [x] Add visual MFA enrollment guidance and direct Keycloak account-console links for administrators

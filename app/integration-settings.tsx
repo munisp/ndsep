@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Link } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
@@ -20,7 +21,11 @@ type FieldName =
   | "PAYSTACK_SECRET_KEY"
   | "FLUTTERWAVE_WEBHOOK_SECRET_HASH"
   | "FLUTTERWAVE_SECRET_KEY"
-  | "INTEGRATION_EXECUTION_MODE";
+  | "INTEGRATION_EXECUTION_MODE"
+  | "WAF_TELEMETRY_URL"
+  | "WAF_TELEMETRY_BEARER_TOKEN"
+  | "SECURITY_TELEMETRY_ALLOWED_HOSTS"
+  | "SIEM_CORRELATION_URL_TEMPLATE";
 
 const groups: Array<{ title: string; note: string; fields: Array<{ key: FieldName; label: string; secret?: boolean }> }> = [
   {
@@ -59,6 +64,16 @@ const groups: Array<{ title: string; note: string; fields: Array<{ key: FieldNam
       { key: "PAYSTACK_SECRET_KEY", label: "Paystack secret key", secret: true },
       { key: "FLUTTERWAVE_WEBHOOK_SECRET_HASH", label: "Flutterwave webhook secret hash", secret: true },
       { key: "FLUTTERWAVE_SECRET_KEY", label: "Flutterwave secret key", secret: true },
+    ],
+  },
+  {
+    title: "APISIX and OpenAppSec telemetry",
+    note: "Configure only an HTTPS, allowlisted telemetry endpoint that returns blockedRequestsLast5m. The application will show unavailable/degraded rather than fabricate WAF statistics.",
+    fields: [
+      { key: "WAF_TELEMETRY_URL", label: "Telemetry URL" },
+      { key: "WAF_TELEMETRY_BEARER_TOKEN", label: "Telemetry bearer token", secret: true },
+      { key: "SECURITY_TELEMETRY_ALLOWED_HOSTS", label: "Allowed telemetry/SIEM hosts (comma-separated)" },
+      { key: "SIEM_CORRELATION_URL_TEMPLATE", label: "SIEM correlation URL template (use {eventId})" },
     ],
   },
 ];
@@ -106,7 +121,7 @@ export default function IntegrationSettingsScreen() {
 
         <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Integration execution mode</Text><Text className="mt-2 text-sm leading-5 text-muted">Staging uses the approved endpoints entered below. Simulation is a development-only emulator lab and cannot verify identity, registry, document, or payment outcomes.</Text><View className="mt-4 flex-row gap-3"><Pressable onPress={() => setValues((current) => ({ ...current, INTEGRATION_EXECUTION_MODE: "staging" }))} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.78 : 1 }]}><View className={`rounded-2xl border px-4 py-3 ${executionMode === "staging" ? "border-success bg-success/10" : "border-border bg-background"}`}><Text className="text-center font-semibold text-foreground">Staging</Text></View></Pressable><Pressable disabled={!status?.simulationAllowed} onPress={() => setValues((current) => ({ ...current, INTEGRATION_EXECUTION_MODE: "simulation" }))} style={({ pressed }) => [{ flex: 1, opacity: !status?.simulationAllowed ? 0.4 : pressed ? 0.78 : 1 }]}><View className={`rounded-2xl border px-4 py-3 ${executionMode === "simulation" ? "border-warning bg-warning/10" : "border-border bg-background"}`}><Text className="text-center font-semibold text-foreground">Simulation</Text></View></Pressable></View><Text className="mt-3 text-xs leading-5 text-muted">{status?.simulationAllowed ? "Simulation is permitted only because this server explicitly enabled development emulators. Saving requires administrator access." : "Simulation is disabled in this environment, including production."}</Text></View>
 
-        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Signed configuration audit</Text><Text className={`mt-2 text-sm font-semibold ${securityAudit.data?.integrity.valid ? "text-success" : "text-warning"}`}>{securityAudit.data?.integrity.valid ? "Integrity chain valid" : securityAudit.isError ? "Administrator access required" : "Integrity key or events unavailable"}</Text><Text className="mt-1 text-xs leading-5 text-muted">Only configuration metadata and actor identifiers are retained here; secret values are never included. Production requires a dedicated audit HMAC key.</Text>{securityAudit.data?.events.length ? <View className="mt-3 gap-2">{securityAudit.data.events.slice(0, 5).map((event) => <View key={event.eventId} className="rounded-xl border border-border bg-background p-3"><Text className="text-xs font-semibold text-foreground">{event.type.replace(/_/g, " ")}</Text><Text className="mt-1 text-xs text-muted">{event.actor} · {new Date(event.occurredAt).toLocaleString()}</Text></View>)}</View> : null}</View>
+        <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Signed configuration audit</Text><Text className={`mt-2 text-sm font-semibold ${securityAudit.data?.integrity.valid ? "text-success" : "text-warning"}`}>{securityAudit.data?.integrity.valid ? "Integrity chain valid" : securityAudit.isError ? "Administrator access required" : "Integrity key or events unavailable"}</Text><Text className="mt-1 text-xs leading-5 text-muted">Only configuration metadata and actor identifiers are retained here; secret values are never included. Production requires a dedicated audit HMAC key.</Text>{securityAudit.data?.events.length ? <View className="mt-3 gap-2">{securityAudit.data.events.slice(0, 25).map((event) => <View key={event.eventId} className="rounded-xl border border-border bg-background p-3"><Text className="text-xs font-semibold text-foreground">{event.type.replace(/_/g, " ")}</Text><Text className="mt-1 text-xs text-muted">{event.actor} · {new Date(event.occurredAt).toLocaleString()}</Text>{event.siemCorrelationUrl ? <Pressable onPress={() => { const url = event.siemCorrelationUrl; if (url) void WebBrowser.openBrowserAsync(url); }}><Text className="mt-2 text-xs font-semibold text-primary">Open correlated SIEM event</Text></Pressable> : <Text className="mt-2 text-xs text-muted">No allowlisted SIEM correlation is configured.</Text>}</View>)}</View> : null}</View>
 
         {groups.map((group) => (
           <View key={group.title} className="rounded-3xl border border-border bg-surface p-5">

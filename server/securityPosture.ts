@@ -1,15 +1,16 @@
 import { fallbackRateLimitTelemetry } from "./httpSecurity";
+import { getConfiguredIntegrationValue } from "./integrationSettingsRepository";
 
 function approvedTelemetryUrl(value: string) {
   const url = new URL(value); if (url.protocol !== "https:") throw new Error("WAF telemetry requires an HTTPS endpoint.");
-  const allowlist = process.env.SECURITY_TELEMETRY_ALLOWED_HOSTS?.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean) ?? [];
+  const allowlist = (getConfiguredIntegrationValue("SECURITY_TELEMETRY_ALLOWED_HOSTS") ?? process.env.SECURITY_TELEMETRY_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
   if (!allowlist.includes(url.hostname.toLowerCase())) throw new Error("WAF telemetry endpoint is not allowlisted.");
   return url;
 }
 
 export async function getSecurityPosture() {
   const applicationRateLimit = fallbackRateLimitTelemetry();
-  const endpoint = process.env.WAF_TELEMETRY_URL?.trim(); const token = process.env.WAF_TELEMETRY_BEARER_TOKEN?.trim();
+  const endpoint = getConfiguredIntegrationValue("WAF_TELEMETRY_URL")?.trim(); const token = getConfiguredIntegrationValue("WAF_TELEMETRY_BEARER_TOKEN")?.trim();
   if (!endpoint || !token) return { applicationRateLimit, waf: { state: "unavailable" as const, blockedRequestsLast5m: null, detail: "Authenticated gateway/WAF telemetry is not configured." }, sampledAt: new Date().toISOString() };
   try {
     const url = approvedTelemetryUrl(endpoint); const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 5_000);

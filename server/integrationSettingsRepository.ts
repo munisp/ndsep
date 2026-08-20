@@ -23,6 +23,10 @@ export const INTEGRATION_FIELDS = [
   "FLUTTERWAVE_WEBHOOK_SECRET_HASH",
   "FLUTTERWAVE_SECRET_KEY",
   "INTEGRATION_EXECUTION_MODE",
+  "WAF_TELEMETRY_URL",
+  "WAF_TELEMETRY_BEARER_TOKEN",
+  "SECURITY_TELEMETRY_ALLOWED_HOSTS",
+  "SIEM_CORRELATION_URL_TEMPLATE",
 ] as const;
 
 export type IntegrationField = (typeof INTEGRATION_FIELDS)[number];
@@ -100,6 +104,17 @@ export function isSimulationModeAllowed(env: NodeJS.ProcessEnv = process.env) {
 
 export function getIntegrationExecutionMode(): IntegrationExecutionMode {
   return getConfiguredIntegrationValue("INTEGRATION_EXECUTION_MODE") === "simulation" ? "simulation" : "staging";
+}
+
+export function getAllowlistedSiemCorrelationUrl(eventId: string) {
+  const template = getConfiguredIntegrationValue("SIEM_CORRELATION_URL_TEMPLATE")?.trim();
+  if (!template || !template.includes("{eventId}")) return null;
+  try {
+    const resolved = template.replaceAll("{eventId}", encodeURIComponent(eventId));
+    const url = new URL(resolved);
+    const allowlist = (getConfiguredIntegrationValue("SECURITY_TELEMETRY_ALLOWED_HOSTS") ?? process.env.SECURITY_TELEMETRY_ALLOWED_HOSTS ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
+    return url.protocol === "https:" && allowlist.includes(url.hostname.toLowerCase()) ? url.toString() : null;
+  } catch { return null; }
 }
 
 export function saveIntegrationSettings(input: Partial<Record<IntegrationField, string>>, actorOpenId = "unknown-administrator") {
