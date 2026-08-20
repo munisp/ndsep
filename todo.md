@@ -417,3 +417,9 @@
 - [x] Add administrator infrastructure status dashboard with simulation/staging readiness detail
 - [x] Add a user-friendly fail-closed runtime recovery screen with next-step guidance
 - [x] Add guarded administrator configuration controls for simulation versus real staging provider modes
+- [x] Define and document enterprise threat model, security trust boundaries, and residual-risk acceptance criteria
+- [x] Add authenticated staging health probes and administrator runtime-health change alerts
+- [x] Add tamper-evident configuration-change audit records for simulation/staging mode changes
+- [x] Add Caddy, APISIX, OpenAppSec, Keycloak MFA, and OPA policy target-environment deployment artifacts
+- [x] Add DDoS, external credential-abuse, and insider-risk resilience controls with fail-closed enforcement
+- [x] Validate defense-in-depth artifacts and document target-environment evidence requirements without claiming absolute security

@@ -29,6 +29,7 @@ export const ENV = {
   oidcJwksUrl: process.env.OIDC_JWKS_URL ?? "",
   oidcAgencyIdClaim: process.env.OIDC_AGENCY_ID_CLAIM ?? "agency_id",
   oidcAgencyRolesClaim: process.env.OIDC_AGENCY_ROLES_CLAIM ?? "agency_roles",
+  oidcMfaAcr: process.env.OIDC_MFA_ACR ?? "urn:idlrpts:mfa",
   allowLocalEnterpriseAuth: process.env.ALLOW_LOCAL_ENTERPRISE_AUTH === "true",
   enterpriseAuthRequired: process.env.ENTERPRISE_AUTH_REQUIRED === "true" || process.env.NODE_ENV === "production",
 };

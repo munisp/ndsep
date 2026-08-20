@@ -66,6 +66,8 @@ class SDKServer {
 
     const email = typeof claims.email === "string" ? claims.email : null;
     const name = typeof claims.name === "string" ? claims.name : email ?? subject;
+    const amr = Array.isArray(claims.amr) ? claims.amr.filter((value): value is string => typeof value === "string") : [];
+    const mfaAuthenticated = claims.acr === ENV.oidcMfaAcr || amr.some((value) => ["mfa", "otp", "totp", "webauthn", "passkey"].includes(value.toLowerCase()));
     return {
       identity: {
         openId: `${ENV.oidcIssuer}:${subject}`.slice(0, 63),
@@ -80,6 +82,7 @@ class SDKServer {
         agencyId,
         agencyRoles,
         authMethod: "oidc",
+        mfaAuthenticated,
       },
     };
   }
@@ -208,6 +211,7 @@ class SDKServer {
             agencyId: "local-development-agency",
             agencyRoles: ["planning_supervisor"],
             authMethod: "local_development",
+            mfaAuthenticated: true,
           }
         : undefined;
 

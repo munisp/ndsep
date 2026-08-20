@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { COOKIE_NAME } from "../shared/const";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, enterpriseProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, enterpriseProcedure, mfaAdminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { assertEnterpriseRole, type EnterpriseAgencyRole } from "./_core/enterpriseAuth";
 import {
   analyzeDocumentImage,
@@ -60,7 +60,8 @@ import {
   advancePermitHandoff,
 } from "./permittingPlatformRepository";
 import { getProviderHealth, verifyBusinessRegistration, verifyNationalIdentity, verifyRegistryTitle } from "./trustProviders";
-import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, saveIntegrationSettings } from "./integrationSettingsRepository";
+import { INTEGRATION_FIELDS, getIntegrationSettingsStatus, listIntegrationSecurityAudit, saveIntegrationSettings } from "./integrationSettingsRepository";
+import { acknowledgeRuntimeStatusAlert, listRuntimeStatusAlerts, probeApprovedStagingEndpoint } from "./securityOperations";
 import { acknowledgeFieldEvidenceEscalation, assignFieldEvidenceSupervisor, escalateFieldEvidence, listFieldEvidence, recordFieldEvidence, reviewFieldEvidence } from "./fieldEvidenceRepository";
 import { exportLocalPolicyHistoryPdf, listLocalPolicies, updateLocalPolicy } from "./localPolicyRepository";
 import { acknowledgeHighRiskReconciliationAlert, getOfflinePaymentSummary, getPaymentGatewayOperationalHealth, getReconciliationRetryOutcomeTrend, listHighRiskReconciliationAlerts, listPaymentAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, listPaymentStateApprovalPolicies, listPendingOfflinePayments, listReceiptScanHistory, markPaymentAlertRead, PAYMENT_APPROVAL_ROLES, PAYMENT_JURISDICTIONS, processDueGatewayVerificationRetries, processDueHighRiskAlertEscalations, recordPaymentAuditExport, recordReconciliationExceptionExport, resolvePaymentReconciliationException, reviewOfflinePayment, submitOfflinePayment, triggerManualGatewayVerificationRetry, updatePaymentStateApprovalPolicy, verifyReceiptAndRecordScan } from "./offlinePaymentRepository";
@@ -253,17 +254,21 @@ export const appRouter = router({
   }),
   integrationSettings: router({
     status: publicProcedure.query(() => getIntegrationSettingsStatus()),
-    save: adminProcedure
+    audit: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).default(100) })).query(({ input }) => listIntegrationSecurityAudit(input.limit)),
+    probe: mfaAdminProcedure.input(z.object({ service: z.string().min(2).max(100), probeUrl: z.string().url().max(1000) })).mutation(({ ctx, input }) => probeApprovedStagingEndpoint({ ...input, actor: ctx.user!.openId })),
+    runtimeAlerts: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).default(100) })).query(({ input }) => listRuntimeStatusAlerts(input.limit)),
+    acknowledgeRuntimeAlert: adminProcedure.input(z.object({ alertEventId: z.string().uuid() })).mutation(({ ctx, input }) => acknowledgeRuntimeStatusAlert({ ...input, actor: ctx.user.openId })),
+    save: mfaAdminProcedure
       .input(z.object(Object.fromEntries(INTEGRATION_FIELDS.map((field) => [field, z.string().max(5000).optional()]))))
-      .mutation(({ input }) => saveIntegrationSettings(input)),
+      .mutation(({ ctx, input }) => saveIntegrationSettings(input, ctx.user!.openId)),
   }),
   diagnosticExports: router({
     attestationStatus: publicProcedure.query(() => getDiagnosticAttestationStatus()),
     receiptStatus: publicProcedure.input(z.object({ receiptId: z.string().uuid() })).query(({ input }) => getDiagnosticAttestationStatusByReceiptId(input.receiptId)),
     listAttestations: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(250).default(100), query: z.string().max(255).optional(), status: z.enum(["all", "active", "revoked"]).default("all"), from: z.string().datetime().nullable().optional(), to: z.string().datetime().nullable().optional() })).query(({ input }) => listDiagnosticAttestations(input)),
     attestationDetail: adminProcedure.input(z.object({ receiptId: z.string().uuid() })).query(({ input }) => getDiagnosticAttestationDetail(input.receiptId)),
-    revokeAttestation: adminProcedure.input(z.object({ receiptId: z.string().uuid(), reason: z.string().min(3).max(1000) })).mutation(({ ctx, input }) => revokeDiagnosticAttestation({ ...input, actorOpenId: ctx.user.openId })),
-    bulkRevokeAttestations: adminProcedure.input(z.object({ receiptIds: z.array(z.string().uuid()).min(1).max(50), reason: z.string().min(3).max(1000) })).mutation(({ ctx, input }) => bulkRevokeDiagnosticAttestations({ ...input, actorOpenId: ctx.user.openId })),
+    revokeAttestation: mfaAdminProcedure.input(z.object({ receiptId: z.string().uuid(), reason: z.string().min(3).max(1000) })).mutation(({ ctx, input }) => revokeDiagnosticAttestation({ ...input, actorOpenId: ctx.user!.openId })),
+    bulkRevokeAttestations: mfaAdminProcedure.input(z.object({ receiptIds: z.array(z.string().uuid()).min(1).max(50), reason: z.string().min(3).max(1000) })).mutation(({ ctx, input }) => bulkRevokeDiagnosticAttestations({ ...input, actorOpenId: ctx.user!.openId })),
     exportAttestations: adminProcedure.input(z.object({ receiptIds: z.array(z.string().uuid()).min(1).max(250) })).mutation(({ input }) => exportDiagnosticAttestations(input.receiptIds)),
     myRevocationNotifications: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(25), readStatus: z.enum(["all", "unread", "acknowledged"]).default("all"), archiveStatus: z.enum(["active", "archived", "all"]).default("active"), sort: z.enum(["newest", "oldest"]).default("newest") })).query(({ ctx, input }) => listReceiptRevocationNotifications({ ...input, recipientSubject: ctx.user.openId })),
     markRevocationNotificationRead: protectedProcedure.input(z.object({ notificationId: z.string().uuid() })).mutation(({ ctx, input }) => markReceiptRevocationNotificationRead({ ...input, recipientSubject: ctx.user.openId })),

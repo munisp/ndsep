@@ -8,6 +8,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useColors } from "@/hooks/use-colors";
 import { getUnreadActivityCount, subscribeActivityFeed } from "@/lib/mobile-activity";
 import { ReceiptNotificationCenter } from "@/components/receipt-notification-center";
+import { RuntimeStatusNotificationCenter } from "@/components/runtime-status-notification-center";
 
 function InboxBadge({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -107,6 +108,7 @@ export default function TabLayout() {
       />
     </Tabs>
     <ReceiptNotificationCenter />
+    <RuntimeStatusNotificationCenter />
     </View>
   );
 }

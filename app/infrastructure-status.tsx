@@ -1,5 +1,6 @@
 import { Link } from "expo-router";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
@@ -7,7 +8,10 @@ import { trpc } from "@/lib/trpc";
 const stateStyle: Record<string, string> = { ready: "text-success", emulator: "text-warning", unavailable: "text-warning", blocked: "text-error", disabled: "text-muted", failed: "text-error" };
 
 export default function InfrastructureStatusScreen() {
+  const [probeService, setProbeService] = useState("keycloak-staging");
+  const [probeUrl, setProbeUrl] = useState("");
   const status = trpc.system.infrastructureStatus.useQuery(undefined, { retry: false, refetchInterval: 15_000 });
+  const probe = trpc.integrationSettings.probe.useMutation({ onSuccess: () => status.refetch() });
   const data = status.data;
   return (
     <ScreenContainer className="bg-background">
@@ -18,6 +22,7 @@ export default function InfrastructureStatusScreen() {
         {data ? <>
           <View className={`rounded-3xl border p-5 ${data.runtime.ok ? "border-success bg-success/10" : "border-error bg-error/10"}`}><Text className={`text-lg font-semibold ${data.runtime.ok ? "text-success" : "text-error"}`}>{data.runtime.ok ? "Runtime safeguards present" : "Runtime safeguards incomplete"}</Text><Text className="mt-2 text-sm leading-5 text-foreground">{data.runtime.ok ? "The runtime configuration contract is present. Provider authorization and external evidence remain separate checks." : `Missing: ${data.runtime.missingRequiredChecks.join(", ")}`}</Text></View>
           <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Execution mode</Text><Text className={`mt-2 text-sm font-semibold ${data.executionMode === "simulation" ? "text-warning" : "text-success"}`}>{data.executionMode === "simulation" ? "Simulation — non-authoritative" : "Staging — approved endpoints required"}</Text><Text className="mt-1 text-sm leading-5 text-muted">{data.simulationAllowed ? "Simulation is permitted only because this is a development environment with emulator support explicitly enabled." : "Simulation is disabled for this environment."}</Text></View>
+          <View className="rounded-3xl border border-border bg-surface p-5"><Text className="text-lg font-semibold text-foreground">Authenticated staging probe</Text><Text className="mt-2 text-sm leading-5 text-muted">Probe only an HTTPS health URL approved through the server allowlist. This request uses a server-held probe credential, rejects private-network targets, and records a signed runtime-health event when the state changes.</Text><TextInput value={probeService} onChangeText={setProbeService} placeholder="Service label" placeholderTextColor="#667085" className="mt-4 rounded-xl border border-border bg-background px-3 py-3 text-sm text-foreground" autoCapitalize="none" /><TextInput value={probeUrl} onChangeText={setProbeUrl} placeholder="https://approved-staging.example.ng/health" placeholderTextColor="#667085" className="mt-3 rounded-xl border border-border bg-background px-3 py-3 text-sm text-foreground" autoCapitalize="none" autoCorrect={false} keyboardType="url" /><Pressable disabled={!probeUrl.trim() || probe.isPending} onPress={() => probe.mutate({ service: probeService.trim() || "staging-service", probeUrl: probeUrl.trim() })} style={({ pressed }) => [{ marginTop: 12, opacity: !probeUrl.trim() || probe.isPending ? 0.5 : pressed ? 0.78 : 1 }]}><View className="rounded-xl bg-foreground px-4 py-3"><Text className="text-center font-semibold text-background">{probe.isPending ? "Checking…" : "Run approved probe"}</Text></View></Pressable>{probe.error ? <Text className="mt-3 text-xs leading-5 text-error">{probe.error.message}</Text> : null}{probe.data ? <Text className={`mt-3 text-xs leading-5 ${probe.data.state === "reachable" ? "text-success" : "text-warning"}`}>{probe.data.detail}</Text> : null}</View>
           <View className="gap-3">{data.services.map((service) => <View key={service.id} className="rounded-2xl border border-border bg-surface p-4"><View className="flex-row items-center justify-between gap-3"><Text className="flex-1 text-base font-semibold text-foreground">{service.label}</Text><Text className={`text-xs font-semibold ${stateStyle[service.state] ?? "text-muted"}`}>{service.state.toUpperCase()}</Text></View><Text className="mt-2 text-sm leading-5 text-muted">{service.detail}</Text><Text className="mt-2 text-xs text-muted">{service.authoritative ? "Configured status only; validate the external provider separately." : "Non-authoritative development simulation or disabled capability."}</Text></View>)}</View>
           <Text className="text-center text-xs text-muted">Updated {new Date(data.generatedAt).toLocaleTimeString()}; refreshes every 15 seconds while open.</Text>
         </> : null}

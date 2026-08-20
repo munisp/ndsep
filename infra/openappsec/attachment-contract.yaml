@@ -1,0 +1,16 @@
+# OPENAPPSEC ATTACHMENT CONTRACT — not active until validated against the installed agent/chart release.
+# Attach the WAF to the Caddy/APISIX ingress path, never directly to the application pod.
+mode: prevent
+protectedAssets:
+  - host: ${IDLR_PUBLIC_HOST}
+    paths: ["/api/*", "/oauth/*"]
+requiredSignals:
+  - web-attack
+  - api-abuse
+  - bot-management
+  - rate-limit-anomaly
+operationalRequirements:
+  - Start in detect mode with a documented tuning window.
+  - Promote to prevent only after false-positive review and change approval.
+  - Export security events to the approved SIEM with request correlation IDs.
+  - Do not allow a WAF agent outage to bypass APISIX authentication, OPA authorization, or application authorization.

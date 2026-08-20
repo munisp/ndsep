@@ -1,0 +1,20 @@
+{
+  "realm": "idlrpts",
+  "sslRequired": "all",
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "quickLoginCheckMilliSeconds": 1000,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "eventsEnabled": true,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+  "requiredActions": [
+    {"alias": "VERIFY_EMAIL", "enabled": true, "defaultAction": true},
+    {"alias": "CONFIGURE_TOTP", "enabled": true, "defaultAction": false}
+  ]
+}
