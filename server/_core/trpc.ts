@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { buildOpaInput, requireOpaDecision, type OpaAction } from "../security/opa";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -43,6 +44,10 @@ export const adminProcedure = t.procedure.use(
     if (!allowed) {
       throw new TRPCError({ code: "FORBIDDEN", message: "Permify: admin write permission denied" });
     }
+
+    await requireOpaDecision(buildOpaInput(ctx.user, "admin", "platform.admin", {
+      mfaVerified: ctx.authAssurance?.mfaVerified,
+    }));
 
     return next({
       ctx: {
@@ -94,14 +99,35 @@ export const auditorProcedure = t.procedure.use(
 // ─── PBAC-enforced procedure factories ───────────────────────────────────────
 import { pbacMiddleware } from "../security/pbac";
 
-/** protectedProcedure + PBAC export guard (admin-only export operations) */
-export const exportProcedure = protectedProcedure.use(pbacMiddleware("*", "export"));
+/**
+ * Additional externalized policy guard for destructive, approval, and export
+ * paths. A missing or unavailable OPA decision denies in production.
+ */
+export function opaGuard(resource: string, action: OpaAction) {
+  return t.middleware(async ({ ctx, next }) => {
+    if (!ctx.user) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Authentication required" });
+    }
+    await requireOpaDecision(buildOpaInput(ctx.user, action, resource, {
+      mfaVerified: ctx.authAssurance?.mfaVerified,
+    }));
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user,
+      },
+    });
+  });
+}
 
-/** protectedProcedure + PBAC delete guard (admin-only delete operations) */
-export const deleteProcedure = protectedProcedure.use(pbacMiddleware("*", "delete"));
+/** protectedProcedure + PBAC + OPA export guard */
+export const exportProcedure = protectedProcedure.use(pbacMiddleware("*", "export")).use(opaGuard("platform.export", "export"));
 
-/** protectedProcedure + PBAC approve guard (admin-only approval operations) */
-export const approveProcedure = protectedProcedure.use(pbacMiddleware("*", "approve"));
+/** protectedProcedure + PBAC + OPA delete guard */
+export const deleteProcedure = protectedProcedure.use(pbacMiddleware("*", "delete")).use(opaGuard("platform.delete", "delete"));
+
+/** protectedProcedure + PBAC + OPA approval guard */
+export const approveProcedure = protectedProcedure.use(pbacMiddleware("*", "approve")).use(opaGuard("platform.approve", "approve"));
 
 // ─── Permify ReBAC middleware ────────────────────────────────────────────────
 import { checkPermission } from "../middlewareIntegration";

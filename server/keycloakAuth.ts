@@ -20,8 +20,8 @@
  */
 
 import { logger } from "./logger";
-import { cacheGet, cacheSet, cacheDel } from "./cache";
 import { captureError } from "./errorMonitoring";
+import { verifyKeycloakToken } from "./keycloak";
 
 const KEYCLOAK_URL = process.env.KEYCLOAK_URL ?? "http://localhost:8080";
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? "ndsep";
@@ -157,38 +157,25 @@ function mapRoles(payload: TokenPayload): string[] {
 export async function validateAccessToken(token: string): Promise<KeycloakSession["user"] | null> {
   if (!KEYCLOAK_ENABLED) return null;
 
-  // Check cache first
-  const cached = await cacheGet(`kc:token:${token.slice(-16)}`);
-  if (cached) {
-    try {
-      return JSON.parse(cached) as KeycloakSession["user"];
-    } catch { /* fallthrough */ }
-  }
+  // This verifier checks the signed JWT's algorithm, key ID, RS256 signature,
+  // issuer, audience, expiry, and not-before claims. Never replace it with a
+  // decoded-payload cache: a cache must not become an authorization bypass.
+  const verified = await verifyKeycloakToken(token);
+  if (!verified) return null;
 
-  const payload = decodeJwtPayload(token);
-  if (!payload) return null;
-
-  // Check expiry
-  if (payload.exp * 1000 < Date.now()) return null;
-
-  // Verify issuer
-  const expectedIssuer = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`;
-  // Note: full signature verification would use JWKS — for now we validate structure + expiry
-  await fetchJWKS(); // Ensure JWKS is cached for production use
-
-  const user: KeycloakSession["user"] = {
-    sub: payload.sub,
-    email: payload.email ?? "",
-    name: payload.name ?? payload.preferred_username ?? "Unknown",
-    username: payload.preferred_username ?? payload.sub,
-    roles: mapRoles(payload),
+  return {
+    sub: verified.sub,
+    email: verified.email ?? "",
+    name: verified.name ?? verified.username,
+    username: verified.username,
+    roles: mapRoles({
+      sub: verified.sub,
+      exp: Math.floor(Date.now() / 1000) + 1,
+      iat: Math.floor(Date.now() / 1000),
+      realm_access: { roles: verified.roles },
+      resource_access: { [KEYCLOAK_CLIENT_ID]: { roles: verified.clientRoles } },
+    }),
   };
-
-  // Cache validated token
-  const ttl = Math.max(60, Math.floor((payload.exp * 1000 - Date.now()) / 1000));
-  await cacheSet(`kc:token:${token.slice(-16)}`, JSON.stringify(user), ttl);
-
-  return user;
 }
 
 export async function exchangeAuthorizationCode(
@@ -226,21 +213,15 @@ export async function exchangeAuthorizationCode(
       expires_in: number;
     };
 
-    const payload = decodeJwtPayload(data.access_token);
-    if (!payload) return null;
+    const user = await validateAccessToken(data.access_token);
+    if (!user) return null;
 
     return {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
       idToken: data.id_token,
       expiresAt: Date.now() + data.expires_in * 1000,
-      user: {
-        sub: payload.sub,
-        email: payload.email ?? "",
-        name: payload.name ?? payload.preferred_username ?? "Unknown",
-        username: payload.preferred_username ?? payload.sub,
-        roles: mapRoles(payload),
-      },
+      user,
     };
   } catch (err) {
     captureError(err instanceof Error ? err : new Error(String(err)), "keycloak-exchange");
@@ -275,21 +256,15 @@ export async function refreshAccessToken(refreshToken: string): Promise<Keycloak
       expires_in: number;
     };
 
-    const payload = decodeJwtPayload(data.access_token);
-    if (!payload) return null;
+    const user = await validateAccessToken(data.access_token);
+    if (!user) return null;
 
     return {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
       idToken: data.id_token,
       expiresAt: Date.now() + data.expires_in * 1000,
-      user: {
-        sub: payload.sub,
-        email: payload.email ?? "",
-        name: payload.name ?? payload.preferred_username ?? "Unknown",
-        username: payload.preferred_username ?? payload.sub,
-        roles: mapRoles(payload),
-      },
+      user,
     };
   } catch (err) {
     captureError(err instanceof Error ? err : new Error(String(err)), "keycloak-refresh");

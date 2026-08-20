@@ -10,7 +10,7 @@
  *   - IP reputation and blocking
  *   - Rate limiting policy sync
  *   - Health check with policy status
- *   - Graceful degradation when WAF is unavailable
+ *   - Explicit unavailable state when WAF management is unavailable
  *
  * Environment:
  *   OPENAPPSEC_URL     — OpenAppSec management URL (default: http://localhost:4000)
@@ -53,7 +53,7 @@ async function wafRequest(method: string, path: string, body?: unknown): Promise
   } catch (err) {
     if (connected) {
       connected = false;
-      logger.warn("[OpenAppSec] Connection lost — WAF protection degraded");
+      logger.error("[OpenAppSec] Management connection lost; deployment health must be investigated");
     }
     errors++;
     return { ok: false, status: 0, data: { error: err instanceof Error ? err.message : String(err) } };
@@ -122,8 +122,8 @@ export async function syncPolicies(): Promise<{ synced: string[]; failed: string
 
 export async function listPolicies(): Promise<WafPolicy[]> {
   const { ok, data } = await wafRequest("GET", "/api/v1/policies");
-  if (!ok) return NDSEP_POLICIES; // Return defaults when WAF unavailable
-  return (data as WafPolicy[]) ?? NDSEP_POLICIES;
+  if (!ok || !Array.isArray(data)) return [];
+  return data as WafPolicy[];
 }
 
 // ─── Threat Events ───────────────────────────────────────────────────────────
@@ -184,6 +184,6 @@ if (OPENAPPSEC_ENABLED) {
       }
     }
   }).catch(() => {
-    logger.warn("[OpenAppSec] Not available — WAF protection using fallback rate limiting");
+    logger.error("[OpenAppSec] Management endpoint unavailable; no fallback WAF state is reported");
   });
 }
