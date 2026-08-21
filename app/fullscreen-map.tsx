@@ -9,7 +9,6 @@ import {
   filterSupportedStateParcels,
   overlayDefinitions,
   stateDefinitions,
-  stateKeyFromParcel,
   toggleLayer,
   toggleOverlay,
   type LayerKey,
@@ -48,6 +47,15 @@ function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
     return fromSelection ?? stateParcels[0] ?? null;
   }, [selectedParcelId, stateParcels]);
 
+  const center = useMemo<[number, number]>(() => {
+    if (selectedParcel) {
+      return [selectedParcel.latitude, selectedParcel.longitude];
+    }
+    return stateDataset.center;
+  }, [selectedParcel, stateDataset.center]);
+
+  const titleMix = useMemo(() => countTitleMix(stateParcels), [stateParcels]);
+
   if (Platform.OS !== "web") {
     return (
       <View className="rounded-[28px] border border-border bg-surface p-6">
@@ -63,15 +71,7 @@ function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
 
   const { MapContainer, TileLayer, CircleMarker, Popup, Polyline, Polygon } = require("react-leaflet");
 
-  const center = useMemo<[number, number]>(() => {
-    if (selectedParcel) {
-      return [selectedParcel.latitude, selectedParcel.longitude];
-    }
-    return stateDataset.center;
-  }, [selectedParcel, stateDataset.center]);
-
   const overlaysToRender = overlayDefinitions.filter((overlay) => activeOverlays.includes(overlay.key));
-  const titleMix = useMemo(() => countTitleMix(stateParcels), [stateParcels]);
 
   return (
     <View className="gap-5">

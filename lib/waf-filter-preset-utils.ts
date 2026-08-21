@@ -1,2 +1,0 @@
-export type WafFilterPreset = { id: string; name: string; query: string; createdAt: string };
-export function normalizeWafFilterPreset(input: { name: string; query: string }): WafFilterPreset | null { const name = input.name.trim().slice(0, 48); const query = input.query.trim().slice(0, 96); if (!name || !query) return null; return { id: `${Date.now()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, name, query, createdAt: new Date().toISOString() }; }

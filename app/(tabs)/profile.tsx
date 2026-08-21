@@ -184,9 +184,6 @@ export default function ProfileScreen() {
           <Link href={"/diagnostic-attestations" as never} asChild>
             <View className="mt-3 rounded-2xl border border-primary bg-background px-4 py-4"><Text className="text-center font-semibold text-primary">Manage organization diagnostic receipts</Text></View>
           </Link>
-          <Link href={"/audit-export-verification" as never} asChild>
-            <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Verify investigation export receipt</Text></View>
-          </Link>
           <Link href={"/security-identity" as never} asChild>
             <View className="mt-3 rounded-2xl border border-border bg-background px-4 py-4"><Text className="text-center font-semibold text-foreground">Review MFA and active sessions</Text></View>
           </Link>

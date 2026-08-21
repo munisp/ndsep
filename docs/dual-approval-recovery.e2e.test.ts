@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-// Staging contract: substitute pgTestDb, WebAuthn virtual authenticators, and a KMS drill mock.
+import { createStagingRecoveryHarness } from "../tests/helpers/staging-recovery-harness";
+
+// Deterministic invariant coverage. Target staging must additionally exercise
+// real PostgreSQL, WebAuthn virtual authenticators, and the approved KMS.
 describe("dual approval recovery", () => {
   it("rejects KMS revocation, then accepts one replay only after distinct WebAuthn approvals", async () => {
     const harness = await createStagingRecoveryHarness();
@@ -13,4 +16,3 @@ describe("dual approval recovery", () => {
     expect(second).toEqual(first); expect(await harness.outboundSideEffects()).toBe(1);
   });
 });
-declare function createStagingRecoveryHarness(): any;

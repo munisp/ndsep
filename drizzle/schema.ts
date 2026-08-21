@@ -115,31 +115,6 @@ export const diagnosticReceiptRevocationNotifications = mysqlTable("diagnosticRe
   archivedAt: timestamp("archivedAt"),
 });
 
-export const wafThreatFilterPresets = mysqlTable("wafThreatFilterPresets", {
-  presetId: varchar("presetId", { length: 80 }).primaryKey(),
-  agencyId: varchar("agencyId", { length: 120 }).notNull(),
-  name: varchar("name", { length: 80 }).notNull(),
-  query: varchar("query", { length: 160 }).notNull(),
-  createdBy: varchar("createdBy", { length: 255 }).notNull(),
-  approvalStatus: mysqlEnum("approvalStatus", ["pending", "approved", "rejected"]).default("pending").notNull(),
-  activeVersion: int("activeVersion").default(0).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export const wafThreatFilterPresetRevisions = mysqlTable("wafThreatFilterPresetRevisions", {
-  revisionId: varchar("revisionId", { length: 80 }).primaryKey(),
-  presetId: varchar("presetId", { length: 80 }).notNull(),
-  version: int("version").notNull(),
-  query: varchar("query", { length: 160 }).notNull(),
-  submittedBy: varchar("submittedBy", { length: 255 }).notNull(),
-  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
-  reviewedBy: varchar("reviewedBy", { length: 255 }),
-  reviewedAt: timestamp("reviewedAt"),
-  reviewNote: text("reviewNote"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type PermittingAgency = typeof permittingAgencies.$inferSelect;
@@ -155,5 +130,3 @@ export type InsertServiceTopology = typeof serviceTopology.$inferInsert;
 export type DiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferSelect;
 export type InsertDiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferInsert;
 export type DiagnosticReceiptRevocationNotification = typeof diagnosticReceiptRevocationNotifications.$inferSelect;
-export type WafThreatFilterPreset = typeof wafThreatFilterPresets.$inferSelect;
-export type WafThreatFilterPresetRevision = typeof wafThreatFilterPresetRevisions.$inferSelect;

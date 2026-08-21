@@ -423,15 +423,9 @@
 - [x] Add administrator audit-chain integrity verification with explicit broken-chain evidence
 - [x] Add guarded Keycloak administrator session-revocation controls with fail-closed IdP boundaries
 - [x] Add verified WAF interval tooltips for threat categories and redacted source-address details
-- [x] Add visual audit-chain timeline that isolates invalid integrity records
-- [x] Add confirmation-protected bulk Keycloak session revocation for administrators
-- [x] Add threat-category search and filtering within WAF interval details
-- [x] Add CSV and PDF export for administrator audit-integrity investigation reports
-- [x] Add durable custom WAF threat-filter preset saving and loading in the security dashboard
-- [x] Add role-aware other-user session termination controls with explicit confirmation safeguards
-- [x] Add fail-closed Keycloak session-directory integration for authorized supervisor cross-user session administration
-- [x] Add governed team publishing and sharing of custom WAF threat-filter presets
-- [x] Add signed audit export receipts and hash-chained download events for investigation reports
-- [x] Add version history and approval workflow for agency-shared WAF threat presets
-- [x] Add external read-only auditor verification view for hash-chained investigation export receipts
-- [x] Add verified session geographic context and risk badges with explicit unavailable states
+- [x] Establish code coverage, full-suite, build, and static-analysis baseline with reproducible evidence
+- [x] Close confirmed code-resolvable defects and high-risk untested paths discovered by the baseline
+- [x] Add deterministic tests for security-sensitive, payment, authentication, and offline replay boundaries
+- [x] Produce an evidence-supported code-readiness score and residual-risk register without claiming certainty from code alone
+- [ ] Restore isolated PostgreSQL test infrastructure and make the payment integration suite green in a repeatable environment
+- [ ] Add native-device and approved-external-provider integration evidence for biometric, map, camera, KMS, OIDC, document-intelligence, and notification boundaries
