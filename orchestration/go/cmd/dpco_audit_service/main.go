@@ -59,7 +59,7 @@ var (
 	permifyTenant    = getenv("PERMIFY_TENANT_ID", "t1")
 	keycloakEnabled  = getenv("KEYCLOAK_ENABLED", "true") == "true"
 	permifyEnabled   = getenv("PERMIFY_ENABLED", "true") == "true"
-	dbURL            = getenv("DATABASE_URL", "postgres://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db?sslmode=disable")
+	dbURL            = os.Getenv("DATABASE_URL")
 )
 
 // ─── Audit Stage Definitions ─────────────────────────────────────────────────
@@ -72,16 +72,14 @@ var auditStages = []string{
 // ─── State ────────────────────────────────────────────────────────────────────
 
 var (
-	mu               sync.RWMutex
-	kafkaProducer    sarama.SyncProducer
-	kafkaOK          bool
-	temporalClient   client.Client
-	temporalOK       bool
-	keycloakClient   *gocloak.GoCloak
-	keycloakOK       bool
-	permifyOK        bool
-	// In-memory audit store (fallback when DB is unavailable)
-	auditStore       = make(map[string]map[string]interface{})
+	mu             sync.RWMutex
+	kafkaProducer  sarama.SyncProducer
+	kafkaOK        bool
+	temporalClient client.Client
+	temporalOK     bool
+	keycloakClient *gocloak.GoCloak
+	keycloakOK     bool
+	permifyOK      bool
 	// Metrics
 	auditsInitiated  int64
 	stageAdvances    int64
@@ -106,40 +104,47 @@ func initKafka() {
 			p, err := sarama.NewSyncProducer(kafkaBrokers, cfg)
 			if err != nil {
 				logger.Printf("[Kafka] Connect failed (%v), retry in 10s", err)
-				mu.Lock(); kafkaOK = false; mu.Unlock()
+				mu.Lock()
+				kafkaOK = false
+				mu.Unlock()
 				time.Sleep(10 * time.Second)
 				continue
 			}
-			mu.Lock(); kafkaProducer = p; kafkaOK = true; mu.Unlock()
+			mu.Lock()
+			kafkaProducer = p
+			kafkaOK = true
+			mu.Unlock()
 			logger.Printf("[Kafka] Connected to %v", kafkaBrokers)
 			return
 		}
 	}()
 }
 
-func publishKafka(eventType string, payload map[string]interface{}) {
+func publishKafka(eventType string, payload map[string]interface{}) error {
 	mu.RLock()
 	ok := kafkaOK
 	p := kafkaProducer
 	mu.RUnlock()
 	if !ok || p == nil {
-		logger.Printf("[Kafka] Stub: %s %v", eventType, payload)
-		return
+		return fmt.Errorf("Kafka is unavailable for %s", eventType)
 	}
 	payload["event_type"] = eventType
 	payload["source"] = "dpco-audit-service"
 	payload["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-	b, _ := json.Marshal(payload)
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode Kafka event %s: %w", eventType, err)
+	}
 	msg := &sarama.ProducerMessage{
 		Topic: kafkaTopic,
 		Key:   sarama.StringEncoder(eventType),
 		Value: sarama.ByteEncoder(b),
 	}
 	if _, _, err := p.SendMessage(msg); err != nil {
-		logger.Printf("[Kafka] Publish error: %v", err)
-		return
+		return fmt.Errorf("publish Kafka event %s: %w", eventType, err)
 	}
 	atomic.AddInt64(&kafkaEvents, 1)
+	return nil
 }
 
 // ─── Temporal Init ────────────────────────────────────────────────────────────
@@ -157,11 +162,16 @@ func initTemporal() {
 			})
 			if err != nil {
 				logger.Printf("[Temporal] Connect failed (%v), retry in 15s", err)
-				mu.Lock(); temporalOK = false; mu.Unlock()
+				mu.Lock()
+				temporalOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
-			mu.Lock(); temporalClient = c; temporalOK = true; mu.Unlock()
+			mu.Lock()
+			temporalClient = c
+			temporalOK = true
+			mu.Unlock()
 			logger.Printf("[Temporal] Connected to %s", temporalHost)
 			return
 		}
@@ -174,8 +184,7 @@ func startAuditWorkflow(auditID, dpcoOrgID, orgID, auditType string) (string, er
 	tc := temporalClient
 	mu.RUnlock()
 	if !ok || tc == nil {
-		// Stub: return a fake workflow ID
-		return fmt.Sprintf("wf-dpco-audit-%s", auditID), nil
+		return "", fmt.Errorf("Temporal audit workflow service is unavailable")
 	}
 	opts := client.StartWorkflowOptions{
 		ID:        fmt.Sprintf("dpco-audit-%s", auditID),
@@ -208,11 +217,16 @@ func initKeycloak() {
 			cancel()
 			if err != nil {
 				logger.Printf("[Keycloak] Connect failed (%v), retry in 15s", err)
-				mu.Lock(); keycloakOK = false; mu.Unlock()
+				mu.Lock()
+				keycloakOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
-			mu.Lock(); keycloakClient = kc; keycloakOK = true; mu.Unlock()
+			mu.Lock()
+			keycloakClient = kc
+			keycloakOK = true
+			mu.Unlock()
 			logger.Printf("[Keycloak] Connected realm=%s", keycloakRealm)
 			return
 		}
@@ -226,8 +240,7 @@ func validateToken(token string) (string, []string, error) {
 	kc := keycloakClient
 	mu.RUnlock()
 	if !ok || kc == nil {
-		// Fallback: accept token, return dpco role
-		return "dpco-user-fallback", []string{"dpco"}, nil
+		return "", nil, fmt.Errorf("Keycloak token validation is unavailable")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -237,7 +250,7 @@ func validateToken(token string) (string, []string, error) {
 	}
 	info, err := kc.GetUserInfo(ctx, token, keycloakRealm)
 	if err != nil {
-		return "", []string{"dpco"}, nil
+		return "", nil, fmt.Errorf("Keycloak user information lookup failed: %w", err)
 	}
 	userID := ""
 	if info.Sub != nil {
@@ -251,31 +264,39 @@ func validateToken(token string) (string, []string, error) {
 func checkPermission(userID, resource, action string) bool {
 	atomic.AddInt64(&permChecks, 1)
 	if !permifyEnabled {
-		return true
+		logger.Printf("[Permify] Disabled: denying %s on %s for %s", action, resource, userID)
+		return false
 	}
 	mu.RLock()
 	ok := permifyOK
 	mu.RUnlock()
 	if !ok {
-		logger.Printf("[Permify] Degraded: allowing %s on %s for %s", action, resource, userID)
-		return true
+		logger.Printf("[Permify] Unavailable: denying %s on %s for %s", action, resource, userID)
+		return false
 	}
 	body := map[string]interface{}{
-		"metadata":  map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
-		"entity":    map[string]interface{}{"type": resource, "id": "dpco-audit"},
+		"metadata":   map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
+		"entity":     map[string]interface{}{"type": resource, "id": "dpco-audit"},
 		"permission": action,
-		"subject":   map[string]interface{}{"type": "user", "id": userID},
+		"subject":    map[string]interface{}{"type": "user", "id": userID},
 	}
 	b, _ := json.Marshal(body)
 	url := fmt.Sprintf("%s/v1/tenants/%s/permissions/check", permifyURL, permifyTenant)
 	resp, err := http.Post(url, "application/json", strings.NewReader(string(b)))
 	if err != nil {
 		logger.Printf("[Permify] Check failed: %v", err)
-		return true // degrade gracefully
+		return false
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Printf("[Permify] Check rejected with HTTP %d", resp.StatusCode)
+		return false
+	}
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logger.Printf("[Permify] Invalid response: %v", err)
+		return false
+	}
 	return result["can"] == "CHECK_RESULT_ALLOWED"
 }
 
@@ -285,12 +306,16 @@ func initPermify() {
 			resp, err := http.Get(fmt.Sprintf("%s/healthz", permifyURL))
 			if err != nil || resp.StatusCode != 200 {
 				logger.Printf("[Permify] Not reachable, retry in 15s")
-				mu.Lock(); permifyOK = false; mu.Unlock()
+				mu.Lock()
+				permifyOK = false
+				mu.Unlock()
 				time.Sleep(15 * time.Second)
 				continue
 			}
 			resp.Body.Close()
-			mu.Lock(); permifyOK = true; mu.Unlock()
+			mu.Lock()
+			permifyOK = true
+			mu.Unlock()
 			logger.Printf("[Permify] Connected at %s", permifyURL)
 			return
 		}
@@ -301,22 +326,25 @@ func initPermify() {
 
 func health(w http.ResponseWriter, r *http.Request) {
 	mu.RLock()
-	kOK := kafkaOK; tOK := temporalOK; kcOK := keycloakOK; pOK := permifyOK
+	kOK := kafkaOK
+	tOK := temporalOK
+	kcOK := keycloakOK
+	pOK := permifyOK
 	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"service":           "dpco-audit-service",
-		"status":            "healthy",
-		"port":              port,
-		"uptime_s":          time.Since(startTime).Seconds(),
-		"kafka":             map[string]interface{}{"connected": kOK, "topic": kafkaTopic, "events_published": atomic.LoadInt64(&kafkaEvents)},
-		"temporal":          map[string]interface{}{"connected": tOK, "host": temporalHost, "task_queue": "ndsep-dpco-audit"},
-		"keycloak":          map[string]interface{}{"connected": kcOK, "realm": keycloakRealm, "tokens_validated": atomic.LoadInt64(&tokenValidations)},
-		"permify":           map[string]interface{}{"connected": pOK, "checks": atomic.LoadInt64(&permChecks)},
-		"audits_initiated":  atomic.LoadInt64(&auditsInitiated),
-		"stage_advances":    atomic.LoadInt64(&stageAdvances),
-		"middleware": []string{"kafka", "temporal", "keycloak", "permify", "redis"},
-		"timestamp":         time.Now().UTC(),
+		"service":          "dpco-audit-service",
+		"status":           "healthy",
+		"port":             port,
+		"uptime_s":         time.Since(startTime).Seconds(),
+		"kafka":            map[string]interface{}{"connected": kOK, "topic": kafkaTopic, "events_published": atomic.LoadInt64(&kafkaEvents)},
+		"temporal":         map[string]interface{}{"connected": tOK, "host": temporalHost, "task_queue": "ndsep-dpco-audit"},
+		"keycloak":         map[string]interface{}{"connected": kcOK, "realm": keycloakRealm, "tokens_validated": atomic.LoadInt64(&tokenValidations)},
+		"permify":          map[string]interface{}{"connected": pOK, "checks": atomic.LoadInt64(&permChecks)},
+		"audits_initiated": atomic.LoadInt64(&auditsInitiated),
+		"stage_advances":   atomic.LoadInt64(&stageAdvances),
+		"middleware":       []string{"kafka", "temporal", "keycloak", "permify", "redis"},
+		"timestamp":        time.Now().UTC(),
 	})
 }
 
@@ -351,6 +379,8 @@ func initiateAudit(w http.ResponseWriter, r *http.Request) {
 	workflowID, err := startAuditWorkflow(auditID, req.DpcoOrgID, req.OrgID, req.AuditType)
 	if err != nil {
 		logger.Printf("[Temporal] Workflow start error: %v", err)
+		http.Error(w, `{"error":"audit workflow unavailable"}`, http.StatusServiceUnavailable)
+		return
 	}
 	audit := map[string]interface{}{
 		"id":            auditID,
@@ -368,14 +398,20 @@ func initiateAudit(w http.ResponseWriter, r *http.Request) {
 			{"stage": "initiated", "entered_at": time.Now().UTC(), "entered_by": userID},
 		},
 	}
-	mu.Lock()
-	auditStore[auditID] = audit
-	mu.Unlock()
+	if err := saveAuditRecord(r.Context(), auditID, audit); err != nil {
+		logger.Printf("[Storage] Persist audit failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&auditsInitiated, 1)
-	publishKafka("dpco.audit.initiated", map[string]interface{}{
+	if err := publishKafka("dpco.audit.initiated", map[string]interface{}{
 		"audit_id": auditID, "dpco_org_id": req.DpcoOrgID, "org_id": req.OrgID,
 		"audit_type": req.AuditType, "audit_year": req.AuditYear, "workflow_id": workflowID,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Audit initiation event failed: %v", err)
+		http.Error(w, `{"error":"audit event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "audit_id": auditID, "workflow_id": workflowID, "current_stage": "initiated"})
 }
@@ -388,14 +424,17 @@ func advanceStage(w http.ResponseWriter, r *http.Request) {
 		UserID string `json:"user_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
-	mu.Lock()
-	audit, ok := auditStore[auditID]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"audit not found"}`, http.StatusNotFound)
+	audit, err := loadAuditRecord(r.Context(), auditID)
+	if err != nil {
+		logger.Printf("[Storage] Load audit failed: %v", err)
+		http.Error(w, `{"error":"audit not found or durable storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
-	currentStage := audit["current_stage"].(string)
+	currentStage, ok := audit["current_stage"].(string)
+	if !ok {
+		http.Error(w, `{"error":"invalid persisted audit stage"}`, http.StatusInternalServerError)
+		return
+	}
 	stageIdx := -1
 	for i, s := range auditStages {
 		if s == currentStage {
@@ -404,25 +443,31 @@ func advanceStage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if stageIdx < 0 || stageIdx >= len(auditStages)-1 {
-		mu.Unlock()
 		http.Error(w, `{"error":"already at final stage"}`, http.StatusBadRequest)
 		return
 	}
 	nextStage := auditStages[stageIdx+1]
 	audit["current_stage"] = nextStage
-	history := audit["stage_history"].([]map[string]interface{})
+	history, _ := audit["stage_history"].([]interface{})
 	history = append(history, map[string]interface{}{
 		"stage": nextStage, "entered_at": time.Now().UTC(),
 		"entered_by": req.UserID, "notes": req.Notes,
 	})
 	audit["stage_history"] = history
-	auditStore[auditID] = audit
-	mu.Unlock()
+	if err := saveAuditRecord(r.Context(), auditID, audit); err != nil {
+		logger.Printf("[Storage] Persist stage advance failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	atomic.AddInt64(&stageAdvances, 1)
-	publishKafka("dpco.audit.stage_advanced", map[string]interface{}{
+	if err := publishKafka("dpco.audit.stage_advanced", map[string]interface{}{
 		"audit_id": auditID, "from_stage": currentStage, "to_stage": nextStage,
 		"advanced_by": req.UserID, "notes": req.Notes,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Audit stage event failed: %v", err)
+		http.Error(w, `{"error":"audit event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok": true, "audit_id": auditID,
@@ -431,12 +476,12 @@ func advanceStage(w http.ResponseWriter, r *http.Request) {
 }
 
 func listAudits(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	result := make([]map[string]interface{}, 0, len(auditStore))
-	for _, a := range auditStore {
-		result = append(result, a)
+	result, err := listAuditRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List audits failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
 	}
-	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"audits": result, "total": len(result)})
 }
@@ -444,11 +489,10 @@ func listAudits(w http.ResponseWriter, r *http.Request) {
 func getAudit(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	auditID := vars["auditId"]
-	mu.RLock()
-	audit, ok := auditStore[auditID]
-	mu.RUnlock()
-	if !ok {
-		http.Error(w, `{"error":"audit not found"}`, http.StatusNotFound)
+	audit, err := loadAuditRecord(r.Context(), auditID)
+	if err != nil {
+		logger.Printf("[Storage] Load audit failed: %v", err)
+		http.Error(w, `{"error":"audit not found or durable storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -468,11 +512,10 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
-	mu.Lock()
-	audit, ok := auditStore[auditID]
-	if !ok {
-		mu.Unlock()
-		http.Error(w, `{"error":"audit not found"}`, http.StatusNotFound)
+	audit, err := loadAuditRecord(r.Context(), auditID)
+	if err != nil {
+		logger.Printf("[Storage] Load audit failed: %v", err)
+		http.Error(w, `{"error":"audit not found or durable storage unavailable"}`, http.StatusServiceUnavailable)
 		return
 	}
 	controls, _ := audit["control_assessments"].(map[string]interface{})
@@ -491,9 +534,11 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 		c := v.(map[string]interface{})
 		switch c["rating"] {
 		case "pass":
-			scored += 100; total += 100
+			scored += 100
+			total += 100
 		case "partial":
-			scored += 50; total += 100
+			scored += 50
+			total += 100
 		case "fail":
 			total += 100
 		}
@@ -501,34 +546,45 @@ func assessControl(w http.ResponseWriter, r *http.Request) {
 	if total > 0 {
 		audit["compliance_score"] = scored / total * 100
 	}
-	auditStore[auditID] = audit
-	mu.Unlock()
-	publishKafka("dpco.audit.control_assessed", map[string]interface{}{
+	if err := saveAuditRecord(r.Context(), auditID, audit); err != nil {
+		logger.Printf("[Storage] Persist assessment failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if err := publishKafka("dpco.audit.control_assessed", map[string]interface{}{
 		"audit_id": auditID, "control_id": req.ControlID, "rating": req.Rating,
-	})
+	}); err != nil {
+		logger.Printf("[Kafka] Audit assessment event failed: %v", err)
+		http.Error(w, `{"error":"audit event delivery unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "control_id": req.ControlID, "rating": req.Rating})
 }
 
 func metrics(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	total := len(auditStore)
+	audits, err := listAuditRecords(r.Context())
+	if err != nil {
+		logger.Printf("[Storage] List audits for metrics failed: %v", err)
+		http.Error(w, `{"error":"durable audit storage unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	total := len(audits)
 	stageCount := make(map[string]int)
-	for _, a := range auditStore {
+	for _, a := range audits {
 		if s, ok := a["current_stage"].(string); ok {
 			stageCount[s]++
 		}
 	}
-	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"total_audits":     total,
-		"audits_initiated": atomic.LoadInt64(&auditsInitiated),
-		"stage_advances":   atomic.LoadInt64(&stageAdvances),
-		"kafka_events":     atomic.LoadInt64(&kafkaEvents),
+		"total_audits":      total,
+		"audits_initiated":  atomic.LoadInt64(&auditsInitiated),
+		"stage_advances":    atomic.LoadInt64(&stageAdvances),
+		"kafka_events":      atomic.LoadInt64(&kafkaEvents),
 		"token_validations": atomic.LoadInt64(&tokenValidations),
-		"perm_checks":      atomic.LoadInt64(&permChecks),
-		"by_stage":         stageCount,
+		"perm_checks":       atomic.LoadInt64(&permChecks),
+		"by_stage":          stageCount,
 	})
 }
 
@@ -539,6 +595,10 @@ func main() {
 	logger.Printf("Middleware: Kafka=%v Temporal=%v Keycloak=%v Permify=%v", kafkaEnabled, temporalEnabled, keycloakEnabled, permifyEnabled)
 	logger.Printf("Kafka brokers: %v | Topic: %s", kafkaBrokers, kafkaTopic)
 	logger.Printf("Temporal: %s | Keycloak: %s realm=%s | Permify: %s", temporalHost, keycloakURL, keycloakRealm, permifyURL)
+	if err := initAuditStore(context.Background()); err != nil {
+		logger.Fatalf("Durable audit storage unavailable: %v", err)
+	}
+	defer closeAuditStore()
 
 	initKafka()
 	initTemporal()

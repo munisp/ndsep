@@ -60,6 +60,7 @@ import { logger } from "../logger";
 import { validateEnvironment } from "../envValidation";
 import { initReadReplica, closeReadReplica, isReplicaAvailable } from "../readReplica";
 import { verifyMigrations } from "../migrationVerifier";
+import { applyDatabaseMigrations } from "../dbMigrations";
 import { regenerateSession, generateSessionNonce } from "../sessionSecurity";
 import { traceMiddleware } from "../telemetry";
 import { initWebhookSystem, deliverWebhookEvent } from "../webhookSystem";
@@ -469,6 +470,24 @@ async function startServer() {
     const poolIdle = pool?.idleCount ?? 0;
     const poolWaiting = pool?.waitingCount ?? 0;
 
+    // The Prometheus server cannot execute SQL. Export the compliance SLO count
+    // from the API process and separately expose whether the source query ran.
+    let citizenRequestSlaBreaches = 0;
+    let citizenRequestSlaMetricAvailable = 0;
+    try {
+      if (!pool) throw new Error("Database pool is unavailable");
+      const result = await pool.query(`
+        SELECT count(*)::int AS breaches
+        FROM citizen_requests
+        WHERE status NOT IN ('completed', 'rejected', 'cancelled')
+          AND submitted_at < NOW() - INTERVAL '30 days'
+      `);
+      citizenRequestSlaBreaches = Number(result?.rows?.[0]?.breaches ?? 0);
+      citizenRequestSlaMetricAvailable = 1;
+    } catch (e) {
+      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[Metrics] Citizen request SLA count unavailable");
+    }
+
     const { cacheMetrics } = await import("../cache");
     const cache = cacheMetrics();
 
@@ -505,6 +524,12 @@ async function startServer() {
       "# HELP ndsep_db_pool_waiting Waiting DB pool requests",
       "# TYPE ndsep_db_pool_waiting gauge",
       `ndsep_db_pool_waiting ${poolWaiting}`,
+      "# HELP ndsep_citizen_requests_sla_breached Citizen requests exceeding the statutory response SLA",
+      "# TYPE ndsep_citizen_requests_sla_breached gauge",
+      `ndsep_citizen_requests_sla_breached ${citizenRequestSlaBreaches}`,
+      "# HELP ndsep_citizen_request_sla_metric_available Whether the citizen-request SLA source query completed (1=available)",
+      "# TYPE ndsep_citizen_request_sla_metric_available gauge",
+      `ndsep_citizen_request_sla_metric_available ${citizenRequestSlaMetricAvailable}`,
       "# HELP ndsep_redis_connected Redis connection status (1=connected)",
       "# TYPE ndsep_redis_connected gauge",
       `ndsep_redis_connected ${cache.connected ? 1 : 0}`,
@@ -522,6 +547,12 @@ async function startServer() {
       `ndsep_memory_heap_used_bytes ${mem.heapUsed}`,
       ...cbLines,
     ];
+
+    // OPA authorization telemetry: bounded outcomes only; no subject or resource labels.
+    try {
+      const { renderOpaPrometheusMetrics } = await import("../security/opaMetrics");
+      lines.push(...renderOpaPrometheusMetrics());
+    } catch (e) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Metrics] OPA metrics unavailable"); }
 
     // gRPC metrics
     try {
@@ -1280,12 +1311,17 @@ async function startServer() {
     logger.warn({ preferredPort, port }, "Preferred port busy, using alternate");
   }
 
-  // ── Eager DB initialization (ensures _pool is set before any request handler runs) ──
-  try {
-    await getDb();
-    logger.info("[DB] Pool initialized successfully");
-  } catch (err) {
-    logger.warn({ err }, "[DB] Pool initialization failed — running without database");
+  // ── Database migration and initialization gate ─────────────────────────────
+  // The platform must never accept traffic with a partial schema. Test suites can
+  // opt out only with an explicit test-only switch.
+  const skipDatabaseGate = process.env.NODE_ENV === "test" && process.env.SKIP_DATABASE_MIGRATIONS === "true";
+  if (!skipDatabaseGate) {
+    await applyDatabaseMigrations();
+    const database = await getDb();
+    if (!database || !getPool()) throw new Error("Database initialization failed after migrations");
+    logger.info("[DB] Migrations applied and pool initialized successfully");
+  } else {
+    logger.warn("[DB] Explicit test-only migration gate bypass enabled");
   }
 
   initWebSocketServer(server);
@@ -1305,18 +1341,13 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Webhook system init failed — webhooks disabled");
   }
 
-  if (process.env.NODE_ENV !== "test") {
-    try {
-      const report = await verifyMigrations();
-      if (report.passed) {
-        logger.info({ checks: report.checks.length, durationMs: report.duration }, "[Startup] Migration verification passed");
-      } else {
-        const failures = report.checks.filter(c => c.status === "fail");
-        logger.error({ failures }, "[Startup] Migration verification FAILED — %d checks failed", failures.length);
-      }
-    } catch (err) {
-      logger.warn({ err }, "[Startup] Migration verification skipped — database not available");
+  if (!skipDatabaseGate) {
+    const report = await verifyMigrations();
+    if (!report.passed) {
+      const failures = report.checks.filter(c => c.status === "fail");
+      throw new Error(`Database migration verification failed: ${failures.map((failure) => failure.name).join(", ")}`);
     }
+    logger.info({ checks: report.checks.length, durationMs: report.duration }, "[Startup] Migration verification passed");
   }
 
   // ── Initialize next-generation modules ──

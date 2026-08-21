@@ -1,25 +1,11 @@
-/**
- * Temporal Workflow — DPCO Accreditation Lifecycle
- * Manages the full accreditation workflow from submission to certificate issuance.
- *
- * State machine:
- *   submitted → document_review → technical_assessment → committee_review
- *   → approved/rejected → certificate_issued (if approved)
- *
- * SLA enforcement:
- *   - Document review: 5 business days
- *   - Technical assessment: 10 business days
- *   - Committee review: 5 business days
- *   - Total: max 90 calendar days (NDPA requirement)
- */
-
-// ─── Workflow Types ──────────────────────────────────────────────────────────
+import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
+import type * as activities from "../activities/accreditation";
 
 export interface AccreditationInput {
   applicationId: number;
   dpcoOrgId: number;
   applicantEmail: string;
-  submittedAt: string; // ISO-8601
+  submittedAt: string;
 }
 
 export interface AccreditationResult {
@@ -30,144 +16,80 @@ export interface AccreditationResult {
   durationDays: number;
 }
 
-export type AccreditationStage =
-  | "submitted"
-  | "document_review"
-  | "technical_assessment"
-  | "committee_review"
-  | "approved"
-  | "rejected"
-  | "certificate_issued";
+export type AccreditationStage = "submitted" | "document_review" | "technical_assessment" | "committee_review" | "approved" | "rejected" | "certificate_issued";
 
-// ─── Activity Stubs ──────────────────────────────────────────────────────────
-// These are the activity function signatures. Actual implementations live in
-// workers/temporal/activities/accreditation.ts and are registered with the
-// Temporal worker at startup.
+export const documentReviewCompleteSignal = defineSignal<[{ approved: boolean; notes: string }]>("documentReviewComplete");
+export const committeeDecisionSignal = defineSignal<[{ approved: boolean; notes: string }]>("committeeDecision");
+export const getStateQuery = defineQuery<AccreditationStage>("getState");
 
-export interface AccreditationActivities {
-  /**
-   * Validates all submitted documents are present and readable.
-   * Returns list of missing or invalid documents.
-   */
-  validateDocuments(applicationId: number): Promise<{ valid: boolean; missing: string[] }>;
+const acts = proxyActivities<typeof activities>({ startToCloseTimeout: "10 minutes", retry: { maximumAttempts: 3 } });
 
-  /**
-   * Sends an email notification to the applicant about stage transition.
-   */
-  notifyApplicant(params: {
-    applicationId: number;
-    email: string;
-    stage: AccreditationStage;
-    message: string;
-  }): Promise<void>;
+export async function accreditationWorkflow(input: AccreditationInput): Promise<AccreditationResult> {
+  let stage: AccreditationStage = "submitted";
+  let documentDecision: { approved: boolean; notes: string } | undefined;
+  let committeeDecision: { approved: boolean; notes: string } | undefined;
+  setHandler(getStateQuery, () => stage);
+  setHandler(documentReviewCompleteSignal, (decision) => { documentDecision = decision; });
+  setHandler(committeeDecisionSignal, (decision) => { committeeDecision = decision; });
 
-  /**
-   * Updates the application status in the database.
-   */
-  updateApplicationStatus(params: {
-    applicationId: number;
-    status: AccreditationStage;
-    notes?: string;
-  }): Promise<void>;
+  stage = "document_review";
+  await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage });
+  await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: "Your accreditation documents are under review." });
+  const documentValidation = await acts.validateDocuments(input.applicationId);
+  if (!documentValidation.valid) {
+    stage = "rejected";
+    const notes = `Missing or invalid documents: ${documentValidation.missing.join(", ")}`;
+    await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage, notes });
+    await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: notes });
+    await acts.notifyOwner({ applicationId: input.applicationId, outcome: "rejected", dpcoOrgId: input.dpcoOrgId });
+    return { applicationId: input.applicationId, status: "rejected", completedAt: new Date().toISOString(), durationDays: Math.max(0, Math.ceil((Date.now() - Date.parse(input.submittedAt)) / 86_400_000)) };
+  }
 
-  /**
-   * Runs the automated technical assessment scoring.
-   * Returns a score 0-100 and a list of findings.
-   */
-  runTechnicalAssessment(applicationId: number): Promise<{
-    score: number;
-    findings: Array<{ category: string; severity: "critical" | "major" | "minor"; description: string }>;
-    passThreshold: boolean;
-  }>;
+  const reviewedWithinSla = await condition(() => documentDecision !== undefined, "5 days");
+  if (!reviewedWithinSla) await acts.escalateOverdueReview({ applicationId: input.applicationId, stage, daysPastSla: 5 });
+  await condition(() => documentDecision !== undefined);
+  if (!documentDecision!.approved) {
+    stage = "rejected";
+    await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage, notes: documentDecision!.notes });
+    await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: documentDecision!.notes });
+    await acts.notifyOwner({ applicationId: input.applicationId, outcome: "rejected", dpcoOrgId: input.dpcoOrgId });
+    return { applicationId: input.applicationId, status: "rejected", completedAt: new Date().toISOString(), durationDays: Math.max(0, Math.ceil((Date.now() - Date.parse(input.submittedAt)) / 86_400_000)) };
+  }
 
-  /**
-   * Issues a certificate and stores the token in the database.
-   */
-  issueCertificate(params: {
-    applicationId: number;
-    dpcoOrgId: number;
-    validityYears: number;
-  }): Promise<{ certificateToken: string; expiresAt: string }>;
+  stage = "technical_assessment";
+  await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage });
+  const assessment = await acts.runTechnicalAssessment(input.applicationId);
+  if (!assessment.passThreshold) {
+    stage = "rejected";
+    const notes = `Technical assessment score ${assessment.score}: ${assessment.findings.map((finding) => finding.description).join("; ")}`;
+    await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage, notes });
+    await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: notes });
+    await acts.notifyOwner({ applicationId: input.applicationId, outcome: "rejected", dpcoOrgId: input.dpcoOrgId });
+    return { applicationId: input.applicationId, status: "rejected", completedAt: new Date().toISOString(), durationDays: Math.max(0, Math.ceil((Date.now() - Date.parse(input.submittedAt)) / 86_400_000)) };
+  }
 
-  /**
-   * Sends the owner a notification about the accreditation outcome.
-   */
-  notifyOwner(params: {
-    applicationId: number;
-    outcome: "approved" | "rejected";
-    dpcoOrgId: number;
-  }): Promise<void>;
+  stage = "committee_review";
+  await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage });
+  await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: "Your application is awaiting committee decision." });
+  const decidedWithinSla = await condition(() => committeeDecision !== undefined, "5 days");
+  if (!decidedWithinSla) await acts.escalateOverdueReview({ applicationId: input.applicationId, stage, daysPastSla: 5 });
+  await condition(() => committeeDecision !== undefined);
+  if (!committeeDecision!.approved) {
+    stage = "rejected";
+    await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage, notes: committeeDecision!.notes });
+    await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: committeeDecision!.notes });
+    await acts.notifyOwner({ applicationId: input.applicationId, outcome: "rejected", dpcoOrgId: input.dpcoOrgId });
+    return { applicationId: input.applicationId, status: "rejected", completedAt: new Date().toISOString(), durationDays: Math.max(0, Math.ceil((Date.now() - Date.parse(input.submittedAt)) / 86_400_000)) };
+  }
 
-  /**
-   * Escalates an overdue review to the committee chair.
-   */
-  escalateOverdueReview(params: {
-    applicationId: number;
-    stage: AccreditationStage;
-    daysPastSla: number;
-  }): Promise<void>;
+  stage = "approved";
+  await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage, notes: committeeDecision!.notes });
+  const certificate = await acts.issueCertificate({ applicationId: input.applicationId, dpcoOrgId: input.dpcoOrgId, validityYears: 2 });
+  stage = "certificate_issued";
+  await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: `Accreditation approved. Licence expires ${certificate.expiresAt}.` });
+  await acts.notifyOwner({ applicationId: input.applicationId, outcome: "approved", dpcoOrgId: input.dpcoOrgId });
+  return { applicationId: input.applicationId, status: "approved", certificateToken: certificate.certificateToken, completedAt: new Date().toISOString(), durationDays: Math.max(0, Math.ceil((Date.now() - Date.parse(input.submittedAt)) / 86_400_000)) };
 }
-
-// ─── Workflow Definition ─────────────────────────────────────────────────────
-// This is the workflow orchestration logic. In a live Temporal deployment,
-// this file is bundled and executed by the Temporal worker runtime.
-// The `workflow` object below is the stub interface — replace with actual
-// @temporalio/workflow imports when deploying the Temporal worker.
-
-export interface AccreditationWorkflow {
-  /**
-   * Main workflow entry point.
-   * Orchestrates the full accreditation lifecycle with SLA enforcement.
-   */
-  run(input: AccreditationInput): Promise<AccreditationResult>;
-
-  /**
-   * Signal: admin has completed document review.
-   */
-  documentReviewComplete(params: { approved: boolean; notes: string }): Promise<void>;
-
-  /**
-   * Signal: committee has made a decision.
-   */
-  committeeDecision(params: { approved: boolean; notes: string }): Promise<void>;
-
-  /**
-   * Query: get current workflow state.
-   */
-  getState(): AccreditationStage;
-}
-
-// ─── Workflow Implementation Stub ────────────────────────────────────────────
-// Replace with actual @temporalio/workflow implementation:
-//
-// import { defineSignal, defineQuery, setHandler, sleep, proxyActivities } from "@temporalio/workflow";
-// import type { AccreditationActivities } from "./accreditation";
-//
-// const acts = proxyActivities<AccreditationActivities>({ startToCloseTimeout: "1 day" });
-//
-// export const documentReviewCompleteSignal = defineSignal<[{ approved: boolean; notes: string }]>("documentReviewComplete");
-// export const committeeDecisionSignal = defineSignal<[{ approved: boolean; notes: string }]>("committeeDecision");
-// export const getStateQuery = defineQuery<AccreditationStage>("getState");
-//
-// export async function accreditationWorkflow(input: AccreditationInput): Promise<AccreditationResult> {
-//   let stage: AccreditationStage = "submitted";
-//   let documentApproved = false;
-//   let committeeApproved = false;
-//
-//   setHandler(getStateQuery, () => stage);
-//
-//   // Stage 1: Document review (5 business day SLA)
-//   stage = "document_review";
-//   await acts.updateApplicationStatus({ applicationId: input.applicationId, status: stage });
-//   await acts.notifyApplicant({ applicationId: input.applicationId, email: input.applicantEmail, stage, message: "Your documents are under review." });
-//
-//   await Promise.race([
-//     new Promise<void>(resolve => setHandler(documentReviewCompleteSignal, ({ approved, notes }) => { documentApproved = approved; resolve(); })),
-//     sleep("5d").then(() => acts.escalateOverdueReview({ applicationId: input.applicationId, stage, daysPastSla: 5 })),
-//   ]);
-//
-//   // ... (continue for each stage)
-// }
 
 export const ACCREDITATION_WORKFLOW_ID_PREFIX = "accreditation-";
 export const ACCREDITATION_TASK_QUEUE = "ndsep-accreditation";

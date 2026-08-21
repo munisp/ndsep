@@ -40,10 +40,6 @@ PUBSUB_TOPICS = [
     "financial-transactions",
 ]
 
-# In-memory state store (fallback when Dapr not available)
-local_state: dict = {}
-local_pubsub: list = []
-
 metrics = {
     "state_gets": 0,
     "state_sets": 0,
@@ -65,17 +61,15 @@ def dapr_request(method: str, path: str, body: dict = None) -> dict:
         with urlopen(req, timeout=5) as resp:
             content = resp.read()
             return json.loads(content) if content else {"success": True}
-    except URLError:
-        return {"degraded": True}
-    except Exception as e:
+    except (URLError, Exception) as e:
         metrics["errors"] += 1
-        return {"error": str(e)}
+        return {"error": f"Dapr sidecar unavailable: {e}"}
 
 def state_get(key: str) -> dict:
     result = dapr_request("GET", f"/v1.0/state/{STATE_STORE}/{key}")
     metrics["state_gets"] += 1
-    if result.get("degraded"):
-        return {"value": local_state.get(key), "source": "local"}
+    if result.get("error"):
+        raise RuntimeError(result["error"])
     return {"value": result, "source": "dapr"}
 
 def state_set(key: str, value, etag: str = None) -> bool:
@@ -84,29 +78,24 @@ def state_set(key: str, value, etag: str = None) -> bool:
         payload[0]["etag"] = etag
     result = dapr_request("POST", f"/v1.0/state/{STATE_STORE}", payload)
     metrics["state_sets"] += 1
-    if result.get("degraded"):
-        local_state[key] = value
-        return True
-    return not result.get("error")
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    return True
 
 def state_delete(key: str) -> bool:
     result = dapr_request("DELETE", f"/v1.0/state/{STATE_STORE}/{key}")
     metrics["state_deletes"] += 1
-    if result.get("degraded"):
-        local_state.pop(key, None)
-        return True
-    return not result.get("error")
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    return True
 
 def publish_event(topic: str, data: dict) -> bool:
     result = dapr_request("POST", f"/v1.0/publish/{PUBSUB_NAME}/{topic}", data)
     metrics["publishes"] += 1
     metrics["by_topic"][topic] += 1
-    if result.get("degraded"):
-        local_pubsub.append({"topic": topic, "data": data, "ts": time.time()})
-        if len(local_pubsub) > 1000:
-            local_pubsub.pop(0)
-        return True
-    return not result.get("error")
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    return True
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -137,8 +126,7 @@ class Handler(BaseHTTPRequestHandler):
                 "state_store": STATE_STORE,
                 "pubsub": PUBSUB_NAME,
                 "topics": PUBSUB_TOPICS,
-                "local_state_keys": len(local_state),
-                "local_pubsub_depth": len(local_pubsub),
+                "durable_state": "dapr-required",
                 "metrics": {k: v for k, v in metrics.items() if k != "by_topic"},
             })
         elif self.path == "/dapr/subscribe":
@@ -151,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/topics":
             self.send_json({"topics": PUBSUB_TOPICS, "pubsub": PUBSUB_NAME})
         elif self.path == "/state":
-            self.send_json({"keys": list(local_state.keys()), "count": len(local_state)})
+            self.send_json({"error": "state enumeration is unsupported; query Dapr directly"}, 501)
         elif self.path == "/metrics":
             lines = [
                 f"ndsep_dapr_state_gets_total {metrics['state_gets']}",
@@ -159,7 +147,6 @@ class Handler(BaseHTTPRequestHandler):
                 f"ndsep_dapr_state_deletes_total {metrics['state_deletes']}",
                 f"ndsep_dapr_publishes_total {metrics['publishes']}",
                 f"ndsep_dapr_errors_total {metrics['errors']}",
-                f"ndsep_dapr_local_state_keys {len(local_state)}",
             ]
             for topic, count in metrics["by_topic"].items():
                 safe = topic.replace("-", "_")

@@ -145,55 +145,13 @@ async def llm_generate(prompt: str, system: str = "", temperature: float = 0.3) 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
-            resp.raise_for_status()
-            return resp.json().get("response", "")
+            response = resp.json().get("response")
+            if not isinstance(response, str) or not response.strip():
+                raise RuntimeError("Ollama returned no usable inference output")
+            return response
     except Exception as e:
-        log.warning(f"Ollama unavailable: {e}. Returning rule-based fallback.")
-        return rule_based_fallback(prompt)
-
-
-def rule_based_fallback(prompt: str) -> str:
-    """Deterministic fallback when LLM is offline."""
-    prompt_lower = prompt.lower()
-    if "breach" in prompt_lower and "notification" in prompt_lower:
-        return (
-            "Under NDPA Article 48, data controllers must notify the Nigeria Data Protection Commission "
-            "within 72 hours of becoming aware of a personal data breach. Article 49 requires notification "
-            "to affected data subjects without undue delay when the breach is likely to result in a high "
-            "risk to their rights and freedoms."
-        )
-    if "cross-border" in prompt_lower or "transfer" in prompt_lower:
-        return (
-            "NDPA Article 40 requires that cross-border transfers of personal data may only occur to "
-            "countries that have been determined to provide an adequate level of protection (Article 41), "
-            "or with appropriate safeguards in place (Article 42), such as binding corporate rules (Article 43)."
-        )
-    if "consent" in prompt_lower:
-        return (
-            "NDPA Article 26 establishes that consent must be freely given, specific, informed, and "
-            "unambiguous. The data controller bears the burden of proof for demonstrating consent. "
-            "Consent can be withdrawn at any time, and withdrawal must be as easy as giving consent."
-        )
-    if "dpo" in prompt_lower or "data protection officer" in prompt_lower:
-        return (
-            "Under NDPA Articles 45-47, data controllers and processors must designate a Data Protection "
-            "Officer when: (a) processing is carried out by a public authority, (b) core activities involve "
-            "regular and systematic monitoring of data subjects on a large scale, or (c) core activities "
-            "consist of processing sensitive personal data on a large scale."
-        )
-    if "penalty" in prompt_lower or "fine" in prompt_lower:
-        return (
-            "NDPA Article 52 sets maximum administrative fines at the higher of 2% of annual gross "
-            "turnover or ₦10,000,000 (ten million Naira). The Commission considers factors including "
-            "nature, gravity, and duration of the infringement; intentional or negligent character; "
-            "and actions taken to mitigate damage to data subjects."
-        )
-    return (
-        "Based on the Nigeria Data Protection Act 2023, please consult the specific articles relevant "
-        "to your query. The NDPA covers data processing principles (Part 3), data subject rights "
-        "(Articles 28-34), cross-border transfers (Part 4), breach notification (Part 6), and "
-        "enforcement (Part 7)."
-    )
+        log.error(f"Ollama inference unavailable: {e}")
+        raise RuntimeError("AI compliance inference is unavailable") from e
 
 
 # ── API Endpoints ───────────────────────────────────────────────────────────

@@ -2,8 +2,8 @@
  * NDSEP Temporal Client — Cloud-Aware
  *
  * Supports both self-hosted Temporal (Docker Compose) and Temporal Cloud.
- * Gracefully degrades to HTTP-based fallback when the Temporal SDK is
- * unavailable or the broker is unreachable.
+ * Requires the official Temporal SDK and a reachable Temporal cluster. Workflow
+ * starts fail explicitly when either prerequisite is unavailable.
  *
  * Environment variables:
  *   TEMPORAL_ADDRESS      gRPC address (default: localhost:7233)
@@ -109,7 +109,7 @@ async function loadTemporalSdk(): Promise<boolean> {
     );
   } catch {
     _sdkAvailable = false;
-    logger.warn("[Temporal] @temporalio/client not installed — using HTTP fallback");
+    logger.error("[Temporal] @temporalio/client is not installed; workflow starts are unavailable");
   }
   return _sdkAvailable;
 }
@@ -162,61 +162,8 @@ async function getTemporalClient(): Promise<any> {
     );
     return _client;
   } catch (err) {
-    logger.warn({ err, address: TEMPORAL_ADDRESS }, "[Temporal] Could not connect — graceful degradation");
-    return null;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HTTP fallback (used when SDK is not installed or broker is unreachable)
-// ─────────────────────────────────────────────────────────────────────────────
-const TEMPORAL_HTTP_URL = process.env.TEMPORAL_UI_URL ?? `http://${TEMPORAL_ADDRESS.replace(":7233", ":8233")}`;
-
-async function httpFallbackStart(options: WorkflowStartOptions): Promise<WorkflowStartResult> {
-  try {
-    const res = await fetch(`${TEMPORAL_HTTP_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workflowId: options.workflowId,
-        workflowType: { name: options.workflowType ?? options.workflowId },
-        taskQueue: { name: options.taskQueue ?? TEMPORAL_TASK_QUEUE },
-        input: options.input ? { payloads: [{ data: Buffer.from(JSON.stringify(options.input)).toString("base64") }] } : undefined,
-        workflowExecutionTimeout: `${options.executionTimeoutSeconds ?? 3600}s`,
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (res.ok) {
-      const data = await res.json() as { runId?: string };
-      return {
-        ok: true,
-        workflowId: options.workflowId,
-        runId: data.runId,
-        namespace: TEMPORAL_NAMESPACE,
-        taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
-        address: TEMPORAL_HTTP_URL,
-        isCloud: IS_TEMPORAL_CLOUD,
-      };
-    }
-    return {
-      ok: false,
-      workflowId: options.workflowId,
-      namespace: TEMPORAL_NAMESPACE,
-      taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
-      address: TEMPORAL_HTTP_URL,
-      isCloud: IS_TEMPORAL_CLOUD,
-      error: `HTTP ${res.status}: ${res.statusText}`,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      workflowId: options.workflowId,
-      namespace: TEMPORAL_NAMESPACE,
-      taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
-      address: TEMPORAL_HTTP_URL,
-      isCloud: IS_TEMPORAL_CLOUD,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    logger.error({ err, address: TEMPORAL_ADDRESS }, "[Temporal] Could not connect");
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 
@@ -225,8 +172,7 @@ async function httpFallbackStart(options: WorkflowStartOptions): Promise<Workflo
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Start (or signal-with-start) a Temporal workflow.
- * Falls back to HTTP API if the gRPC SDK is unavailable.
+ * Start a Temporal workflow through the official gRPC SDK.
  */
 export async function startWorkflow(
   workflowType: string,
@@ -234,8 +180,10 @@ export async function startWorkflow(
 ): Promise<WorkflowStartResult> {
   const client = await getTemporalClient();
 
-  if (client) {
-    try {
+  if (!client) {
+    throw new Error("Temporal SDK is unavailable; workflow start cannot be acknowledged");
+  }
+  try {
       const handle = await client.workflow.start(workflowType, {
         workflowId: options.workflowId,
         taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
@@ -258,20 +206,8 @@ export async function startWorkflow(
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       logger.error({ err, workflowId: options.workflowId }, "[Temporal] Failed to start workflow via SDK");
-      return {
-        ok: false,
-        workflowId: options.workflowId,
-        namespace: TEMPORAL_NAMESPACE,
-        taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
-        address: TEMPORAL_ADDRESS,
-        isCloud: IS_TEMPORAL_CLOUD,
-        error,
-      };
+      throw new Error(`Temporal workflow ${options.workflowId} was not started: ${error}`);
     }
-  }
-
-  // SDK not available — use HTTP fallback
-  return httpFallbackStart({ ...options, workflowType });
 }
 
 /**
@@ -283,7 +219,7 @@ export async function describeWorkflow(
   runId?: string
 ): Promise<WorkflowInfo | null> {
   const client = await getTemporalClient();
-  if (!client) return null;
+  if (!client) throw new Error("Temporal SDK is unavailable; workflow description cannot be determined");
 
   try {
     const handle = client.workflow.getHandle(workflowId, runId);
@@ -300,8 +236,9 @@ export async function describeWorkflow(
       namespace: TEMPORAL_NAMESPACE,
     };
   } catch (err) {
-    logger.warn({ err, workflowId }, "[Temporal] Could not describe workflow");
-    return null;
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error({ err, workflowId }, "[Temporal] Workflow description failed");
+    throw new Error(`Temporal workflow ${workflowId} could not be described: ${error}`);
   }
 }
 
@@ -313,7 +250,7 @@ export async function listWorkflows(options?: {
   query?: string;
 }): Promise<WorkflowInfo[]> {
   const client = await getTemporalClient();
-  if (!client) return [];
+  if (!client) throw new Error("Temporal SDK is unavailable; workflow list cannot be determined");
 
   try {
     const results: WorkflowInfo[] = [];
@@ -336,8 +273,9 @@ export async function listWorkflows(options?: {
     }
     return results;
   } catch (err) {
-    logger.warn({ err }, "[Temporal] Could not list workflows");
-    return [];
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error({ err }, "[Temporal] Workflow listing failed");
+    throw new Error(`Temporal workflows could not be listed: ${error}`);
   }
 }
 

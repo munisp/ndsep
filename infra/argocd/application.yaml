@@ -54,6 +54,7 @@ spec:
   description: NDSEP Platform — National Data Sovereignty Enforcement
   sourceRepos:
     - https://github.com/munisp/NGApp.git
+    - https://github.com/munisp/ndsep.git
   destinations:
     - namespace: ndsep
       server: https://kubernetes.default.svc

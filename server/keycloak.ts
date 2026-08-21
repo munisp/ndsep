@@ -21,6 +21,9 @@ import { logger } from "./logger";
 const KEYCLOAK_URL = process.env.KEYCLOAK_URL ?? "http://localhost:8080";
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? "ndsep";
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? "ndsep-platform";
+// Keycloak is reached over the internal service network, but tokens are issued
+// for its public HTTPS hostname at the Caddy edge. Do not conflate the two.
+const KEYCLOAK_ISSUER_URL = process.env.KEYCLOAK_ISSUER_URL ?? KEYCLOAK_URL;
 
 // ── JWKS cache ────────────────────────────────────────────────────────────────
 interface JwksKey {
@@ -73,6 +76,9 @@ interface JwtPayload {
   iss?: string;
   exp?: number;
   iat?: number;
+  nbf?: number;
+  amr?: string[];
+  acr?: string;
 }
 
 function parseJwtUnsafe(token: string): { header: JwtHeader; payload: JwtPayload } | null {
@@ -122,6 +128,8 @@ export interface KeycloakUser {
   name?: string;
   roles: string[];
   clientRoles: string[];
+  /** True only when the signed OIDC token records an MFA-capable method. */
+  mfaVerified: boolean;
   raw: JwtPayload;
 }
 
@@ -135,38 +143,32 @@ export async function verifyKeycloakToken(token: string): Promise<KeycloakUser |
 
   const { header, payload } = parsed;
 
-  // Check expiry
-  if (payload.exp && payload.exp < Math.floor(Date.now() / 1_000)) {
-    return null; // expired
-  }
+  const now = Math.floor(Date.now() / 1_000);
+  const expectedIssuer = `${KEYCLOAK_ISSUER_URL}/realms/${KEYCLOAK_REALM}`;
 
-  // Check audience
-  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud ?? ""];
-  if (!aud.includes(KEYCLOAK_CLIENT_ID) && !aud.includes("account")) {
-    // Still accept if issuer matches our realm (some configs omit client in aud)
-    const expectedIss = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`;
-    if (payload.iss !== expectedIss) return null;
-  }
+  // A bearer token is only accepted when its cryptographic and registered
+  // claims bind it to this exact realm and client. Never decode-only trust a
+  // token and never accept an unsigned/development fallback.
+  if (!payload.sub || !payload.exp || payload.exp <= now || (payload.nbf !== undefined && payload.nbf > now)) return null;
+  if (payload.iss !== expectedIssuer) return null;
+  const audience = Array.isArray(payload.aud) ? payload.aud : [payload.aud ?? ""];
+  if (!audience.includes(KEYCLOAK_CLIENT_ID)) return null;
+  if (header.alg !== "RS256" || !header.kid) return null;
 
-  // Verify signature
-  if (header.alg === "RS256") {
-    const keys = await getJwks();
-    const jwk = header.kid ? keys.find(k => k.kid === header.kid) : keys[0];
-    if (!jwk) {
-      // JWKS unavailable — degrade gracefully (accept in dev, reject in prod)
-      if (process.env.NODE_ENV === "production") return null;
-      logger.warn("[Keycloak] JWKS unavailable — accepting token in dev mode");
-    } else {
-      const valid = await verifyRs256(token, jwk);
-      if (!valid) return null;
-    }
-  } else if (header.alg === "HS256") {
-    // HS256 not supported for SSO — reject
+  const keys = await getJwks();
+  const jwk = keys.find((key) => key.kid === header.kid);
+  if (!jwk || jwk.kty !== "RSA" || jwk.use !== "sig" || (jwk.alg && jwk.alg !== "RS256")) {
+    logger.warn({ kid: header.kid }, "[Keycloak] Signing key unavailable or incompatible");
     return null;
   }
+  if (!(await verifyRs256(token, jwk))) return null;
 
   const realmRoles = payload.realm_access?.roles ?? [];
   const clientRoles = payload.resource_access?.[KEYCLOAK_CLIENT_ID]?.roles ?? [];
+  const authenticationMethods = payload.amr ?? [];
+  const mfaVerified = authenticationMethods.some((method) =>
+    ["mfa", "otp", "webauthn", "hwk", "fido2"].includes(method.toLowerCase()),
+  );
 
   return {
     sub: payload.sub ?? "",
@@ -175,6 +177,7 @@ export async function verifyKeycloakToken(token: string): Promise<KeycloakUser |
     name: payload.name,
     roles: realmRoles,
     clientRoles,
+    mfaVerified,
     raw: payload,
   };
 }

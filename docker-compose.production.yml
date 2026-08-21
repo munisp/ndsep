@@ -48,8 +48,6 @@ services:
       target: production
     image: ndsep/api:latest
     container_name: ndsep-api
-    ports:
-      - "3000:3000"
     env_file:
       - .env.production
     environment:
@@ -58,13 +56,17 @@ services:
       LOG_LEVEL: info
       # CORS: comma-separated list of allowed origins for mobile apps
       # Example: https://ndsep.nitda.gov.ng,https://app.ndsep.ng
-      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      CORS_ORIGINS: "${CORS_ORIGINS:?CORS_ORIGINS is required}"
       NDSEP_DB_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db?sslmode=require
       NDSEP_DB_POOL_MIN: "2"
       NDSEP_DB_POOL_MAX: "20"
       WORKER_RELAY_URL: http://ndsep-api:3000/api/workers/event
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db?sslmode=require
       FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      OPA_ENABLED: "true"
+      OPA_URL: http://opa:8181
+      OPA_DECISION_PATH: /v1/data/ndsep/authz/allow
+      KEYCLOAK_ISSUER_URL: https://${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,7 +78,6 @@ services:
     logging: *default-logging
     networks:
       - ndsep-internal
-      - ndsep-public
 
   # ─── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
@@ -261,8 +262,6 @@ services:
       POSTGRES_SEEDS: postgres
       TEMPORAL_ADDRESS: temporal:7233
       LOG_LEVEL: warn
-    ports:
-      - "7233:7233"
     healthcheck:
       test: ["CMD", "temporal", "workflow", "list", "--address", "temporal:7233"]
       interval: 30s
@@ -284,14 +283,14 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep_db
       KC_DB_USERNAME: ndsep_user
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+      KC_HOSTNAME_STRICT: "true"
+      KC_PROXY_HEADERS: xforwarded
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:?KEYCLOAK_ADMIN_USER is required}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_LOG_LEVEL: WARN
-    ports:
-      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -304,7 +303,6 @@ services:
     logging: *default-logging
     networks:
       - ndsep-internal
-      - ndsep-public
 
   # ─── Permify (Authorization Engine) ──────────────────────────────────────────
   permify:
@@ -316,8 +314,6 @@ services:
       PERMIFY_DATABASE_ENGINE: postgres
       PERMIFY_DATABASE_URI: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       PERMIFY_LOG_LEVEL: warn
-    ports:
-      - "3476:3476"
     depends_on:
       postgres:
         condition: service_healthy
@@ -331,23 +327,111 @@ services:
   # ─── Apache APISIX (API Gateway) ─────────────────────────────────────────────
   apisix:
     <<: [*resource-defaults, *default-restart]
-    image: apache/apisix:3.9.0-debian
+    image: ghcr.io/openappsec/apisix-attachment:latest
     container_name: ndsep-apisix
+    # The OpenAppSec APISIX attachment shares IPC with the inspection agent.
+    # Do not replace this image with stock APISIX in a production profile.
+    ipc: service:openappsec-agent
     volumes:
-      - ./infra/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
-    ports:
-      - "9080:9080"   # HTTP
-      - "9443:9443"   # HTTPS
-      - "9180:9180"   # Admin API
+      - ./config/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    environment:
+      APISIX_STAND_ALONE: "true"
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY is required}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /usr/local/apisix/logs
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       - ndsep-api
+      - openappsec-agent
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9180/apisix/admin/routes"]
       <<: *hc-defaults
     logging: *default-logging
     networks:
       - ndsep-internal
+
+  # ─── OpenAppSec inline WAF agent ────────────────────────────────────────────
+  openappsec-agent:
+    <<: [*resource-defaults, *default-restart]
+    image: ghcr.io/openappsec/agent:latest
+    container_name: ndsep-openappsec-agent
+    ipc: shareable
+    environment:
+      registered_server: "NDSEP APISIX"
+      # Central-management registration is optional. Declarative prevent-mode
+      # policy remains local and reviewable when this value is blank.
+      user_email: ${OPENAPPSEC_OPERATOR_EMAIL:-}
+      AGENT_TOKEN: ${OPENAPPSEC_AGENT_TOKEN:-}
+    volumes:
+      - waf-config:/etc/cp/conf
+      - waf-data:/etc/cp/data
+      - waf-logs:/var/log/nano_agent
+      - ./infra/openappsec:/ext/appsec:ro
+    command: /cp-nano-agent
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Caddy public edge ───────────────────────────────────────────────────────
+  caddy:
+    <<: [*resource-defaults, *default-restart]
+    image: caddy:2.8.4-alpine
+    container_name: ndsep-caddy
+    environment:
+      NDSEP_PUBLIC_HOST: ${NDSEP_PUBLIC_HOST:?NDSEP_PUBLIC_HOST is required}
+      KEYCLOAK_PUBLIC_HOST: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
       - ndsep-public
+      - ndsep-internal
+
+  # ─── Open Policy Agent (OPA) ─────────────────────────────────────────────────
+  opa:
+    <<: [*resource-defaults, *default-restart]
+    image: openpolicyagent/opa:0.67.0-static
+    container_name: ndsep-opa
+    command: ["run", "--server", "--addr=:8181", "/policies"]
+    volumes:
+      - ./infra/opa/policies:/policies:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "opa", "eval", "--format=raw", "--data", "/policies", "data.ndsep.authz.allow"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
 
   # ─── Prometheus ───────────────────────────────────────────────────────────────
   prometheus:
@@ -364,8 +448,6 @@ services:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
       <<: *hc-defaults
@@ -386,8 +468,6 @@ services:
     volumes:
       - ./infra/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./infra/prometheus/templates:/etc/alertmanager/templates:ro
-    ports:
-      - "9093:9093"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]
       <<: *hc-defaults
@@ -408,15 +488,13 @@ services:
     image: grafana/grafana:10.4.0
     container_name: ndsep-grafana
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER is required}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
       GF_LOG_LEVEL: warn
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
-    ports:
-      - "3001:3000"
     depends_on:
       - prometheus
     healthcheck:
@@ -441,8 +519,6 @@ services:
       KAFKA_BROKERS: kafka:9092
       CBN_NIP_ENDPOINT: ${CBN_NIP_ENDPOINT:-https://nip.cbn.gov.ng/api/v1}
       CBN_RTGS_ENDPOINT: ${CBN_RTGS_ENDPOINT:-https://rtgs.cbn.gov.ng/api/v1}
-    ports:
-      - "8130:8130"
     depends_on:
       postgres:
         condition: service_healthy
@@ -466,8 +542,6 @@ services:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
       SWIFT_BIC: ${SWIFT_BIC:-NDPCNGLA}
-    ports:
-      - "8131:8131"
     depends_on:
       postgres:
         condition: service_healthy
@@ -490,8 +564,6 @@ services:
       FRAUD_ENGINE_PORT: "8132"
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
-    ports:
-      - "8132:8132"
     depends_on:
       postgres:
         condition: service_healthy
@@ -512,8 +584,6 @@ services:
       WATCHLIST_PORT: "8133"
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       OFAC_API_KEY: ${OFAC_API_KEY:-demo-ofac-key}
-    ports:
-      - "8133:8133"
     depends_on:
       postgres:
         condition: service_healthy
@@ -536,8 +606,6 @@ services:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
       NFIU_STR_ENDPOINT: ${NFIU_STR_ENDPOINT:-https://api.nfiu.gov.ng/v1/str}
-    ports:
-      - "8134:8134"
     depends_on:
       postgres:
         condition: service_healthy
@@ -561,8 +629,6 @@ services:
       BVN_API_ENDPOINT: ${BVN_API_ENDPOINT:-https://api.nibss-plc.org.ng/v1/bvn}
       NIN_API_ENDPOINT: ${NIN_API_ENDPOINT:-https://api.nimc.gov.ng/v1/nin}
       NIBSS_API_KEY: ${NIBSS_API_KEY:-demo-nibss-key}
-    ports:
-      - "8135:8135"
     depends_on:
       postgres:
         condition: service_healthy
@@ -586,8 +652,6 @@ services:
       CBN_PORTAL_ENDPOINT: ${CBN_PORTAL_ENDPOINT:-https://portal.cbn.gov.ng/api/v1}
       CBN_API_KEY: ${CBN_API_KEY:-demo-cbn-key}
       NFIU_GOAML_ENDPOINT: ${NFIU_GOAML_ENDPOINT:-https://goaml.nfiu.gov.ng/api/v1}
-    ports:
-      - "8136:8136"
     depends_on:
       postgres:
         condition: service_healthy
@@ -613,8 +677,6 @@ services:
       NCC_API_KEY: ${NCC_API_KEY:-ncc-api-key-placeholder}
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-    ports:
-      - "8122:8122"
     depends_on:
       postgres:
         condition: service_healthy
@@ -640,8 +702,6 @@ services:
       FMOH_API_BASE_URL: ${FMOH_API_BASE_URL:-https://health.gov.ng/api/v1}
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-    ports:
-      - "8123:8123"
     depends_on:
       postgres:
         condition: service_healthy
@@ -668,8 +728,6 @@ services:
       DPR_API_KEY: ${DPR_API_KEY:-dpr-api-key-placeholder}
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-    ports:
-      - "8124:8124"
     depends_on:
       postgres:
         condition: service_healthy
@@ -694,8 +752,6 @@ services:
       NAICOM_API_KEY: ${NAICOM_API_KEY:-naicom-api-key-placeholder}
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-    ports:
-      - "8125:8125"
     depends_on:
       postgres:
         condition: service_healthy
@@ -720,8 +776,6 @@ services:
       CBN_FINTECH_API_KEY: ${CBN_FINTECH_API_KEY:-cbn-fintech-api-key-placeholder}
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-    ports:
-      - "8126:8126"
     depends_on:
       postgres:
         condition: service_healthy
@@ -740,9 +794,6 @@ services:
     image: openappsec/open-appsec-nginx:latest
     container_name: ndsep-waf
     <<: *default-restart
-    ports:
-      - "80:80"
-      - "443:443"
     environment:
       # WAF mode: detect-learn (2 weeks) → prevent (production)
       OPEN_APPSEC_MODE: ${WAF_MODE:-detect-learn}
@@ -1906,6 +1957,8 @@ volumes:
     driver: local
   waf-config:
     driver: local
+  waf-data:
+    driver: local
   waf-logs:
     driver: local
   tls-certs:
@@ -1916,6 +1969,10 @@ volumes:
       # For Let's Encrypt production: point to /etc/letsencrypt/live/${DOMAIN}/
       # For local dev self-signed: point to ./infra/nginx/ssl/
       device: ${TLS_CERT_DIR:-./infra/nginx/ssl}
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
 
 # ─── Networks ─────────────────────────────────────────────────────────────────
 networks:
@@ -1923,4 +1980,4 @@ networks:
     driver: bridge
     internal: true   # No external access to internal services
   ndsep-public:
-    driver: bridge   # Only nginx, keycloak, and ndsep-api are on this network
+    driver: bridge   # Only the Caddy edge connects this network to the internal service mesh

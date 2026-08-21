@@ -71,10 +71,10 @@ export const p13AdvancedAnalyticsRouter = router({
       SELECT
         (SELECT COUNT(*) FROM organizations) as total_orgs,
         (SELECT COUNT(*) FROM organizations WHERE compliance_score >= 70) as compliant_orgs,
-        (SELECT COUNT(*) FROM breach_notifications WHERE created_at > NOW() - INTERVAL '30 days') as recent_breaches,
-        (SELECT COUNT(*) FROM dsar_requests WHERE status = 'pending') as pending_dsars,
-        (SELECT COALESCE(SUM(amount), 0) FROM fine_payments WHERE status = 'paid') as total_fines_collected,
-        (SELECT COUNT(*) FROM compliance_violations WHERE status = 'open') as open_violations
+        (SELECT COUNT(*) FROM breach_incidents WHERE detected_at > NOW() - INTERVAL '30 days') as recent_breaches,
+        (SELECT COUNT(*) FROM citizen_requests WHERE status IN ('submitted', 'acknowledged')) as pending_dsars,
+        (SELECT COALESCE(SUM(amount), 0) FROM financial_penalties WHERE payment_status = 'completed') as total_fines_collected,
+        (SELECT COUNT(*) FROM compliance_violations WHERE status = 'non_compliant') as open_violations
     `);
     return totals;
   }),
@@ -265,7 +265,7 @@ export const p13ConsentRecordsRouter = router({
       const params: unknown[] = [];
       if (input.search) { params.push(`%${input.search}%`); sql += ` AND (data_subject_email ILIKE $${params.length} OR purpose ILIKE $${params.length})`; }
       if (input.status) { params.push(input.status); sql += ` AND status = $${params.length}`; }
-      if (input.org_id) { params.push(input.org_id); sql += ` AND org_id = $${params.length}`; }
+      if (input.org_id) { params.push(input.org_id); sql += ` AND organization_id = $${params.length}`; }
       if (input.legal_basis) { params.push(input.legal_basis); sql += ` AND legal_basis = $${params.length}`; }
       const offset = (input.page - 1) * input.limit;
       params.push(input.limit); sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
@@ -1057,9 +1057,9 @@ export const regulatoryReportingRouter = router({
         const [data] = await exec(`
           SELECT
             (SELECT COUNT(*) FROM organizations) as total_orgs,
-            (SELECT COUNT(*) FROM breach_notifications WHERE created_at BETWEEN $1 AND $2) as breaches,
-            (SELECT COUNT(*) FROM dsar_requests WHERE created_at BETWEEN $1 AND $2) as dsars,
-            (SELECT COALESCE(SUM(amount), 0) FROM fine_payments WHERE created_at BETWEEN $1 AND $2) as fines
+            (SELECT COUNT(*) FROM breach_incidents WHERE detected_at BETWEEN $1 AND $2) as breaches,
+            (SELECT COUNT(*) FROM citizen_requests WHERE submitted_at BETWEEN $1 AND $2) as dsars,
+            (SELECT COALESCE(SUM(amount), 0) FROM financial_penalties WHERE created_at BETWEEN $1 AND $2) as fines
         `, [input.reporting_period_start, input.reporting_period_end]);
         snapshot = data;
       }

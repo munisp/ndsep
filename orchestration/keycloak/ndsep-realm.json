@@ -10,18 +10,25 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-  "permanentLockout": false,
+  "permanentLockout": true,
   "maxFailureWaitSeconds": 900,
   "minimumQuickLoginWaitSeconds": 60,
   "waitIncrementSeconds": 60,
   "quickLoginCheckMilliSeconds": 1000,
   "maxDeltaTimeSeconds": 43200,
   "failureFactor": 5,
-  "accessTokenLifespan": 3600,
-  "accessTokenLifespanForImplicitFlow": 900,
-  "ssoSessionIdleTimeout": 1800,
-  "ssoSessionMaxLifespan": 36000,
-  "offlineSessionIdleTimeout": 2592000,
+  "accessTokenLifespan": 600,
+  "accessTokenLifespanForImplicitFlow": 300,
+  "ssoSessionIdleTimeout": 900,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionIdleTimeout": 604800,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "webAuthnPolicyRpEntityName": "NDSEP",
+  "webAuthnPolicyUserVerificationRequirement": "required",
   "roles": {
     "realm": [
       {
@@ -113,20 +120,32 @@
       "publicClient": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
-      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
       "authorizationServicesEnabled": true,
       "redirectUris": [
-        "http://localhost:3000/*",
-        "https://*.manus.computer/*",
-        "https://*.manus.space/*"
+        "https://ndsep.nitda.gov.ng/*",
+        "https://staging.ndsep.nitda.gov.ng/*"
       ],
       "webOrigins": [
-        "http://localhost:3000",
-        "https://*.manus.computer",
-        "https://*.manus.space"
+        "https://ndsep.nitda.gov.ng",
+        "https://staging.ndsep.nitda.gov.ng"
       ],
       "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "ndsep-access-token-amr",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-amr-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        }
+      ],
       "attributes": {
         "saml.assertion.signature": "false",
         "saml.force.post.binding": "false",
@@ -137,13 +156,14 @@
         "exclude.session.state.from.auth.response": "false",
         "saml_force_name_id_format": "false",
         "saml.client.signature": "false",
-        "tls.client.certificate.bound.access.tokens": "false",
+        "tls.client.certificate.bound.access.tokens": "true",
+        "pkce.code.challenge.method": "S256",
         "saml.authnstatement": "false",
         "display.on.consent.screen": "false",
         "saml.onetimeuse.condition": "false"
       },
       "authorizationSettings": {
-        "allowRemoteResourceManagement": true,
+        "allowRemoteResourceManagement": false,
         "policyEnforcementMode": "ENFORCING",
         "resources": [
           {
@@ -267,6 +287,24 @@
       }
     }
   ],
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10
+    },
+    {
+      "alias": "webauthn-register",
+      "name": "WebAuthn Register",
+      "providerId": "webauthn-register",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 20
+    }
+  ],
   "identityProviders": [],
   "identityProviderMappers": [],
   "components": {
@@ -284,7 +322,8 @@
             "saml-user-attribute-mapper",
             "saml-role-list-mapper",
             "saml-user-property-mapper",
-            "oidc-usermodel-attribute-mapper"
+            "oidc-usermodel-attribute-mapper",
+            "oidc-amr-mapper"
           ]
         }
       }

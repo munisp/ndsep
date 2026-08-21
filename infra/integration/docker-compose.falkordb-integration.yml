@@ -1,0 +1,75 @@
+name: ndsep-falkordb-integration
+
+services:
+  falkordb:
+    image: falkordb/falkordb-server:v4.20.3
+    environment:
+      REDIS_ARGS: >-
+        --requirepass ${FALKORDB_PASSWORD:?FALKORDB_PASSWORD is required}
+        --appendonly yes
+        --appendfsync everysec
+    volumes:
+      - falkordb_integration_data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$FALKORDB_PASSWORD\" ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - falkordb_integration
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+
+  graph-worker:
+    build:
+      context: ../..
+      dockerfile: workers/go/cmd/falkordb_kg_worker/Dockerfile
+    environment:
+      FALKORDB_URL: redis://:${FALKORDB_PASSWORD:?FALKORDB_PASSWORD is required}@falkordb:6379
+      FALKORDB_GRAPH_NAME: ${FALKORDB_GRAPH_NAME:-ndsep_integration}
+      FALKORDB_QUERY_TIMEOUT_MS: ${FALKORDB_QUERY_TIMEOUT_MS:-3000}
+      PORT: "8090"
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - falkordb_integration
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  runner:
+    image: curlimages/curl:8.12.1
+    entrypoint: ["sh", "-c", "trap : TERM INT; sleep infinity & wait"]
+    tmpfs:
+      - /tmp
+    depends_on:
+      graph-worker:
+        condition: service_healthy
+    networks:
+      - falkordb_integration
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+networks:
+  falkordb_integration:
+    internal: true
+
+volumes:
+  falkordb_integration_data:

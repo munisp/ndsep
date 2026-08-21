@@ -250,21 +250,21 @@ class LivenessScorer:
         # Combined score
         challenge_score = (challenges_passed / len(challenges)) * 100 if challenges else 0
         motion_score = motion_consistency * 100
-        spoof_score = spoof_result.overall_score if spoof_result else 50
-        df_penalty = (df_result.deepfake_probability * 30) if df_result else 0
+        spoof_score = spoof_result.overall_score if spoof_result else 0
+        df_penalty = (df_result.deepfake_probability * 30) if df_result else 100
 
         combined = (
             challenge_score * 0.40 +
             motion_score * 0.20 +
-            spoof_score * 0.30 +
-            10  # base score for having frames
+            spoof_score * 0.40
         ) - df_penalty
 
         combined = max(0, min(100, combined))
         is_live = (
             combined >= self.ACTIVE_THRESHOLD and
             challenges_passed >= max(1, len(challenges) // 2) and
-            (spoof_result is None or spoof_result.is_real)
+            spoof_result is not None and spoof_result.is_real and
+            df_result is not None and not df_result.is_deepfake
         )
 
         return ActiveLivenessResult(

@@ -35,9 +35,9 @@ Built for the **Nigeria Data Protection Commission (NDPC)** to serve as the nati
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| Frontend | React 18, Vite, Radix UI, Tailwind CSS | SPA with 205 pages |
-| API | Express, tRPC, Zod | Type-safe RPC with 801 procedures |
-| Database | PostgreSQL 16, Drizzle ORM | 117 tables, 66 FKs, 29 migrations |
+| Frontend | React, Vite, Radix UI, Tailwind CSS | NDSEP single-page application |
+| API | Express, tRPC, Zod | Type-safe RPC backend |
+| Database | PostgreSQL 16, Drizzle ORM | **168 public tables** and **35 canonical SQL migrations** verified on a clean database |
 | Auth | Keycloak, OAuth 2.0, JWT | SSO with RBAC + PBAC |
 | Encryption | AES-256-GCM, KMS (AWS/Vault) | Field-level on 27 PII fields |
 | Workers (Go) | DPI engine, SQL auditor, breach monitor | High-performance processing |
@@ -68,8 +68,8 @@ Built for the **Nigeria Data Protection Commission (NDPC)** to serve as the nati
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/munisp/NGApp.git
-cd NGApp
+git clone https://github.com/munisp/ndsep.git
+cd ndsep
 pnpm install
 
 # 2. Set up environment
@@ -110,7 +110,7 @@ cd workers/python && pip install -r requirements.txt && cd ../..
 ## Project Structure
 
 ```
-NGApp/
+ndsep/
 ├── client/                 # React frontend (Vite)
 │   ├── src/
 │   │   ├── pages/          # 205 page components
@@ -126,8 +126,8 @@ NGApp/
 │   ├── featureFlags.ts     # Feature flag system
 │   └── openapi.ts          # OpenAPI doc generation
 ├── drizzle/                # Database schema & ORM
-│   └── schema.ts           # 117 tables, 2,938 LOC
-├── migrations/             # 29 SQL migration files
+│   └── schema.ts           # Drizzle schema definitions
+│   └── 0000_*.sql … 0034_*.sql  # 35 canonical SQL migration files
 ├── workers/
 │   ├── go/                 # Go workers (DPI, discovery, SQL audit)
 │   ├── rust/               # Rust workers (CSP, API key, offline)

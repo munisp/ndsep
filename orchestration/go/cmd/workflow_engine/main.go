@@ -5,7 +5,7 @@
 //   - Executes enforcement workflows: ComplianceEnforcement, PenaltyDispute,
 //     IncidentResponse, CrossBorderApproval, NightlyMLRetrain
 //   - Queries workflow status via Temporal client
-//   - Graceful degradation: in-memory stub when Temporal is unreachable
+//   - Rejects workflow operations when Temporal is unreachable; durable execution is required.
 //
 // Nightly ML Retrain cron:
 //   - Registered as Temporal schedule "ndsep-ml-nightly-retrain"
@@ -50,8 +50,6 @@ var (
 	temporalOK       bool
 	workflowsStarted int64
 	workflowErrors   int64
-	// in-memory fallback when Temporal is unreachable
-	localWorkflows = make(map[string]map[string]interface{})
 )
 
 // ─── Temporal Init ────────────────────────────────────────────────────────────
@@ -134,21 +132,8 @@ func executeWorkflow(workflowType, workflowID string, input map[string]interface
 		return run.GetRunID(), nil
 	}
 
-	// Fallback: in-memory stub
-	runID := uuid.New().String()
-	mu.Lock()
-	localWorkflows[workflowID] = map[string]interface{}{
-		"workflow_id":   workflowID,
-		"workflow_type": workflowType,
-		"run_id":        runID,
-		"status":        "running",
-		"started_at":    time.Now().UTC(),
-		"input":         input,
-		"source":        "local-fallback",
-	}
-	mu.Unlock()
-	atomic.AddInt64(&workflowsStarted, 1)
-	return runID, nil
+	atomic.AddInt64(&workflowErrors, 1)
+	return "", fmt.Errorf("temporal workflow service is unavailable")
 }
 
 // ─── HTTP Handlers ────────────────────────────────────────────────────────────
@@ -156,7 +141,6 @@ func executeWorkflow(workflowType, workflowID string, input map[string]interface
 func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	mu.RLock()
 	tOK := temporalOK
-	count := len(localWorkflows)
 	mu.RUnlock()
 	status := "healthy"
 	if !tOK {
@@ -164,16 +148,15 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"service":           "workflow-engine",
-		"status":            status,
-		"temporal_host":     temporalHost,
+		"service":            "workflow-engine",
+		"status":             status,
+		"temporal_host":      temporalHost,
 		"temporal_connected": tOK,
-		"task_queue":        taskQueue,
-		"workflows_started": atomic.LoadInt64(&workflowsStarted),
-		"workflow_errors":   atomic.LoadInt64(&workflowErrors),
-		"local_workflows":   count,
-		"uptime_seconds":    time.Since(startTime).Seconds(),
-		"timestamp":         time.Now().UTC(),
+		"task_queue":         taskQueue,
+		"workflows_started":  atomic.LoadInt64(&workflowsStarted),
+		"workflow_errors":    atomic.LoadInt64(&workflowErrors),
+		"uptime_seconds":     time.Since(startTime).Seconds(),
+		"timestamp":          time.Now().UTC(),
 	})
 }
 
@@ -197,7 +180,7 @@ func startWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	runID, err := executeWorkflow(req.WorkflowType, req.WorkflowID, req.Input)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
 		return
 	}
@@ -205,42 +188,38 @@ func startWorkflowHandler(w http.ResponseWriter, r *http.Request) {
 	tOK := temporalOK
 	mu.RUnlock()
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"ok":          true,
-		"workflow_id": req.WorkflowID,
-		"run_id":      runID,
-		"status":      "running",
+		"ok":                 true,
+		"workflow_id":        req.WorkflowID,
+		"run_id":             runID,
+		"status":             "running",
 		"temporal_connected": tOK,
-		"temporal_url": fmt.Sprintf("http://%s/namespaces/default/workflows/%s", temporalHost, req.WorkflowID),
+		"temporal_url":       fmt.Sprintf("http://%s/namespaces/default/workflows/%s", temporalHost, req.WorkflowID),
 	})
 }
 
 func listWorkflowsHandler(w http.ResponseWriter, _ *http.Request) {
 	mu.RLock()
-	wfs := make([]map[string]interface{}, 0, len(localWorkflows))
-	for _, wf := range localWorkflows {
-		wfs = append(wfs, wf)
-	}
 	tOK := temporalOK
 	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"workflows":          wfs,
-		"total":              len(wfs),
-		"temporal_connected": tOK,
-	})
+	if !tOK {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": "temporal workflow service is unavailable"})
+		return
+	}
+	w.WriteHeader(http.StatusNotImplemented)
+	json.NewEncoder(w).Encode(map[string]interface{}{"error": "workflow listing must be queried from Temporal visibility; local workflow mirrors are intentionally disabled"})
 }
 
 func metricsHandler(w http.ResponseWriter, _ *http.Request) {
 	mu.RLock()
 	tOK := temporalOK
-	count := len(localWorkflows)
 	mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"temporalConnected": tOK,
 		"workflowsStarted":  atomic.LoadInt64(&workflowsStarted),
 		"workflowErrors":    atomic.LoadInt64(&workflowErrors),
-		"localWorkflows":    count,
 		"uptimeSeconds":     time.Since(startTime).Seconds(),
 	})
 }

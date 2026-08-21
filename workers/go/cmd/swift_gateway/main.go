@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -175,37 +174,17 @@ func processSWIFTMessage(msg SWIFTMessage) {
 		})
 	}
 
-	// Step 4: Route to correspondent bank and simulate ACK
-	processingTimeMs := int64(rand.Intn(2000) + 500)
-	ackReceived := rand.Float64() > 0.02 // 98% ACK rate
-	status := "sent"
-	if ackReceived {
-		status = "acknowledged"
+	// Step 4: A correspondent-bank acknowledgement is authoritative. This worker
+	// records an awaiting state and never synthesizes an ACK or processing time.
+	if _, err := shared.DB.Exec(`
+		UPDATE swift_messages SET status='awaiting_correspondent_ack', sanctions_screened=true,
+		sanctions_hit=false, ack_received=false, ack_timestamp=NULL, processing_time_ms=NULL,
+		updated_at=NOW() WHERE id=$1`, msg.ID); err != nil {
+		shared.Log("ERROR", "SWIFT_PENDING_ACK_WRITE_FAILED", map[string]interface{}{"msg_id": msg.ID, "error": err.Error()})
+		return
 	}
-
-	shared.DB.Exec(`
-		UPDATE swift_messages SET status=$1, sanctions_screened=true, sanctions_hit=false,
-		ack_received=$2, ack_timestamp=$3, processing_time_ms=$4, updated_at=NOW()
-		WHERE id=$5`,
-		status, ackReceived,
-		func() interface{} {
-			if ackReceived {
-				return time.Now()
-			}
-			return nil
-		}(),
-		processingTimeMs, msg.ID,
-	)
-
-	atomic.AddInt64(&messagesProcessed, 1)
-	shared.Log("INFO", "SWIFT_PROCESSED", map[string]interface{}{
+	shared.Log("ERROR", "SWIFT_CORRESPONDENT_ACK_REQUIRED", map[string]interface{}{
 		"msg_id": msg.ID, "ref": msg.MessageRef, "type": msg.MessageType,
-		"status": status, "ack": ackReceived, "processing_ms": processingTimeMs,
-	})
-
-	shared.PublishEvent("swift.message.processed", map[string]interface{}{
-		"ref": msg.MessageRef, "type": msg.MessageType, "status": status,
-		"amount": msg.Amount, "currency": msg.Currency,
 	})
 }
 

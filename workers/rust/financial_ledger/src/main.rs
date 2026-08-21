@@ -5,7 +5,7 @@ Processes Mojaloop payments, manages penalty lifecycle.
 Technology: Rust, TigerBeetle HTTP API, Mojaloop, NIBSS, Axum
 */
 use axum::{extract::State, response::Json, routing::get, Router};
-use log::info;
+use log::{info, warn};
 use serde_json::{json, Value};
 use std::env;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -310,55 +310,13 @@ async fn run_ledger_processor(
                 let amount: f32 = row.get(2);
                 let currency: String = row.get(3);
 
-                let upd = pick_penalty_update(penalty_id);
-
-                let _ = db
-                    .execute(
-                        "UPDATE financial_penalties SET status = $1::penalty_status WHERE id = $2",
-                        &[&upd.new_status, &penalty_id],
-                    )
-                    .await;
-
-                state.transactions_processed.fetch_add(1, Ordering::Relaxed);
-                if upd.new_status == "paid" {
-                    state.payments_settled.fetch_add(1, Ordering::Relaxed);
-                    // Post double-entry transfer to TigerBeetle:
-                    // Debit org account (org_id + 1000 offset), Credit NDSEP Treasury (account 1)
-                    let debit_acct = (org_id as u128) + 1000;
-                    let amount_ngn = (amount * if currency == "NGN" { 1.0 } else { 1600.0 }) as u64;
-                    let posted = state
-                        .tb
-                        .post_transfer(debit_acct, 1, amount_ngn, 1, penalty_id as u128)
-                        .await;
-                    if posted {
-                        info!(
-                            "[TigerBeetle] Transfer posted: penalty #{} {} NGN",
-                            penalty_id, amount_ngn
-                        );
-                    }
-                }
-
-                ndsep_shared::broadcast(
-                    &http,
-                    "ledger_transaction",
-                    json!({
-                        "type": "ledger_transaction",
-                        "penaltyId": penalty_id,
-                        "organizationId": org_id,
-                        "amount": amount,
-                        "currency": currency,
-                        "newStatus": upd.new_status,
-                        "paymentScheme": upd.scheme,
-                        "transactionRef": upd.tx_ref,
-                        "tigerbeetleConnected": state.tb.connected.load(Ordering::Relaxed),
-                        "timestamp": ndsep_shared::now_utc(),
-                    }),
-                )
-                .await;
-
-                info!(
-                    "[Ledger] Penalty #{} -> {} via {} | {} {}",
-                    penalty_id, upd.new_status, upd.scheme, amount, currency
+                // A pending penalty is not a payment confirmation. This worker does
+                // not invent payment outcomes or transaction references. A separate
+                // authoritative payment-ingest path must supply a confirmed payment
+                // before a TigerBeetle transfer and status transition are attempted.
+                warn!(
+                    "[Ledger] Penalty #{} remains pending: authoritative payment confirmation required (org={}, amount={} {})",
+                    penalty_id, org_id, amount, currency
                 );
             }
         }

@@ -221,7 +221,10 @@ class SDKServer {
             logger.warn("[Auth] Revoked token presented — session blacklisted");
             return null;
           }
-        } catch { /* Redis unavailable — allow token (graceful degradation) */ }
+        } catch (error) {
+          logger.error({ err: error instanceof Error ? error.message : String(error) }, "[Auth] Revocation status unavailable — denying session");
+          return null;
+        }
       };
 
       if (

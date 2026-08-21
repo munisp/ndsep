@@ -311,8 +311,8 @@ export async function emitMutationEvent(
 
 /**
  * Check Permify authorization before a mutation.
- * Returns true if allowed, false if denied.
- * Gracefully degrades to allowing if Permify is unavailable.
+ * Returns true only for an explicit Permify allow decision. Upstream failures
+ * and malformed responses are denied so protected mutations fail closed.
  */
 export async function checkPermission(
   userId: string | number,
@@ -321,17 +321,17 @@ export async function checkPermission(
 ): Promise<boolean> {
   try {
     const result = await permifyCheck(resource, String(userId), action, `user:${userId}`);
-    return result !== false;
+    return result === true;
   } catch {
-    return true; // Graceful degradation
+    return false;
   }
 }
 
 /**
  * tRPC middleware factory for Permify ReBAC enforcement.
  * Checks if the current user has the required relationship/permission
- * on the specified resource before allowing the mutation to proceed.
- * Gracefully degrades — if Permify is unavailable, the request is allowed.
+ * on the specified resource before allowing the mutation to proceed. An
+ * unavailable authorization service denies the request rather than bypassing it.
  */
 export function permifyMiddleware(resource: string, action: string) {
   return async ({ ctx, next }: { ctx: { user?: { id: number; role: string } }; next: () => unknown }) => {

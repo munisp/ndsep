@@ -2,7 +2,7 @@
 Face Feature Extraction & Matching
 ====================================
 Extracts 128-d face embeddings and computes similarity scores.
-Uses face_recognition (dlib) as primary, OpenCV DNN as fallback.
+Uses the CPU face_recognition (dlib) embedding model. No heuristic image-similarity fallback is permitted for biometric decisions.
 """
 
 import logging
@@ -19,7 +19,7 @@ logger = logging.getLogger("liveness.face_matcher")
 class FaceEmbedding:
     """128-dimensional face feature vector."""
     vector: np.ndarray  # (128,) float64
-    model: str  # "dlib" or "opencv_dnn"
+    model: str  # "dlib"
 
 
 @dataclass
@@ -39,7 +39,6 @@ class FaceFeatureExtractor:
     def __init__(self):
         self._backend = "none"
         self._face_rec = None
-        self._dnn_net = None
         self._init_backend()
 
     def _init_backend(self):
@@ -53,13 +52,7 @@ class FaceFeatureExtractor:
         except ImportError:
             logger.warning("[FaceFeatureExtractor] face_recognition not available")
 
-        # Fallback: OpenCV DNN face embedder
-        try:
-            model_path = cv2.data.haarcascades  # check OpenCV is usable
-            self._backend = "opencv_histogram"
-            logger.info("[FaceFeatureExtractor] Using OpenCV histogram fallback")
-        except Exception:
-            logger.error("[FaceFeatureExtractor] No face embedding backend available")
+        logger.error("[FaceFeatureExtractor] No approved face embedding backend is available")
 
     def extract(self, face_image: np.ndarray) -> Optional[FaceEmbedding]:
         """Extract face embedding from a cropped face image (BGR)."""
@@ -68,8 +61,6 @@ class FaceFeatureExtractor:
 
         if self._backend == "dlib":
             return self._extract_dlib(face_image)
-        elif self._backend == "opencv_histogram":
-            return self._extract_histogram(face_image)
         return None
 
     def _extract_dlib(self, face_image: np.ndarray) -> Optional[FaceEmbedding]:
@@ -89,20 +80,6 @@ class FaceFeatureExtractor:
             vector=np.array(encodings[0], dtype=np.float64),
             model="dlib",
         )
-
-    def _extract_histogram(self, face_image: np.ndarray) -> Optional[FaceEmbedding]:
-        """Fallback: color histogram as pseudo-embedding (128-d)."""
-        hsv = cv2.cvtColor(face_image, cv2.COLOR_BGR2HSV)
-        # 3-channel histogram: H(64 bins) + S(32 bins) + V(32 bins) = 128 dims
-        hist_h = cv2.calcHist([hsv], [0], None, [64], [0, 180]).flatten()
-        hist_s = cv2.calcHist([hsv], [1], None, [32], [0, 256]).flatten()
-        hist_v = cv2.calcHist([hsv], [2], None, [32], [0, 256]).flatten()
-        vec = np.concatenate([hist_h, hist_s, hist_v])
-        # L2 normalize
-        norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec = vec / norm
-        return FaceEmbedding(vector=vec, model="opencv_histogram")
 
 
 class FaceMatcher:
@@ -137,19 +114,10 @@ class FaceMatcher:
         # Euclidean distance
         distance = float(np.linalg.norm(emb_a.vector - emb_b.vector))
 
-        # Convert distance to similarity (0-1 scale)
-        # For dlib: distance < 0.6 is same person (lower = more similar)
-        # Similarity = 1 - (distance / max_distance)
-        if emb_a.model == "dlib":
-            max_dist = 1.2  # practical max for dlib
-            similarity = max(0.0, 1.0 - (distance / max_dist))
-            is_match = distance < thresh
-        else:
-            # Histogram: use cosine similarity
-            cos_sim = float(np.dot(emb_a.vector, emb_b.vector))
-            similarity = max(0.0, min(1.0, cos_sim))
-            distance = 1.0 - similarity
-            is_match = similarity >= (1.0 - thresh)
+        # dlib embeddings use Euclidean distance; lower values represent a closer match.
+        max_dist = 1.2
+        similarity = max(0.0, 1.0 - (distance / max_dist))
+        is_match = distance < thresh
 
         # Calibrate confidence (0-100 scale)
         confidence = _calibrate_confidence(similarity, emb_a.model)
@@ -180,5 +148,4 @@ def _calibrate_confidence(similarity: float, model: str) -> float:
             return 40 + (similarity - 0.5) * 150
         else:
             return similarity * 80
-    else:
-        return similarity * 100
+    return 0.0

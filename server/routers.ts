@@ -2215,7 +2215,7 @@ export const appRouter = router({
     get: protectedProcedure
       .input(z.object({ organizationId: z.number().int().positive() }))
       .query(async ({ input, ctx }) => {
-        canAccessOrg(ctx.user, input.organizationId);
+        if (!canAccessOrg(ctx.user, input.organizationId)) throw new TRPCError({ code: "FORBIDDEN" });
         return getNotificationSettings(input.organizationId);
       }),
     upsert: protectedProcedure
@@ -2238,17 +2238,17 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         const { organizationId, ...settings } = input;
-        canAccessOrg(ctx.user, organizationId);
+        if (!canAccessOrg(ctx.user, organizationId)) throw new TRPCError({ code: "FORBIDDEN" });
         createAuditLog({ userId: ctx.user.id, action: "settings.notification.update", resourceType: "organization", resourceId: organizationId, details: `Updated notification settings for org #${organizationId}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
         return upsertNotificationSettings(organizationId, settings);
       }),
   }),
   // Gap 1: Consent Management (NDPA S.25–27, GAID Art. 16–20)
   consent: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), status: z.string().optional(), limit: z.number().default(100) }).optional())
       .query(async ({ input }) => listConsentRecords(input?.orgId, input?.status, input?.limit)),
-    stats: publicProcedure
+    stats: protectedProcedure
       .input(z.object({ orgId: z.number().optional() }).optional())
       .query(async ({ input }) => getConsentStats(input?.orgId)),
     create: protectedProcedure
@@ -2314,7 +2314,7 @@ export const appRouter = router({
 
   // Gap 2: Data Breach Notification (NDPA S.47, GAID Art. 31–36)
   breaches: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listBreachIncidents(input?.orgId, input?.status, input?.limit)),
     create: protectedProcedure
@@ -2415,7 +2415,7 @@ export const appRouter = router({
 
   // Gap 3: DPO Registry (GAID Art. 11–14)
   dpoRegistry: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(100) }).optional())
       .query(async ({ input }) => listDpoAppointments(input?.orgId, input?.limit)),
     create: adminProcedure
@@ -2471,7 +2471,7 @@ export const appRouter = router({
 
   // Gap 4: DPIA Assessments (GAID Art. 28)
   dpia: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listDpiaAssessments(input?.orgId, input?.status, input?.limit)),
     create: protectedProcedure
@@ -2544,7 +2544,7 @@ export const appRouter = router({
 
   // Gap 5: ROPA (NDPA S.44)
   ropa: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(100) }).optional())
       .query(async ({ input }) => listRopaRecords(input?.orgId, input?.limit)),
     create: protectedProcedure
@@ -2642,7 +2642,7 @@ export const appRouter = router({
   }),
   // Gap 6: Retention Policiess
   retention: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(100) }).optional())
       .query(async ({ input }) => listRetentionPolicies(input?.orgId, input?.limit)),
     create: adminProcedure
@@ -2691,7 +2691,7 @@ export const appRouter = router({
 
   // Gap 7: DPO Reports (semi-annual, GAID Art. 12)
   dpoReports: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listDpoReports(input?.orgId, input?.limit)),
     create: protectedProcedure
@@ -2749,7 +2749,7 @@ export const appRouter = router({
 
   // Gap 8: Compliance Audit Returns (CAR)
   auditReturns: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listComplianceAuditReturns(input?.orgId, input?.status, input?.limit)),
     create: protectedProcedure
@@ -2865,7 +2865,7 @@ export const appRouter = router({
 
   // Gap 10: Data Processing Agreements
   dpa: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listDataProcessingAgreements(input?.orgId, input?.status, input?.limit)),
     create: protectedProcedure
@@ -2909,7 +2909,7 @@ export const appRouter = router({
 
   // Gap 11: Privacy Notices
   privacyNotices: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listPrivacyNotices(input?.orgId, input?.status, input?.limit)),
     create: protectedProcedure
@@ -2957,10 +2957,10 @@ export const appRouter = router({
 
   // Gap 12: Cookie Consent
   cookieConsent: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(100) }).optional())
       .query(async ({ input }) => listCookieConsentRecords(input?.orgId, input?.limit)),
-    stats: publicProcedure
+    stats: protectedProcedure
       .input(z.object({ orgId: z.number().optional() }).optional())
       .query(async ({ input }) => getCookieConsentStats(input?.orgId)),
     create: publicProcedure
@@ -2991,7 +2991,7 @@ export const appRouter = router({
 
   // Gap 13: Automated Decisions (NDPA S.36)
   automatedDecisions: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listAutomatedDecisions(input?.orgId, input?.limit)),
     create: protectedProcedure
@@ -3076,7 +3076,7 @@ export const appRouter = router({
   }),
   // Gap 14: Children's Dataa / Parental Consent (NDPA S.35)
   parentalConsent: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listParentalConsents(input?.orgId, input?.limit)),
     create: protectedProcedure
@@ -3130,7 +3130,7 @@ export const appRouter = router({
 
   // Gap 15: Staff Training
   staffTraining: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), status: z.string().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listStaffTraining(input?.orgId, input?.status, input?.limit)),
     create: protectedProcedure
@@ -3223,7 +3223,7 @@ export const appRouter = router({
 
   // Gap 17: Data Portability / Export Jobs
   dataExport: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ orgId: z.number().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => listDataExportJobs(input?.orgId, input?.limit)),
     create: protectedProcedure

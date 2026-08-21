@@ -1,14 +1,11 @@
 /**
- * NDSEP Database Migration Verification
- * =======================================
- * Post-migration verification to ensure data integrity:
- *   - Schema validation (expected tables/columns exist)
- *   - Row count sanity checks
- *   - Index existence verification
- *   - Constraint verification
- *   - Foreign key integrity
+ * NDSEP database migration verification.
+ *
+ * The readiness path calls this verifier after the canonical Drizzle migration
+ * chain has run. It intentionally fails closed for missing core schema,
+ * incomplete migration history, referential-integrity gaps, or unindexed
+ * foreign keys that would make parent deletes and relational queries degrade.
  */
-
 import { Pool } from "pg";
 import { getDatabaseUrl } from "./config";
 import { getPgSslConfig } from "./dbSslConfig";
@@ -28,110 +25,131 @@ export interface VerificationReport {
 
 const CRITICAL_TABLES = [
   "users", "organizations", "audit_logs", "citizen_requests",
-  "breach_incidents", "consent_records", "dpia_records",
-  "dpco_organisations", "dpco_audit_engagements", "sessions",
-  "data_processing_activities", "transfer_instruments",
-];
+  "breach_incidents", "consent_records", "dpia_assessments",
+  "dpco_organisations", "dpco_audit_engagements", "transfer_instruments",
+  "analytics_snapshots", "compliance_calendar_events", "consent_records_v2",
+  "notification_inbox", "public_compliance_registry", "api_rate_limit_stats",
+  "whistleblower_cases", "penalty_calculations",
+] as const;
+
+const CRITICAL_COLUMNS = [
+  ["users", "open_id"],
+  ["users", "name"],
+  ["users", "role"],
+  ["organizations", "compliance_score"],
+  ["citizen_requests", "citizen_email"],
+  ["audit_logs", "action"],
+  ["consent_records_v2", "organization_id"],
+  ["penalty_calculations", "org_id"],
+  ["public_compliance_registry", "is_published"],
+] as const;
+
+const EXPECTED_MIGRATION_COUNT = 30;
+const MINIMUM_TABLE_COUNT = 165;
+const MINIMUM_FOREIGN_KEY_COUNT = 83;
+
+function pushCheck(checks: MigrationCheck[], name: string, ok: boolean, details: string, statusWhenFalse: "fail" | "warn" = "fail") {
+  checks.push({ name, status: ok ? "pass" : statusWhenFalse, details });
+}
 
 export async function verifyMigrations(): Promise<VerificationReport> {
   const pool = new Pool({ connectionString: getDatabaseUrl(), ssl: getPgSslConfig(), max: 2 });
-  const start = Date.now();
+  const startedAt = Date.now();
   const checks: MigrationCheck[] = [];
 
   try {
-    // 1. Check all critical tables exist
     for (const table of CRITICAL_TABLES) {
-      const { rows } = await pool.query(
-        `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)`,
-        [table]
+      const { rows } = await pool.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = $1
+        ) AS exists`,
+        [table],
       );
-      checks.push({
-        name: `table_exists:${table}`,
-        status: rows[0].exists ? "pass" : "fail",
-        details: rows[0].exists ? `Table ${table} exists` : `MISSING: table ${table}`,
-      });
+      pushCheck(checks, `table_exists:${table}`, rows[0]?.exists === true,
+        rows[0]?.exists ? `Table ${table} exists` : `MISSING: table ${table}`);
     }
 
-    // 2. Check critical columns
-    const criticalColumns = [
-      { table: "users", column: "open_id" },
-      { table: "users", column: "display_name" },
-      { table: "users", column: "role" },
-      { table: "organizations", column: "compliance_score" },
-      { table: "citizen_requests", column: "citizen_email" },
-      { table: "audit_logs", column: "action" },
-    ];
-
-    for (const { table, column } of criticalColumns) {
-      const { rows } = await pool.query(
-        `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2)`,
-        [table, column]
+    for (const [table, column] of CRITICAL_COLUMNS) {
+      const { rows } = await pool.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+        ) AS exists`,
+        [table, column],
       );
-      checks.push({
-        name: `column_exists:${table}.${column}`,
-        status: rows[0].exists ? "pass" : "fail",
-        details: rows[0].exists ? `${table}.${column} exists` : `MISSING: ${table}.${column}`,
-      });
+      pushCheck(checks, `column_exists:${table}.${column}`, rows[0]?.exists === true,
+        rows[0]?.exists ? `${table}.${column} exists` : `MISSING: ${table}.${column}`);
     }
 
-    // 3. Check indexes exist
-    const { rows: indexes } = await pool.query(
-      `SELECT indexname FROM pg_indexes WHERE schemaname = 'public'`
+    const { rows: [tableCount] } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM pg_tables WHERE schemaname = 'public'`,
     );
-    const indexCount = indexes.length;
-    checks.push({
-      name: "index_count",
-      status: indexCount >= 10 ? "pass" : "warn",
-      details: `${indexCount} indexes found`,
-    });
+    pushCheck(checks, "table_count", Number(tableCount.count) >= MINIMUM_TABLE_COUNT,
+      `${tableCount.count} public tables (minimum ${MINIMUM_TABLE_COUNT})`);
 
-    // 4. Check row counts for critical tables
-    for (const table of ["users", "organizations"]) {
-      try {
-        const { rows: [row] } = await pool.query(`SELECT COUNT(*)::int AS cnt FROM ${table}`);
-        checks.push({
-          name: `row_count:${table}`,
-          status: "pass",
-          details: `${table}: ${row.cnt} rows`,
-        });
-      } catch {
-        checks.push({
-          name: `row_count:${table}`,
-          status: "warn",
-          details: `Could not count rows in ${table}`,
-        });
-      }
+    const { rows: [migrationCount] } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM drizzle.__drizzle_migrations`,
+    );
+    pushCheck(checks, "drizzle_migration_history", Number(migrationCount.count) >= EXPECTED_MIGRATION_COUNT,
+      `${migrationCount.count} recorded Drizzle migrations (minimum ${EXPECTED_MIGRATION_COUNT})`);
+
+    const { rows: [indexCount] } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM pg_indexes WHERE schemaname = 'public'`,
+    );
+    pushCheck(checks, "index_count", Number(indexCount.count) >= 300,
+      `${indexCount.count} indexes found (minimum 300)`, "warn");
+
+    const { rows: [foreignKeyCount] } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM pg_constraint
+       WHERE contype = 'f' AND connamespace = 'public'::regnamespace`,
+    );
+    pushCheck(checks, "foreign_key_count", Number(foreignKeyCount.count) >= MINIMUM_FOREIGN_KEY_COUNT,
+      `${foreignKeyCount.count} foreign keys (minimum ${MINIMUM_FOREIGN_KEY_COUNT})`);
+
+    const { rows: [unindexedForeignKeyCount] } = await pool.query<{ count: string }>(`
+      WITH foreign_keys AS (
+        SELECT conrelid, conkey::smallint[] AS key_columns
+        FROM pg_constraint
+        WHERE contype = 'f' AND connamespace = 'public'::regnamespace
+      ), indexes AS (
+        SELECT indrelid, array_to_string(indkey::smallint[], ' ') AS key_columns
+        FROM pg_index
+        WHERE indisvalid AND indisready
+      )
+      SELECT COUNT(*)::text AS count
+      FROM foreign_keys fk
+      WHERE NOT EXISTS (
+        SELECT 1 FROM indexes i
+        WHERE i.indrelid = fk.conrelid
+          AND (i.key_columns = array_to_string(fk.key_columns, ' ')
+            OR i.key_columns LIKE array_to_string(fk.key_columns, ' ') || ' %')
+      )
+    `);
+    pushCheck(checks, "foreign_key_index_coverage", Number(unindexedForeignKeyCount.count) === 0,
+      `${unindexedForeignKeyCount.count} foreign keys lack a leading index`);
+
+    for (const table of ["users", "organizations"] as const) {
+      const { rows: [row] } = await pool.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM ${table}`);
+      checks.push({ name: `row_count:${table}`, status: "pass", details: `${table}: ${row.count} rows` });
     }
-
-    // 5. Check foreign key constraints
-    const { rows: fks } = await pool.query(
-      `SELECT COUNT(*)::int AS cnt FROM information_schema.table_constraints
-       WHERE constraint_type = 'FOREIGN KEY' AND table_schema = 'public'`
-    );
+  } catch (error) {
     checks.push({
-      name: "foreign_keys",
-      status: "pass",
-      details: `${fks[0].cnt} foreign key constraints`,
+      name: "migration_verifier_execution",
+      status: "fail",
+      details: error instanceof Error ? error.message : String(error),
     });
-
   } finally {
     await pool.end();
   }
 
-  const passed = checks.every(c => c.status !== "fail");
-
   const report: VerificationReport = {
-    passed,
+    passed: checks.every((check) => check.status !== "fail"),
     checks,
-    duration: Date.now() - start,
+    duration: Date.now() - startedAt,
   };
 
-  if (passed) {
-    logger.info({ checks: checks.length, duration: report.duration }, "[Migration] All checks passed");
-  } else {
-    const failures = checks.filter(c => c.status === "fail");
-    logger.error({ failures }, "[Migration] %d checks failed", failures.length);
-  }
-
+  if (report.passed) logger.info({ checks: checks.length, duration: report.duration }, "[Migration] Verification passed");
+  else logger.error({ failures: checks.filter((check) => check.status === "fail") }, "[Migration] Verification failed");
   return report;
 }

@@ -88,18 +88,14 @@ export async function recordFinancialTransaction(
   penaltyId: string,
   description?: string,
 ): Promise<void> {
-  try {
-    const { tigerbeetleResilience } = await import("./resilience");
-    await tigerbeetleResilience(() => createTigerBeetleTransaction({
-      type,
-      amountUsd,
-      orgId,
-      penaltyId,
-      description,
-    }));
-  } catch (e) {
-    logger.warn({ err: (e as Error).message }, `[TigerBeetle] recordFinancialTransaction failed (non-fatal)`);
-  }
+  const { tigerbeetleResilience } = await import("./resilience");
+  await tigerbeetleResilience(() => createTigerBeetleTransaction({
+    type,
+    amountUsd,
+    orgId,
+    penaltyId,
+    description,
+  }));
 }
 
 // ─── Temporal Workflow ────────────────────────────────────────────────────────
@@ -109,11 +105,7 @@ export async function triggerWorkflow(
   input: Record<string, unknown>,
   taskQueue = "ndsep-main",
 ): Promise<void> {
-  try {
-    await temporalResilience(() => startWorkflow(workflowType, { workflowId, input, taskQueue }));
-  } catch (e) {
-    logger.warn({ err: (e as Error).message }, `[Temporal] triggerWorkflow ${workflowType} failed (non-fatal)`);
-  }
+  await temporalResilience(() => startWorkflow(workflowType, { workflowId, input, taskQueue }));
 }
 
 // ─── Permify RBAC ─────────────────────────────────────────────────────────────
@@ -126,8 +118,8 @@ export async function checkPermission(
   try {
     return await permifyCheck(subjectId, action, resourceType, resourceId);
   } catch (e) {
-    logger.warn({ err: (e as Error).message }, `[Permify] checkPermission failed (non-fatal)`);
-    return true; // fail-open for non-critical checks
+    logger.error({ err: (e as Error).message }, `[Permify] checkPermission failed; denying access`);
+    return false;
   }
 }
 
@@ -152,8 +144,8 @@ export async function checkRateLimit(
     await cacheSet(countKey, String(count + 1), windowSecs);
     return true;
   } catch (e) {
-    logger.warn({ err: (e as Error).message }, `[RateLimit] checkRateLimit ${key} failed (non-fatal)`);
-    return true; // fail-open
+    logger.error({ err: (e as Error).message }, `[RateLimit] checkRateLimit ${key} failed; denying request`);
+    return false;
   }
 }
 
@@ -177,15 +169,16 @@ export async function relayToGoBridge(
   try {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 1000);
-    await fetch(`${GO_BRIDGE_URL}/events/relay`, {
+    const response = await fetch(`${GO_BRIDGE_URL}/events/relay`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ event_type: eventType, payload, timestamp: Date.now() }),
       signal: ctrl.signal,
     });
     clearTimeout(timeout);
-  } catch {
-    // Non-critical — Go bridge may not be running
+    if (!response.ok) throw new Error(`Go bridge relay failed with HTTP ${response.status}`);
+  } catch (error) {
+    throw new Error(`Go bridge relay unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -207,10 +200,11 @@ export async function checkRateLimitRust(
       signal: ctrl.signal,
     });
     clearTimeout(timeout);
+    if (!res.ok) return false;
     const data = await res.json() as { allowed: boolean };
     return data.allowed;
   } catch {
-    return true; // Fail open if Rust cache not available
+    return false;
   }
 }
 

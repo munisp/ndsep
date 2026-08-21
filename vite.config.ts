@@ -260,8 +260,13 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
-    // QW5: Production source maps for error debugging
-    sourcemap: process.env.NODE_ENV === "production" ? "hidden" : true,
+    // Source maps are opt-in for production diagnostics. Rendering source maps
+    // for the full portal can exhaust constrained local/CI build environments
+    // without affecting runtime functionality.
+    sourcemap: process.env.GENERATE_SOURCEMAP === "true" ? "hidden" : false,
+    // Compression-size reporting is diagnostic only and can be expensive for
+    // this portal's large route graph; CI can enable it in a dedicated job.
+    reportCompressedSize: false,
     // M14: Bundle analysis — run with ANALYZE=true pnpm build
     rollupOptions: {
       output: {

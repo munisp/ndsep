@@ -122,13 +122,18 @@ groups:
     interval: 300s
     rules:
 
+      - alert: CitizenRequestSLAMetricUnavailable
+        expr: ndsep_citizen_request_sla_metric_available != 1
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Citizen-request SLA metric source is unavailable"
+          description: "The NDSEP API could not evaluate the citizen-request SLA source query. Resolve metrics/database access before relying on SLA alert coverage."
+
       - alert: CitizenRequestSLABreach
-        expr: |
-          (
-            SELECT count(*) FROM citizen_requests
-            WHERE status NOT IN ('completed', 'rejected', 'cancelled')
-            AND submitted_at < NOW() - INTERVAL '30 days'
-          ) > 0
+        expr: ndsep_citizen_requests_sla_breached > 0
         for: 0m
         labels:
           severity: critical
@@ -174,16 +179,85 @@ groups:
           summary: "Invalid BGP route detected"
           description: "{{ $value }} BGP routes with RPKI status INVALID detected."
 
-      - alert: RateLimitThrottling
+      - alert: APISIXGatewayMetricsDown
+        expr: up{job="apisix"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "APISIX gateway metrics endpoint is unreachable"
+          description: "Prometheus cannot scrape the internal APISIX metrics listener for more than 2 minutes. Confirm APISIX availability and that only the internal metrics port is reachable."
+
+      - alert: APISIXRateLimitSaturation
         expr: |
-          rate(nginx_http_requests_total{status="429"}[5m]) > 10
+          (
+            sum(rate(apisix_http_status{code="429"}[5m]))
+            /
+            clamp_min(sum(rate(apisix_http_status[5m])), 0.1)
+          ) > 0.02
+          and sum(increase(apisix_http_status{code="429"}[5m])) >= 20
         for: 5m
         labels:
           severity: warning
           team: security
         annotations:
-          summary: "High rate of 429 responses from Nginx"
-          description: "Rate limiting is triggering {{ $value | humanize }} times/s."
+          summary: "APISIX rate-limit saturation exceeds 2%"
+          description: "{{ $value | humanizePercentage }} of APISIX responses are 429 over 5 minutes (at least 20 throttled requests). Check abusive sources, trusted client-IP handling, and route limits before raising capacity."
+
+      - alert: APISIXRateLimitAttackOrMisconfiguration
+        expr: |
+          (
+            sum(rate(apisix_http_status{code="429"}[1m]))
+            /
+            clamp_min(sum(rate(apisix_http_status[1m])), 0.1)
+          ) > 0.10
+          and sum(increase(apisix_http_status{code="429"}[1m])) >= 50
+        for: 2m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "APISIX 429 rate exceeds 10%"
+          description: "{{ $value | humanizePercentage }} of APISIX responses are throttled over 1 minute (at least 50). Treat as active abuse or trusted-proxy/rate-policy failure; invoke the edge incident runbook."
+
+      - alert: OPAServiceDown
+        expr: up{job="opa"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "OPA policy service is unreachable"
+          description: "The OPA internal metrics target has been down for more than 1 minute. Privileged NDSEP actions must fail closed; investigate before restoring availability."
+
+      - alert: OPAPolicyTimeouts
+        expr: |
+          sum(increase(ndsep_opa_decisions_total{outcome="timeout"}[5m])) >= 3
+          and
+          (
+            sum(increase(ndsep_opa_decisions_total{outcome="timeout"}[5m]))
+            /
+            clamp_min(sum(increase(ndsep_opa_decisions_total[5m])), 1)
+          ) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "OPA policy evaluation timeout rate exceeds 1%"
+          description: "{{ $value | humanizePercentage }} of OPA decisions timed out over 5 minutes (at least 3). Privileged requests are denied; inspect OPA CPU, policy bundle, DNS/network path, and API timeout budget."
+
+      - alert: OPAFailClosedDenialsSpike
+        expr: |
+          sum(increase(ndsep_opa_decisions_total{outcome=~"unconfigured|unavailable|http_error|malformed|timeout"}[5m])) >= 10
+        for: 2m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "OPA fail-closed infrastructure denials are spiking"
+          description: "{{ $value }} privileged authorization decisions failed due to OPA configuration, availability, response, or timeout errors in 5 minutes. Do not disable OPA; restore the policy dependency."
 
   # ─── Infrastructure ────────────────────────────────────────────────────────
   - name: ndsep-infra

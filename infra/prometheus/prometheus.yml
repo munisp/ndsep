@@ -29,6 +29,23 @@ scrape_configs:
     metrics_path: /api/metrics
     scrape_interval: 15s
 
+  # APISIX metrics are exposed only on the internal gateway metrics listener.
+  - job_name: apisix
+    static_configs:
+      - targets: ["apisix:9091"]
+    metrics_path: /apisix/prometheus/metrics
+    scrape_interval: 15s
+    scrape_timeout: 5s
+
+  # OPA exposes service and Go runtime health metrics internally. Detailed
+  # authorization outcome/latency metrics come from the ndsep-api scrape.
+  - job_name: opa
+    static_configs:
+      - targets: ["opa:8181"]
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 5s
+
   # PostgreSQL (via postgres_exporter)
   - job_name: postgres
     static_configs:
@@ -133,67 +150,6 @@ scrape_configs:
     metrics_path: /metrics
     scrape_interval: 15s
 
-  - job_name: dapr-state-bridge
-    static_configs:
-      - targets: ["dapr-state-bridge:8167"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-
-  - job_name: dapr-bridge
-    static_configs:
-      - targets: ["dapr-bridge:8150"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: fluvio-relay
-    static_configs:
-      - targets: ["fluvio-relay:8151"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: mojaloop-adapter
-    static_configs:
-      - targets: ["mojaloop-adapter:8152"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: apisix-manager
-    static_configs:
-      - targets: ["apisix-manager:8153"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: tigerbeetle-worker
-    static_configs:
-      - targets: ["tigerbeetle-worker:8160"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: opensearch-indexer
-    static_configs:
-      - targets: ["opensearch-indexer:8161"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: keycloak-validator
-    static_configs:
-      - targets: ["keycloak-validator:8162"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: lakehouse-ingest
-    static_configs:
-      - targets: ["lakehouse-ingest:8163"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: permify-rbac-sync
-    static_configs:
-      - targets: ["permify-rbac-sync:8164"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: fluvio-consumer
-    static_configs:
-      - targets: ["fluvio-consumer:8165"]
-    metrics_path: /metrics
-    scrape_interval: 15s
-  - job_name: opensearch-query
-    static_configs:
-      - targets: ["opensearch-query:8166"]
-    metrics_path: /metrics
-    scrape_interval: 15s
   - job_name: dapr-state-bridge
     static_configs:
       - targets: ["dapr-state-bridge:8167"]

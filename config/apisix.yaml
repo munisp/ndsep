@@ -2,43 +2,134 @@ apisix:
   node_listen: 9080
   enable_admin: true
   admin_listen:
+    ip: 0.0.0.0
     port: 9180
 
+# The production Compose deployment publishes neither 9180 nor 9080 directly.
+# Caddy is the sole public edge; the admin listener is available only on the
+# internal network to a dedicated deployment job with APISIX_ADMIN_KEY.
 deployment:
-  role: traditional
-  role_traditional:
+  role: data_plane
+  role_data_plane:
     config_provider: yaml
 
+plugin_attr:
+  openid-connect:
+    timeout: 3000
+  # Metrics bind only on the internal Compose network. Prometheus scrapes the
+  # privileged-agent endpoint directly; Caddy never exposes it publicly.
+  prometheus:
+    export_addr:
+      ip: 0.0.0.0
+      port: 9091
+    export_uri: /apisix/prometheus/metrics
+    prefer_name: true
+
 routes:
-  - uri: /api/*
+  # Deliberately narrow anonymous surface. Health must not reveal build,
+  # database, dependency, or topology details.
+  - id: health
+    uri: /api/health
+    methods: [GET]
     upstream:
       type: roundrobin
       nodes:
-        "ndsep-api:5000": 1
+        "ndsep-api:3000": 1
     plugins:
       limit-req:
-        rate: 200
-        burst: 100
+        rate: 5
+        burst: 5
         key_type: var
-        key: remote_addr
+        key: http_x_forwarded_for
         rejected_code: 429
+      prometheus: {}
+      response-rewrite:
+        headers:
+          set:
+            Cache-Control: "no-store"
 
-  - uri: /trpc/*
+  # Every API and tRPC path requires an OIDC bearer token. Caddy replaces the
+  # forwarding header, so per-client limits cannot be spoofed by direct users.
+  - id: ndsep-api
+    uri: /api/*
+    priority: 10
     upstream:
       type: roundrobin
+      scheme: http
       nodes:
-        "ndsep-api:5000": 1
+        "ndsep-api:3000": 1
+    timeout:
+      connect: 3
+      send: 15
+      read: 30
     plugins:
+      openid-connect:
+        discovery: "http://keycloak:8080/realms/ndsep/.well-known/openid-configuration"
+        bearer_only: true
+        realm: "ndsep"
+        client_id: "ndsep-platform"
+        use_jwks: true
+        ssl_verify: true
       limit-req:
-        rate: 300
-        burst: 150
+        rate: 30
+        burst: 20
         key_type: var
-        key: remote_addr
+        key: http_x_forwarded_for
+        rejected_code: 429
+      limit-count:
+        count: 600
+        time_window: 60
+        key_type: var
+        key: http_x_forwarded_for
+        rejected_code: 429
+      prometheus: {}
+      response-rewrite:
+        headers:
+          set:
+            Cache-Control: "no-store"
+            X-Content-Type-Options: "nosniff"
+            X-Frame-Options: "DENY"
 
-  - uri: /health
+  - id: ndsep-trpc
+    uri: /trpc/*
+    priority: 10
     upstream:
       type: roundrobin
+      scheme: http
       nodes:
-        "ndsep-api:5000": 1
+        "ndsep-api:3000": 1
+    timeout:
+      connect: 3
+      send: 15
+      read: 30
+    plugins:
+      openid-connect:
+        discovery: "http://keycloak:8080/realms/ndsep/.well-known/openid-configuration"
+        bearer_only: true
+        realm: "ndsep"
+        client_id: "ndsep-platform"
+        use_jwks: true
+        ssl_verify: true
+      limit-req:
+        rate: 30
+        burst: 20
+        key_type: var
+        key: http_x_forwarded_for
+        rejected_code: 429
+      limit-count:
+        count: 600
+        time_window: 60
+        key_type: var
+        key: http_x_forwarded_for
+        rejected_code: 429
+      prometheus: {}
+      response-rewrite:
+        headers:
+          set:
+            Cache-Control: "no-store"
+            X-Content-Type-Options: "nosniff"
+            X-Frame-Options: "DENY"
+
+# No catch-all anonymous route is defined. Unknown paths fail closed with 404.
 
 #END

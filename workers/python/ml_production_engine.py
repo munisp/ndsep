@@ -24,14 +24,12 @@ Port: 8085
 import os
 import sys
 import json
-import math
 import time
-import random
 import hashlib
 import logging
 import threading
 import pickle
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from collections import defaultdict
@@ -83,9 +81,7 @@ except ImportError:
     HAS_PG = False
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-DB_URL = os.environ.get("DATABASE_URL",
-    os.environ.get("WORKER_DATABASE_URL",
-    "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+DB_URL = os.environ.get("DATABASE_URL", os.environ.get("WORKER_DATABASE_URL", ""))
 PORT = int(os.environ.get("ML_WORKER_PORT", "8085"))
 MODEL_DIR = Path(os.environ.get("ML_MODEL_PATH", "./workers/python/models"))
 LAKEHOUSE_URL = os.environ.get("LAKEHOUSE_URL", "http://localhost:8140")
@@ -112,59 +108,22 @@ _label_encoders: dict[str, Any] = {}
 # ── Feature Extraction from PostgreSQL ─────────────────────────────────────────
 FEATURE_COLUMNS = [
     "compliance_score", "violation_count", "critical_violations", "high_violations",
-    "enforcement_count", "total_fines", "days_active", "breach_count",
-    "sector_encoded", "staff_proxy", "has_dpo"
+    "enforcement_count", "total_fines", "days_active", "breach_count", "sector_encoded"
 ]
 
 def _try_lakehouse_features() -> Optional[tuple]:
-    """Try to extract features from Lakehouse Analytics Engine (Parquet via DuckDB)."""
-    try:
-        import requests
-        resp = requests.get(f"{LAKEHOUSE_URL}/features/compliance_features", timeout=8)
-        if not resp.ok:
-            return None
-        data = resp.json()
-        rows = data.get("rows", [])
-        if not rows or len(rows) < 5:
-            return None
+    """Reserved for a versioned lakehouse feature contract.
 
-        log.info(f"[ML] Using Lakehouse features ({len(rows)} rows) instead of direct PostgreSQL")
-        sectors = list(set(r.get("sector", "Other") for r in rows if r.get("sector")))
-        sector_map = {s: i for i, s in enumerate(sorted(sectors))}
-
-        org_ids = [str(r.get("org_id", "")) for r in rows]
-        X, y = [], []
-        for r in rows:
-            compliance = float(r.get("compliance_score") or 50)
-            features = [
-                compliance,
-                float(r.get("violation_count") or 0),
-                0.0,  # critical_violations (not in lakehouse aggregate)
-                0.0,  # high_violations
-                0.0,  # enforcement_count
-                float(r.get("total_penalties") or 0),
-                365.0,  # days_active placeholder
-                float(r.get("breach_count") or 0),
-                float(sector_map.get(r.get("sector", "Other"), 0)),
-                float(r.get("violation_count") or 0),  # staff proxy
-                1.0 if compliance > 75 else 0.0,  # DPO proxy
-            ]
-            X.append(features)
-            y.append(1 if compliance < 70 else 0)
-
-        return np.array(X, dtype=np.float32), np.array(y), org_ids, FEATURE_COLUMNS
-    except Exception as e:
-        log.debug(f"[ML] Lakehouse features unavailable: {e}")
-        return None
+    The current lakehouse API exposes persisted Parquet objects but not the full
+    labelled feature set required by this model. Returning partial rows padded
+    with invented values would create deceptive predictions, so the engine uses
+    PostgreSQL until that contract is implemented and versioned.
+    """
+    return None
 
 def extract_features() -> tuple:
     """Extract ML features from Lakehouse (preferred) or PostgreSQL (fallback)."""
-    # Try Lakehouse first for enriched analytical features
-    lh_result = _try_lakehouse_features()
-    if lh_result is not None:
-        return lh_result
-
-    if not HAS_PG:
+    if not HAS_PG or not DB_URL:
         return np.array([]), np.array([]), [], FEATURE_COLUMNS
 
     try:
@@ -232,9 +191,7 @@ def extract_features() -> tuple:
                 float(r["total_fines"]),
                 float(r["days_active"]),
                 float(r["breach_count"]),
-                float(sector_map.get(r.get("sector", "Other"), 0)),
-                float(r["enforcement_count"] * 2 + r["violation_count"]),  # staff proxy
-                1.0 if r.get("compliance_score", 0) > 75 else 0.0,  # DPO proxy
+                float(sector_map.get(r.get("sector", "Other"), 0))
             ]
             X.append(features)
             y.append(int(r["at_risk"]))
@@ -269,21 +226,8 @@ def extract_violation_timeseries() -> tuple:
         conn.close()
 
         if len(rows) < 3:
-            # Generate synthetic time-series for demo
-            rows = []
-            base_count = 15
-            for i in range(24):
-                month = datetime(2024, 1, 1) + timedelta(days=30 * i)
-                trend = i * 0.3
-                seasonal = 5 * math.sin(2 * math.pi * i / 12)
-                noise = random.gauss(0, 2)
-                count = max(1, int(base_count + trend + seasonal + noise))
-                rows.append({
-                    "violation_count": count,
-                    "critical_count": max(0, int(count * 0.15 + random.gauss(0, 1))),
-                    "high_count": max(0, int(count * 0.25 + random.gauss(0, 1))),
-                    "orgs_affected": max(1, int(count * 0.6 + random.gauss(0, 1))),
-                })
+            log.warning("Insufficient persisted monthly violation history for time-series training")
+            return np.array([]), np.array([])
 
         features = np.array([
             [r["violation_count"], r["critical_count"], r["high_count"], r["orgs_affected"]]
@@ -582,8 +526,34 @@ def train_risk_scorer() -> dict:
     log.info(f"Risk scorer trained: accuracy={metrics['accuracy']}, version={version}")
     return {"model": "risk_scorer", "status": "trained", "version": version, "metrics": _model_metrics["risk_scorer"]}
 
+def load_persisted_models() -> None:
+    """Load the latest complete model/scaler pair for each CPU model after restart."""
+    if not HAS_SKLEARN:
+        return
+    for model_name in ("xgboost_breach", "lstm_violation", "isolation_forest", "risk_scorer"):
+        candidates = sorted(
+            [path for path in MODEL_DIR.glob(f"{model_name}_*.joblib") if "_scaler_" not in path.name],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for model_path in candidates:
+            version = model_path.stem.removeprefix(f"{model_name}_")
+            scaler_path = MODEL_DIR / f"{model_name}_scaler_{version}.joblib"
+            if not scaler_path.exists():
+                continue
+            try:
+                _models[model_name] = joblib.load(model_path)
+                _scalers[model_name] = joblib.load(scaler_path)
+                _feature_names[model_name] = FEATURE_COLUMNS
+                _model_metrics.setdefault(model_name, {"version": version, "loaded_at": datetime.now(timezone.utc).isoformat(), "artifact": str(model_path)})
+                log.info("Loaded persisted CPU model %s version %s", model_name, version)
+                break
+            except Exception as error:
+                log.error("Could not load model artifact %s: %s", model_path, error)
+
+
 def train_all_models() -> dict:
-    """Train all models."""
+    """Train all models from persisted platform data."""
     global _training_runs, _last_train
     results = []
     results.append(train_xgboost_breach_predictor())
@@ -714,8 +684,9 @@ class TrainRequest(BaseModel):
 
 @app.get("/health")
 def health():
+    ready = HAS_SKLEARN and HAS_PG and bool(DB_URL) and bool(_models)
     return {
-        "status": "healthy",
+        "status": "healthy" if ready else "unhealthy",
         "worker": "ml_production_engine",
         "version": "3.0.0",
         "has_sklearn": HAS_SKLEARN,
@@ -760,21 +731,26 @@ def get_model(model_name: str):
         raise HTTPException(status_code=404, detail=f"Model not found: {model_name}")
     return metrics
 
+def _require_prediction(result: dict) -> dict:
+    if "error" in result:
+        raise HTTPException(status_code=503, detail=result["error"])
+    return result
+
 @app.post("/predict/breach")
 def api_predict_breach(req: PredictRequest):
-    return predict_breach(req.org_features)
+    return _require_prediction(predict_breach(req.org_features))
 
 @app.post("/predict/violations")
 def api_predict_violations():
-    return predict_violations()
+    return _require_prediction(predict_violations())
 
 @app.post("/predict/anomaly")
 def api_detect_anomaly(req: PredictRequest):
-    return detect_anomalies(req.org_features)
+    return _require_prediction(detect_anomalies(req.org_features))
 
 @app.post("/predict/risk")
 def api_score_risk(req: PredictRequest):
-    return score_risk(req.org_features)
+    return _require_prediction(score_risk(req.org_features))
 
 @app.get("/shap/{model_name}")
 def get_shap(model_name: str):
@@ -818,7 +794,9 @@ if __name__ == "__main__":
     log.info(f"Starting NDSEP ML Production Engine on port {PORT}")
     log.info(f"  sklearn={HAS_SKLEARN}, XGBoost={HAS_XGB}, SHAP={HAS_SHAP}, PostgreSQL={HAS_PG}")
 
-    # Initial training
+    load_persisted_models()
+    # Training is attempted from real persisted data; unavailable data leaves the
+    # service unhealthy rather than creating synthetic model artifacts.
     threading.Thread(target=train_all_models, daemon=True).start()
     # Background retraining
     threading.Thread(target=retrain_scheduler, daemon=True).start()

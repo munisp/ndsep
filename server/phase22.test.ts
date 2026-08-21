@@ -117,9 +117,10 @@ describe("APISIX key hardening", () => {
     expect(src).toContain("APISIX_ADMIN_KEY");
   });
 
-  it("has CHANGE_ME_IN_PRODUCTION fallback sentinel", () => {
+  it("requires APISIX_ADMIN_KEY and has no placeholder fallback", () => {
     const src = readFile("server/apisix.ts");
-    expect(src).toContain("CHANGE_ME_IN_PRODUCTION");
+    expect(src).toContain("APISIX_ADMIN_KEY is required for gateway administration");
+    expect(src).not.toContain("CHANGE_ME_IN_PRODUCTION");
   });
 });
 
@@ -170,10 +171,11 @@ describe("Watchlist screener Python fallback", () => {
     expect(src).toContain("FUZZY_MATCH_THRESHOLD");
   });
 
-  it("handles psycopg2 ImportError gracefully", () => {
+  it("fails closed when psycopg2 is unavailable", () => {
     const src = readFile("workers/python/watchlist_screener_fallback.py");
     expect(src).toContain("ImportError");
-    expect(src).toContain("mock mode");
+    expect(src).toContain("authoritative watchlist screening is unavailable");
+    expect(src).not.toContain("running in mock mode");
   });
 });
 

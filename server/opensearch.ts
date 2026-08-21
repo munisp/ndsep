@@ -10,7 +10,7 @@
  *   - Full-text search with highlighting
  *   - Aggregations for dashboards
  *   - Health check with cluster info
- *   - Graceful degradation when unavailable
+ *   - Explicit failure when required indexing or search operations are unavailable
  *
  * Environment:
  *   OPENSEARCH_URL      — OpenSearch URL (default: http://localhost:9200)
@@ -148,37 +148,44 @@ const NDSEP_INDICES = [
   },
 ];
 
-export async function ensureIndices(): Promise<{ created: string[]; existing: string[]; failed: string[] }> {
+export async function ensureIndices(): Promise<{ created: string[]; existing: string[] }> {
   const created: string[] = [];
   const existing: string[] = [];
-  const failed: string[] = [];
 
   for (const idx of NDSEP_INDICES) {
-    const { ok, status } = await osRequest("HEAD", `/${idx.name}`);
+    const { ok, status, data } = await osRequest("HEAD", `/${idx.name}`);
     if (ok) {
       existing.push(idx.name);
       continue;
     }
-    if (status === 404) {
-      const { ok: createOk } = await osRequest("PUT", `/${idx.name}`, { mappings: idx.mappings });
-      if (createOk) created.push(idx.name);
-      else failed.push(idx.name);
+    if (status !== 404) {
+      throw new Error(`OpenSearch index check failed for ${idx.name}: ${status || "connection unavailable"} ${JSON.stringify(data)}`);
     }
+
+    const { ok: createOk, status: createStatus, data: createData } = await osRequest("PUT", `/${idx.name}`, { mappings: idx.mappings });
+    if (!createOk) {
+      throw new Error(`OpenSearch index creation failed for ${idx.name}: ${createStatus || "connection unavailable"} ${JSON.stringify(createData)}`);
+    }
+    created.push(idx.name);
   }
 
-  return { created, existing, failed };
+  return { created, existing };
 }
 
 // ─── Document Operations ─────────────────────────────────────────────────────
 
 export async function indexDocument(index: string, id: string, doc: Record<string, unknown>): Promise<boolean> {
-  const { ok } = await osRequest("PUT", `/${index}/_doc/${id}`, doc);
-  if (ok) indexed++;
-  return ok;
+  const { ok, status, data } = await osRequest("PUT", `/${index}/_doc/${id}`, doc);
+  if (!ok) {
+    throw new Error(`OpenSearch document index failed for ${index}/${id}: ${status || "connection unavailable"} ${JSON.stringify(data)}`);
+  }
+  indexed++;
+  return true;
 }
 
 export async function bulkIndex(index: string, docs: Array<{ id: string; doc: Record<string, unknown> }>): Promise<number> {
   if (docs.length === 0) return 0;
+  if (!OPENSEARCH_ENABLED) throw new Error("OpenSearch is disabled; bulk indexing cannot be acknowledged");
   const lines: string[] = [];
   for (const { id, doc } of docs) {
     lines.push(JSON.stringify({ index: { _index: index, _id: id } }));
@@ -192,15 +199,16 @@ export async function bulkIndex(index: string, docs: Array<{ id: string; doc: Re
       body,
       signal: AbortSignal.timeout(30_000),
     });
-    if (res.ok) {
-      indexed += docs.length;
-      return docs.length;
+    const data = await res.json().catch(() => ({})) as { errors?: boolean; items?: Array<{ index?: { status?: number; error?: unknown } }> };
+    const rejected = data.items?.filter((item) => (item.index?.status ?? 500) >= 300 || item.index?.error) ?? [];
+    if (!res.ok || data.errors || rejected.length > 0) {
+      throw new Error(`OpenSearch bulk index failed for ${index}: HTTP ${res.status}; rejected=${rejected.length}`);
     }
+    indexed += docs.length;
+    return docs.length;
+  } catch (err) {
     errors++;
-    return 0;
-  } catch {
-    errors++;
-    return 0;
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }
 
@@ -219,9 +227,9 @@ export async function search(
   if (options?.sort) body.sort = options.sort;
   if (options?.highlight) body.highlight = options.highlight;
 
-  const { ok, data } = await osRequest("POST", `/${index}/_search`, body);
+  const { ok, status, data } = await osRequest("POST", `/${index}/_search`, body);
   searched++;
-  if (!ok) return { hits: [], total: 0, took: 0 };
+  if (!ok) throw new Error(`OpenSearch search failed for ${index}: ${status || "connection unavailable"} ${JSON.stringify(data)}`);
 
   const d = data as Record<string, unknown>;
   const hits = d.hits as Record<string, unknown> | undefined;
@@ -248,12 +256,12 @@ export async function aggregate(
   aggs: Record<string, unknown>,
   query?: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const { ok, data } = await osRequest("POST", `/${index}/_search`, {
+  const { ok, status, data } = await osRequest("POST", `/${index}/_search`, {
     size: 0,
     query: query ?? { match_all: {} },
     aggs,
   });
-  if (!ok) return {};
+  if (!ok) throw new Error(`OpenSearch aggregation failed for ${index}: ${status || "connection unavailable"} ${JSON.stringify(data)}`);
   return ((data as Record<string, unknown>).aggregations ?? {}) as Record<string, unknown>;
 }
 
@@ -261,6 +269,7 @@ export async function aggregate(
 
 export async function opensearchSmokeTest() {
   const health = await opensearchHealth();
+  if (!health.connected) throw new Error("OpenSearch smoke test failed: cluster is unavailable");
   const indices = await ensureIndices();
   return { health, indices };
 }

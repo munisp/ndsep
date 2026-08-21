@@ -8,15 +8,15 @@
  *   APISIX_ADMIN_URL   — APISIX admin API base URL (default: http://localhost:9180)
  *   APISIX_ADMIN_KEY   — APISIX admin API key (X-API-KEY header)
  *   APISIX_GATEWAY_URL — APISIX proxy base URL (default: http://localhost:9080)
- *   APISIX_ENABLED     — Set to "false" to disable (graceful degradation)
+ *   APISIX_ENABLED     — Set to "false" only when gateway management is intentionally disabled
  *
- * All functions degrade gracefully when APISIX is unavailable.
+ * Management operations fail explicitly when APISIX is unavailable or unconfigured.
  */
 
 import { logger } from "./logger";
 
 const ADMIN_URL = process.env.APISIX_ADMIN_URL ?? "http://localhost:9180";
-const ADMIN_KEY = process.env.APISIX_ADMIN_KEY ?? "CHANGE_ME_IN_PRODUCTION";
+const ADMIN_KEY = process.env.APISIX_ADMIN_KEY;
 const GATEWAY_URL = process.env.APISIX_GATEWAY_URL ?? "http://localhost:9080";
 const ENABLED = process.env.APISIX_ENABLED !== "false";
 const TIMEOUT_MS = 5000;
@@ -59,6 +59,7 @@ async function adminRequest<T = unknown>(
   body?: unknown
 ): Promise<{ ok: boolean; data?: T; error?: string }> {
   if (!ENABLED) return { ok: false, error: "APISIX disabled via APISIX_ENABLED=false" };
+  if (!ADMIN_KEY) return { ok: false, error: "APISIX_ADMIN_KEY is required for gateway administration" };
   try {
     const res = await fetch(`${ADMIN_URL}/apisix/admin${path}`, {
       method,
@@ -82,6 +83,7 @@ async function adminRequest<T = unknown>(
 
 export async function apisixHealth(): Promise<ApisixHealthResult> {
   if (!ENABLED) return { healthy: false, error: "APISIX disabled" };
+  if (!ADMIN_KEY) return { healthy: false, error: "APISIX_ADMIN_KEY is required for gateway administration" };
   try {
     const res = await fetch(`${ADMIN_URL}/apisix/admin/routes`, {
       headers: { "X-API-KEY": ADMIN_KEY },
@@ -101,7 +103,7 @@ export async function apisixHealth(): Promise<ApisixHealthResult> {
 
 export async function apisixListRoutes(): Promise<ApisixRoute[]> {
   const result = await adminRequest<any>("GET", "/routes");
-  if (!result.ok) return [];
+  if (!result.ok) throw new Error(`APISIX route listing failed: ${result.error}`);
   return result.data?.list ?? [];
 }
 
@@ -121,7 +123,7 @@ export async function apisixDeleteRoute(id: string): Promise<{ success: boolean;
 
 export async function apisixListUpstreams(): Promise<ApisixUpstream[]> {
   const result = await adminRequest<any>("GET", "/upstreams");
-  if (!result.ok) return [];
+  if (!result.ok) throw new Error(`APISIX upstream listing failed: ${result.error}`);
   return result.data?.list ?? [];
 }
 

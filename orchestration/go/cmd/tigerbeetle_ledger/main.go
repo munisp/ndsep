@@ -1,215 +1,238 @@
-// NDSEP TigerBeetle Ledger Service (Go) - Double-entry accounting. Port 8240.
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
+	"math"
+	"math/big"
 	"net/http"
 	"os"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
+	tb "github.com/tigerbeetle/tigerbeetle-go"
 )
 
-var (
-	logger  = log.New(os.Stdout, "[tigerbeetle] ", log.LstdFlags)
-	mu      sync.RWMutex
-	ledger  []map[string]interface{}
-	summary = map[string]interface{}{
-		"total_penalties_issued":  0.0,
-		"total_penalties_paid":    0.0,
-		"total_penalties_pending": 0.0,
-		"total_escrow_held":       0.0,
-		"total_distributed":       0.0,
-		"entry_count":             0,
-	}
+const (
+	ledgerCode   uint32 = 1
+	accountCode  uint16 = 1
+	transferCode uint16 = 1
 )
 
-func newID() string {
-	return fmt.Sprintf("tb-%d-%d", time.Now().UnixNano(), rand.Intn(9999))
+type application struct {
+	client tb.Client
 }
 
-func health(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	count := len(ledger)
-	mu.RUnlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"service": "tigerbeetle-ledger", "status": "healthy",
-		"entry_count": count, "timestamp": time.Now().UTC(),
-	})
+type transactionRequest struct {
+	OrgID       string  `json:"org_id"`
+	PenaltyID   string  `json:"penalty_id"`
+	AmountUSD   float64 `json:"amount_usd"`
+	Currency    string  `json:"currency"`
+	Type        string  `json:"type"`
+	Description string  `json:"description"`
+	IssuedBy    string  `json:"issued_by"`
+	Timestamp   string  `json:"timestamp"`
 }
 
-func issuePenalty(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		OrgID       string  `json:"org_id"`
-		ViolationID string  `json:"violation_id"`
-		AmountUSD   float64 `json:"amount_usd"`
-		Currency    string  `json:"currency"`
+func requiredEnv(name string) string {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		log.Fatalf("%s is required; TigerBeetle cannot be replaced with an in-memory ledger", name)
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
-		return
-	}
-	txID := newID()
-	entry := map[string]interface{}{
-		"id": txID, "tx_type": "penalty_issued",
-		"debit_account": "penalty_receivable", "credit_account": "penalty_revenue",
-		"amount_usd": req.AmountUSD, "currency": req.Currency,
-		"org_id": req.OrgID, "violation_id": req.ViolationID,
-		"status": "posted", "created_at": time.Now().UTC(),
-	}
-	mu.Lock()
-	ledger = append(ledger, entry)
-	summary["total_penalties_issued"] = summary["total_penalties_issued"].(float64) + req.AmountUSD
-	summary["total_penalties_pending"] = summary["total_penalties_pending"].(float64) + req.AmountUSD
-	summary["entry_count"] = summary["entry_count"].(int) + 1
-	mu.Unlock()
-	logger.Printf("PENALTY_ISSUED tx=%s org=%s amount=%.2f", txID, req.OrgID, req.AmountUSD)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "tx_id": txID, "status": "posted"})
+	return value
 }
 
-func payPenalty(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		PenaltyID  string  `json:"penalty_id"`
-		OrgID      string  `json:"org_id"`
-		AmountUSD  float64 `json:"amount_usd"`
-		PaymentRef string  `json:"payment_ref"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
-		return
-	}
-	txID := newID()
-	entry := map[string]interface{}{
-		"id": txID, "tx_type": "penalty_paid",
-		"debit_account": "penalty_revenue", "credit_account": "government_fund",
-		"amount_usd": req.AmountUSD, "currency": "USD",
-		"org_id": req.OrgID, "penalty_id": req.PenaltyID,
-		"payment_ref": req.PaymentRef, "status": "settled", "created_at": time.Now().UTC(),
-	}
-	mu.Lock()
-	ledger = append(ledger, entry)
-	summary["total_penalties_paid"] = summary["total_penalties_paid"].(float64) + req.AmountUSD
-	summary["total_penalties_pending"] = summary["total_penalties_pending"].(float64) - req.AmountUSD
-	summary["entry_count"] = summary["entry_count"].(int) + 1
-	mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "tx_id": txID, "status": "settled"})
+func deterministicID(parts ...string) tb.Uint128 {
+	hash := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	var bytes [16]byte
+	copy(bytes[:], hash[:16])
+	bytes[15] |= 0x01 // never permit a zero ID
+	return tb.BytesToUint128(bytes)
 }
 
-func getSummary(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	s := make(map[string]interface{})
-	for k, v := range summary { s[k] = v }
-	s["last_updated"] = time.Now().UTC()
-	mu.RUnlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s)
+func amountInCents(amount float64) (tb.Uint128, error) {
+	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 {
+		return tb.Uint128{}, fmt.Errorf("amount_usd must be a positive finite value")
+	}
+	cents := math.Round(amount * 100)
+	if cents > float64(^uint64(0)) {
+		return tb.Uint128{}, fmt.Errorf("amount_usd exceeds supported range")
+	}
+	return tb.ToUint128(uint64(cents)), nil
 }
 
-func getEntries(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	entries := make([]map[string]interface{}, len(ledger))
-	copy(entries, ledger)
-	mu.RUnlock()
-	if len(entries) > 50 { entries = entries[len(entries)-50:] }
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"entries": entries, "total": len(ledger)})
+func uint128ToUSD(value tb.Uint128) float64 {
+	number := value.BigInt()
+	asFloat, _ := new(big.Float).SetInt(number).Float64()
+	return asFloat / 100.0
 }
 
-// ── Kafka publisher ────────────────────────────────────────────────────────────
-func publishToKafka(topic string, payload interface{}) {
-	brokers := os.Getenv("KAFKA_BROKERS")
-	if brokers == "" {
-		return
+func validateCreateResults[T any](results []T, describe func(T) string) error {
+	if len(results) == 0 {
+		return nil
 	}
-	proxyURL := os.Getenv("KAFKA_REST_PROXY_URL")
-	if proxyURL == "" {
-		proxyURL = "http://localhost:8082"
-	}
-	data, _ := json.Marshal(map[string]interface{}{
-		"records": []map[string]interface{}{{"value": payload}},
-	})
-	client := &http.Client{Timeout: 3 * time.Second}
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/topics/%s", proxyURL, topic), nil)
+	return fmt.Errorf("TigerBeetle rejected event: %s", describe(results[0]))
+}
+
+func (app *application) ensureAccount(id tb.Uint128) error {
+	results, err := app.client.CreateAccounts([]tb.Account{{
+		ID: id, Ledger: ledgerCode, Code: accountCode,
+		Flags: tb.AccountFlags{History: true}.ToUint16(),
+	}})
 	if err != nil {
+		return fmt.Errorf("create account: %w", err)
+	}
+	return validateCreateResults(results, func(result tb.CreateAccountResult) string {
+		if result.Status == tb.AccountExists {
+			return ""
+		}
+		return result.Status.String()
+	})
+}
+
+func (app *application) ensureAccounts(orgID string) (tb.Uint128, tb.Uint128, error) {
+	organization := deterministicID("ndsep", "org", orgID)
+	treasury := deterministicID("ndsep", "treasury", "revenue")
+	if err := app.ensureAccount(organization); err != nil {
+		return tb.Uint128{}, tb.Uint128{}, err
+	}
+	if err := app.ensureAccount(treasury); err != nil {
+		return tb.Uint128{}, tb.Uint128{}, err
+	}
+	return organization, treasury, nil
+}
+
+func (app *application) health(w http.ResponseWriter, _ *http.Request) {
+	if err := app.client.Nop(); err != nil {
+		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("TigerBeetle unavailable: %w", err))
 		return
 	}
-	req.Header.Set("Content-Type", "application/vnd.kafka.json.v2+json")
-	_ = data
-	_, _ = client.Do(req)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"service": "tigerbeetle-ledger", "status": "healthy", "timestamp": time.Now().UTC(),
+	})
 }
 
-// ── Redis cache helper ─────────────────────────────────────────────────────────
-func cacheSet(key string, value interface{}, ttlSeconds int) {
-	webdisURL := os.Getenv("REDIS_WEBDIS_URL")
-	if webdisURL == "" {
-		webdisURL = "http://localhost:7379"
+func (app *application) transaction(w http.ResponseWriter, r *http.Request) {
+	var request transactionRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid JSON: %w", err))
+		return
 	}
-	data, _ := json.Marshal(value)
-	client := &http.Client{Timeout: 2 * time.Second}
-	url := fmt.Sprintf("%s/SET/%s/%s/EX/%d", webdisURL, key, string(data), ttlSeconds)
-	req, _ := http.NewRequest("GET", url, nil)
-	_, _ = client.Do(req)
-}
-
-func toFloat(v interface{}) float64 {
-	if v == nil {
-		return 0
+	if strings.TrimSpace(request.OrgID) == "" || strings.TrimSpace(request.PenaltyID) == "" || strings.TrimSpace(request.Type) == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("org_id, penalty_id, and type are required"))
+		return
 	}
-	switch val := v.(type) {
-	case float64:
-		return val
-	case int:
-		return float64(val)
+	if request.Currency == "" {
+		request.Currency = "USD"
+	}
+	if request.Currency != "USD" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("only USD is configured for this TigerBeetle ledger"))
+		return
+	}
+	amount, err := amountInCents(request.AmountUSD)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	organization, treasury, err := app.ensureAccounts(request.OrgID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	debit, credit := organization, treasury
+	switch request.Type {
+	case "penalty", "fine", "escrow":
+	case "settlement", "refund":
+		debit, credit = treasury, organization
 	default:
-		return 0
+		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported transaction type %q", request.Type))
+		return
 	}
+	transferID := deterministicID("ndsep", "transfer", request.OrgID, request.PenaltyID, request.Type, fmt.Sprintf("%.2f", request.AmountUSD))
+	results, err := app.client.CreateTransfers([]tb.Transfer{{
+		ID: transferID, DebitAccountID: debit, CreditAccountID: credit,
+		Amount: amount, Ledger: ledgerCode, Code: transferCode,
+	}})
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("create TigerBeetle transfer: %w", err))
+		return
+	}
+	if err := validateCreateResults(results, func(result tb.CreateTransferResult) string {
+		if result.Status == tb.TransferExists {
+			return ""
+		}
+		return result.Status.String()
+	}); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"success": true, "transaction_id": transferID.String(), "ledger_entry_id": transferID.String(),
+		"idempotent": len(results) > 0, "status": "posted",
+	})
 }
 
-// ── Balance endpoint with Redis caching ───────────────────────────────────────
-func getBalance(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	orgID := vars["org_id"]
-	mu.RLock()
-	var debits, credits float64
-	for _, e := range ledger {
-		if fmt.Sprintf("%v", e["org_id"]) == orgID {
-			if e["entry_type"] == "debit" {
-				debits += toFloat(e["amount_usd"])
-			} else {
-				credits += toFloat(e["amount_usd"])
-			}
-		}
+func (app *application) balance(w http.ResponseWriter, r *http.Request) {
+	orgID := mux.Vars(r)["org_id"]
+	if orgID == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("org_id is required"))
+		return
 	}
-	mu.RUnlock()
-	balance := map[string]interface{}{
-		"org_id": orgID, "total_debits": debits, "total_credits": credits,
-		"net_balance": debits - credits, "currency": "USD",
-		"status": "ACTIVE", "timestamp": time.Now().UTC(),
+	accountID := deterministicID("ndsep", "org", orgID)
+	accounts, err := app.client.LookupAccounts([]tb.Uint128{accountID})
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("lookup TigerBeetle account: %w", err))
+		return
 	}
-	cacheSet(fmt.Sprintf("tb:balance:%s", orgID), balance, 30)
+	if len(accounts) != 1 {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no TigerBeetle account exists for organization"))
+		return
+	}
+	account := accounts[0]
+	issued := uint128ToUSD(account.DebitsPosted)
+	paid := uint128ToUSD(account.CreditsPosted)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"orgId": orgID, "total_penalties_issued": issued, "total_penalties_paid": paid,
+		"total_escrow_held": uint128ToUSD(account.DebitsPending), "total_refunds": 0.0,
+		"net_liability": issued - paid, "currency": "USD", "lastUpdated": time.Now().UTC(),
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(balance)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]interface{}{"success": false, "error": err.Error()})
 }
 
 func main() {
+	addresses := strings.Split(requiredEnv("TIGERBEETLE_ADDRESSES"), ",")
+	clusterID, err := tb.HexStringToUint128(requiredEnv("TIGERBEETLE_CLUSTER_ID"))
+	if err != nil {
+		log.Fatalf("invalid TIGERBEETLE_CLUSTER_ID: %v", err)
+	}
+	client, err := tb.NewClient(clusterID, addresses)
+	if err != nil {
+		log.Fatalf("create TigerBeetle client: %v", err)
+	}
+	defer client.Close()
+	application := &application{client: client}
 	port := os.Getenv("PORT")
-	if port == "" { port = "8240" }
-	r := mux.NewRouter()
-	r.HandleFunc("/health", health).Methods(http.MethodGet)
-	r.HandleFunc("/ledger/penalty/issue", issuePenalty).Methods(http.MethodPost)
-	r.HandleFunc("/ledger/penalty/pay", payPenalty).Methods(http.MethodPost)
-	r.HandleFunc("/ledger/summary", getSummary).Methods(http.MethodGet)
-	r.HandleFunc("/ledger/entries", getEntries).Methods(http.MethodGet)
-	r.HandleFunc("/ledger/balance/{org_id}", getBalance).Methods(http.MethodGet)
-	logger.Printf("NDSEP TigerBeetle Ledger starting on :%s (Kafka=%s)", port, os.Getenv("KAFKA_BROKERS"))
-	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), r); err != nil {
-		logger.Fatalf("Server failed: %v", err)
+	if port == "" {
+		port = "8240"
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/health", application.health).Methods(http.MethodGet)
+	router.HandleFunc("/transaction", application.transaction).Methods(http.MethodPost)
+	router.HandleFunc("/balance/{org_id}", application.balance).Methods(http.MethodGet)
+	log.Printf("TigerBeetle ledger proxy starting on :%s", port)
+	if err := http.ListenAndServe(":"+port, router); err != nil {
+		log.Fatalf("TigerBeetle ledger proxy failed: %v", err)
 	}
 }

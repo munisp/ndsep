@@ -1,0 +1,114 @@
+name: Pre-production Monitoring GitOps
+
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'infra/k8s/monitoring/**'
+      - 'infra/argocd/**'
+      - 'infra/prometheus/**'
+      - 'infra/grafana/**'
+      - 'scripts/security/drill-opa-infrastructure-denial-spike.sh'
+      - '.github/workflows/preproduction-monitoring-gitops.yml'
+  workflow_dispatch:
+    inputs:
+      execute_opa_drill:
+        description: 'Run the bounded P1 drill against the isolated pre-production outage canary'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preproduction-monitoring-gitops
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate monitoring overlay
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Kustomize rendering
+        run: |
+          command -v kubectl
+          kubectl kustomize infra/k8s/monitoring/overlays/preproduction >/tmp/ndsep-preproduction-monitoring.yaml
+          test -s /tmp/ndsep-preproduction-monitoring.yaml
+      - name: Validate drill default mode
+        run: |
+          bash -n scripts/security/drill-opa-infrastructure-denial-spike.sh
+          DRILL_MODE=plan ./scripts/security/drill-opa-infrastructure-denial-spike.sh
+
+  sync:
+    name: Sync monitoring resources through Argo CD
+    needs: validate
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    environment: preproduction
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync and wait for the dedicated application
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_PREPRODUCTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          command -v argocd
+          : "${ARGOCD_SERVER:?ARGOCD_SERVER must be configured in the protected preproduction environment}"
+          : "${ARGOCD_AUTH_TOKEN:?ARGOCD_PREPRODUCTION_TOKEN must be configured in the protected preproduction environment}"
+          argocd app sync ndsep-preproduction-monitoring --server "${ARGOCD_SERVER}" --auth-token "${ARGOCD_AUTH_TOKEN}" --grpc-web --prune
+          argocd app wait ndsep-preproduction-monitoring --server "${ARGOCD_SERVER}" --auth-token "${ARGOCD_AUTH_TOKEN}" --grpc-web --sync --health --timeout 600
+
+  verify:
+    name: Verify reconciled monitoring resources
+    needs: sync
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    environment: preproduction
+    timeout-minutes: 10
+    steps:
+      - name: Verify ConfigMap and PrometheusRule
+        env:
+          KUBECONFIG: ${{ secrets.PREPRODUCTION_KUBECONFIG }}
+        run: |
+          set -euo pipefail
+          command -v kubectl
+          : "${KUBECONFIG:?PREPRODUCTION_KUBECONFIG must be configured in the protected preproduction environment}"
+          kubectl -n ndsep-staging get configmap ndsep-grafana-dashboard-edge-policy-security
+          kubectl -n ndsep-staging get prometheusrule ndsep-edge-policy-security
+
+  controlled-opa-p1-drill:
+    name: Execute bounded OPA P1 drill
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_opa_drill
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    environment: preproduction-drill
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated outage-canary drill
+        env:
+          KUBECONFIG: ${{ secrets.PREPRODUCTION_KUBECONFIG }}
+          DRILL_NAMESPACE: ndsep-staging
+          DRILL_CANARY_DEPLOYMENT: ndsep-api-opa-outage-canary
+          DRILL_CANARY_URL: ${{ secrets.PREPRODUCTION_OPA_OUTAGE_CANARY_URL }}
+          DRILL_PROMETHEUS_URL: ${{ secrets.PREPRODUCTION_PROMETHEUS_URL }}
+          DRILL_MFA_TOKEN: ${{ secrets.PREPRODUCTION_DRILL_MFA_TOKEN }}
+          DRILL_REQUEST_COUNT: '10'
+          DRILL_OBSERVE_SECONDS: '150'
+          DRILL_MODE: execute
+          CONFIRM_ISOLATED_OPA_CANARY: 'YES'
+        run: |
+          set -euo pipefail
+          ./scripts/security/drill-opa-infrastructure-denial-spike.sh
+      - name: Publish non-sensitive drill summary
+        if: always()
+        run: |
+          {
+            echo '## Pre-production OPA P1 drill'
+            echo
+            echo 'The bounded outage-canary drill completed. Tokens, Prometheus responses, and request IDs are not published in this summary.'
+            echo 'Attach redacted evidence to the approved exercise ticket before closure.'
+          } >> "$GITHUB_STEP_SUMMARY"

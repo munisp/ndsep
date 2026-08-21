@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import { trpc } from '../api/trpc';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -8,9 +9,11 @@ interface ChatMessage {
 
 export default function AiAdvisorScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', content: 'Welcome to the NDSEP AI Compliance Advisor. I can help with NDPA compliance questions, data protection guidance, breach notification requirements, and regulatory interpretations. How can I help you today?' },
+    { role: 'assistant', content: 'Welcome to the NDSEP AI Compliance Advisor. Ask a compliance question and I will query the authorised NDSEP compliance Q&A service.' },
   ]);
   const [input, setInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const utils = trpc.useUtils();
 
   const suggestedQueries = [
     'What are the NDPA breach notification requirements?',
@@ -20,29 +23,38 @@ export default function AiAdvisorScreen() {
     'What penalties apply for non-compliance with NDPA?',
   ];
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    setMessages(prev => [...prev, { role: 'user', content: input }]);
+  const handleSend = async () => {
+    const question = input.trim();
+    if (!question || isSending) return;
+
+    setMessages(prev => [...prev, { role: 'user', content: question }]);
     setInput('');
-    // In production, this would call the LLM endpoint
-    setTimeout(() => {
+    setIsSending(true);
+    try {
+      const result = await utils.ollama.complianceQA.fetch({ question, useRAG: true });
+      setMessages(prev => [...prev, { role: 'assistant', content: result.answer }]);
+    } catch {
+      // This is intentionally an explicit operational failure, never a generated
+      // legal/compliance answer or fabricated fallback.
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Based on the Nigeria Data Protection Act (NDPA) 2023, data controllers must notify the NDPC within 72 hours of becoming aware of a personal data breach that is likely to result in a risk to the rights and freedoms of data subjects. The notification must include the nature of the breach, categories of data affected, approximate number of data subjects, likely consequences, and measures taken to address the breach.',
+        content: 'The authorised NDSEP compliance Q&A service is currently unavailable. No advisory response was generated. Please retry later or contact the responsible compliance officer.',
       }]);
-    }, 1000);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>AI Compliance Advisor</Text>
-        <Text style={styles.subtitle}>Powered by NDSEP RAG Engine</Text>
+        <Text style={styles.subtitle}>Authoritative NDSEP compliance Q&A service</Text>
       </View>
 
       <ScrollView style={styles.chatArea}>
         {messages.map((msg, i) => (
-          <View key={i} style={[styles.msgBubble, msg.role === 'user' ? styles.userMsg : styles.assistantMsg]}>
+          <View key={`${msg.role}-${i}`} style={[styles.msgBubble, msg.role === 'user' ? styles.userMsg : styles.assistantMsg]}>
             <Text style={[styles.msgText, msg.role === 'user' && { color: '#fff' }]}>{msg.content}</Text>
           </View>
         ))}
@@ -52,7 +64,7 @@ export default function AiAdvisorScreen() {
         <View style={styles.suggestions}>
           <Text style={styles.suggestLabel}>Suggested queries:</Text>
           {suggestedQueries.map(q => (
-            <TouchableOpacity key={q} style={styles.suggestBtn} onPress={() => { setInput(q); }}>
+            <TouchableOpacity key={q} style={styles.suggestBtn} onPress={() => setInput(q)} disabled={isSending}>
               <Text style={styles.suggestText}>{q}</Text>
             </TouchableOpacity>
           ))}
@@ -67,9 +79,10 @@ export default function AiAdvisorScreen() {
           placeholder="Ask about data protection compliance..."
           placeholderTextColor="#94a3b8"
           onSubmitEditing={handleSend}
+          editable={!isSending}
         />
-        <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
-          <Text style={styles.sendText}>Send</Text>
+        <TouchableOpacity style={[styles.sendBtn, isSending && styles.sendBtnDisabled]} onPress={handleSend} disabled={isSending}>
+          <Text style={styles.sendText}>{isSending ? 'Asking…' : 'Send'}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -93,5 +106,6 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderTopColor: '#e2e8f0', backgroundColor: '#fff' },
   input: { flex: 1, backgroundColor: '#f1f5f9', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: '#1e293b' },
   sendBtn: { marginLeft: 8, backgroundColor: '#3b82f6', borderRadius: 10, paddingHorizontal: 18, justifyContent: 'center' },
+  sendBtnDisabled: { backgroundColor: '#94a3b8' },
   sendText: { color: '#fff', fontWeight: '600', fontSize: 14 },
 });

@@ -382,34 +382,7 @@ async fn metrics() -> impl IntoResponse {
 
 // ─── Main ──────────────────────────────────────────────────────────────────
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt::init();
-    init_metrics();
-
-    let port = get_env("TIGERBEETLE_LEDGER_PORT", "8160");
-    let tigerbeetle_url = get_env("TIGERBEETLE_URL", "localhost:3000");
-
-    let state = AppState {
-        accounts: Arc::new(Mutex::new(HashMap::new())),
-        transfers: Arc::new(Mutex::new(Vec::new())),
-        start_time: Instant::now(),
-        tigerbeetle_url,
-    };
-
-    let app = Router::new()
-        .route("/accounts", post(create_account))
-        .route("/accounts/:id", get(get_account))
-        .route("/transfers", post(create_transfer).get(list_transfers))
-        .route("/holds", post(place_hold))
-        .route("/holds/void", post(void_hold))
-        .route("/health", get(health))
-        .route("/metrics", get(metrics))
-        .with_state(state);
-
-    let addr = format!("0.0.0.0:{}", port);
-    tracing::info!("NDSEP TigerBeetle Ledger Worker starting on {}", addr);
-
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+fn main() {
+    eprintln!("The Rust in-memory TigerBeetle ledger is disabled because it cannot provide durable financial records. Deploy orchestration/go/cmd/tigerbeetle_ledger with TIGERBEETLE_CLUSTER_ID and TIGERBEETLE_ADDRESSES instead.");
+    std::process::exit(78);
 }

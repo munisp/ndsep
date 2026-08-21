@@ -4,12 +4,12 @@
 //   - Validates JWT bearer tokens via Keycloak token introspection API
 //   - Realm: ndsep (configurable via KEYCLOAK_REALM)
 //   - Client: ndsep-platform (configurable via KEYCLOAK_CLIENT_ID)
-//   - Graceful degradation: local role-map fallback if Keycloak unreachable
+//   - Rejects requests when Keycloak cannot make an authoritative decision.
 //
 // Permify (HTTP REST v1):
-//   - Checks permissions via POST /v1/permissions/check
+//   - Checks permissions through the configured tenant endpoint.
 //   - Schema: ndsep-enforcement (org, user, resource entities)
-//   - Graceful degradation: allows all if Permify unreachable (with warning)
+//   - Rejects requests when Permify is unavailable or returns an invalid response.
 package main
 
 import (
@@ -44,33 +44,20 @@ var (
 	keycloakClientID = getenv("KEYCLOAK_CLIENT_ID", "ndsep-platform")
 	keycloakSecret   = getenv("KEYCLOAK_CLIENT_SECRET", "")
 	permifyURL       = getenv("PERMIFY_URL", "http://localhost:3476")
+	permifyTenant    = getenv("PERMIFY_TENANT", "ndsep")
 	keycloakEnabled  = getenv("KEYCLOAK_ENABLED", "true") == "true"
 	permifyEnabled   = getenv("PERMIFY_ENABLED", "true") == "true"
 )
 
 var (
-	mu               sync.RWMutex
-	keycloakClient   *gocloak.GoCloak
-	keycloakOK       bool
-	permifyOK        bool
-	tokensValidated  int64
-	tokenErrors      int64
-	permChecks       int64
+	mu              sync.RWMutex
+	keycloakClient  *gocloak.GoCloak
+	keycloakOK      bool
+	permifyOK       bool
+	tokensValidated int64
+	tokenErrors     int64
+	permChecks      int64
 )
-
-// Role-permission map (local fallback when Keycloak is unreachable)
-var rolePermissions = map[string][]string{
-	"admin":                    {"dashboard:view", "orgs:manage", "violations:issue", "penalties:issue", "penalties:approve", "transfers:approve", "audit:view", "roles:manage", "financials:view", "financials:manage", "network:view", "network:manage", "ml:view", "ml:manage", "certificates:view", "certificates:issue", "portal:review", "reports:view", "reports:generate"},
-	"government_staff":         {"dashboard:view", "orgs:manage", "violations:issue", "penalties:issue", "transfers:approve", "audit:view", "financials:view", "network:view", "certificates:view", "certificates:issue", "portal:review", "reports:view", "reports:generate"},
-	"auditor":                  {"dashboard:view", "audit:view", "financials:view", "network:view", "certificates:view", "reports:view", "portal:review"},
-	"org_admin":                {"dashboard:view", "portal:submit", "certificates:view", "reports:view"},
-	"org_user":                 {"dashboard:view", "portal:submit"},
-	"regulator":                {"dashboard:view", "audit:view", "financials:view", "reports:view", "reports:generate", "transfers:approve"},
-	"legal_officer":            {"dashboard:view", "audit:view", "financials:view", "penalties:approve", "reports:view"},
-	"finance_officer":          {"dashboard:view", "financials:view", "financials:manage", "reports:view"},
-	"tech_officer":             {"dashboard:view", "network:view", "network:manage", "ml:view", "reports:view"},
-	"data_protection_officer":  {"dashboard:view", "audit:view", "transfers:approve", "certificates:view", "reports:view"},
-}
 
 // ─── Keycloak Init ────────────────────────────────────────────────────────────
 
@@ -165,17 +152,8 @@ func validateToken(token string) (map[string]interface{}, error) {
 		}, nil
 	}
 
-	// Fallback: basic JWT structure check (no signature verification)
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid JWT structure")
-	}
-	atomic.AddInt64(&tokensValidated, 1)
-	return map[string]interface{}{
-		"active":       true,
-		"validated_by": "local-fallback",
-		"warning":      "Keycloak unavailable — signature not verified",
-	}, nil
+	atomic.AddInt64(&tokenErrors, 1)
+	return nil, fmt.Errorf("keycloak token validation is unavailable")
 }
 
 // ─── Permission Check ─────────────────────────────────────────────────────────
@@ -186,33 +164,41 @@ func checkPermission(subjectType, subjectID, permission, resourceType, resourceI
 	mu.RUnlock()
 	atomic.AddInt64(&permChecks, 1)
 
-	if pOK {
-		body, _ := json.Marshal(map[string]interface{}{
-			"metadata": map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
-			"entity":   map[string]interface{}{"type": resourceType, "id": resourceID},
-			"permission": permission,
-			"subject":  map[string]interface{}{"type": subjectType, "id": subjectID},
-		})
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		req, _ := http.NewRequestWithContext(ctx, "POST", permifyURL+"/v1/permissions/check",
-			strings.NewReader(string(body)))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			var result struct {
-				Can string `json:"can"`
-			}
-			json.NewDecoder(resp.Body).Decode(&result)
-			return result.Can == "RESULT_ALLOWED", nil
-		}
+	if !pOK {
+		return false, fmt.Errorf("permify authorization service is unavailable")
 	}
 
-	// Fallback: role-based local check
-	logger.Printf("[Permify] Offline — using local role map for %s:%s %s %s:%s",
-		subjectType, subjectID, permission, resourceType, resourceID)
-	return true, fmt.Errorf("permify unavailable — degraded mode")
+	body, err := json.Marshal(map[string]interface{}{
+		"metadata":   map[string]interface{}{"schema_version": "", "snap_token": "", "depth": 20},
+		"entity":     map[string]interface{}{"type": resourceType, "id": resourceID},
+		"permission": permission,
+		"subject":    map[string]interface{}{"type": subjectType, "id": subjectID},
+	})
+	if err != nil {
+		return false, fmt.Errorf("encode Permify request: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", permifyURL+"/v1/tenants/"+permifyTenant+"/permissions/check", strings.NewReader(string(body)))
+	if err != nil {
+		return false, fmt.Errorf("create Permify request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("call Permify: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, fmt.Errorf("Permify returned HTTP %d", resp.StatusCode)
+	}
+	var result struct {
+		Can string `json:"can"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("decode Permify response: %w", err)
+	}
+	return result.Can == "RESULT_ALLOWED", nil
 }
 
 // ─── HTTP Handlers ────────────────────────────────────────────────────────────
@@ -261,25 +247,10 @@ func validateHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"valid": true, "claims": result})
 }
 
-func checkHandler(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Role       string `json:"role"`
-		Permission string `json:"permission"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
-		return
-	}
-	perms := rolePermissions[req.Role]
-	allowed := false
-	for _, p := range perms {
-		if p == req.Permission {
-			allowed = true
-			break
-		}
-	}
+func checkHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"allowed": allowed, "role": req.Role, "permission": req.Permission})
+	w.WriteHeader(http.StatusGone)
+	json.NewEncoder(w).Encode(map[string]interface{}{"error": "role-only authorization is retired; use /auth/permission with an authenticated subject and resource"})
 }
 
 func permissionHandler(w http.ResponseWriter, r *http.Request) {
@@ -296,11 +267,12 @@ func permissionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	allowed, err := checkPermission(req.SubjectType, req.SubjectID, req.Permission, req.ResourceType, req.ResourceID)
 	w.Header().Set("Content-Type", "application/json")
-	resp := map[string]interface{}{"allowed": allowed}
 	if err != nil {
-		resp["warning"] = err.Error()
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{"allowed": false, "error": err.Error()})
+		return
 	}
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(map[string]interface{}{"allowed": allowed})
 }
 
 func metricsHandler(w http.ResponseWriter, _ *http.Request) {

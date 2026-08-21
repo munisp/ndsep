@@ -20,13 +20,13 @@ from typing import Any
 import httpx
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI(title="NDSEP ML Breach Predictor", version="3.0.0")
 
-DB_URL = os.getenv("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db")
-RAY_ML_URL = os.getenv("RAY_ML_URL", "http://localhost:8250")
+DB_URL = os.getenv("DATABASE_URL", os.getenv("WORKER_DATABASE_URL", ""))
+CPU_ML_URL = os.getenv("CPU_ML_URL", "http://localhost:8085")
 
 # ── Models ───────────────────────────────────────────────────────────────────
 
@@ -61,15 +61,13 @@ def load_organizations(sectors: list[str] | None = None, limit: int = 50) -> lis
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             sql = """
                 SELECT o.id, o.name, o.sector, o.compliance_score,
-                       o.risk_score,
-                       (SELECT COUNT(*) FROM breach_incidents b WHERE b.organization_id = o.id
-                        AND b.created_at > NOW() - INTERVAL '1 year') AS recent_breaches,
-                       (SELECT COUNT(*) FROM staff_training_records t WHERE t.organization_id = o.id
-                        AND t.passed = true) AS trained_staff,
-                       (SELECT COUNT(*) FROM dpo_appointments d WHERE d.organization_id = o.id
-                        AND d.is_active = true) AS has_dpo,
-                       (SELECT COUNT(*) FROM consent_records c WHERE c.organization_id = o.id
-                        AND c.consent_status = 'active') AS active_consents
+                       (SELECT COUNT(*) FROM compliance_violations v WHERE v.organization_id = o.id) AS violation_count,
+                       (SELECT COUNT(*) FROM compliance_violations v WHERE v.organization_id = o.id AND v.severity = 'critical') AS critical_violations,
+                       (SELECT COUNT(*) FROM compliance_violations v WHERE v.organization_id = o.id AND v.severity = 'high') AS high_violations,
+                       (SELECT COUNT(*) FROM enforcement_actions e WHERE e.organization_id = o.id) AS enforcement_count,
+                       (SELECT COALESCE(SUM(amount), 0) FROM financial_penalties p WHERE p.organization_id = o.id) AS total_fines,
+                       GREATEST(1, EXTRACT(DAY FROM NOW() - o.created_at)) AS days_active,
+                       (SELECT COUNT(*) FROM breach_incidents b WHERE b.organization_id = o.id) AS breach_count
                 FROM organizations o
                 WHERE 1=1
             """
@@ -86,116 +84,59 @@ def load_organizations(sectors: list[str] | None = None, limit: int = 50) -> lis
         conn.close()
 
 
-def predict_via_ray_ml(org: dict) -> dict | None:
-    """Call real XGBoost model on Ray ML Engine for breach prediction + SHAP."""
+def predict_via_cpu_model(org: dict) -> dict:
+    """Call the CPU ML engine with observed PostgreSQL features only."""
+    fields = ("compliance_score", "violation_count", "critical_violations", "high_violations", "enforcement_count", "total_fines", "days_active", "breach_count")
+    if any(org.get(field) is None for field in fields):
+        raise HTTPException(status_code=422, detail="Organization lacks the observed feature data required for model inference")
+    payload = {field: float(org[field]) for field in fields}
+    payload["sector_encoded"] = 0.0  # Sector encoding is model-owned and unavailable to this API contract.
     try:
-        compliance_score = float(org.get("compliance_score") or 65)
-        recent_breaches = int(org.get("recent_breaches") or 0)
-        has_dpo = 1 if int(org.get("has_dpo") or 0) > 0 else 0
-
-        resp = httpx.post(
-            f"{RAY_ML_URL}/predict/breach",
-            json={
-                "compliance_score": compliance_score,
-                "sector_risk": 7,
-                "violation_count": recent_breaches,
-                "has_dpo": has_dpo,
-                "data_volume": 5,
-                "cross_border": 0,
-                "sensitive_data": 1,
-                "security_score": min(10, compliance_score / 10),
-                "breach_history": recent_breaches,
-                "employee_count": 100,
-                "annual_revenue": 5000000,
-            },
-            timeout=10.0,
-        )
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception:
-        pass
-    return None
+        response = httpx.post(f"{CPU_ML_URL.rstrip('/')}/predict/breach", json={"org_features": payload, "org_id": str(org["id"])}, timeout=15.0)
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail=f"CPU ML inference service unavailable: {error}") from error
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail=f"CPU ML inference rejected the request: {response.text[:300]}")
+    return response.json()
 
 
 def predict_breach_for_org(org: dict) -> dict:
-    """Predict breach risk for a single org using real ML model, with rule-based fallback."""
-    compliance_score = float(org.get("compliance_score") or 65)
-    recent_breaches = int(org.get("recent_breaches") or 0)
-    trained_staff = int(org.get("trained_staff") or 0)
-    has_dpo = int(org.get("has_dpo") or 0) > 0
-    active_consents = int(org.get("active_consents") or 0)
-
-    # Try real ML model first
-    ml_result = predict_via_ray_ml(org)
-    if ml_result and "breach_probability" in ml_result:
-        prob = float(ml_result["breach_probability"])
-        shap = ml_result.get("shap_explanation", {})
-        model_source = "xgboost_trained"
-        feature_importance = {}
-        if isinstance(shap, dict):
-            top_factors = shap.get("top_factors", [])
-            for f in top_factors:
-                if isinstance(f, dict):
-                    feature_importance[f.get("feature", "unknown")] = round(abs(float(f.get("contribution", 0))) * 100, 1)
-    else:
-        # Fallback: compute from real org data (no random noise, deterministic)
-        compliance_gap = (100 - compliance_score) / 100
-        breach_penalty = min(0.3, recent_breaches * 0.1)
-        dpo_bonus = -0.05 if has_dpo else 0.05
-        training_bonus = -0.02 * min(5, trained_staff)
-        consent_maturity = -0.02 if active_consents > 10 else 0.02
-
-        prob = max(0.0, min(1.0,
-            0.1 + compliance_gap * 0.4 + breach_penalty + dpo_bonus + training_bonus + consent_maturity
-        ))
-        model_source = "rule_based_fallback"
-        feature_importance = {
-            "compliance_score": round(compliance_gap * 40, 1),
-            "breach_history": round(breach_penalty * 100, 1),
-            "dpo_appointment": round(abs(dpo_bonus) * 100, 1),
-            "staff_training": round(abs(training_bonus) * 100, 1),
-            "consent_management": round(abs(consent_maturity) * 100, 1),
-        }
-
-    p30 = round(prob * 30 / 365 * 100, 2)
-    p90 = round(prob * 90 / 365 * 100, 2)
+    """Return only the trained CPU model's observed-feature risk estimate."""
+    ml_result = predict_via_cpu_model(org)
+    probability = float(ml_result["probability"])
+    feature_importance = {item["feature"]: abs(float(item["impact"])) for item in ml_result.get("top_factors", []) if isinstance(item, dict) and "feature" in item}
+    compliance_score = float(org["compliance_score"])
+    breach_count = int(org["breach_count"])
 
     # Risk factors from real data
     factors = []
     if compliance_score < 70:
         factors.append(f"Low compliance ({compliance_score:.1f}%)")
-    if recent_breaches > 0:
-        factors.append(f"{recent_breaches} breach(es) in past year")
-    if not has_dpo:
-        factors.append("No active DPO appointed")
-    if trained_staff == 0:
-        factors.append("No trained privacy staff")
-    if active_consents == 0:
-        factors.append("No active consent records")
+    if breach_count > 0:
+        factors.append(f"{breach_count} recorded breach incident(s)")
     if not factors:
         factors.append("Standard risk profile")
 
     action = "Continue monitoring"
-    if p30 > 5:
-        action = "Schedule compliance audit within 30 days"
-    if p30 > 10:
+    if probability >= 0.70:
         action = "Immediate security assessment required"
-    if p30 > 15:
-        action = "CRITICAL: Emergency intervention — high breach probability"
+    elif probability >= 0.50:
+        action = "Schedule compliance audit"
+    elif probability >= 0.30:
+        action = "Continue monitored compliance programme"
 
     return {
         "org_id": org.get("id", 0),
         "org_name": org.get("name", "Unknown"),
         "sector": org.get("sector", "Unknown"),
         "jurisdiction": "NG",
-        "probability_30d": p30,
-        "probability_90d": p90,
-        "risk_score": round(prob * 100, 2),
+        "risk_probability": round(probability, 4),
+        "risk_score": round(probability * 100, 2),
         "top_risk_factors": factors,
         "recommended_action": action,
-        "model_source": model_source,
+        "model_source": "cpu_trained_model",
+        "model_version": ml_result.get("model_version", "unknown"),
         "feature_importance": feature_importance,
-        "confidence": round(92.0 if model_source == "xgboost_trained" else 75.0, 1),
     }
 
 
@@ -338,26 +279,26 @@ async def health():
     except Exception:
         pass
 
-    # Check Ray ML Engine
+    # Check the authoritative CPU inference service.
     ml_ok = False
     try:
-        resp = httpx.get(f"{RAY_ML_URL}/health", timeout=3.0)
-        ml_ok = resp.status_code == 200
+        response = httpx.get(f"{CPU_ML_URL.rstrip('/')}/health", timeout=3.0)
+        ml_ok = response.status_code == 200 and response.json().get("status") == "healthy"
     except Exception:
-        pass
+        ml_ok = False
 
     return {
-        "status": "healthy" if db_ok else "degraded",
+        "status": "healthy" if db_ok and ml_ok else "unhealthy",
         "service": "ml-breach-predictor",
         "version": "3.0.0",
         "capabilities": [
             "breach_prediction", "feature_importance", "economic_impact",
             "network_effects", "shap_explanations",
         ],
-        "model": "xgboost_trained" if ml_ok else "rule_based_fallback",
+        "model": "cpu_trained_model" if ml_ok else "unavailable",
         "data_source": "postgresql",
         "organizations_loaded": org_count,
-        "ray_ml_connected": ml_ok,
+        "cpu_ml_connected": ml_ok,
         "db_connected": db_ok,
     }
 
@@ -370,27 +311,25 @@ async def predict_breaches(req: PredictionRequest | None = None):
 
     orgs = load_organizations(sectors=sectors, limit=count)
     predictions = [predict_breach_for_org(org) for org in orgs]
-    predictions.sort(key=lambda p: p["probability_30d"], reverse=True)
-
-    model_sources = set(p["model_source"] for p in predictions)
+    predictions.sort(key=lambda prediction: prediction["risk_probability"], reverse=True)
 
     return {
         "predictions": predictions[:count],
         "total": min(count, len(predictions)),
         "data_source": "postgresql",
-        "model": "xgboost_trained" if "xgboost_trained" in model_sources else "rule_based_fallback",
+        "model": "cpu_trained_model",
         "generated_at": datetime.utcnow().isoformat(),
     }
 
 
 @app.post("/api/v1/economic-impact")
 async def economic_impact(req: EconomicRequest):
-    return calc_economic_impact(req.jurisdiction, req.policy_changes, req.duration_months)
+    raise HTTPException(status_code=501, detail="Economic impact modelling is disabled until it is connected to sourced macroeconomic data and a validated methodology")
 
 
 @app.post("/api/v1/network-effects")
 async def network_effects(req: NetworkRequest):
-    return simulate_network_propagation(req.trigger_org, req.trigger_event, req.propagation_steps)
+    raise HTTPException(status_code=501, detail="Network propagation is disabled until a verified organization-relationship dataset is integrated")
 
 
 @app.post("/api/v1/train")
@@ -398,45 +337,35 @@ async def train_model(req: TrainRequest):
     """Trigger real model training via Ray ML Engine."""
     start = time.time()
     try:
-        resp = httpx.post(f"{RAY_ML_URL}/train", json={"models": ["all"]}, timeout=120.0)
+        resp = httpx.post(f"{CPU_ML_URL.rstrip('/')}/train", json={"models": ["all"]}, timeout=120.0)
         if resp.status_code == 200:
             result = resp.json()
             result["training_time_ms"] = round((time.time() - start) * 1000, 1)
-            result["delegated_to"] = "ray_ml_engine"
+            result["delegated_to"] = "cpu_ml_engine"
             return result
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "training_time_ms": round((time.time() - start) * 1000, 1),
-        }
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=f"CPU ML training unavailable: {error}") from error
+    raise HTTPException(status_code=503, detail="CPU ML training request was rejected")
 
 
 @app.get("/api/v1/model-info")
 async def model_info():
-    # Get real model info from Ray ML Engine
+    # Get model information from the CPU model service.
     try:
-        resp = httpx.get(f"{RAY_ML_URL}/models", timeout=5.0)
+        resp = httpx.get(f"{CPU_ML_URL.rstrip('/')}/models", timeout=5.0)
         if resp.status_code == 200:
             data = resp.json()
             return {
                 "model_name": "NDSEP Breach Predictor",
                 "version": "3.0.0",
-                "algorithm": "XGBoost (real trained model via Ray ML Engine)",
-                "backend": "ray_ml_engine",
+                "algorithm": "CPU-trained scikit-learn model",
+                "backend": "cpu_ml_engine",
                 "registered_models": data.get("models", {}),
                 "data_source": "postgresql (organizations, breach_incidents, compliance data)",
             }
-    except Exception:
-        pass
-
-    return {
-        "model_name": "NDSEP Breach Predictor",
-        "version": "3.0.0",
-        "algorithm": "Rule-based fallback (Ray ML Engine unavailable)",
-        "backend": "local",
-        "data_source": "postgresql",
-    }
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=f"CPU ML model registry unavailable: {error}") from error
+    raise HTTPException(status_code=503, detail="CPU ML model registry rejected the request")
 
 
 if __name__ == "__main__":

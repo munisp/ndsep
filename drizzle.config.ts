@@ -6,7 +6,7 @@ const connectionString =
   "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db";
 
 export default defineConfig({
-  schema: "./drizzle/schema.ts",
+  schema: ["./drizzle/schema.ts", "./drizzle/runtimeTables.ts"],
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {

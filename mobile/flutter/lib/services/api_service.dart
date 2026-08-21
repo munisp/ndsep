@@ -68,6 +68,15 @@ class ApiService {
     return fromJson(data['result']['data']['json']);
   }
 
+  List<dynamic> _records(dynamic json) {
+    if (json is List<dynamic>) return json;
+    if (json is Map) {
+      final rows = json['rows'] ?? json['records'] ?? json['items'];
+      if (rows is List<dynamic>) return rows;
+    }
+    throw const FormatException('NDSEP API returned an invalid collection payload');
+  }
+
   // ─── Auth ────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>?> getMe() => query('auth.me', null, (j) => j as Map<String, dynamic>?);
 
@@ -255,13 +264,41 @@ class ApiService {
   Future<void> completeRemediationWorkflow(int id) =>
       mutate('remediation.complete', {'id': id}, (_) => null);
 
+  // ─── DPCO Operations ─────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> getDpcoDashboardStats() =>
+      query('dpco.dashboardStats', null, (j) => j as Map<String, dynamic>);
+
+  Future<List<dynamic>> listDpcoOrganisations({int limit = 50, int offset = 0}) =>
+      query('dpco.listOrganisations', {'limit': limit, 'offset': offset}, _records);
+
+  Future<List<dynamic>> listDpcoClients() =>
+      query('dpco.listClients', null, _records);
+
+  Future<List<dynamic>> listDpcoAuditEngagements() =>
+      query('dpco.listAuditEngagements', null, _records);
+
+  Future<List<dynamic>> listDpcoVerificationStatements() =>
+      query('dpco.listVerificationStatements', null, _records);
+
+  Future<List<dynamic>> listDpcoTrainingSessions() =>
+      query('dpco.listTrainingSessions', null, _records);
+
+  Future<List<dynamic>> listDpcoPolicyDrafts() =>
+      query('dpco.listPolicyDrafts', null, _records);
+
   // ─── Banking / KYC ───────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> getBankingInstitutionStats() =>
+      query('banking.institutions.institutionStats', null, (j) => j as Map<String, dynamic>);
+
+  Future<Map<String, dynamic>> listBankingInstitutions({int page = 1, int limit = 20}) =>
+      query('banking.institutions.listInstitutions', {'page': page, 'limit': limit}, (j) => j as Map<String, dynamic>);
+
   Future<List<dynamic>> listKycRecords({int limit = 50, String? status, int? bankId}) =>
       query('banking.kyc.list', {
         'limit': limit,
         if (status != null) 'status': status,
         if (bankId != null) 'bankId': bankId,
-      }, (j) => j as List<dynamic>);
+      }, _records);
 
   Future<Map<String, dynamic>> submitKyc({
     required int bankId,
@@ -279,12 +316,30 @@ class ApiService {
         if (dateOfBirth != null) 'dateOfBirth': dateOfBirth,
       }, (j) => j as Map<String, dynamic>);
 
+  Future<List<dynamic>> listBankingWatchlist({int limit = 50}) =>
+      query('banking.watchlist.list', {'limit': limit}, _records);
+
+  Future<List<dynamic>> listBankingPayments({int limit = 50}) =>
+      query('banking.payments.list', {'limit': limit}, _records);
+
+  Future<List<dynamic>> listSwiftMessages({int limit = 50}) =>
+      query('banking.swift.list', {'limit': limit}, _records);
+
+  Future<List<dynamic>> listFraudAlerts({int limit = 50}) =>
+      query('banking.fraud.list', {'limit': limit}, _records);
+
+  Future<List<dynamic>> listCbnReports({int limit = 50}) =>
+      query('banking.cbnReports.list', {'limit': limit}, _records);
+
+  Future<List<dynamic>> listCorrespondentBanks({int limit = 50}) =>
+      query('banking.correspondents.list', {'limit': limit}, _records);
+
   // ─── AML ─────────────────────────────────────────────────────────────────────
   Future<List<dynamic>> listAmlCases({int limit = 50, String? status}) =>
       query('banking.aml.list', {
         'limit': limit,
         if (status != null) 'status': status,
-      }, (j) => j as List<dynamic>);
+      }, _records);
 
   // ─── Monitoring ──────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getMonitoringStats() =>
@@ -299,7 +354,6 @@ class ApiService {
   // ─── Workers ─────────────────────────────────────────────────────────────────
   Future<List<dynamic>> getWorkerStatus() =>
       query('workers.status', null, (j) => j as List<dynamic>);
-}
 
   // ─── Compliance Calendar ──────────────────────────────────────────────────────
   Future<List<dynamic>> getCalendarEvents({required String startDate, required String endDate, int? orgId, String? sector}) =>
@@ -352,3 +406,4 @@ class ApiService {
         'reminderDays': reminderDays,
         if (notes != null) 'notes': notes,
       }, (j) => j as Map<String, dynamic>);
+}

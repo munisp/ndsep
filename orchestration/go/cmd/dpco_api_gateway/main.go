@@ -109,10 +109,6 @@ func validateDPCOToken(r *http.Request) (*DPCOClaims, error) {
 	var orgID int
 	var licenceNumber string
 	if err := row.Scan(&orgID, &licenceNumber); err != nil {
-		// Fallback: accept any token for sandbox (remove in production)
-		if os.Getenv("NODE_ENV") != "production" {
-			return &DPCOClaims{Sub: "sandbox", LicenceNumber: "DPCO-SANDBOX-001", OrgID: 1}, nil
-		}
 		return nil, fmt.Errorf("invalid or expired API key")
 	}
 	return &DPCOClaims{Sub: strconv.Itoa(orgID), LicenceNumber: licenceNumber, OrgID: orgID}, nil

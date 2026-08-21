@@ -44,33 +44,17 @@
 
 ## 2. Router Coverage Analysis
 
-### All 22 Router Files
-| File | Lines | Queries | Mutations | Middleware Events |
-|------|-------|---------|-----------|-------------------|
-| routers.ts (main) | 3,398 | 55 | 58 | 20+ Dapr calls |
-| accreditation.ts | 570 | 4 | 10 | 1 (import + 1 call) |
-| banking.ts | 1,170 | 24 | 19 | 1 (import + 1 call) |
-| billing.ts | 1,194 | 16 | 8 | Import only |
-| dpco.ts | 1,338 | 20 | 25 | Import only |
-| dpcoAi.ts | 397 | 3 | 3 | Import only |
-| enhancements.ts | 1,122 | 30 | 50 | Import only |
-| newFeatures.ts | 469 | 8 | 15 | Import only |
-| phase5Features.ts | 431 | 5 | 8 | Import only |
-| phase6Features.ts | 290 | 3 | 7 | Import only |
-| phase7Features.ts | 185 | 2 | 2 | Import only |
-| phase8Features.ts | 275 | 3 | 3 | Import only |
-| phase11Features.ts | 756 | 10 | 10 | Import only |
-| phase12Features.ts | 1,333 | 20 | 33 | Import only |
-| phase13Features.ts | 1,061 | 15 | 31 | Import only |
-| production9Features.ts | 1,372 | 20 | 11 | Import only |
-| productionFeatures.ts | 457 | 10 | 20 | Import only |
-| push.ts | 191 | 2 | 4 | Import only |
-| sectors.ts | 491 | 5 | 3 | Import only |
-| telecom.ts | 215 | 3 | 3 | Import only |
-| workflows.ts | 129 | 6 | 1 | 1 call |
-| aimlRouter.ts | 739 | 10 | 14 | Import only |
+### Current event-emission audit
 
-**Gap:** 18/22 router files have middleware imports but no active event emission calls in mutation handlers. Main routers.ts has 20+ active calls.
+A source scan performed after the remediation work found that every router module importing the central mutation-event layer also contains at least one active `emitMutationEvent(...)` invocation. The two scanned modules with no active invocation were core/support modules, not business routers: `server/_core/trpc.ts` and `server/productionReadinessScore.ts`.
+
+| Audit target | Current result | Status |
+|---|---|---|
+| Business routers importing the middleware event layer | Active mutation emission found in all scanned router modules | **Closed** |
+| DPCO, banking, billing, AI/ML, phase, sector, telecom, workflow routers | Active mutation emission found | **Closed** |
+| Core procedure definitions and readiness scoring utilities | No mutation emission expected from these support modules | Not a router gap |
+
+> The former statement that **18/22 router files were import-only** is an obsolete baseline. It must not be used as a current production-readiness finding.
 
 ---
 
@@ -119,24 +103,17 @@
 
 ## 5. Mobile Parity Analysis
 
-| Feature Area | Web Pages | RN Screens | Flutter Screens | Gap |
-|-------------|-----------|------------|-----------------|-----|
-| Dashboard | 3 | 2 | 2 | Low |
-| Organizations | 5 | 2 | 2 | Medium |
-| Compliance | 8 | 1 | 1 | High |
-| Enforcement | 6 | 1 | 1 | High |
-| DPO Registry | 3 | 1 | 1 | Medium |
-| Breach | 3 | 1 | 1 | Medium |
-| DPIA | 3 | 1 | 1 | Medium |
-| Consent | 3 | 1 | 1 | Medium |
-| DPCO Portal | 12 | 0 | 0 | Critical |
-| Banking | 9 | 0 | 0 | Critical |
-| AI Features | 8 | 0 | 0 | Critical |
-| Security/SIEM | 5 | 1 | 1 | High |
-| Sector pages | 10 | 0 | 0 | Critical |
-| **Total** | **205** | **23** | **28** | **~85% gap** |
+The initial inventory in this document is stale. Both mobile clients now include DPCO, banking, and AI feature screens, and the priority operational summaries have been wired to authenticated backend contracts.
 
-**Recommendation:** For initial production, scope mobile to top 15 screens (Dashboard, Organizations, Compliance, Enforcement, Breach, Consent, DPO Registry, DPCO Portal summary, Banking summary). Full parity requires ~150+ additional screens per platform.
+| Feature area | React Native | Flutter | Current boundary |
+|---|---|---|---|
+| DPCO portal | Dashboard statistics and recent engagements from `dpco.*` procedures | Dashboard statistics, engagements, and real collection dialogs from `dpco.*` procedures | Summary and collection access implemented; no one-screen-for-one-web-page parity claim |
+| Banking | Institution summary already queries banking procedures | Institution statistics, institution list, and eight live operational collections from `banking.*` procedures | Summary and collection access implemented; transactional detail flows remain separate work |
+| AI advisory | Calls `ollama.complianceQA` through authenticated tRPC; explicit unavailable state rather than canned answer | AI screen present; separate live-device verification required | No client may fabricate a compliance answer |
+| Compliance, enforcement, governance | Core screens are present in both clients | Core screens are present in both clients | Completeness must be measured against a maintained route inventory, not the obsolete 85% estimate |
+| Sector-specific pages | Not full parity | Not full parity | Remaining product-scope gap |
+
+> The former **~85% mobile gap** was calculated before the DPCO, banking, AI, and governance screens were added. It is no longer an authoritative measurement. Full mobile parity remains unverified and should not be inferred from the summary-screen wiring completed here.
 
 ---
 

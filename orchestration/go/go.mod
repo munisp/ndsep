@@ -5,13 +5,20 @@ go 1.22
 require (
 	github.com/IBM/sarama v1.43.0
 	github.com/Nerzal/gocloak/v13 v13.9.0
+	github.com/go-chi/chi/v5 v5.0.10
+	github.com/go-chi/cors v1.2.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
+	github.com/lib/pq v1.10.9
+	github.com/redis/go-redis/v9 v9.7.3
+	github.com/tigerbeetle/tigerbeetle-go v0.17.9
 	go.temporal.io/sdk v1.26.0
 )
 
 require (
+	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/eapache/go-resiliency v1.6.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
 	github.com/eapache/queue v1.1.0 // indirect

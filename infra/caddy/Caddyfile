@@ -1,0 +1,64 @@
+{
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+	admin off
+}
+
+# NDSEP application edge. Caddy is the sole public entry point; APISIX,
+# Keycloak administration, OPA, databases, and worker ports stay internal.
+{$NDSEP_PUBLIC_HOST} {
+	encode zstd gzip
+	request_body {
+		max_size 16MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: wss:"
+		-Server
+	}
+
+	handle {
+		reverse_proxy apisix:9080 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {host}
+			# Replace, never append, client-provided forwarding headers. APISIX
+			# limits use this trusted value instead of a spoofable direct header.
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+}
+
+# Keycloak is public only for OIDC realm endpoints and static assets required by
+# those pages. Its administrative console and management API are never proxied.
+{$KEYCLOAK_PUBLIC_HOST} {
+	encode zstd gzip
+	request_body {
+		max_size 2MB
+	}
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	@oidc path /realms/* /resources/*
+	handle @oidc {
+		reverse_proxy keycloak:8080 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	respond "Not found" 404
+}
