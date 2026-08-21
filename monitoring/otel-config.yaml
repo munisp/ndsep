@@ -1,0 +1,98 @@
+# NDSEP OpenTelemetry Collector Configuration
+# Receives traces/metrics/logs from all services and exports to backends.
+# Mount: ./monitoring/otel-config.yaml:/etc/otelcol-contrib/config.yaml
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: ndsep-api
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["ndsep-api:5000"]
+        - job_name: event-gateway
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["event-gateway:8170"]
+        - job_name: realtime-engine
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["realtime-engine:8130"]
+
+processors:
+  batch:
+    send_batch_size: 1024
+    timeout: 5s
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  attributes:
+    actions:
+      - key: deployment.environment
+        value: "${DEPLOY_ENV:-development}"
+        action: upsert
+      - key: service.namespace
+        value: ndsep
+        action: upsert
+
+  resource:
+    attributes:
+      - key: service.namespace
+        value: ndsep
+        action: upsert
+
+  filter/health:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["http.target"] == "/healthz"'
+        - 'attributes["http.target"] == "/api/health"'
+
+exporters:
+  otlp/jaeger:
+    endpoint: "${JAEGER_ENDPOINT:-jaeger:4317}"
+    tls:
+      insecure: true
+
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: ndsep
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  logging:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+  zpages:
+    endpoint: "0.0.0.0:55679"
+
+service:
+  extensions: [health_check, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/health, batch, attributes]
+      exporters: [otlp/jaeger, logging]
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, batch, resource]
+      exporters: [prometheus, logging]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, attributes]
+      exporters: [logging]

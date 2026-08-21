@@ -1,0 +1,203 @@
+# NDSEP Chaos Engineering — Litmus Chaos Experiments
+# Tests platform resilience under failure conditions.
+# Run during scheduled game days in staging environment.
+---
+# Experiment 1: Kill wiredigg pod — test graceful degradation
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: wiredigg-pod-kill
+  namespace: ndsep
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create", "delete", "get", "list"]
+      - apiGroups: ["apps"]
+        resources: ["deployments"]
+        verbs: ["get", "list"]
+    image: litmuschaos/go-runner:latest
+    args:
+      - -name
+      - pod-delete
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: "30"
+      - name: CHAOS_INTERVAL
+        value: "10"
+      - name: FORCE
+        value: "false"
+      - name: TARGET_PODS
+        value: "1"
+      - name: APP_LABEL
+        value: "app=wiredigg"
+      - name: APP_NAMESPACE
+        value: "ndsep"
+---
+# Experiment 2: Database connection failure
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: postgres-network-loss
+  namespace: ndsep
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create", "delete", "get", "list"]
+    image: litmuschaos/go-runner:latest
+    args:
+      - -name
+      - pod-network-loss
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: "60"
+      - name: NETWORK_INTERFACE
+        value: "eth0"
+      - name: TARGET_PODS
+        value: "1"
+      - name: APP_LABEL
+        value: "app=postgres"
+      - name: NETWORK_PACKET_LOSS_PERCENTAGE
+        value: "100"
+      - name: DESTINATION_IPS
+        value: ""
+---
+# Experiment 3: API server CPU stress
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: api-cpu-stress
+  namespace: ndsep
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create", "delete", "get", "list"]
+    image: litmuschaos/go-runner:latest
+    args:
+      - -name
+      - pod-cpu-hog
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: "120"
+      - name: CPU_CORES
+        value: "2"
+      - name: APP_LABEL
+        value: "app=ndsep-api"
+---
+# Experiment 4: Network latency injection between services
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: service-latency
+  namespace: ndsep
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create", "delete", "get", "list"]
+    image: litmuschaos/go-runner:latest
+    args:
+      - -name
+      - pod-network-latency
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: "60"
+      - name: NETWORK_LATENCY
+        value: "500"
+      - name: APP_LABEL
+        value: "app=liveness-service"
+      - name: NETWORK_INTERFACE
+        value: "eth0"
+---
+# Experiment 5: Redis cache failure
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosExperiment
+metadata:
+  name: redis-pod-kill
+  namespace: ndsep
+spec:
+  definition:
+    scope: Namespaced
+    permissions:
+      - apiGroups: [""]
+        resources: ["pods"]
+        verbs: ["create", "delete", "get", "list"]
+    image: litmuschaos/go-runner:latest
+    args:
+      - -name
+      - pod-delete
+    env:
+      - name: TOTAL_CHAOS_DURATION
+        value: "30"
+      - name: APP_LABEL
+        value: "app=redis"
+      - name: FORCE
+        value: "true"
+---
+# Chaos Schedule — automated weekly game day
+apiVersion: litmuschaos.io/v1alpha1
+kind: ChaosSchedule
+metadata:
+  name: ndsep-weekly-gameday
+  namespace: ndsep
+spec:
+  schedule:
+    type: repeat
+    repeat:
+      properties:
+        minChaosInterval: 168h  # weekly
+      workDays:
+        includedDays: "Wed"
+      startTime:
+        hour: 14
+        minute: 0
+  engineTemplateSpec:
+    appinfo:
+      appns: ndsep
+      applabel: app=ndsep-api
+      appkind: deployment
+    experiments:
+      - name: wiredigg-pod-kill
+      - name: redis-pod-kill
+      - name: service-latency
+---
+# Automated runbook for chaos responses
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chaos-runbooks
+  namespace: ndsep
+data:
+  wiredigg-pod-kill.md: |
+    # Wiredigg Pod Kill — Expected Behavior
+    1. Network Intelligence page shows "Service unavailable" banner
+    2. tRPC queries return mock/cached data
+    3. Pod auto-recovers within 30s via K8s restart policy
+    4. No data loss — captured packets are persisted to DB
+    5. Alert fires in Grafana within 15s
+
+  postgres-network-loss.md: |
+    # PostgreSQL Network Loss — Expected Behavior
+    1. All write operations queue in memory (max 30s)
+    2. Read operations fall back to Redis cache
+    3. Health endpoint returns degraded status
+    4. Connection pool retries with exponential backoff
+    5. Full recovery within 60s of network restoration
+
+  redis-pod-kill.md: |
+    # Redis Cache Kill — Expected Behavior
+    1. Cache misses increase — all queries hit PostgreSQL directly
+    2. Response times increase 2-5x temporarily
+    3. Rate limiting falls back to in-memory counters
+    4. Session data preserved in PostgreSQL
+    5. Redis auto-recovers via K8s restart

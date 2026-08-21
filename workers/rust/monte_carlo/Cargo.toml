@@ -1,0 +1,19 @@
+[package]
+name = "monte_carlo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+tokio-postgres = { workspace = true }
+rayon = "1.10"
+nalgebra = "0.33"
+statrs = "0.17"

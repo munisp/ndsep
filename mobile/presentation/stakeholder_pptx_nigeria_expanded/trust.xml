@@ -1,0 +1,21 @@
+<slide id="trust">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Audit integrity, verification, and chain of custody</text>
+  <text id="subtitle" x="58" y="86" width="1080" height="30" font="body" size="16" color="muted">The platform helps institutions prove what happened, who touched the record, and whether exported audit files still match the trusted source.</text>
+  <shape id="shot-frame" type="rect" x="58" y="132" width="570" height="470" fill="paper" stroke="border" stroke-width="1" shadow="true"/>
+  <image id="audit-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784580309906_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL2F1ZGl0X3ZlcmlmeV9zZWVkZWRfdjM.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODAzMDk5MDZfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwyRjFaR2wwWDNabGNtbG1lVjl6WldWa1pXUmZkak0ucG5nP3gtb3NzLXByb2Nlc3M9aW1hZ2UvcmVzaXplLHdfMTU2MCxoXzE1NjAvZm9ybWF0LHdlYnAiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3ODY3NTIwMDB9fX1dfQ__&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEUCIQDOsIcyYAmKLsQk1KHez0tDBHRK6Yk2IaWEA58hhOQXxAIgJSWAEqlK9sDziSUDTX1acEXCWF3MquqQBMB6UzsjhZU_" x="68" y="142" width="550" height="430" fit="cover"/>
+  <text id="shot-caption" x="82" y="578" width="522" height="18" font="caption" size="12" color="muted" align="center">Real web screenshot: signed audit verification workflow and published public verification key</text>
+  <table id="trust-table" x="660" y="142" width="562" height="360" columns="2.2,3.4" rows="52,62,62,62,62,60" font="table" size="15" color="ink" padding="10 12" header-fill="brand" header-border="2 solid brand" border-h="1 solid border" border-v="1 solid border" border-outer="1 solid border">
+    <tr color="#FFFFFF"><td>Integrity control</td><td>Why stakeholders care</td></tr>
+    <tr><td><strong>Signed audit packages</strong></td><td>Exported records become harder to alter without detection.</td></tr>
+    <tr fill="surface"><td><strong>Public-key verification</strong></td><td>Third parties can validate shared audit packages directly on-platform.</td></tr>
+    <tr><td><strong>Key rotation and revocation</strong></td><td>Long-term verification remains credible even as signing credentials change.</td></tr>
+    <tr fill="surface"><td><strong>Chain-of-custody timeline</strong></td><td>Institutions can see who generated, verified, downloaded, or reassigned critical records.</td></tr>
+    <tr><td><strong>Secure offline audit access</strong></td><td>Inspectors can carry audit packages into the field without weakening protection.</td></tr>
+  </table>
+  <shape id="closing-band" type="rect" x="660" y="526" width="562" height="76" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="closing" x="682" y="546" width="518" height="40" font="body" size="17" color="ink" line-height="1.3">For Nigeria, this means disputes, exceptions, and external verification can be managed with stronger defensibility and more public confidence.</text>
+  <text id="footer" x="58" y="686" width="540" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform • Nigeria stakeholder deck</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">9</text>
+</slide>

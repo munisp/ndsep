@@ -1,0 +1,372 @@
+// NDSEP gRPC Service Definitions
+// Auto-generates typed clients in TypeScript, Rust, Go, Python
+// Binary serialization for high-throughput inter-service communication
+
+syntax = "proto3";
+
+package ndsep;
+
+option go_package = "github.com/munisp/NGApp/orchestration/go/proto";
+
+// ── Wiredigg Network Intelligence Service ───────────────────────────────────
+
+service WirediggService {
+  rpc GetHealth (Empty) returns (HealthResponse);
+  rpc GetStatus (Empty) returns (StatusResponse);
+  rpc GetMetrics (Empty) returns (MetricsResponse);
+  rpc StartCapture (CaptureRequest) returns (CaptureResponse);
+  rpc StopCapture (Empty) returns (CaptureResponse);
+  rpc GetPackets (PacketQuery) returns (PacketList);
+  rpc GetThreats (ThreatQuery) returns (ThreatList);
+  rpc StreamPackets (PacketQuery) returns (stream Packet);
+  rpc StreamThreats (ThreatQuery) returns (stream Threat);
+  rpc GetAnomalyStats (Empty) returns (AnomalyStats);
+  rpc GetIoTDevices (Empty) returns (IoTDeviceList);
+}
+
+// ── Liveness Verification Service ───────────────────────────────────────────
+
+service LivenessService {
+  rpc DetectFace (ImageRequest) returns (FaceDetectionResponse);
+  rpc PassiveLiveness (ImageRequest) returns (LivenessResponse);
+  rpc ActiveLiveness (VideoFrames) returns (LivenessResponse);
+  rpc MatchFaces (FaceMatchRequest) returns (FaceMatchResponse);
+  rpc ExtractFeatures (ImageRequest) returns (FeatureResponse);
+  rpc CheckAntiSpoofing (ImageRequest) returns (AntiSpoofResponse);
+  rpc DetectDeepfake (ImageRequest) returns (DeepfakeResponse);
+}
+
+// ── Audit Chain Service ─────────────────────────────────────────────────────
+
+service AuditChainService {
+  rpc AppendEntry (AuditEntryRequest) returns (AuditEntryResponse);
+  rpc VerifyChain (Empty) returns (ChainVerification);
+  rpc GetMerkleRoot (Empty) returns (MerkleRootResponse);
+  rpc GetProof (ProofRequest) returns (ProofResponse);
+  rpc GetEntries (EntriesQuery) returns (AuditEntryList);
+}
+
+// ── AI Compliance Engine ────────────────────────────────────────────────────
+
+service ComplianceAIService {
+  rpc QueryCompliance (ComplianceQuery) returns (ComplianceAnswer);
+  rpc GenerateDPIA (DPIARequest) returns (DPIAResponse);
+  rpc RunGapAnalysis (GapAnalysisRequest) returns (GapAnalysisResponse);
+  rpc AnalyzeImpact (ImpactRequest) returns (ImpactResponse);
+}
+
+// ── Shared Types ────────────────────────────────────────────────────────────
+
+message Empty {}
+
+message HealthResponse {
+  string status = 1;
+  string service = 2;
+  string version = 3;
+  int64 uptime_ms = 4;
+}
+
+message StatusResponse {
+  bool capturing = 1;
+  int64 packets_captured = 2;
+  int64 threats_detected = 3;
+  int64 anomalies_detected = 4;
+  int32 iot_devices = 5;
+}
+
+message MetricsResponse {
+  double packets_per_second = 1;
+  double bytes_per_second = 2;
+  map<string, int64> protocol_counts = 3;
+  int64 total_bytes = 4;
+  double cpu_usage = 5;
+  double memory_mb = 6;
+}
+
+message CaptureRequest {
+  string interface_name = 1;
+  string filter = 2;
+  int32 max_packets = 3;
+}
+
+message CaptureResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message PacketQuery {
+  int32 limit = 1;
+  int32 offset = 2;
+  string protocol_filter = 3;
+  string src_ip_filter = 4;
+  string dst_ip_filter = 5;
+}
+
+message Packet {
+  int64 id = 1;
+  string timestamp = 2;
+  string src_ip = 3;
+  string dst_ip = 4;
+  int32 src_port = 5;
+  int32 dst_port = 6;
+  string protocol = 7;
+  int32 length = 8;
+  string application_protocol = 9;
+  string payload_preview = 10;
+  string dns_query = 11;
+  string tls_sni = 12;
+}
+
+message PacketList {
+  repeated Packet packets = 1;
+  int64 total = 2;
+}
+
+message Threat {
+  int64 id = 1;
+  string timestamp = 2;
+  string threat_type = 3;
+  string severity = 4;
+  string src_ip = 5;
+  string dst_ip = 6;
+  string description = 7;
+  string mitre_tactic = 8;
+  string mitre_technique = 9;
+  double confidence = 10;
+}
+
+message ThreatQuery {
+  int32 limit = 1;
+  string severity_filter = 2;
+  string type_filter = 3;
+}
+
+message ThreatList {
+  repeated Threat threats = 1;
+  int64 total = 2;
+}
+
+message AnomalyStats {
+  int64 total_anomalies = 1;
+  double anomaly_rate = 2;
+  repeated AnomalyBucket recent = 3;
+}
+
+message AnomalyBucket {
+  string timestamp = 1;
+  int32 count = 2;
+  double avg_score = 3;
+}
+
+message IoTDevice {
+  string mac_address = 1;
+  string manufacturer = 2;
+  string device_type = 3;
+  string ip_address = 4;
+  double risk_score = 5;
+  int64 packets_seen = 6;
+  string first_seen = 7;
+  string last_seen = 8;
+}
+
+message IoTDeviceList {
+  repeated IoTDevice devices = 1;
+}
+
+// ── Liveness Types ──────────────────────────────────────────────────────────
+
+message ImageRequest {
+  bytes image_data = 1;
+  string image_format = 2; // "jpeg", "png", "base64"
+}
+
+message VideoFrames {
+  repeated bytes frames = 1;
+  repeated string challenges = 2;
+}
+
+message FaceDetectionResponse {
+  bool face_detected = 1;
+  int32 face_count = 2;
+  repeated Landmark landmarks = 3;
+  BoundingBox bbox = 4;
+  double detection_time_ms = 5;
+}
+
+message Landmark {
+  double x = 1;
+  double y = 2;
+  int32 index = 3;
+}
+
+message BoundingBox {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+}
+
+message LivenessResponse {
+  bool is_live = 1;
+  double liveness_score = 2;
+  double quality_score = 3;
+  string method = 4; // "passive" or "active"
+  repeated string challenges_passed = 5;
+}
+
+message FaceMatchRequest {
+  bytes image1 = 1;
+  bytes image2 = 2;
+}
+
+message FaceMatchResponse {
+  bool is_match = 1;
+  double similarity = 2;
+  double confidence = 3;
+}
+
+message FeatureResponse {
+  repeated double embedding = 1;
+  int32 dimensions = 2;
+}
+
+message AntiSpoofResponse {
+  bool is_real = 1;
+  double overall_score = 2;
+  string spoof_type = 3; // "real", "printed_photo", "screen_replay", "mask", "deepfake"
+  map<string, double> check_scores = 4;
+}
+
+message DeepfakeResponse {
+  bool is_deepfake = 1;
+  double probability = 2;
+  map<string, double> analysis = 3;
+}
+
+// ── Audit Chain Types ───────────────────────────────────────────────────────
+
+message AuditEntryRequest {
+  string aggregate_type = 1;
+  string aggregate_id = 2;
+  string event_type = 3;
+  string actor_id = 4;
+  string payload_json = 5;
+}
+
+message AuditEntryResponse {
+  uint64 id = 1;
+  string hash = 2;
+  string prev_hash = 3;
+  string timestamp = 4;
+}
+
+message ChainVerification {
+  bool valid = 1;
+  uint64 entries_checked = 2;
+  uint64 broken_at = 3;
+}
+
+message MerkleRootResponse {
+  string date = 1;
+  string root_hash = 2;
+  uint64 entry_count = 3;
+  bool anchored = 4;
+  string anchor_tx_hash = 5;
+}
+
+message ProofRequest {
+  uint64 entry_id = 1;
+}
+
+message ProofResponse {
+  string entry_hash = 1;
+  string merkle_root = 2;
+  repeated ProofNode proof = 3;
+  bool verified = 4;
+}
+
+message ProofNode {
+  string hash = 1;
+  string position = 2;
+}
+
+message EntriesQuery {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message AuditEntryList {
+  repeated AuditEntry entries = 1;
+}
+
+message AuditEntry {
+  uint64 id = 1;
+  string timestamp = 2;
+  string aggregate_type = 3;
+  string aggregate_id = 4;
+  string event_type = 5;
+  string hash = 6;
+  string prev_hash = 7;
+}
+
+// ── Compliance AI Types ─────────────────────────────────────────────────────
+
+message ComplianceQuery {
+  string question = 1;
+  string org_context_json = 2;
+}
+
+message ComplianceAnswer {
+  string response = 1;
+  double confidence = 2;
+  string model = 3;
+  string timestamp = 4;
+}
+
+message DPIARequest {
+  string org_name = 1;
+  string processing_activity = 2;
+  repeated string data_categories = 3;
+  repeated string data_subjects = 4;
+  string purpose = 5;
+  string legal_basis = 6;
+  bool cross_border = 7;
+  bool automated_decision = 8;
+}
+
+message DPIAResponse {
+  string dpia_id = 1;
+  double risk_score = 2;
+  string risk_level = 3;
+  string assessment = 4;
+  bool prior_consultation_required = 5;
+  repeated string mitigations = 6;
+}
+
+message GapAnalysisRequest {
+  string org_name = 1;
+  string sector = 2;
+  repeated string current_policies = 3;
+  bool has_dpo = 4;
+  bool has_breach_plan = 5;
+  bool has_consent_mechanism = 6;
+}
+
+message GapAnalysisResponse {
+  double compliance_score = 1;
+  int32 total_gaps = 2;
+  int32 critical_gaps = 3;
+  string ai_recommendations = 4;
+}
+
+message ImpactRequest {
+  string regulatory_change = 1;
+  repeated string affected_articles = 2;
+  repeated string org_sectors = 3;
+}
+
+message ImpactResponse {
+  string analysis = 1;
+  repeated string sectors_impacted = 2;
+  string model = 3;
+}

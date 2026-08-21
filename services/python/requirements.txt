@@ -1,0 +1,15 @@
+chromadb==0.5.23
+fastapi==0.115.6
+feedparser==6.0.11
+httpx==0.28.1
+langchain==0.3.13
+numpy==2.2.1
+opentelemetry-api==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+opentelemetry-sdk==1.29.0
+pandas==2.2.3
+prometheus-client==0.21.1
+pydantic==2.10.3
+scikit-learn==1.6.0
+sentence-transformers==3.3.1
+uvicorn[standard]==0.34.0

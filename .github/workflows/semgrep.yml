@@ -1,0 +1,77 @@
+###############################################################################
+# NDSEP Semgrep SAST Scanning
+# Runs Semgrep static analysis with security-focused rulesets.
+# Complements CodeQL with additional checks for:
+#   - OWASP Top 10 patterns
+#   - TypeScript/Express-specific vulnerabilities
+#   - Secret detection in source code
+#   - Insecure cryptographic patterns
+###############################################################################
+
+name: "Semgrep Security Scan"
+
+on:
+  push:
+    branches: [main, develop, staging]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 8 * * 1'  # Weekly Monday 08:00 UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config "p/owasp-top-ten" \
+            --config "p/typescript" \
+            --config "p/expressjs" \
+            --config "p/secrets" \
+            --config "p/sql-injection" \
+            --config "p/xss" \
+            --config "p/command-injection" \
+            --config "p/insecure-transport" \
+            --config "p/jwt" \
+            --config "p/crypto" \
+            --sarif --output semgrep-results.sarif \
+            --exclude "node_modules" \
+            --exclude "dist" \
+            --exclude "*.test.*" \
+            --exclude "workers/rust/target" \
+            --exclude "workers/python/vendor" \
+            --severity ERROR \
+            --severity WARNING \
+            || true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep-results.sarif
+          category: semgrep
+
+      - name: Fail on high-severity findings
+        run: |
+          semgrep scan \
+            --config "p/owasp-top-ten" \
+            --config "p/secrets" \
+            --config "p/sql-injection" \
+            --exclude "node_modules" \
+            --exclude "dist" \
+            --exclude "*.test.*" \
+            --exclude "workers/rust/target" \
+            --exclude "workers/python/vendor" \
+            --severity ERROR \
+            --error

@@ -1,0 +1,206 @@
+{
+  "annotations": { "list": [] },
+  "description": "NDSEP Middleware Health — All 14 infrastructure services",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Service Health Matrix",
+      "type": "state-timeline",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "up{namespace=\"ndsep\"}",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "DOWN", "color": "red" } }, "type": "value" },
+            { "options": { "1": { "text": "UP", "color": "green" } }, "type": "value" }
+          ]
+        }
+      }
+    },
+    {
+      "title": "PostgreSQL — Active Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "pg_stat_activity_count{datname=\"ndsep_db\"}", "legendFormat": "active" },
+        { "expr": "pg_settings_max_connections", "legendFormat": "max" }
+      ]
+    },
+    {
+      "title": "PostgreSQL — Query Duration (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(pg_query_duration_seconds_bucket[5m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, rate(pg_query_duration_seconds_bucket[5m]))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "title": "PostgreSQL — Transaction Rate",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
+      "targets": [
+        { "expr": "rate(pg_stat_database_xact_commit{datname=\"ndsep_db\"}[5m])", "legendFormat": "commits/s" },
+        { "expr": "rate(pg_stat_database_xact_rollback{datname=\"ndsep_db\"}[5m])", "legendFormat": "rollbacks/s" }
+      ]
+    },
+    {
+      "title": "Redis — Memory Usage",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 14 },
+      "targets": [
+        { "expr": "redis_memory_used_bytes / redis_memory_max_bytes * 100", "legendFormat": "% used" }
+      ],
+      "fieldConfig": { "defaults": { "max": 100, "thresholds": { "steps": [{ "value": 0, "color": "green" }, { "value": 70, "color": "yellow" }, { "value": 90, "color": "red" }] } } }
+    },
+    {
+      "title": "Redis — Hit Rate",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 14 },
+      "targets": [
+        { "expr": "rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m])) * 100", "legendFormat": "hit %" }
+      ]
+    },
+    {
+      "title": "Redis — Connected Clients",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 14 },
+      "targets": [
+        { "expr": "redis_connected_clients", "legendFormat": "clients" }
+      ]
+    },
+    {
+      "title": "Kafka — Consumer Lag",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "targets": [
+        { "expr": "kafka_consumer_group_lag{group=~\"ndsep.*\"}", "legendFormat": "{{topic}} ({{group}})" }
+      ]
+    },
+    {
+      "title": "Kafka — Messages/sec by Topic",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "targets": [
+        { "expr": "rate(kafka_topic_partition_current_offset{topic=~\"ndsep.*\"}[5m])", "legendFormat": "{{topic}}" }
+      ]
+    },
+    {
+      "title": "Temporal — Workflow Execution Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "targets": [
+        { "expr": "rate(temporal_workflow_completed_total{namespace=\"ndsep\"}[5m])", "legendFormat": "completed" },
+        { "expr": "rate(temporal_workflow_failed_total{namespace=\"ndsep\"}[5m])", "legendFormat": "failed" }
+      ]
+    },
+    {
+      "title": "Temporal — Active Workflows",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "targets": [
+        { "expr": "temporal_workflow_active_total{namespace=\"ndsep\"}", "legendFormat": "active" }
+      ]
+    },
+    {
+      "title": "TigerBeetle — Transfer Latency (p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 38 },
+      "targets": [
+        { "expr": "histogram_quantile(0.99, rate(tigerbeetle_transfer_duration_seconds_bucket[5m]))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "title": "TigerBeetle — Transfers/sec",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 38 },
+      "targets": [
+        { "expr": "rate(ndsep_tigerbeetle_transfers_total[5m])", "legendFormat": "transfers/s" }
+      ]
+    },
+    {
+      "title": "Mojaloop — Transfer Status",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 38 },
+      "targets": [
+        { "expr": "ndsep_mojaloop_transfers_total", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "title": "OpenSearch — Index Size",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 46 },
+      "targets": [
+        { "expr": "opensearch_index_store_size_bytes{index=~\"ndsep.*\"}", "legendFormat": "{{index}}" }
+      ]
+    },
+    {
+      "title": "OpenSearch — Search Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 46 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(opensearch_search_query_duration_seconds_bucket[5m]))", "legendFormat": "p95" }
+      ]
+    },
+    {
+      "title": "Keycloak — Auth Requests/sec",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 54 },
+      "targets": [
+        { "expr": "rate(keycloak_request_duration_count{realm=\"ndsep\"}[5m])", "legendFormat": "{{method}}" }
+      ]
+    },
+    {
+      "title": "Permify — Authorization Checks/sec",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 54 },
+      "targets": [
+        { "expr": "rate(ndsep_permify_checks_total[5m])", "legendFormat": "{{result}}" }
+      ]
+    },
+    {
+      "title": "APISIX — Request Rate by Route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 54 },
+      "targets": [
+        { "expr": "rate(apisix_http_status{route=~\"ndsep.*\"}[5m])", "legendFormat": "{{route}} ({{code}})" }
+      ]
+    },
+    {
+      "title": "OpenAppSec — WAF Events",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 62 },
+      "targets": [
+        { "expr": "rate(ndsep_waf_events_total[5m])", "legendFormat": "{{action}}" }
+      ]
+    },
+    {
+      "title": "Fluvio / Lakehouse — Ingestion Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 62 },
+      "targets": [
+        { "expr": "rate(ndsep_lakehouse_records_ingested_total[5m])", "legendFormat": "lakehouse" },
+        { "expr": "rate(ndsep_fluvio_messages_total[5m])", "legendFormat": "fluvio" }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["ndsep", "middleware", "infrastructure"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "NDSEP Middleware Health — 14 Services",
+  "uid": "ndsep-middleware-health",
+  "version": 1
+}

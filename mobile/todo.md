@@ -1,0 +1,313 @@
+# Project TODO
+
+- [x] Mobile Home / Mission Hub with active tasks, resume actions, and connectivity summary
+- [x] Bottom-tab navigation for Home, Parcels, Field, Geo, and Profile
+- [x] Parcel search and quick lookup flow
+- [x] Parcel detail screen with linked field, geospatial, and legal actions
+- [x] Field mission workflow with offline-safe capture state and queue visibility
+- [x] Geospatial workbench with parcel context and GeoLibre handoff
+- [x] GeoLibre launch screen with prepared parcel context and export readiness
+- [x] Stakeholder onboarding flow for KYC, KYB, documents, and liveness status
+- [x] Legal workflow screen for C of O and related progression tracking
+- [x] Notifications and recent activity experience
+- [x] Profile and settings screen with role, session, and app readiness details
+- [x] Shared local data layer for seeded parcel, workflow, onboarding, and mission content
+- [x] Mobile-native visual system and brand adaptation for land-registry operations
+- [x] App icon and branding update for the mobile shell
+- [x] Native mobile validation and handoff documentation
+- [x] Dedicated native KYC/KYB onboarding screen with OCR and liveness workflow integration
+- [x] Comprehensive native Certificate of Occupancy legal workflow screen and progression experience
+- [x] Live platform API synchronization for parcel, mission, onboarding, and workflow data
+- [x] Offline persistence and sync recovery for native mobile workflows
+- [x] Dedicated parcel detail screen with deep links into field, geo, and legal tasks
+- [x] Push notifications for field updates and sync-state events
+- [x] Background sync replay for offline field mutations
+- [x] Dedicated GeoLibre launch screen with parcel export controls
+- [x] Notification filters and parcel-specific search in the mobile inbox
+- [x] Unread recent-activity badge in the tab shell navigation
+- [x] Interactive KYC approval actions directly from inbox notifications
+- [x] Interactive legal workflow approval actions directly from inbox notifications
+- [x] Verify parcel-level notification subscriptions are fully implemented in the mobile app
+- [x] Verify notifications preference screen is fully implemented in the mobile app
+- [x] Verify swipe-to-dismiss and mark-as-read inbox gestures are fully implemented in the mobile app
+- [x] Parcel-level notification mute durations for 1 hour, 1 day, and until workflow completion
+- [x] Server-synced notification preferences across active devices
+- [x] Smooth transition animations and visual swipe feedback in the notifications inbox
+- [x] Native notification detail sheet with comprehensive alert audit history
+- [x] Geofence-based parcel subscription alerts for location-accurate field notifications
+- [x] AI-generated notification summaries and priority ranking based on interaction history
+- [x] Offline geofence event replay for parcel alerts after connectivity returns
+- [x] Conflict reconciliation for delayed or duplicate parcel geofence transitions
+- [x] Production roadmap for mining permit domain expansion
+- [x] Production roadmap for oil and gas licensing domain expansion
+- [x] Production roadmap for multi-agency permitting domain expansion
+- [x] Shared permitting domain model for mining, oil and gas, and multi-agency workflows
+- [x] Multi-language service topology across TypeScript, Python, Go, and Rust
+- [x] Middleware integration contracts for workflow, events, authz, gateway, cache, ledger, and analytics
+- [x] Mining permit workflow module with domain-specific entities, rules, and UI flows
+- [x] Oil and gas licensing workflow module with domain-specific entities, rules, and UI flows
+- [x] Multi-agency permitting orchestration with unified intake and cross-agency routing
+- [x] PWA parity upgrades for expanded permitting workflows and dashboards
+- [x] Native mobile parity upgrades for expanded permitting workflows and dashboards
+- [x] Validation, regression coverage, and checkpoint for the expanded permitting platform
+- [x] Editable mining permit intake and review forms
+- [x] Editable oil and gas permit intake and review forms
+- [x] Role-based agency login and approval queues for multi-agency permitting
+- [x] AI document extraction to prefill permit intake forms
+- [x] True PDF and image permit document upload parsing for AI form prefilling
+- [x] Per-agency approval queue filters and SLA dashboards
+- [x] Field-level role permissions for applicant and reviewer permit form controls
+- [x] Replace Manus-specific authentication with portable open-source auth and role management
+- [x] Replace Manus-specific storage and document proxy flows with portable object storage integration
+- [x] Replace Manus-specific AI and OCR helpers with portable open-source or standard-provider integrations
+- [x] Remove Manus-specific runtime and environment assumptions from mobile and web clients
+- [x] Add external deployment and self-hosting documentation for the permitting stack
+- [x] End-to-end production hardening pass across backend, PWA, and native mobile
+- [x] True PDF and image permit upload parsing with persistent file handling and AI extraction
+- [x] Per-agency queue filters, SLA dashboards, and operational metrics
+- [x] Field-level role permissions across applicant, reviewer, and supervisor workflows
+- [ ] Portable enterprise auth upgrade path beyond local JWT baseline
+- [ ] Portable object storage upgrade path beyond local filesystem baseline
+- [x] Comprehensive production validation, self-hosting readiness, and deployment hardening
+- [x] Audit-history export options for permit review and approval records
+- [x] Automated reviewer-assignment rules for escalated permit cases
+- [x] Side-by-side AI extraction verification against uploaded permit PDFs
+- [x] Visual deadline warnings and interactive queue analytics charts on the SLA dashboard
+- [x] Supervisor override and reassignment controls for auto-assigned permit cases
+- [x] Direct local-device audit history downloads in CSV and PDF formats
+- [x] Signed audit-package exports with tamper-evident hash verification
+- [x] Multi-step approval handoff rules with escalation timers for complex permit workflows
+- [x] Offline audit-package caching for low-connectivity field inspectors
+- [x] Dedicated audit-package signature verification page with upload and validation results
+- [x] In-app notification center for handoff deadlines, escalations, and reviewer alerts
+- [x] Encrypted offline audit cache with biometric unlock for field inspectors
+- [ ] Background reminder scheduler for handoffs nearing escalation thresholds
+- [ ] Public-key verification workflow for signed audit packages
+- [ ] Audit-package chain-of-custody timeline and verification status badges
+- [ ] Role-based notification preferences for reviewers, supervisors, and inspectors
+- [ ] Reviewer workload balancing rules across agencies and permit sectors
+- [ ] SLA breach incident log with acknowledgement and resolution tracking
+- [ ] Supervisor dashboard for override reasons, reassignment analytics, and exception trends
+- [ ] Permit package download bundles that combine audit, documents, and signatures
+- [ ] Offline-first inspector workspace for cached permit evidence and audit packages
+- [ ] Tamper-evident evidence manifest for uploaded permit documents
+- [ ] Approval handoff dependency graph for multi-agency sequencing visibility
+- [ ] Scheduled digest notifications for queue backlog and at-risk permits
+- [ ] Field-inspector secure session timeout and re-authentication policies
+- [ ] Stronger self-hosting secrets management and signing-key rotation support
+- [ ] MinIO or S3-compatible object storage upgrade for audit and evidence packages
+- [ ] Enterprise identity-provider integration path for role federation and SSO
+- [ ] Operations telemetry for notification delivery, handoff latency, and audit download usage
+- [x] Background reminder scheduling for near-due approval handoffs
+- [x] Dashboard urgency indicators for permits approaching escalation deadlines
+- [x] Public-key verification for externally shared audit packages
+- [x] Supervisor exception dashboard with interactive escalation trend and reassignment pattern analytics
+- [x] Signing-key rotation with revocation tracking for audit-package verification
+- [x] Visual chain-of-custody timeline for audit and evidence packages
+- [x] Scheduled email and in-app digest notifications for supervisor backlog and overdue handoff summaries
+- [ ] Revised stakeholder presentation deck with real platform screenshots
+- [ ] Nigeria and Africa positioning narrative for federal, state, builders, NGOs, and end buyers
+- [ ] Corrected slide layouts, tables, footers, and screenshot validation for the platform deck
+- [x] Realistic Nigerian seed data for agencies, applicants, permits, parcels, and public-sector workflows
+- [x] Realistic audit trails, notifications, handoffs, and dashboard analytics for presentation-quality screens
+- [x] Presentation-ready seeded screenshots across core product surfaces
+- [ ] Live dashboard cards and charts wired to seeded analytics
+- [ ] Tailored federal regulator dashboard scenario
+- [ ] Tailored state land agency dashboard scenario
+- [ ] Tailored builder dashboard scenario
+- [ ] Real screenshots captured across updated seeded product pages
+- [ ] Corrected stakeholder slide deck with verified real screenshots and stakeholder-specific value framing
+- [ ] Rebuild stakeholder presentation deck with corrected layouts and visible page numbers
+- [ ] Validate and use only real app screenshots with no 404 or loading states in the presentation
+- [ ] Fix table rendering, footer visibility, and screenshot formatting in the stakeholder deck
+- [ ] PowerPoint stakeholder slide deck exported with real screenshots, corrected tables, visible page numbers, and non-cutoff layouts
+- [ ] Full categorized inventory of platform features, including geospatial, AI, workflow, field, audit, and stakeholder capabilities
+- [ ] Gap analysis of the current deck against the complete platform feature set
+- [ ] Nigeria-tailored feature inventory mapped to federal institutions, state agencies, builders, NGOs, and end buyers
+- [ ] Nigeria-focused presentation gap analysis covering land administration, housing, extractives, revenue, and citizen trust
+- [ ] Revised Nigeria-focused stakeholder slide deck covering the full feature inventory
+- [ ] Expanded deck coverage for geospatial and parcel intelligence
+- [ ] Expanded deck coverage for AI-assisted document extraction and prioritization
+- [ ] Expanded deck coverage for low-connectivity field operations and offline continuity
+- [ ] Full Nigeria-focused PowerPoint deck covering geospatial intelligence, AI extraction, field operations, and stakeholder value
+- [ ] Dedicated presentation coverage for parcel intelligence, spatial clearance, geofence alerts, and offline geofence replay
+- [ ] Dedicated presentation coverage for AI document parsing, side-by-side verification, and notification prioritization
+- [ ] Dedicated presentation coverage for offline field operations, secure cache, biometric unlock, and audit continuity
+- [ ] Audit current real screenshot coverage and remove repeated presentation imagery
+- [ ] Verify whether live map-based or parcel-map screens exist in the current product
+- [ ] Capture additional distinct real screenshots across geospatial, AI, field, audit, and notification flows for the stakeholder deck
+- [ ] Revised deck slide coverage for real geospatial screenshots and explicit web-versus-native map explanation
+- [ ] Revised deck slide coverage for Certificate of Occupancy workflow continuity and state land administration value
+- [ ] Revised deck slide coverage for government, builder, NGO, and buyer monetization pathways in Nigeria
+- [ ] Explicit screenshot-authenticity note and geospatial limitation note in final presentation delivery
+- [x] Procurement-grade stakeholder deck with stronger state land administration emphasis
+- [x] Expanded Certificate of Occupancy workflow coverage across the procurement-facing deck
+- [x] Revenue assurance and state monetization narrative for land administration and approvals
+- [x] Tailored presentation script for federal regulators, state land agencies, and builders
+- [x] Verify and include a true geospatial map screenshot in the procurement deck, or clearly state if the current product only exposes web parcel-intelligence plus native-map-dependent geospatial views
+- [x] Build a true browser-rendered geospatial web map view for the Geo experience
+- [x] Capture and validate a real web geospatial map screenshot from the updated product
+- [x] Revise the procurement-grade deck and script to include the true web map screenshot and updated geospatial narrative
+- [x] Full-screen parcel map page with multiple interactive markers in the web application
+- [x] Map legends for housing, right-of-way, mining, and infrastructure review layers
+- [x] Corridor overlays for housing, right-of-way, mining, and infrastructure review on the geospatial map
+- [ ] Lagos-specific procurement presentation deck for land administration and revenue assurance
+- [ ] FCT-specific procurement presentation deck for land administration and revenue assurance
+- [ ] Kano-specific procurement presentation deck for land administration and revenue assurance
+- [x] Lagos-specific parcel dataset and administrative boundary layers in the interactive web map
+- [x] FCT-specific parcel dataset and administrative boundary layers in the interactive web map
+- [x] Kano-specific parcel dataset and administrative boundary layers in the interactive web map
+- [x] State switcher and layer controls for Lagos, FCT, and Kano map views
+- [x] Create a high-level, auditable record of user-requested platform work without exposing internal instructions
+- [x] Audit all high-risk server and mobile code paths for silent mockware and plausible-looking simulated outputs
+- [x] Add explicit provenance, availability, confidence, and degraded-state handling for AI and document analysis outputs
+- [x] Ensure liveness, signature verification, parsing, notification analysis, and geofence registration never report unsupported results as verified
+- [x] Add regression tests that fail when unavailable, heuristic, seeded, or simulated behavior is presented as production output
+- [x] Publish an evidence-based silent-mockware findings report with verified remaining limitations
+- [x] Define configuration-backed provider contracts for real KYC/KYB, liveness, document intelligence, official registry verification, and audit-key custody
+- [x] Add enterprise agency authorization boundaries for trust-sensitive workflow mutations
+- [x] Implement fail-closed provider adapters for document intelligence, liveness, KYC/KYB, and official registry checks
+- [x] Add provider configuration validation, health reporting, and audit provenance to the platform
+- [x] Add tests for unconfigured, failed, and authorized provider execution paths
+- [x] Produce provider onboarding and deployment requirements for the external services that cannot be truthfully simulated
+- [x] Present and preserve unconfigured fail-closed provider defaults until approved production credentials are supplied
+- [ ] Configure Keycloak OpenID Connect issuer, audience, JWKS, and agency claim mappings
+- [ ] Deploy a secured persistent Docling Serve environment and validate authenticated document conversion
+- [ ] Integrate approved NIMC NVS bridge endpoint and validate authorized NIN verification
+- [ ] Integrate approved CAC bridge endpoint and validate authorized business-registration verification
+- [ ] Run authenticated end-to-end trust-provider verification and publish evidence
+- [x] Reconfirm default-unavailable Keycloak, Docling, NIMC, and CAC state before any live credential activation
+- [x] Add an administrator-only integration settings page with server-side configuration handling
+- [x] Add development-only Keycloak and Docling emulators that are explicit, non-production, and non-verifying
+- [x] Add availability-aware controls, disabled actions, and user-friendly provider failure messages
+- [x] Add regression coverage for settings access control, test-emulator labelling, and unavailable-service UX behavior
+- [ ] Configure server-side integration-settings encryption key and initial administrator access policy
+- [ ] Securely save approved NIMC bridge endpoint and token through Integration Settings
+- [ ] Securely save approved CAC bridge endpoint and token through Integration Settings
+- [x] Run explicit test-only Keycloak and Docling staging workflow and record non-production evidence
+- [x] Preserve unconfigured encryption, bootstrap-administrator, NIMC, and CAC defaults until approved values are supplied
+- [ ] Collect and validate approved real staging credentials for encryption, administration, Keycloak, Docling, NIMC, and CAC
+- [ ] Configure and validate real staging provider integrations without emulator fallback
+- [ ] Preserve real staging verification evidence with secrets redacted
+- [ ] Defer real staging activation until approved provider values are supplied through secure configuration
+- [ ] Collect authorized real Keycloak, Docling, NIMC, CAC, encryption, and bootstrap-administrator values through secure configuration
+- [ ] Run redacted real-provider staging verification after secure configuration is activated
+- [ ] Maintain default-unavailable external integrations without requesting credentials unless the user explicitly supplies them or requests activation
+- [x] Strengthen offline field evidence capture, draft queueing, and conflict-aware reconciliation
+- [x] Add Nigeria-specific land and multi-agency permitting controls using clearly labelled local domain data
+- [x] Enhance administrator auditability, integrity monitoring, and operational UX without external-provider dependency
+- [x] Add regression coverage for the strengthened offline, local-domain, and administrator workflows
+- [x] Add offline device-camera and file attachments with durable local evidence metadata
+- [x] Add supervisor approve/reject review workflow for reconciled field evidence manifests
+- [x] Add configurable Nigeria jurisdiction permit checklists and local SLA tracking rules
+- [x] Add regression coverage for evidence attachments, supervisor decisions, and jurisdiction policy calculations
+- [x] Add attachment thumbnails and local file-size enforcement for offline field evidence
+- [x] Add supervisor assignment and review-turnaround timers for field manifests
+- [x] Add authorized local SLA policy editing with version history and audit trail
+- [x] Add regression coverage for attachment limits, assignment timers, and policy versions
+- [x] Add offline attachment deletion and storage quota progress visibility
+- [x] Add in-app alerts for supervisor reviews exceeding the 48-hour local target
+- [x] Add protected local SLA policy history export as an integrity-marked PDF package
+- [x] Add regression coverage for storage cleanup, review alerts, and policy export integrity
+- [x] Add filtering and priority sorting for supervisor field-manifest review queue
+- [x] Add visually explicit warning and critical states to offline storage quota progress
+- [x] Add local SLA policy history preview before protected PDF export
+- [x] Add regression coverage for review prioritization, quota states, and policy preview data
+- [x] Add auditable one-tap internal escalation for overdue field-manifest reviews
+- [x] Add saved supervisor dashboard filter presets for priority review workflows
+- [x] Add regression coverage for escalation records and saved preset application
+- [x] Add management escalation acknowledgement with resolution notes and status updates
+- [x] Add rename, delete, and local team-sharing controls for saved supervisor presets
+- [x] Add clearly visible escalated badges to overdue field-manifest alerts
+- [x] Add regression coverage for acknowledgement lifecycle and preset management
+- [ ] Add escalation ownership and handoff-date tracking in management acknowledgement workflow
+- [ ] Add shared supervisor preset import validation and compatible local import flow
+- [ ] Add local management escalation trend and resolution-time analytics visualization
+- [ ] Add regression coverage for accountability, preset validation, and escalation analytics
+- [ ] Add editable escalation owner and handoff date controls to the acknowledgement modal
+- [ ] Add file-based shared supervisor preset import with compatibility validation
+- [ ] Add weekly local escalation resolution-time snapshot analytics
+- [ ] Add regression coverage for modal accountability edits, preset import, and weekly snapshots
+- [ ] Implement file-picker import with validation errors for shared supervisor presets
+- [ ] Add acknowledgement update success toast feedback
+- [ ] Render weekly local escalation resolution-time snapshot analytics
+- [ ] Add regression coverage for import errors, success toast, and weekly analytics
+- [ ] Run a clean audit of all session-era implementation claims against current source, compilation, tests, and runtime health
+- [ ] Fix every confirmed regression or unimplemented claim found in the audit
+- [ ] Publish an evidence-backed inventory of tested, local-only, untested, and externally validated functionality
+- [ ] Implement shared-preset file-picker import UI with strict local payload validation and visible errors
+- [ ] Implement acknowledgement success toast and weekly local escalation snapshot UI
+- [ ] Add comprehensive deterministic real-path test coverage for implemented local workflows
+- [ ] Re-run source review, TypeScript compilation, and full regression evidence before completion claims
+- [x] Wire and verify the visible shared-preset Import button and file-picker flow
+- [ ] Verify weekly snapshot and acknowledgement toast render in dashboard UI
+- [ ] Run deterministic end-to-end local dashboard workflow validation with explicit external-service exclusions
+- [ ] Repair visible Import button access to the shared-preset file picker
+- [ ] Validate supervisor dashboard local paths and document all remaining non-local or untested boundaries
+- [x] Add deterministic shared-preset import success and invalid-payload feedback tests
+- [x] Diagnose and resolve Expo SDK package-version warnings
+- [x] Re-run release validation after dependency alignment
+- [ ] Complete pending shared-preset import UI, weekly resolution snapshot, and acknowledgement success feedback
+- [ ] Validate delivered claims through source review, compilation, and behavioral tests before reporting completion
+- [ ] Add file-picker import and validation for shared supervisor filter presets
+- [ ] Add weekly escalation resolution-time snapshot to management analytics
+- [ ] Add acknowledgement update success toast feedback
+- [ ] Add regression coverage for import validation, weekly snapshots, and acknowledgement success feedback
+- [x] Establish offline-payment records and notification routes required by the current mobile source state
+- [x] Add a Payment Alerts section in Profile linking to the payment notifications inbox
+- [x] Add persistent verified-receipt scan history to the administrator QR scanner
+- [x] Add a pending offline-payment count widget to the operations dashboard
+- [x] Add deterministic tests for payment alerts, receipt scan history, and pending-payment totals
+- [x] Replace the local JSON payment audit store with PostgreSQL payment and append-only audit-event tables
+- [x] Wire applicant offline-payment submission and administrator payment-review screens to protected payment routes
+- [x] Add QR receipt scan success and error sounds with native haptic feedback
+- [x] Add regression tests for payment database events, review decisions, and scan feedback mapping
+- [x] Install and configure a local PostgreSQL service for the development payment audit database
+- [x] Add signature-verified, idempotent gateway webhook reconciliation with fail-closed configuration
+- [x] Add dual-control high-value payment approval policy and administrator decision workflow
+- [x] Add filtered, exportable administrator dashboard for append-only payment audit events
+- [x] Add regression tests for webhook integrity, dual-control separation, and audit-event export
+- [x] Maintain default-unavailable gateway reconciliation until a real provider signature secret is securely configured
+- [x] Add secure, fail-closed provider activation configuration and callback URL reporting
+- [x] Require authenticated provider transaction re-verification before recording settlement evidence
+- [x] Add state-specific high-value thresholds and distinct administrator approval-role rules
+- [x] Add regression coverage for provider configuration, settlement re-verification, and state policy enforcement
+- [x] Add a dedicated administrator payment-gateway settings page with redacted credential status and secure update controls
+- [x] Add a reconciliation exception queue with administrator review and auditable resolution outcomes
+- [x] Add operations dashboard callback readiness and gateway connection-health widget
+- [x] Add regression coverage for gateway settings access, exception lifecycle, and health status reporting
+- [x] Add controlled retries for transient provider transaction-verification failures with auditable outcomes
+- [x] Add role-based alerts when high-risk reconciliation exceptions open
+- [x] Add interactive callback registration guidance for the selected payment gateway
+- [x] Add regression coverage for retry bounds, high-risk alert targeting, and callback guide state
+- [x] Add an admin dashboard badge for pending high-risk reconciliation exceptions
+- [x] Add an administrator manual retry control for eligible failed reconciliation checks
+- [x] Add searchable role-targeted reconciliation alert history
+- [x] Add regression coverage for high-risk badge counts, manual retry restrictions, and alert search
+- [x] Display retry attempt count and next scheduled retry time in reconciliation exceptions
+- [x] Add exception queue filtering and sorting by retry count and retry schedule
+- [x] Add role-targeted high-risk alert read acknowledgements
+- [x] Add regression coverage for retry metadata, queue controls, and alert acknowledgement
+- [x] Add filtered reconciliation exception CSV export with audit evidence
+- [x] Add Operations retry-outcome trend chart and success-rate summary
+- [x] Add visible, auditable escalation timers for unacknowledged high-risk alerts
+- [x] Add regression coverage for export data, retry metrics, and alert escalation timing
+- [ ] Add automatic senior-admin escalation delivery for overdue high-risk alerts
+- [ ] Add date-range controls to reconciliation exception exports
+- [ ] Add daily retry-success percentage bars to Operations
+- [ ] Add regression coverage for escalation delivery, date filtering, and daily success-rate calculations
+- [ ] Add a dedicated senior-admin escalated alert history tab with filtering
+- [ ] Run focused end-to-end review and fix all confirmed findings across the affected payment operations flows
+- [x] Validate, commit, and push the current verified project state to GitHub
+- [ ] Add loading skeleton and actionable error state to the Operations retry-success chart
+- [ ] Add a Clear Filters action to reset calendar date-range export selections
+- [ ] Preserve queue state while clearing date-range selections without reloading the screen
+- [ ] Replace reconciliation date fields with a visual calendar range picker
+- [ ] Render interactive daily retry-success percentage bars with exact outcome tooltips
+- [ ] Add quick-select date-range presets for reconciliation exports
+- [ ] Animate retry-success bars when trend data changes
+- [ ] Add Operations chart export to PNG or PDF
+- [ ] Include This Month and Year to Date quick date presets
+- [ ] Include export timestamp and active filters in chart PDF output
+- [ ] Safely reconcile validated GitHub backup changes with the repository default branch
+- [ ] Prepare and validate a file-level integration branch based on GitHub production

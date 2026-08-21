@@ -1,0 +1,79 @@
+###############################################################################
+# NDSEP Kubernetes ConfigMap — Non-sensitive configuration
+# Apply: kubectl apply -f infra/k8s/configmap.yaml
+###############################################################################
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ndsep-config
+  namespace: ndsep
+  labels:
+    app: ndsep-api
+    app.kubernetes.io/part-of: ndsep-platform
+data:
+  # ─── Runtime ─────────────────────────────────────────────────────────────
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+
+  # ─── Platform Identity ────────────────────────────────────────────────────
+  PLATFORM_NAME: "National Data Sovereignty Enforcement Platform"
+  PLATFORM_VERSION: "3.0.0"
+  PLATFORM_URL: "https://ndsep.gov.ng"
+  PLATFORM_SUPPORT_EMAIL: "support@ndsep.gov.ng"
+  PLATFORM_ADMIN_EMAIL: "admin@ndsep.gov.ng"
+
+  # ─── Database Pool ────────────────────────────────────────────────────────
+  NDSEP_DB_POOL_MIN: "2"
+  NDSEP_DB_POOL_MAX: "20"
+  NDSEP_DB_IDLE_TIMEOUT_MS: "30000"
+
+  # ─── Rate Limiting ────────────────────────────────────────────────────────
+  RATE_LIMIT_WINDOW_MS: "60000"
+  RATE_LIMIT_MAX_REQUESTS: "200"
+  AUTH_RATE_LIMIT_MAX: "20"
+
+  # ─── NDPA Compliance Thresholds ──────────────────────────────────────────
+  NDPA_BREACH_NOTIFICATION_HOURS: "72"
+  NDPA_MAX_FINE_NGN: "10000000"
+  NDPA_MAX_FINE_PERCENT_REVENUE: "0.02"
+  DPCO_MIN_COMPLIANCE_SCORE: "85"
+  DPCO_RENEWAL_WARNING_DAYS: "30"
+
+  # ─── CBN Banking Thresholds ───────────────────────────────────────────────
+  CBN_KYC_TIER1_LIMIT_NGN: "50000"
+  CBN_KYC_TIER2_LIMIT_NGN: "200000"
+  CBN_NIP_TRANSFER_LIMIT_NGN: "10000000"
+  CBN_RTGS_MIN_AMOUNT_NGN: "5000000"
+
+  # ─── NCC Telecom Thresholds ───────────────────────────────────────────────
+  NCC_SIM_REGISTRATION_REQUIRED: "true"
+  NCC_NIN_VERIFICATION_REQUIRED: "true"
+  NCC_DATA_BREACH_NOTIFICATION_HOURS: "24"
+
+  # ─── NHIA Healthcare Thresholds ──────────────────────────────────────────
+  NHIA_EMR_ENCRYPTION_ALGORITHM: "AES"
+  NHIA_EMR_ENCRYPTION_KEY_LENGTH: "256"
+  NHIA_DATA_RETENTION_YEARS: "10"
+
+  # ─── NERC Energy Thresholds ──────────────────────────────────────────────
+  NERC_OUTAGE_NOTIFICATION_HOURS: "2"
+  NERC_DATA_LOCALIZATION_REQUIRED: "true"
+
+  # ─── NAICOM Insurance Thresholds ─────────────────────────────────────────
+  NAICOM_CLAIMS_PROCESSING_DAYS: "30"
+  NAICOM_DATA_RETENTION_YEARS: "7"
+
+  # ─── Scheduler Settings ──────────────────────────────────────────────────
+  DIGEST_SCHEDULE_CRON: "0 8 * * 1"
+  NATIONAL_REPORT_SCHEDULE_CRON: "0 17 * * 5"
+  COMPLIANCE_RESCORE_SCHEDULE_CRON: "0 2 * * *"
+  OVERDUE_CHECK_INTERVAL_MS: "3600000"
+
+  # ─── OpenTelemetry ───────────────────────────────────────────────────────
+  OTEL_SERVICE_NAME: "ndsep-api"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318/v1/traces"
+
+  # ─── Worker Configuration ─────────────────────────────────────────────────
+  WORKER_RELAY_URL: "http://ndsep-api:3000/api/workers/event"
+  ENABLE_DEMO_LOGIN: "false"

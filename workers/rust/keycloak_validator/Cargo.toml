@@ -1,0 +1,18 @@
+[package]
+name = "keycloak_validator"
+version = "1.0.0"
+edition = "2021"
+description = "NDSEP Keycloak Token Validator — JWT validation, JWKS caching, role extraction"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+axum = "0.7"
+reqwest = { version = "0.11", features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+prometheus = "0.13"
+lazy_static = "1"
+base64 = "0.21"

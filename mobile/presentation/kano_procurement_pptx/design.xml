@@ -1,0 +1,15 @@
+<design>
+  <size width="1280" height="720"></size>
+  <color name="brand-green" value="#115740"/>
+  <color name="accent-blue" value="#1D4F91"/>
+  <color name="ink" value="#1A1F24"/>
+  <color name="muted" value="#5C6670"/>
+  <color name="paper" value="#FFFFFF"/>
+  <color name="surface" value="#F2F5F3"/>
+  <color name="border" value="#D9E0DB"/>
+  <font name="display" family="Inter" size="48"/>
+  <font name="heading" family="Inter" size="32"/>
+  <font name="strong" family="Inter" size="20"/>
+  <font name="body" family="Inter" size="18"/>
+  <font name="caption" family="Inter" size="14"/>
+</design>

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wiredigg
+  namespace: ndsep
+  labels:
+    app: wiredigg
+    component: network-intelligence
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wiredigg
+  template:
+    metadata:
+      labels:
+        app: wiredigg
+        component: network-intelligence
+    spec:
+      containers:
+        - name: wiredigg
+          image: ndsep/wiredigg:latest
+          ports:
+            - containerPort: 8160
+              protocol: TCP
+          env:
+            - name: WIREDIGG_PORT
+              value: "8160"
+            - name: WIREDIGG_MAX_PACKETS
+              value: "100000"
+            - name: RUST_LOG
+              value: "info,wiredigg=debug"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8160
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8160
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            capabilities:
+              add:
+                - NET_RAW
+                - NET_ADMIN
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wiredigg
+  namespace: ndsep
+spec:
+  selector:
+    app: wiredigg
+  ports:
+    - port: 8160
+      targetPort: 8160
+      protocol: TCP
+  type: ClusterIP

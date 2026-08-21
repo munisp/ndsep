@@ -1,0 +1,24 @@
+[workspace]
+members = [
+    "pqc-engine",
+    "circuit-breaker",
+    "data-pipeline",
+    "wasm-modules",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/munisp/NGApp"
+
+[workspace.dependencies]
+tokio = { version = "1.42", features = ["full"] }
+axum = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+anyhow = "1.0"
+thiserror = "2.0"

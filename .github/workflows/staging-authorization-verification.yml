@@ -1,0 +1,69 @@
+name: Staging Authorization Verification
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      staging_base_url:
+        description: "Optional approved staging URL override; otherwise use the protected environment secret"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-authorization-verification
+  cancel-in-progress: false
+
+jobs:
+  verify-opa-and-amr:
+    name: Verify OPA fail-closed and signed MFA assurance
+    # deployment_status is emitted by the staging delivery controller only after
+    # successful rollout. Manual dispatch is retained for approved revalidation.
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.deployment.environment == 'staging' && github.event.deployment_status.state == 'success')
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.4.1'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install verifier dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify staging OPA fail-closed and signed Keycloak AMR controls
+        env:
+          # Environment-scoped secrets are short-lived dedicated test credentials.
+          # No production credential or customer token may be used here.
+          STAGING_TEST_BASE_URL: ${{ inputs.staging_base_url || secrets.STAGING_TEST_BASE_URL }}
+          STAGING_NO_MFA_TOKEN: ${{ secrets.STAGING_NO_MFA_TOKEN }}
+          STAGING_MFA_TOKEN: ${{ secrets.STAGING_MFA_TOKEN }}
+          STAGING_OPA_INTERNAL_URL: ${{ secrets.STAGING_OPA_INTERNAL_URL }}
+          STAGING_OPA_TEST_TOKEN: ${{ secrets.STAGING_OPA_TEST_TOKEN }}
+          STAGING_OPA_OUTAGE_CANARY_URL: ${{ secrets.STAGING_OPA_OUTAGE_CANARY_URL }}
+          STAGING_CANARY_PATH: ${{ vars.STAGING_OPA_CANARY_PATH }}
+          STAGING_MFA_EXPECTED_STATUS: ${{ vars.STAGING_MFA_EXPECTED_STATUS || '200' }}
+        run: pnpm exec tsx scripts/security/verify-staging-opa-amr.ts
+
+      - name: Publish non-sensitive verifier summary
+        if: always()
+        run: |
+          {
+            echo '## Staging authorization verification'
+            echo
+            echo 'The OPA/AMR verifier completed. Inspect the protected job log for pass/fail status.'
+            echo 'Tokens, OPA credentials, and decoded claim bodies are intentionally not published.'
+          } >> "$GITHUB_STEP_SUMMARY"

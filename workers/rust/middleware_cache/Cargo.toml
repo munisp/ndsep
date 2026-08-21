@@ -1,0 +1,12 @@
+[package]
+name = "middleware_cache"
+version = "0.1.0"
+edition = "2021"
+description = "NDSEP Rust middleware cache and rate limiter worker"
+
+[[bin]]
+name = "middleware_cache"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"

@@ -1,0 +1,26 @@
+<slide id="leadership_dashboard">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="36" width="4" height="610" fill="hairline"/>
+  <text id="title" x="86" y="50" width="520" height="40" font="heading" size="30" color="ink" wrap="false">A command view for leadership</text>
+  <text id="subtitle" x="86" y="108" width="1036" height="52" font="body" size="20" color="muted" line-height="1.35"><p>This real seeded dashboard helps public leadership see permit exposure, delivery pressure, and multi-domain operating signals across the Nigerian workflow environment.</p></text>
+
+  <shape id="screenshot-frame" type="rect" x="86" y="176" width="760" height="438" fill="paper" stroke="hairline" stroke-width="1"/>
+  <image id="dashboard-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784579148735_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL2hvbWVfc2VlZGVkX3Yz.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1NzkxNDg3MzVfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwyaHZiV1ZmYzJWbFpHVmtYM1l6LnBuZz94LW9zcy1wcm9jZXNzPWltYWdlL3Jlc2l6ZSx3XzE1NjAsaF8xNTYwL2Zvcm1hdCx3ZWJwIiwiQ29uZGl0aW9uIjp7IkRhdGVMZXNzVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNzg2NzUyMDAwfX19XX0_&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEUCIEYC2CSghmcdhuV11LVN1TqpxyRYxknpNpDzZ7vpqb-WAiEA-aIgRCXR7CDlNuMdbq7oSDgKuy3nzQi0vuW9zw2VNXU_" x="98" y="188" width="736" height="414" fit="contain"/>
+
+  <shape id="card-1" type="rect" x="878" y="192" width="316" height="118" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card-1-title" x="902" y="212" width="240" height="24" font="strong" size="20" color="ink" wrap="false">Cross-domain visibility</text>
+  <text id="card-1-body" x="902" y="248" width="266" height="46" font="body" size="17" color="muted" line-height="1.35"><p>Housing, legal workflow, permit pressure, and field continuity can be viewed from one leadership surface.</p></text>
+
+  <shape id="card-2" type="rect" x="878" y="336" width="316" height="118" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card-2-title" x="902" y="356" width="240" height="24" font="strong" size="20" color="ink" wrap="false">Stakeholder-specific lens</text>
+  <text id="card-2-body" x="902" y="392" width="266" height="46" font="body" size="17" color="muted" line-height="1.35"><p>Federal, state, and builder views can emphasize different signals while staying on the same data backbone.</p></text>
+
+  <shape id="card-3" type="rect" x="878" y="480" width="316" height="118" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="card-3-title" x="902" y="500" width="240" height="24" font="strong" size="20" color="ink" wrap="false">Decision-ready metrics</text>
+  <text id="card-3-body" x="902" y="536" width="266" height="46" font="body" size="17" color="muted" line-height="1.35"><p>The dashboard is designed to help leaders act on risk and bottlenecks, not just view statistics after the fact.</p></text>
+
+  <shape id="footer-strip" type="rect" x="0" y="674" width="1280" height="46" fill="paper"/>
+  <shape id="footer-line" type="rect" x="0" y="674" width="1280" height="2" fill="brand"/>
+  <text id="footer-text" x="64" y="689" width="420" height="14" font="caption" size="13" color="muted" wrap="false">IDLR-PTS Platform | Nigeria stakeholder deck</text>
+  <text id="page-number" x="1210" y="689" width="24" height="14" font="caption" size="13" color="muted" align="right" wrap="false">6</text>
+</slide>

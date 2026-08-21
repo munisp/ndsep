@@ -1,0 +1,24 @@
+<slide id="lagos_geospatial">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="primary"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Lagos decisions are parcel-driven and corridor-sensitive</text>
+  <text id="subtitle" x="58" y="86" width="1096" height="30" font="body" size="16" color="muted">The platform now includes a true browser-rendered web map that brings parcel markers, overlay corridors, and workflow context into one review space for Lagos land administration.</text>
+  <shape id="shot-frame" type="rect" x="58" y="136" width="736" height="428" fill="paper" stroke="hairline" stroke-width="1" shadow="true"/>
+  <image id="shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784584011220_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL2Z1bGxzY3JlZW5fbWFwX3NlZWRlZF92MQ.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODQwMTEyMjBfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwyWjFiR3h6WTNKbFpXNWZiV0Z3WDNObFpXUmxaRjkyTVEucG5nP3gtb3NzLXByb2Nlc3M9aW1hZ2UvcmVzaXplLHdfMTU2MCxoXzE1NjAvZm9ybWF0LHdlYnAiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3ODY3NTIwMDB9fX1dfQ__&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEYCIQCSdb8Q6gPrx~4RW~M-5h1OLAVMKYA61XYQs1Fb~h3C1wIhANtrlM~ge8sBakq0zRt2RtefUw3whl3HMjhOgSZFWgjX" x="70" y="160" width="712" height="380" fit="cover"/>
+  <text id="shot-label" x="70" y="144" width="712" height="14" font="caption" size="11" color="muted" align="center" wrap="false">Real web screenshot • browser-rendered parcel map with multiple markers, active legends, and corridor overlays</text>
+  <shape id="right-card" type="rect" x="826" y="136" width="396" height="428" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="right-title" x="850" y="162" width="348" height="28" font="body" size="20" color="ink"><p><strong>What this unlocks for Lagos</strong></p></text>
+  <text id="right-copy" x="850" y="204" width="348" height="316" font="body" size="17" color="ink" line-height="1.33">
+    <p>The map view lets officers and executive reviewers see parcel location, overlay context, and selected parcel intelligence in one web workspace.</p>
+    <p space-before="14"><strong>For Lagos, this supports:</strong></p>
+    <p space-before="10">• Housing growth review and parcel prioritisation.</p>
+    <p>• Right-of-way and corridor conflict screening before field escalation.</p>
+    <p>• Faster desk-based review of parcel status, workflow stage, and risk.</p>
+    <p>• More credible coordination between land administration, planning, infrastructure, and builder-facing approvals.</p>
+    <p space-before="14">Because this is a real web map screenshot from the live product, the deck can now show genuine geospatial evidence rather than only describing parcel intelligence in theory.</p>
+  </text>
+  <shape id="assurance-band" type="rect" x="58" y="586" width="1164" height="40" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="assurance" x="82" y="598" width="1116" height="16" font="body" size="15" color="ink" align="center" wrap="false">The Lagos procurement case is strengthened when map context, parcel identity, and legal workflow are visible in one review surface.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Lagos State</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">3</text>
+</slide>

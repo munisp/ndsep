@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS dt_bilateral_agreements CASCADE;
+DROP TABLE IF EXISTS dt_sandboxes CASCADE;
+DROP TABLE IF EXISTS dt_economic_indicators CASCADE;
+DROP TABLE IF EXISTS dt_policy_impacts CASCADE;
+DROP TABLE IF EXISTS dt_monte_carlo_stats CASCADE;
+DROP TABLE IF EXISTS dt_simulation_results CASCADE;
+DROP TABLE IF EXISTS dt_simulations CASCADE;
+DROP TABLE IF EXISTS dt_org_agents CASCADE;
+DROP TABLE IF EXISTS dt_sector_models CASCADE;
+DROP TABLE IF EXISTS dt_policies CASCADE;
+DROP TABLE IF EXISTS dt_jurisdictions CASCADE;

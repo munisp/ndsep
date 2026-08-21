@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5, viewport-fit=cover" />
+    <title>NDSEP — National Data Sovereignty Enforcement Platform</title>
+    <meta name="description" content="National Data Sovereignty Enforcement Platform — real-time compliance monitoring, enforcement, and audit management for financial institutions and regulated entities." />
+    <meta name="theme-color" content="#f4f2f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111019" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="NDSEP" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- Open Graph -->
+    <meta property="og:title" content="NDSEP — National Data Sovereignty Enforcement Platform" />
+    <meta property="og:description" content="Real-time compliance monitoring, enforcement, and audit management." />
+    <meta property="og:type" content="website" />
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    <!-- Fonts: Inter (UI) + Space Grotesk (headers) + JetBrains Mono (data) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <!-- Prevent FOUC on dark mode -->
+    <script>
+      (function() {
+        var t = localStorage.getItem('ndsep_theme');
+        if (t === 'dark' || (t === 'auto' || !t) && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root">
+      <div id="app-loader" style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:oklch(0.975 0.005 265);font-family:Inter,system-ui,sans-serif">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:16px">
+          <div style="width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,oklch(0.55 0.22 250),oklch(0.58 0.20 290))">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div style="width:24px;height:24px;border:2px solid oklch(0.55 0.22 250 / 0.2);border-top-color:oklch(0.55 0.22 250);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+        </div>
+        <style>
+          @keyframes spin { to { transform: rotate(360deg) } }
+          .dark #app-loader { background: oklch(0.085 0.02 265) !important }
+        </style>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+    <!-- Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').catch(function() {});
+        });
+      }
+    </script>
+  </body>
+
+</html>

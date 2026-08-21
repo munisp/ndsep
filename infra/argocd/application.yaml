@@ -1,0 +1,177 @@
+# NDSEP GitOps — ArgoCD Application Definitions
+# Auto-deploys from k8s/ directory on merge to main.
+# Supports canary deployments with automatic rollback.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ndsep-platform
+  namespace: argocd
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: ndsep=ghcr.io/munisp/ndsep
+    argocd-image-updater.argoproj.io/ndsep.update-strategy: semver
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ndsep
+  source:
+    repoURL: https://github.com/munisp/NGApp.git
+    targetRevision: main
+    path: k8s
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ndsep
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ndsep
+  namespace: argocd
+spec:
+  description: NDSEP Platform — National Data Sovereignty Enforcement
+  sourceRepos:
+    - https://github.com/munisp/NGApp.git
+    - https://github.com/munisp/ndsep.git
+  destinations:
+    - namespace: ndsep
+      server: https://kubernetes.default.svc
+    - namespace: ndsep-staging
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: "*"
+    - group: apps
+      kind: "*"
+    - group: networking.istio.io
+      kind: "*"
+    - group: security.istio.io
+      kind: "*"
+---
+# Staging environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ndsep-staging
+  namespace: argocd
+spec:
+  project: ndsep
+  source:
+    repoURL: https://github.com/munisp/NGApp.git
+    targetRevision: staging
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ndsep-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+# Rollout strategy (Argo Rollouts for canary)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: ndsep-api-rollout
+  namespace: ndsep
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: ndsep-api
+  strategy:
+    canary:
+      steps:
+        - setWeight: 10
+        - pause: { duration: 5m }
+        - setWeight: 30
+        - pause: { duration: 5m }
+        - setWeight: 60
+        - pause: { duration: 5m }
+        - setWeight: 100
+      canaryMetadata:
+        labels:
+          version: canary
+      stableMetadata:
+        labels:
+          version: stable
+      analysis:
+        templates:
+          - templateName: ndsep-success-rate
+        startingStep: 1
+        args:
+          - name: service-name
+            value: ndsep-api
+  template:
+    metadata:
+      labels:
+        app: ndsep-api
+    spec:
+      containers:
+        - name: ndsep-api
+          image: ghcr.io/munisp/ndsep:latest
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+---
+# Success rate analysis template
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: ndsep-success-rate
+  namespace: ndsep
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-rate
+      interval: 1m
+      count: 5
+      successCondition: result[0] >= 0.95
+      failureCondition: result[0] < 0.90
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring:9090
+          query: |
+            sum(rate(http_requests_total{service="{{args.service-name}}",code=~"2.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="{{args.service-name}}"}[5m]))

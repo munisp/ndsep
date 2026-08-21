@@ -1,0 +1,292 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digital-twin-v2
+  labels:
+    app: digital-twin-v2
+    tier: simulation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: digital-twin-v2
+  template:
+    metadata:
+      labels:
+        app: digital-twin-v2
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "digital-twin"
+        dapr.io/app-port: "8175"
+    spec:
+      containers:
+        - name: digital-twin
+          image: ndsep/digital-twin-v2:latest
+          ports:
+            - containerPort: 8175
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-db
+                  key: url
+            - name: KAFKA_URL
+              value: "kafka:9092"
+            - name: REDIS_URL
+              value: "redis:6379"
+            - name: TEMPORAL_URL
+              value: "temporal:7233"
+            - name: DAPR_URL
+              value: "http://localhost:3500"
+            - name: MONTE_CARLO_URL
+              value: "http://monte-carlo:8177"
+            - name: AGENT_MODEL_URL
+              value: "http://agent-model:8178"
+            - name: SYSTEM_DYNAMICS_URL
+              value: "http://system-dynamics:8179"
+            - name: ML_PREDICTION_URL
+              value: "http://ml-predictor:8176"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8175
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8175
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: digital-twin-v2
+spec:
+  selector:
+    app: digital-twin-v2
+  ports:
+    - port: 8175
+      targetPort: 8175
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monte-carlo
+  labels:
+    app: monte-carlo
+    tier: simulation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: monte-carlo
+  template:
+    metadata:
+      labels:
+        app: monte-carlo
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "monte-carlo"
+        dapr.io/app-port: "8177"
+    spec:
+      containers:
+        - name: monte-carlo
+          image: ndsep/monte-carlo:latest
+          ports:
+            - containerPort: 8177
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8177
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monte-carlo
+spec:
+  selector:
+    app: monte-carlo
+  ports:
+    - port: 8177
+      targetPort: 8177
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-model
+  labels:
+    app: agent-model
+    tier: simulation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-model
+  template:
+    metadata:
+      labels:
+        app: agent-model
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "agent-model"
+        dapr.io/app-port: "8178"
+    spec:
+      containers:
+        - name: agent-model
+          image: ndsep/agent-model:latest
+          ports:
+            - containerPort: 8178
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8178
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-model
+spec:
+  selector:
+    app: agent-model
+  ports:
+    - port: 8178
+      targetPort: 8178
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: system-dynamics
+  labels:
+    app: system-dynamics
+    tier: simulation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: system-dynamics
+  template:
+    metadata:
+      labels:
+        app: system-dynamics
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "system-dynamics"
+        dapr.io/app-port: "8179"
+    spec:
+      containers:
+        - name: system-dynamics
+          image: ndsep/system-dynamics:latest
+          ports:
+            - containerPort: 8179
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8179
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: system-dynamics
+spec:
+  selector:
+    app: system-dynamics
+  ports:
+    - port: 8179
+      targetPort: 8179
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-predictor
+  labels:
+    app: ml-predictor
+    tier: simulation
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ml-predictor
+  template:
+    metadata:
+      labels:
+        app: ml-predictor
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "ml-predictor"
+        dapr.io/app-port: "8176"
+    spec:
+      containers:
+        - name: ml-predictor
+          image: ndsep/ml-predictor:latest
+          ports:
+            - containerPort: 8176
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-db
+                  key: url
+            - name: REDIS_URL
+              value: "redis:6379"
+            - name: KAFKA_URL
+              value: "kafka:9092"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8176
+            initialDelaySeconds: 15
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-predictor
+spec:
+  selector:
+    app: ml-predictor
+  ports:
+    - port: 8176
+      targetPort: 8176

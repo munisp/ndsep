@@ -1,0 +1,16 @@
+[package]
+name = "sla_tracker"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sla_tracker"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = "0.7"
+warp = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"

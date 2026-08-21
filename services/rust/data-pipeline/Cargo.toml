@@ -1,0 +1,21 @@
+[package]
+name = "ndsep-data-pipeline"
+description = "High-throughput data pipeline for event processing, transformation, and lakehouse ingestion"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+arrow = "54"
+parquet = "54"
+datafusion = "44"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4"] }

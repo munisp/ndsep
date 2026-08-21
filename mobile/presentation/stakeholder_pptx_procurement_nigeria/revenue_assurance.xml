@@ -1,0 +1,31 @@
+<slide id="revenue_assurance">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Revenue assurance and monetization</text>
+  <text id="subtitle" x="58" y="86" width="1088" height="30" font="body" size="16" color="muted">The platform creates value not only by digitizing workflow, but by helping public institutions reduce leakage, improve formalisation visibility, and convert approvals into traceable economic activity.</text>
+  <shape id="m1" type="rect" x="58" y="132" width="270" height="136" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="m1t" x="76" y="156" width="234" height="34" font="display" size="30" color="revenue" align="center">State IGR visibility</text>
+  <text id="m1c" x="76" y="200" width="234" height="38" font="body" size="15" color="muted" align="center">More traceable approval, registration, and land-linked fee pathways</text>
+  <shape id="m2" type="rect" x="352" y="132" width="270" height="136" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="m2t" x="370" y="156" width="234" height="34" font="display" size="30" color="revenue" align="center">Lower leakage</text>
+  <text id="m2c" x="370" y="200" width="234" height="38" font="body" size="15" color="muted" align="center">Better queue traceability and audit integrity reduce hidden process loss</text>
+  <shape id="m3" type="rect" x="646" y="132" width="270" height="136" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="m3t" x="664" y="156" width="234" height="34" font="display" size="30" color="revenue" align="center">Faster conversion</text>
+  <text id="m3c" x="664" y="200" width="234" height="38" font="body" size="15" color="muted" align="center">Approvals move faster into project execution, financing, and sale</text>
+  <shape id="m4" type="rect" x="940" y="132" width="282" height="136" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="m4t" x="958" y="156" width="246" height="34" font="display" size="30" color="revenue" align="center">Better confidence</text>
+  <text id="m4c" x="958" y="200" width="246" height="38" font="body" size="15" color="muted" align="center">Trusted records improve buyer, lender, and investor confidence</text>
+  <table id="money-table" x="58" y="314" width="760" height="258" columns="2.0,4.4" rows="48,52,52,52,54" font="body" size="15" color="ink" padding="10 12" header-fill="brand" header-border="2 solid brand" border-h="1 solid hairline" border-outer="1 solid hairline">
+    <tr color="#FFFFFF"><td>Value channel</td><td>How value is captured in practice</td></tr>
+    <tr><td><strong>Federal oversight value</strong></td><td>Clearer extractives, land, and approval records improve governance credibility and strengthen investment-climate signals.[2] [3]</td></tr>
+    <tr fill="mist"><td><strong>State revenue assurance</strong></td><td>Land formalisation, approval traceability, registration continuity, and clearer workflow accountability support stronger visibility over internally generated revenue pathways.[1]</td></tr>
+    <tr><td><strong>Builder project economics</strong></td><td>Developers reduce carrying cost, coordination drag, and uncertainty when approvals move with clearer status, deadlines, and handoffs.</td></tr>
+    <tr fill="mist"><td><strong>Market confidence</strong></td><td>Stronger parcel, title, permit, and audit continuity can improve buyer trust, lender confidence, and transaction defensibility.</td></tr>
+  </table>
+  <shape id="panel" type="rect" x="850" y="314" width="372" height="258" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="panel-title" x="876" y="340" width="320" height="24" font="body" size="20" color="ink"><p><strong>Procurement meaning</strong></p></text>
+  <text id="panel-copy" x="876" y="378" width="320" height="148" font="body" size="17" color="ink" line-height="1.34">This is why revenue assurance should appear in the deck as a core procurement outcome. A platform that shortens C of O and approval cycles, clarifies land-linked workflow value, and produces more defensible records can improve both service and state fiscal performance.</text>
+  <text id="panel-close" x="876" y="532" width="320" height="22" font="body" size="17" color="revenue" line-height="1.25"><p><strong>It is an operating lever for both service delivery and public value capture.</strong></p></text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">10</text>
+</slide>

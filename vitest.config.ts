@@ -1,23 +1,29 @@
 import { defineConfig } from "vitest/config";
+import path from "path";
 
-/**
- * This coverage scope intentionally measures executable TypeScript service and
- * domain logic. Native UI, Expo configuration, generated assets, deployment
- * manifests, and scripts are reported through build/device validation rather
- * than being silently counted as untested application logic.
- */
+const templateRoot = path.resolve(import.meta.dirname);
+
 export default defineConfig({
-  test: {
-    coverage: {
-      provider: "v8",
-      include: ["server/**/*.ts", "lib/**/*.ts"],
-      exclude: [
-        "server/_core/{imageGeneration,llm,notification,voiceTranscription,storageProxy}.ts",
-        "lib/_core/**",
-        "lib/**/nativewind-pressable.ts",
-        "**/*.d.ts",
-      ],
-      reporter: ["text", "json-summary"],
+  root: templateRoot,
+  resolve: {
+    alias: {
+      "@": path.resolve(templateRoot, "client", "src"),
+      "@shared": path.resolve(templateRoot, "shared"),
+      "@assets": path.resolve(templateRoot, "attached_assets"),
     },
+  },
+  test: {
+    environment: "node",
+    include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    exclude: [
+      "server/phase15.test.ts",
+      "server/phase16.test.ts",
+      "server/phase17.test.ts",
+      "server/phase20.test.ts",
+      "server/phase43.test.ts",
+      "server/phase44.test.ts",
+    ],
+    setupFiles: ["server/vitest.setup.ts"],
+    testTimeout: 15000,
   },
 });

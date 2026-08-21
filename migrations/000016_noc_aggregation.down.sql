@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS noc_escalation_history CASCADE;
+DROP TABLE IF EXISTS noc_runbooks CASCADE;
+DROP TABLE IF EXISTS noc_oncall_schedules CASCADE;
+DROP TABLE IF EXISTS noc_escalation_policies CASCADE;
+DROP TABLE IF EXISTS noc_uptime_sla CASCADE;
+DROP TABLE IF EXISTS noc_uptime_records CASCADE;
+DROP TABLE IF EXISTS noc_alerts CASCADE;
+DROP TABLE IF EXISTS noc_collector_metrics CASCADE;
+DROP TABLE IF EXISTS noc_topology_links CASCADE;
+DROP TABLE IF EXISTS noc_devices CASCADE;

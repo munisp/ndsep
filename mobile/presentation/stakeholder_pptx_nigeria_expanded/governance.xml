@@ -1,0 +1,22 @@
+<slide id="governance">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="960" height="46" font="heading" size="30" color="ink" wrap="false">Multi-agency governance and role-based queues</text>
+  <text id="subtitle" x="58" y="86" width="1080" height="30" font="body" size="16" color="muted">The platform makes agency ownership, queue pressure, escalations, and exception handling visible instead of leaving them buried in informal follow-up.</text>
+  <shape id="shot-frame" type="rect" x="58" y="132" width="640" height="490" fill="paper" stroke="border" stroke-width="1" shadow="true"/>
+  <image id="profile-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784580252203_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL3Byb2ZpbGVfc2VlZGVkX3Yy.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODAyNTIyMDNfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwzQnliMlpwYkdWZmMyVmxaR1ZrWDNZeS5wbmc~eC1vc3MtcHJvY2Vzcz1pbWFnZS9yZXNpemUsd18xNTYwLGhfMTU2MC9mb3JtYXQsd2VicCIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc4Njc1MjAwMH19fV19&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEYCIQDsqdpTcSkS~A4zf1-MGBqrRB-6MFw5FnebZMG3zRNiZwIhAK2TMNHP~TA-WsDK4VrxZnIFmkLxJpRdOV1LozQ8kSm9" x="68" y="142" width="620" height="460" fit="cover"/>
+  <text id="shot-caption" x="82" y="600" width="592" height="18" font="caption" size="12" color="muted" align="center">Real web screenshot: role switching, approval queues, onboarding readiness, and land-rights workflow continuity</text>
+  <shape id="intro-card" type="rect" x="732" y="142" width="490" height="100" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="intro-copy" x="756" y="166" width="442" height="56" font="body" size="18" color="ink" line-height="1.35">Federal and state approval chains often slow down at the handoff points. The platform fixes that by assigning clear queue ownership, exposing due dates, and keeping escalation and reassignment decisions auditable.</text>
+  <shape id="queue-card" type="rect" x="732" y="266" width="490" height="96" fill="#F8FAFC" stroke="border" stroke-width="1"/>
+  <text id="queue-title" x="756" y="286" width="442" height="22" font="body" size="18" color="ink"><p><strong>Role-based queues</strong></p></text>
+  <text id="queue-copy" x="756" y="312" width="442" height="34" font="body" size="15" color="muted">Mining, petroleum, planning, environment, and supervisory roles see different work queues and responsibilities.</text>
+  <shape id="handoff-card" type="rect" x="732" y="384" width="490" height="96" fill="#F8FAFC" stroke="border" stroke-width="1"/>
+  <text id="handoff-title" x="756" y="404" width="442" height="22" font="body" size="18" color="ink"><p><strong>Timed handoffs and escalation</strong></p></text>
+  <text id="handoff-copy" x="756" y="430" width="442" height="34" font="body" size="15" color="muted">Near-due work, overdue cases, and reassignment triggers become visible before they turn into service failure.</text>
+  <shape id="supervisor-card" type="rect" x="732" y="502" width="490" height="108" fill="#F8FAFC" stroke="border" stroke-width="1"/>
+  <text id="supervisor-title" x="756" y="522" width="442" height="22" font="body" size="18" color="ink"><p><strong>Supervisor exception control</strong></p></text>
+  <text id="supervisor-copy" x="756" y="548" width="442" height="46" font="body" size="15" color="muted" line-height="1.3">Overrides, reassignments, and digests are retained with audit history, making complex public workflows easier to manage and defend.</text>
+  <text id="footer" x="58" y="686" width="540" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform • Nigeria stakeholder deck</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">7</text>
+</slide>

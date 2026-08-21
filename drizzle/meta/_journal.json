@@ -1,40 +1,249 @@
 {
   "version": "7",
-  "dialect": "mysql",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1763372440610,
-      "tag": "0000_elite_eternals",
+      "version": "7",
+      "when": 1773067414957,
+      "tag": "0000_round_prodigy",
       "breakpoints": true
     },
     {
       "idx": 1,
-      "version": "5",
-      "when": 1784555093806,
-      "tag": "0001_brown_nico_minoru",
+      "version": "7",
+      "when": 1773075024897,
+      "tag": "0001_narrow_dexter_bennett",
       "breakpoints": true
     },
     {
       "idx": 2,
-      "version": "5",
-      "when": 1787096118502,
-      "tag": "0002_chief_stryfe",
+      "version": "7",
+      "when": 1773079214306,
+      "tag": "0002_yummy_malice",
       "breakpoints": true
     },
     {
       "idx": 3,
-      "version": "5",
-      "when": 1787106823733,
-      "tag": "0003_daily_ozymandias",
+      "version": "7",
+      "when": 1773090273362,
+      "tag": "0003_wise_thena",
       "breakpoints": true
     },
     {
       "idx": 4,
-      "version": "5",
-      "when": 1787162836443,
-      "tag": "0004_silly_midnight",
+      "version": "7",
+      "when": 1773194203772,
+      "tag": "0004_rich_violations",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1773194554046,
+      "tag": "0005_loose_dragon_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1773228392477,
+      "tag": "0006_lazy_abomination",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1773233405349,
+      "tag": "0007_worried_thena",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1773241929568,
+      "tag": "0008_adorable_the_hand",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1773569776773,
+      "tag": "0009_organic_menace",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1773570688946,
+      "tag": "0010_even_stranger",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1773572630517,
+      "tag": "0011_early_elektra",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1774096114920,
+      "tag": "0012_stormy_mentor",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1774096114921,
+      "tag": "0013_dpco_engagement_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1774096114922,
+      "tag": "0014_dpco_accreditation_applications",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1774096114923,
+      "tag": "0015_dpco_ai_features",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1774096114924,
+      "tag": "0016_billing_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1774096114925,
+      "tag": "0017_phase27_missing_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1774096114926,
+      "tag": "0018_phase29_30_fixes",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1774096114927,
+      "tag": "0019_field_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1774096114928,
+      "tag": "0020_citizen_requests_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1774096114929,
+      "tag": "0021_performance_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1774096114930,
+      "tag": "0022_v2_recommendations",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1774096114931,
+      "tag": "0023_kms_key_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1774096114932,
+      "tag": "0024_canonical_schema_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1774096114933,
+      "tag": "0025_phase13_runtime_contracts",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1774096114934,
+      "tag": "0026_foreign_key_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1774096114935,
+      "tag": "0027_mobile_push_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786637530000,
+      "tag": "0028_api_usage_log_fk_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786639100000,
+      "tag": "0029_bootstrap_tables_canonical",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786640000000,
+      "tag": "0030_dpco_audit_service_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786640100000,
+      "tag": "0031_dpco_registry_service_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786640200000,
+      "tag": "0032_dpco_verification_service_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786640300000,
+      "tag": "0033_dpco_lifecycle_reference_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786640400000,
+      "tag": "0034_dpco_final_lifecycle_identifier_checks",
       "breakpoints": true
     }
   ]

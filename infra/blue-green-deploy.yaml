@@ -1,0 +1,119 @@
+# NDSEP Blue-Green Deployment Configuration
+# ============================================
+# Enables zero-downtime deployments by maintaining two identical environments
+# (blue and green) and switching traffic between them atomically.
+#
+# Usage:
+#   1. Deploy new version to inactive environment
+#   2. Run smoke tests against inactive
+#   3. Switch load balancer to new environment
+#   4. Keep old environment for instant rollback
+#
+# Compatible with: Docker Swarm, K8s, AWS ALB, Nginx
+
+# --- Kubernetes Blue-Green Strategy ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ndsep-blue
+  namespace: ndsep
+  labels:
+    app: ndsep
+    slot: blue
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ndsep
+      slot: blue
+  template:
+    metadata:
+      labels:
+        app: ndsep
+        slot: blue
+    spec:
+      containers:
+        - name: ndsep
+          image: ndsep/platform:latest
+          ports:
+            - containerPort: 3002
+          envFrom:
+            - secretRef:
+                name: ndsep-env
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: 3002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ndsep-green
+  namespace: ndsep
+  labels:
+    app: ndsep
+    slot: green
+spec:
+  replicas: 0  # Inactive slot — scale up during deploy
+  selector:
+    matchLabels:
+      app: ndsep
+      slot: green
+  template:
+    metadata:
+      labels:
+        app: ndsep
+        slot: green
+    spec:
+      containers:
+        - name: ndsep
+          image: ndsep/platform:latest
+          ports:
+            - containerPort: 3002
+          envFrom:
+            - secretRef:
+                name: ndsep-env
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: 3002
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+---
+# Service that points to active slot — change selector.slot to switch
+apiVersion: v1
+kind: Service
+metadata:
+  name: ndsep-active
+  namespace: ndsep
+spec:
+  selector:
+    app: ndsep
+    slot: blue  # Change to "green" to switch
+  ports:
+    - port: 80
+      targetPort: 3002
+  type: ClusterIP

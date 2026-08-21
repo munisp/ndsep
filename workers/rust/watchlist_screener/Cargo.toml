@@ -1,0 +1,24 @@
+[package]
+name = "watchlist_screener"
+version = "1.0.0"
+edition = "2021"
+description = "NDSEP High-performance watchlist screening engine (OFAC/UN/EU/UK/NFIU)"
+
+[[bin]]
+name = "watchlist_screener"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+uuid = { workspace = true }
+axum = { workspace = true }
+tokio-postgres = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }

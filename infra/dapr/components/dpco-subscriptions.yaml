@@ -1,0 +1,54 @@
+# Dapr pub/sub subscriptions for DPCO microservices
+# Each DPCO service subscribes to relevant topics via the kafka-pubsub component
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: dpco-analytics-audit-events
+  namespace: default
+spec:
+  pubsubname: kafka-pubsub
+  topic: ndsep.dpco.audit.events
+  routes:
+    default: /dapr/events/ndsep/dpco/audit/events
+  scopes:
+  - dpco-analytics
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: dpco-analytics-verification-events
+  namespace: default
+spec:
+  pubsubname: kafka-pubsub
+  topic: ndsep.dpco.verification.events
+  routes:
+    default: /dapr/events/ndsep/dpco/verification/events
+  scopes:
+  - dpco-analytics
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: dpco-notification-all-events
+  namespace: default
+spec:
+  pubsubname: kafka-pubsub
+  topic: ndsep.dpco.audit.events
+  routes:
+    default: /dapr/events/ndsep/dpco/audit/events
+  scopes:
+  - dpco-notification
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: dpco-notification-registry-events
+  namespace: default
+spec:
+  pubsubname: kafka-pubsub
+  topic: ndsep.dpco.registry.events
+  routes:
+    default: /dapr/events/ndsep/dpco/registry/events
+  scopes:
+  - dpco-notification

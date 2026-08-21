@@ -1,0 +1,53 @@
+name: 'ndsep_analytics'
+version: '1.0.0'
+config-version: 2
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'ndsep'
+
+# These configurations specify where dbt should look for different types of files.
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Configuring models
+models:
+  ndsep_analytics:
+    # Staging layer: raw data from NDSEP PostgreSQL
+    staging:
+      +materialized: view
+      +schema: staging
+
+    # Intermediate layer: business logic transformations
+    intermediate:
+      +materialized: ephemeral
+
+    # Marts layer: analytics-ready tables for dashboards
+    marts:
+      +materialized: table
+      +schema: analytics
+      compliance:
+        +materialized: table
+      regulatory:
+        +materialized: table
+      enforcement:
+        +materialized: table
+
+vars:
+  # NDSEP-specific variables
+  ndsep_db: "ndsep_db"
+  ndpa_effective_date: "2023-06-12"  # Date NDPA came into force
+  compliance_score_weights:
+    dpia: 20
+    dpo: 15
+    breach_notification: 25
+    audit_returns: 20
+    data_retention: 10
+    staff_training: 10

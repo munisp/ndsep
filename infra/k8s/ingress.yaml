@@ -1,0 +1,45 @@
+###############################################################################
+# NDSEP Ingress — nginx-ingress controller with TLS and rate limiting
+###############################################################################
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ndsep-ingress
+  namespace: ndsep
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    # TLS
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "60"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+    # Proxy settings
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    # WebSocket support
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/websocket-services: ndsep-api
+spec:
+  tls:
+    - hosts:
+        - ndsep.nitda.gov.ng
+      secretName: ndsep-tls-cert
+  rules:
+    - host: ndsep.nitda.gov.ng
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ndsep-api
+                port:
+                  number: 80

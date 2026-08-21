@@ -1,0 +1,63 @@
+###############################################################################
+# KEDA — Kubernetes Event-Driven Autoscaling
+# Prerequisites:
+#   helm repo add kedacore https://kedacore.github.io/charts
+#   helm install keda kedacore/keda --namespace keda --create-namespace
+#
+# This file provides the namespace + operator config for reference.
+# The actual KEDA operator is installed via Helm; ScaledObjects are in
+# keda-scaledobjects.yaml and triggers in keda-triggers.yaml.
+###############################################################################
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keda
+  labels:
+    app.kubernetes.io/part-of: ndsep-platform
+    app.kubernetes.io/component: autoscaling
+---
+# KEDA Operator HelmRelease (if using Flux/ArgoCD for GitOps)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keda-helm-values
+  namespace: keda
+  annotations:
+    helm.sh/chart: kedacore/keda
+    helm.sh/version: "2.14.0"
+data:
+  values.yaml: |
+    # KEDA Helm chart values for NDSEP
+    replicaCount: 2
+    podDisruptionBudget:
+      minAvailable: 1
+    resources:
+      operator:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      metricsServer:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    prometheus:
+      metricServer:
+        enabled: true
+        port: 9022
+      operator:
+        enabled: true
+        port: 8080
+    logging:
+      operator:
+        level: info
+      metricServer:
+        level: "0"
+    # Webhook for validating ScaledObjects
+    webhooks:
+      enabled: true

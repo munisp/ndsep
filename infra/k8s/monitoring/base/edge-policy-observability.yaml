@@ -1,0 +1,187 @@
+# NDSEP Kubernetes monitoring resources
+#
+# Prerequisites:
+#   1. Grafana sidecar dashboard discovery enabled with label grafana_dashboard=1.
+#   2. Prometheus Operator installed and configured to select PrometheusRule
+#      resources carrying release: kube-prometheus-stack.
+#   3. Prometheus scrapes the internal APISIX and OPA metrics endpoints plus the
+#      NDSEP API /api/metrics endpoint described in infra/prometheus/prometheus.yml.
+#
+# Apply only after server-side dry-run and review:
+#   kubectl apply --server-side --dry-run=server -f infra/k8s/monitoring/edge-policy-observability.yaml
+#   kubectl apply -f infra/k8s/monitoring/edge-policy-observability.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ndsep-grafana-dashboard-edge-policy-security
+  namespace: ndsep
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: ndsep-platform
+    grafana_dashboard: "1"
+  annotations:
+    # Grafana's kiwigrid sidecar honors this key when the dashboard folder
+    # annotation is enabled in the selected Helm chart.
+    k8s-sidecar-target-directory: /tmp/dashboards/NDSEP
+immutable: true
+data:
+  ndsep-edge-policy-security.json: |
+    {
+      "annotations": {"list": []},
+      "description": "NDSEP APISIX rate-limit saturation and OPA fail-closed authorization health. All queries use bounded labels and internal Prometheus metrics.",
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 2}, {"color": "red", "value": 10}]}, "unit": "percent"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "id": 1,
+          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
+          "targets": [{"editorMode": "code", "expr": "100 * sum(rate(apisix_http_status{code=\"429\"}[$__rate_interval])) / clamp_min(sum(rate(apisix_http_status[$__rate_interval])), 0.1)", "legendFormat": "429 response ratio", "range": true, "refId": "A"}],
+          "title": "APISIX 429 Saturation Ratio",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 20}, {"color": "red", "value": 50}]}, "unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+          "id": 2,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "targets": [{"editorMode": "code", "expr": "sum(increase(apisix_http_status{code=\"429\"}[5m]))", "legendFormat": "5m 429 responses", "range": true, "refId": "A"}],
+          "title": "APISIX 429 Events (5m)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 3,
+          "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+          "targets": [{"editorMode": "code", "expr": "sum by (outcome) (increase(ndsep_opa_decisions_total{outcome=~\"unconfigured|unavailable|http_error|malformed|timeout\"}[5m]))", "legendFormat": "{{outcome}}", "range": true, "refId": "A"}],
+          "title": "OPA Fail-Closed Infrastructure Denials (5m)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]}, "unit": "percent"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 6, "x": 12, "y": 8},
+          "id": 4,
+          "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "targets": [{"editorMode": "code", "expr": "100 * sum(increase(ndsep_opa_decisions_total{outcome=\"timeout\"}[5m])) / clamp_min(sum(increase(ndsep_opa_decisions_total[5m])), 1)", "legendFormat": "timeout ratio", "range": true, "refId": "A"}],
+          "title": "OPA Timeout Ratio (5m)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+          "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 6, "x": 18, "y": 8},
+          "id": 5,
+          "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "targets": [{"editorMode": "code", "expr": "up{job=\"opa\"}", "legendFormat": "OPA metrics target", "range": true, "refId": "A"}],
+          "title": "OPA Service Availability",
+          "type": "stat"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["security", "apisix", "opa", "authorization"],
+      "templating": {"list": [{"current": {"selected": false, "text": "Prometheus", "value": "Prometheus"}, "hide": 0, "includeAll": false, "label": "Prometheus", "multi": false, "name": "DS_PROMETHEUS", "options": [], "query": "prometheus", "refresh": 1, "regex": "", "skipUrlSync": false, "type": "datasource"}]},
+      "time": {"from": "now-6h", "to": "now"},
+      "timezone": "utc",
+      "title": "NDSEP Edge and Policy Security",
+      "uid": "ndsep-edge-policy-security",
+      "version": 1
+    }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ndsep-edge-policy-security
+  namespace: ndsep
+  labels:
+    app.kubernetes.io/name: ndsep
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: ndsep-platform
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: ndsep-edge-policy-security
+      interval: 30s
+      rules:
+        - alert: APISIXGatewayMetricsDown
+          expr: up{job="apisix"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "APISIX gateway metrics endpoint is unreachable"
+            description: "Prometheus cannot scrape the internal APISIX metrics listener for more than 2 minutes. Confirm APISIX availability and that only the internal metrics port is reachable."
+        - alert: APISIXRateLimitSaturation
+          expr: |
+            (
+              sum(rate(apisix_http_status{code="429"}[5m]))
+              /
+              clamp_min(sum(rate(apisix_http_status[5m])), 0.1)
+            ) > 0.02
+            and sum(increase(apisix_http_status{code="429"}[5m])) >= 20
+          for: 5m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "APISIX rate-limit saturation exceeds 2%"
+            description: "{{ $value | humanizePercentage }} of APISIX responses are 429 over 5 minutes (at least 20 throttled requests). Check abusive sources, trusted client-IP handling, and route limits before raising capacity."
+        - alert: APISIXRateLimitAttackOrMisconfiguration
+          expr: |
+            (
+              sum(rate(apisix_http_status{code="429"}[1m]))
+              /
+              clamp_min(sum(rate(apisix_http_status[1m])), 0.1)
+            ) > 0.10
+            and sum(increase(apisix_http_status{code="429"}[1m])) >= 50
+          for: 2m
+          labels:
+            severity: critical
+            team: security
+          annotations:
+            summary: "APISIX 429 rate exceeds 10%"
+            description: "{{ $value | humanizePercentage }} of APISIX responses are throttled over 1 minute (at least 50). Treat as active abuse or trusted-proxy/rate-policy failure; invoke the edge incident runbook."
+        - alert: OPAServiceDown
+          expr: up{job="opa"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "OPA policy service is unreachable"
+            description: "The OPA internal metrics target has been down for more than 1 minute. Privileged NDSEP actions must fail closed; investigate before restoring availability."
+        - alert: OPAPolicyTimeouts
+          expr: |
+            sum(increase(ndsep_opa_decisions_total{outcome="timeout"}[5m])) >= 3
+            and
+            (
+              sum(increase(ndsep_opa_decisions_total{outcome="timeout"}[5m]))
+              /
+              clamp_min(sum(increase(ndsep_opa_decisions_total[5m])), 1)
+            ) > 0.01
+          for: 2m
+          labels:
+            severity: warning
+            team: security
+          annotations:
+            summary: "OPA policy evaluation timeout rate exceeds 1%"
+            description: "{{ $value | humanizePercentage }} of OPA decisions timed out over 5 minutes (at least 3). Privileged requests are denied; inspect OPA CPU, policy bundle, DNS/network path, and API timeout budget."
+        - alert: OPAFailClosedDenialsSpike
+          expr: |
+            sum(increase(ndsep_opa_decisions_total{outcome=~"unconfigured|unavailable|http_error|malformed|timeout"}[5m])) >= 10
+          for: 2m
+          labels:
+            severity: critical
+            team: security
+          annotations:
+            summary: "OPA fail-closed infrastructure denials are spiking"
+            description: "{{ $value }} privileged authorization decisions failed due to OPA configuration, availability, response, or timeout errors in 5 minutes. Do not disable OPA; restore the policy dependency."

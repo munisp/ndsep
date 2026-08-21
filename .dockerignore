@@ -1,11 +1,73 @@
-node_modules
-.git
-.expo
-.manus-logs
-dist
-server/uploads
-server/data/*.json
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.dist
+client/dev-dist/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
 *.log
+npm-debug.log*
+
+# Test artifacts
+coverage/
+.nyc_output/
+test-results/
+demo-screenshots/
+
+# Rust build cache
+workers/rust/target/
+services/rust/target/
+
+# Go binaries
+workers/go/bin/
+orchestration/bin/
+
+# Python caches
+__pycache__/
+*.pyc
+workers/python/vendor/
+workers/python/models/
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# CI/CD configs
+.github/
+
+# Development files
 .env
-.env.*
-!.env.production.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.manus-logs/
+.manus/
+todo.md
+
+# Presentation / non-code
+presentation/
+
+# Temporary
+tmp/
+temp/
+*.tgz

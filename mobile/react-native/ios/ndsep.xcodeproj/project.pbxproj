@@ -1,0 +1,12 @@
+// !$*UTF8*$!
+// Xcode project file stub — run `pod install` to generate the full workspace.
+// This is a minimal project descriptor for the NDSEP React Native iOS app.
+//
+// Build instructions:
+//   1. cd ios && pod install
+//   2. open ndsep.xcworkspace
+//   3. Build & Run (Cmd+R)
+//
+// Bundle identifier: com.ndsep.mobile
+// Deployment target: iOS 15.1+
+// Swift version: 5.0

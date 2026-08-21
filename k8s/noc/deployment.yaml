@@ -1,0 +1,284 @@
+# NDSEP NOC Subsystem Kubernetes Deployments
+# =============================================
+# Deploy all 4 NOC microservices:
+#   - noc-collector (Rust) — SNMP/Syslog/NetFlow on port 8190
+#   - noc-escalation (Go) — Escalation engine on port 8191
+#   - noc-correlator (Python) — Alert correlation on port 8192
+#   - noc-uptime (Rust) — Uptime tracking on port 8193
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noc-collector
+  namespace: ndsep
+  labels:
+    app: noc-collector
+    tier: noc
+    language: rust
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: noc-collector
+  template:
+    metadata:
+      labels:
+        app: noc-collector
+        tier: noc
+    spec:
+      containers:
+        - name: noc-collector
+          image: ndsep/noc-collector:latest
+          ports:
+            - containerPort: 8190
+              name: http
+            - containerPort: 1162
+              protocol: UDP
+              name: snmp
+            - containerPort: 1514
+              protocol: UDP
+              name: syslog
+            - containerPort: 2055
+              protocol: UDP
+              name: netflow
+          envFrom:
+            - configMapRef:
+                name: ndsep-config
+            - secretRef:
+                name: ndsep-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8190
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8190
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noc-collector
+  namespace: ndsep
+spec:
+  selector:
+    app: noc-collector
+  ports:
+    - name: http
+      port: 8190
+      targetPort: 8190
+    - name: snmp
+      port: 1162
+      targetPort: 1162
+      protocol: UDP
+    - name: syslog
+      port: 1514
+      targetPort: 1514
+      protocol: UDP
+    - name: netflow
+      port: 2055
+      targetPort: 2055
+      protocol: UDP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noc-escalation
+  namespace: ndsep
+  labels:
+    app: noc-escalation
+    tier: noc
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: noc-escalation
+  template:
+    metadata:
+      labels:
+        app: noc-escalation
+        tier: noc
+    spec:
+      containers:
+        - name: noc-escalation
+          image: ndsep/noc-escalation:latest
+          ports:
+            - containerPort: 8191
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndsep-config
+            - secretRef:
+                name: ndsep-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8191
+            initialDelaySeconds: 3
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8191
+            initialDelaySeconds: 2
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noc-escalation
+  namespace: ndsep
+spec:
+  selector:
+    app: noc-escalation
+  ports:
+    - name: http
+      port: 8191
+      targetPort: 8191
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noc-correlator
+  namespace: ndsep
+  labels:
+    app: noc-correlator
+    tier: noc
+    language: python
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: noc-correlator
+  template:
+    metadata:
+      labels:
+        app: noc-correlator
+        tier: noc
+    spec:
+      containers:
+        - name: noc-correlator
+          image: ndsep/noc-correlator:latest
+          ports:
+            - containerPort: 8192
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndsep-config
+            - secretRef:
+                name: ndsep-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8192
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8192
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noc-correlator
+  namespace: ndsep
+spec:
+  selector:
+    app: noc-correlator
+  ports:
+    - name: http
+      port: 8192
+      targetPort: 8192
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noc-uptime
+  namespace: ndsep
+  labels:
+    app: noc-uptime
+    tier: noc
+    language: rust
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: noc-uptime
+  template:
+    metadata:
+      labels:
+        app: noc-uptime
+        tier: noc
+    spec:
+      containers:
+        - name: noc-uptime
+          image: ndsep/noc-uptime:latest
+          ports:
+            - containerPort: 8193
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ndsep-config
+            - secretRef:
+                name: ndsep-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8193
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8193
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noc-uptime
+  namespace: ndsep
+spec:
+  selector:
+    app: noc-uptime
+  ports:
+    - name: http
+      port: 8193
+      targetPort: 8193

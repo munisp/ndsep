@@ -1,0 +1,420 @@
+version: "3.9"
+
+services:
+  # ── Core Infrastructure ──────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ndsep_db
+      POSTGRES_USER: ndsep_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ndsep_secure_2026}
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ndsep_user -d ndsep_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+
+  # ── Kafka (via Redpanda — lightweight, Kafka-compatible) ────────────────────
+  kafka:
+    image: redpanda-data/redpanda:v24.1.1
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://kafka:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'HEALTHY'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── OpenSearch ──────────────────────────────────────────────────────────────
+  opensearch:
+    image: opensearchproject/opensearch:2.17.0
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx256m
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ports: ["9200:9200"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes: ["opensearchdata:/usr/share/opensearch/data"]
+
+  # ── Keycloak (OIDC / SSO) ──────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep_db
+      KC_DB_USERNAME: ndsep_user
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ndsep_secure_2026}
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ── Permify (ReBAC authorization) ──────────────────────────────────────────
+  permify:
+    image: ghcr.io/permify/permify:v1.1.4
+    command: serve
+    environment:
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: ${PERMIFY_DATABASE_URI:-postgres://ndsep_user:ndsep_dev@postgres:5432/ndsep_db}
+    ports: ["3476:3476", "3478:3478"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3476/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ── Temporal (workflow orchestration) ───────────────────────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=ndsep_user
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:-ndsep_secure_2026}
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    ports: ["7233:7233"]
+    healthcheck:
+      test: ["CMD-SHELL", "tctl cluster health | grep -q SERVING || true"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ── APISIX (API Gateway) ───────────────────────────────────────────────────
+  apisix:
+    image: apache/apisix:3.9.1-debian
+    environment:
+      APISIX_STAND_ALONE: "true"
+    ports:
+      - "9080:9080"
+      - "9180:9180"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9080/apisix/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./config/apisix.yaml:/usr/local/apisix/conf/apisix.yaml
+
+  # ── OpenAppSec (WAF) ───────────────────────────────────────────────────────
+  openappsec:
+    image: ghcr.io/openappsec/smartsync-tuning:latest
+    environment:
+      LEARNING_HOST: openappsec
+      TUNING_HOST: 0.0.0.0
+      SYSLOG_ENABLED: "false"
+    ports: ["8085:8085"]
+
+  # ── Dapr (sidecar for pub/sub, state, invocation) ──────────────────────────
+  dapr-sidecar:
+    image: daprio/dapr:1.14.4
+    command: ["./daprd",
+      "--app-id", "ndsep-api",
+      "--app-port", "5000",
+      "--dapr-http-port", "3500",
+      "--dapr-grpc-port", "50001",
+      "--resources-path", "/components"]
+    ports: ["3500:3500"]
+    volumes:
+      - ./config/dapr/components:/components
+    depends_on:
+      - kafka
+      - redis
+    network_mode: "service:ndsep-api"
+
+  # ── Fluvio (streaming) ─────────────────────────────────────────────────────
+  fluvio:
+    image: infinyon/fluvio:0.11.11
+    command: ["fluvio", "cluster", "start", "--local"]
+    ports: ["9003:9003"]
+    environment:
+      FLUVIO_NODE_BIND_ADDR: 0.0.0.0:9003
+
+  # ── TigerBeetle (financial ledger) ─────────────────────────────────────────
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.4
+    command: ["start", "--addresses=0.0.0.0:3001", "/data/0_0.tigerbeetle"]
+    ports: ["3001:3001"]
+    volumes: ["tigerbeetledata:/data"]
+
+  # ── Mojaloop (payment switch simulator) ────────────────────────────────────
+  mojaloop-simulator:
+    image: mojaloop/ml-api-adapter:v14.0.6
+    environment:
+      ENDPOINT_SOURCE_URL: http://mojaloop-simulator:3000
+      ENDPOINT_HEALTH_URL: http://mojaloop-simulator:3000/health
+    ports: ["3000:3000"]
+
+  # ── Lakehouse (MinIO + Iceberg REST) ───────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-06-29T01-20-47Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes: ["miniodata:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  iceberg-rest:
+    image: tabulario/iceberg-rest:1.5.2
+    environment:
+      CATALOG_WAREHOUSE: s3://ndsep-lakehouse/warehouse
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      AWS_S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_REGION: us-east-1
+    ports: ["8181:8181"]
+    depends_on:
+      minio: { condition: service_healthy }
+
+  # ── TypeScript API (main server) ─────────────────────────────────────────────
+  ndsep-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports: ["5000:5000"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ndsep_user:ndsep_dev@postgres:5432/ndsep_db}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-32-chars-minimum!!}
+      NODE_ENV: development
+      EVENT_GATEWAY_URL: http://event-gateway:8170
+      REALTIME_ENGINE_URL: http://realtime-engine:8180
+      PQC_ENGINE_URL: http://pqc-engine:8190
+      COMPLIANCE_AI_URL: http://compliance-ai:8200
+      REGULATORY_INTEL_URL: http://regulatory-intelligence:8201
+      DAPR_HTTP_PORT: "3500"
+      DAPR_ENABLED: "true"
+      KAFKA_BROKERS: kafka:9092
+      OPENSEARCH_URL: http://opensearch:9200
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ndsep
+      KEYCLOAK_ENABLED: "true"
+      PERMIFY_URL: http://permify:3476
+      PERMIFY_ENABLED: "true"
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_ENABLED: "true"
+      APISIX_ADMIN_URL: http://apisix:9180
+      OPENAPPSEC_URL: http://openappsec:8085
+      TIGERBEETLE_ADDRESS: tigerbeetle:3001
+      TIGERBEETLE_ENABLED: "true"
+      FLUVIO_URL: http://fluvio:9003
+      MOJALOOP_ADAPTER_URL: http://mojaloop-simulator:3000
+      MOJALOOP_ENABLED: "true"
+      LAKEHOUSE_CATALOG_URL: http://iceberg-rest:8181
+      LAKEHOUSE_S3_ENDPOINT: http://minio:9000
+      OPENSEARCH_INDEXER_URL: http://opensearch:9200
+      OPENSEARCH_QUERY_URL: http://opensearch:9200
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # ── Go Services ──────────────────────────────────────────────────────────────
+  event-gateway:
+    build:
+      context: ./services/go
+      dockerfile: event-gateway/Dockerfile
+    ports: ["8170:8170"]
+    environment:
+      PORT: "8170"
+      KAFKA_BROKERS: kafka:9092
+
+  realtime-engine:
+    build:
+      context: ./services/go
+      dockerfile: realtime-engine/Dockerfile
+    ports: ["8180:8180"]
+    environment:
+      PORT: "8180"
+
+  dlq-processor:
+    build:
+      context: ./services/go
+      dockerfile: dlq-processor/Dockerfile
+    ports: ["9090:9090"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ndsep_user:ndsep_dev@postgres:5432/ndsep_db}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  health-orchestrator:
+    build:
+      context: ./services/go
+      dockerfile: health-orchestrator/Dockerfile
+    ports: ["8195:8195"]
+    environment:
+      PORT: "8195"
+
+  # ── Rust Services ────────────────────────────────────────────────────────────
+  pqc-engine:
+    build:
+      context: ./services/rust/pqc-engine
+    ports: ["8190:8190"]
+    environment:
+      PORT: "8190"
+
+  data-pipeline:
+    build:
+      context: ./services/rust/data-pipeline
+    ports: ["8191:8191"]
+    environment:
+      PORT: "8191"
+
+  # ── Python ML Services ───────────────────────────────────────────────────────
+  compliance-ai:
+    build:
+      context: ./services/python/compliance-ai
+    ports: ["8200:8200"]
+    environment:
+      PORT: "8200"
+
+  regulatory-intelligence:
+    build:
+      context: ./services/python/regulatory-intelligence
+    ports: ["8201:8201"]
+    environment:
+      PORT: "8201"
+
+  # ── Python Workers ──────────────────────────────────────────────────────────
+  ml-breach-predictor:
+    build:
+      context: .
+      dockerfile: workers/python/Dockerfile
+    command: ["python", "-m", "workers.python.ml_breach_predictor"]
+    environment:
+      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      KAFKA_BROKERS: "kafka:9092"
+      REDIS_URL: "redis://redis:6379"
+    depends_on: [postgres, redis, kafka]
+    restart: unless-stopped
+
+  compliance-analytics-worker:
+    build:
+      context: .
+      dockerfile: workers/python/Dockerfile
+    command: ["python", "-m", "workers.python.compliance_analytics"]
+    environment:
+      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      KAFKA_BROKERS: "kafka:9092"
+      OPENSEARCH_URL: "http://opensearch:9200"
+    depends_on: [postgres, kafka, opensearch]
+    restart: unless-stopped
+
+  dsar-deadline-tracker:
+    build:
+      context: .
+      dockerfile: workers/python/Dockerfile
+    command: ["python", "-m", "workers.python.dsar_deadline_tracker"]
+    environment:
+      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      REDIS_URL: "redis://redis:6379"
+    depends_on: [postgres, redis]
+    restart: unless-stopped
+
+  lakehouse-analytics:
+    build:
+      context: .
+      dockerfile: workers/python/Dockerfile
+    command: ["python", "-m", "workers.python.lakehouse_analytics_engine"]
+    environment:
+      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      ICEBERG_REST_URL: "http://iceberg-rest:8181"
+      MINIO_ENDPOINT: "http://minio:9000"
+    depends_on: [postgres, minio, iceberg-rest]
+    restart: unless-stopped
+
+  siem-correlator:
+    build:
+      context: .
+      dockerfile: workers/python/Dockerfile
+    command: ["python", "-m", "workers.python.siem_correlator"]
+    environment:
+      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      KAFKA_BROKERS: "kafka:9092"
+      REDIS_URL: "redis://redis:6379"
+      OPENSEARCH_URL: "http://opensearch:9200"
+    depends_on: [postgres, kafka, redis]
+    restart: unless-stopped
+
+  noc-anomaly-detector:
+    build:
+      context: .
+      dockerfile: workers/python/Dockerfile
+    command: ["python", "-m", "workers.python.noc_anomaly_detector"]
+    environment:
+      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      KAFKA_BROKERS: "kafka:9092"
+      REDIS_URL: "redis://redis:6379"
+    depends_on: [postgres, kafka, redis]
+    restart: unless-stopped
+
+  watchlist-screener:
+    build:
+      context: .
+      dockerfile: workers/python/Dockerfile
+    command: ["python", "-m", "workers.python.watchlist_screener_fallback"]
+    environment:
+      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      REDIS_URL: "redis://redis:6379"
+    depends_on: [postgres, redis]
+    restart: unless-stopped
+
+  # ── Observability ────────────────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    ports:
+      - "4317:4317"   # gRPC
+      - "4318:4318"   # HTTP
+      - "8889:8889"   # Prometheus metrics
+    volumes:
+      - ./monitoring/otel-config.yaml:/etc/otelcol-contrib/config.yaml
+
+volumes:
+  pgdata:
+  opensearchdata:
+  miniodata:
+  tigerbeetledata:

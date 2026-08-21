@@ -1,0 +1,32 @@
+<slide id="cofo_workflow">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="4" fill="brand"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Certificate of Occupancy workflow continuity</text>
+  <text id="subtitle" x="58" y="86" width="1080" height="30" font="body" size="16" color="muted">The platform does not stop at permit intake. It supports review, approval, signing, and registration continuity across Certificate of Occupancy and related land-rights workflows.</text>
+  <shape id="shot-frame" type="rect" x="58" y="132" width="650" height="392" fill="paper" stroke="hairline" stroke-width="1" shadow="true"/>
+  <image id="legal-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784581943107_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL2xlZ2FsX3dvcmtmbG93X3NlZWRlZF92MQ.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODE5NDMxMDdfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwyeGxaMkZzWDNkdmNtdG1iRzkzWDNObFpXUmxaRjkyTVEucG5nP3gtb3NzLXByb2Nlc3M9aW1hZ2UvcmVzaXplLHdfMTU2MCxoXzE1NjAvZm9ybWF0LHdlYnAiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3ODY3NTIwMDB9fX1dfQ__&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEUCIQDFdWOeHEU-Fc6aCmRRohapGqyYrck99OdMYxKA9JKHegIgUSydHMFZsO7XCG0Tl-wuvDUuwqxK-YnohWZhKDVBPyw_" x="68" y="142" width="630" height="362" fit="cover"/>
+  <text id="shot-caption" x="84" y="508" width="598" height="18" font="caption" size="12" color="muted" align="center">Real web screenshot: Certificate of Occupancy progression, registration status, assigned desk context, and related land-rights workflow continuity</text>
+  <shape id="context-card" type="rect" x="740" y="132" width="482" height="206" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="context-title" x="764" y="156" width="434" height="26" font="body" size="20" color="ink"><p><strong>Why this matters to states</strong></p></text>
+  <text id="context-copy" x="764" y="192" width="434" height="118" font="body" size="17" color="muted" line-height="1.35">Certificate of Occupancy workflows are one of the clearest places where states can improve service quality, citizen trust, and revenue assurance simultaneously. When review, signing, registration, and desk ownership are visible, fewer files disappear into opaque manual chains and more land-linked value becomes traceable.</text>
+  <shape id="revenue-note" type="rect" x="740" y="360" width="482" height="164" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="revenue-title" x="764" y="384" width="434" height="22" font="body" size="18" color="ink"><p><strong>Revenue and accountability relevance</strong></p></text>
+  <text id="revenue-copy" x="764" y="414" width="434" height="84" font="body" size="16" color="muted" line-height="1.35">A clearer C of O pipeline helps states reduce leakage, shorten turnaround, improve formalisation visibility, and create stronger audit trails around land-rights issuance and registration continuity.</text>
+  <shape id="step1" type="rect" x="58" y="552" width="214" height="72" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step1t" x="74" y="572" width="182" height="16" font="caption" size="13" color="brand" align="center" wrap="false">1. Draft prepared</text>
+  <text id="step1c" x="74" y="592" width="182" height="16" font="caption" size="12" color="muted" align="center" wrap="false">Parcel-linked file opened</text>
+  <shape id="step2" type="rect" x="292" y="552" width="214" height="72" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step2t" x="308" y="572" width="182" height="16" font="caption" size="13" color="brand" align="center" wrap="false">2. Review in progress</text>
+  <text id="step2c" x="308" y="592" width="182" height="16" font="caption" size="12" color="muted" align="center" wrap="false">Desk ownership is visible</text>
+  <shape id="step3" type="rect" x="526" y="552" width="214" height="72" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step3t" x="542" y="572" width="182" height="16" font="caption" size="13" color="brand" align="center" wrap="false">3. Approved</text>
+  <text id="step3c" x="542" y="592" width="182" height="16" font="caption" size="12" color="muted" align="center" wrap="false">Decision captured in workflow</text>
+  <shape id="step4" type="rect" x="760" y="552" width="214" height="72" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step4t" x="776" y="572" width="182" height="16" font="caption" size="13" color="brand" align="center" wrap="false">4. Signed</text>
+  <text id="step4c" x="776" y="592" width="182" height="16" font="caption" size="12" color="muted" align="center" wrap="false">Final land-rights control applied</text>
+  <shape id="step5" type="rect" x="994" y="552" width="228" height="72" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="step5t" x="1010" y="572" width="196" height="16" font="caption" size="13" color="brand" align="center" wrap="false">5. Registered</text>
+  <text id="step5c" x="1010" y="592" width="196" height="16" font="caption" size="12" color="muted" align="center" wrap="false">Formal record becomes traceable</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Commercial-in-Confidence</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">5</text>
+</slide>

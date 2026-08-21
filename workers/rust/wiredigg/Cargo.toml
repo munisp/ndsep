@@ -1,0 +1,38 @@
+[package]
+name = "wiredigg"
+version = "0.1.0"
+edition = "2021"
+description = "NDSEP Network Intelligence Engine — real-time packet capture, protocol dissection, ML anomaly detection, threat classification"
+
+[dependencies]
+ndsep_shared = { path = "../shared" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+uuid = { workspace = true }
+axum = { workspace = true }
+
+# Packet capture & protocol parsing
+pnet = "0.35"
+etherparse = "0.16"
+dns-parser = "0.8"
+
+# ML / statistics
+ndarray = "0.16"
+
+# Async & concurrency
+dashmap = "6"
+parking_lot = "0.12"
+
+# Pattern matching
+aho-corasick = "1"
+
+# Tower middleware
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

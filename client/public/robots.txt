@@ -1,0 +1,18 @@
+# NDSEP Platform — Robots Directive
+User-agent: *
+Allow: /dpco-app
+Allow: /register
+Allow: /status
+Allow: /verify
+Allow: /public-registry
+Allow: /privacy-notices
+
+# Disallow authenticated/admin areas
+Disallow: /admin/
+Disallow: /api/
+Disallow: /dpco/
+Disallow: /gov/
+Disallow: /settings/
+
+# Sitemap
+Sitemap: https://ndsep.ng/sitemap.xml

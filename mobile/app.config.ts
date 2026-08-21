@@ -1,0 +1,149 @@
+// Load environment variables with proper priority (system > .env)
+import "./scripts/load-env.js";
+import type { ExpoConfig } from "expo/config";
+
+// Portable bundle/package identifier. Override with APP_BUNDLE_ID when deploying outside local development.
+// Bundle ID can only contain letters, numbers, and dots, and Android requires each segment to start with a letter.
+const rawBundleId = process.env.APP_BUNDLE_ID ?? "com.idlrpts.platform";
+const bundleId =
+  rawBundleId
+    .replace(/[-_]/g, ".") // Replace hyphens/underscores with dots
+    .replace(/[^a-zA-Z0-9.]/g, "") // Remove invalid chars
+    .replace(/\.+/g, ".") // Collapse consecutive dots
+    .replace(/^\.+|\.+$/g, "") // Trim leading/trailing dots
+    .toLowerCase()
+    .split(".")
+    .map((segment) => {
+      // Android requires each segment to start with a letter
+      // Prefix with 'x' if segment starts with a digit
+      return /^[a-zA-Z]/.test(segment) ? segment : "x" + segment;
+    })
+    .join(".") || "com.idlrpts.platform";
+const schemeFromBundleId = process.env.EXPO_PUBLIC_APP_SCHEME ?? "idlrpts";
+
+const env = {
+  // App branding - update these values directly (do not use env vars)
+  appName: "IDLR-PTS Mobile",
+  appSlug: "idlr_pts_mobile",
+  // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
+  // Leave empty to use the default icon from assets/images/icon.png
+  logoUrl: "https://d2xsxph8kpxj0f.cloudfront.net/310519663412555753/nD8psbxgdhN483xARNzbnB/idlr_pts_mobile_icon-3wvmbD3WPyBcKGaBHSyqER.png",
+  scheme: schemeFromBundleId,
+  iosBundleId: bundleId,
+  androidPackage: bundleId,
+};
+
+const config: ExpoConfig = {
+  name: env.appName,
+  slug: env.appSlug,
+  version: "1.0.0",
+  orientation: "portrait",
+  icon: "./assets/images/icon.png",
+  scheme: env.scheme,
+  userInterfaceStyle: "automatic",
+  newArchEnabled: true,
+  ios: {
+    supportsTablet: true,
+    bundleIdentifier: env.iosBundleId,
+    "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["processing"]
+      }
+  },
+  android: {
+    adaptiveIcon: {
+      backgroundColor: "#E6F4FE",
+      foregroundImage: "./assets/images/android-icon-foreground.png",
+      backgroundImage: "./assets/images/android-icon-background.png",
+      monochromeImage: "./assets/images/android-icon-monochrome.png",
+    },
+    edgeToEdgeEnabled: true,
+    predictiveBackGestureEnabled: false,
+    package: env.androidPackage,
+    permissions: ["POST_NOTIFICATIONS", "ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"],
+    intentFilters: [
+      {
+        action: "VIEW",
+        autoVerify: true,
+        data: [
+          {
+            scheme: env.scheme,
+            host: "*",
+          },
+        ],
+        category: ["BROWSABLE", "DEFAULT"],
+      },
+    ],
+  },
+  web: {
+    bundler: "metro",
+    output: "static",
+    favicon: "./assets/images/favicon.png",
+  },
+  plugins: [
+    "expo-router",
+    "expo-background-task",
+    "expo-notifications",
+    "expo-asset",
+    "expo-font",
+    "expo-web-browser",
+    [
+      "expo-camera",
+      {
+        cameraPermission: "Allow $(PRODUCT_NAME) to capture identity, field, and payment receipt evidence.",
+        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone when recording onboarding evidence.",
+        recordAudioAndroid: false,
+      },
+    ],
+    "expo-document-picker",
+    [
+      "expo-audio",
+      {
+        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
+      },
+    ],
+    [
+      "expo-video",
+      {
+        supportsBackgroundPlayback: true,
+        supportsPictureInPicture: true,
+      },
+    ],
+    [
+      "expo-splash-screen",
+      {
+        image: "./assets/images/splash-icon.png",
+        imageWidth: 200,
+        resizeMode: "contain",
+        backgroundColor: "#ffffff",
+        dark: {
+          backgroundColor: "#000000",
+        },
+      },
+    ],
+    [
+      "expo-location",
+      {
+        locationWhenInUsePermission: "Allow $(PRODUCT_NAME) to use your location to detect parcel visits and field activity.",
+        locationAlwaysAndWhenInUsePermission: "Allow $(PRODUCT_NAME) to monitor parcel geofences in the background for field notifications.",
+        isIosBackgroundLocationEnabled: true,
+        isAndroidBackgroundLocationEnabled: true,
+      },
+    ],
+    [
+      "expo-build-properties",
+      {
+        android: {
+          buildArchs: ["armeabi-v7a", "arm64-v8a"],
+          minSdkVersion: 24,
+        },
+      },
+    ],
+  ],
+  experiments: {
+    typedRoutes: true,
+    reactCompiler: true,
+  },
+};
+
+export default config;

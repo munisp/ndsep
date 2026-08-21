@@ -1,0 +1,38 @@
+# Semgrep configuration for NDSEP
+# https://semgrep.dev/docs/running-rules/
+
+rules:
+  - id: ndsep-no-eval
+    pattern: eval(...)
+    message: "eval() is prohibited — use safe alternatives"
+    languages: [typescript, javascript]
+    severity: ERROR
+
+  - id: ndsep-no-innerhtml
+    pattern: $X.innerHTML = ...
+    message: "Direct innerHTML assignment may cause XSS — use textContent or sanitized input"
+    languages: [typescript, javascript]
+    severity: WARNING
+
+  - id: ndsep-no-document-write
+    pattern: document.write(...)
+    message: "document.write() is a security risk"
+    languages: [typescript, javascript]
+    severity: ERROR
+
+  - id: ndsep-no-hardcoded-secrets
+    patterns:
+      - pattern: |
+          $KEY = "..."
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: ".*(password|secret|token|api_key|apikey|auth).*"
+    message: "Possible hardcoded secret — use environment variables"
+    languages: [typescript, javascript]
+    severity: WARNING
+
+  - id: ndsep-no-reject-unauthorized-false
+    pattern: "rejectUnauthorized: false"
+    message: "rejectUnauthorized: false disables TLS certificate verification — MitM vulnerability"
+    languages: [typescript, javascript]
+    severity: ERROR

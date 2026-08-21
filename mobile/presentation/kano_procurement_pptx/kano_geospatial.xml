@@ -1,0 +1,23 @@
+<slide id="kano_geospatial">
+  <background color="paper"/>
+  <shape id="top-bar" type="rect" x="0" y="0" width="1280" height="3" fill="brand-green"/>
+  <text id="title" x="58" y="40" width="980" height="46" font="heading" size="30" color="ink" wrap="false">Parcel visibility strengthens GIS-backed land administration</text>
+  <text id="subtitle" x="58" y="86" width="1092" height="30" font="body" size="16" color="muted">The platform’s real web map gives Kano a live parcel-review surface where markers, corridor overlays, and parcel intelligence support field-led administration and desk-based decision-making together.</text>
+  <shape id="shot-frame" type="rect" x="58" y="136" width="736" height="428" fill="paper" stroke="border" stroke-width="1"/>
+  <image id="shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784584449121_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL2Z1bGxzY3JlZW5fbWFwX3NlZWRlZF92MQ.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1ODQ0NDkxMjFfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwyWjFiR3h6WTNKbFpXNWZiV0Z3WDNObFpXUmxaRjkyTVEucG5nP3gtb3NzLXByb2Nlc3M9aW1hZ2UvcmVzaXplLHdfMTU2MCxoXzE1NjAvZm9ybWF0LHdlYnAiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3ODY3NTIwMDB9fX1dfQ__&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEQCIFjO8ktN73rGs~jclHDGY-meSryampeZunfTUkHsxeiaAiBaZi3jm91Y53RMZttnl-VzE~7Uk0qecknmMP4Gq8zRRw__" x="70" y="160" width="712" height="380" fit="cover"/>
+  <text id="shot-label" x="70" y="144" width="712" height="14" font="caption" size="11" color="muted" align="center" wrap="false">Real web screenshot • browser-rendered parcel map with multiple markers, active legends, and corridor overlays</text>
+  <shape id="right-card" type="rect" x="826" y="136" width="396" height="428" fill="surface" stroke="border" stroke-width="1"/>
+  <text id="right-title" x="850" y="162" width="348" height="28" font="body" size="20" color="ink"><p><strong>What this unlocks for Kano</strong></p></text>
+  <text id="right-copy" x="850" y="204" width="348" height="316" font="body" size="17" color="ink" line-height="1.33">
+    <p>The map view helps Kano connect parcel identity, digitised land intelligence, and workflow context in one review environment.</p>
+    <p space-before="14"><strong>This supports:</strong></p>
+    <p space-before="10">• Better alignment between field demarcation and the registry record.</p>
+    <p>• Clearer parcel context before certificate generation or post-title transactions.</p>
+    <p>• A more practical GIS backbone for land administration and governance use cases.</p>
+    <p>• Stronger visibility into corridor-sensitive infrastructure, housing, and extractive review zones.</p>
+  </text>
+  <shape id="assurance-band" type="rect" x="58" y="586" width="1164" height="40" fill="#ECFDF5" stroke="#BBF7D0" stroke-width="1"/>
+  <text id="assurance" x="82" y="598" width="1116" height="16" font="body" size="15" color="ink" align="center" wrap="false">For Kano, parcel maps become more valuable when they directly support demarcation, certification, and revenue-linked registry continuity.</text>
+  <text id="footer" x="58" y="686" width="620" height="18" font="caption" size="12" color="muted" wrap="false">IDLR-PTS Platform | Kano State</text>
+  <text id="page" x="1210" y="684" width="22" height="18" font="caption" size="12" color="muted" align="right" wrap="false">3</text>
+</slide>

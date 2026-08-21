@@ -1,0 +1,17 @@
+[package]
+name = "portability_exporter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+axum = { workspace = true }
+tokio-postgres = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+uuid = { workspace = true }

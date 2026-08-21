@@ -1,0 +1,201 @@
+# NDSEP Multi-Region Active-Active Deployment
+# Deploys across Nigerian data centers with disaster recovery.
+# Uses CockroachDB for multi-region SQL consistency.
+---
+# CockroachDB StatefulSet — Multi-region cluster
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cockroachdb
+  namespace: ndsep
+spec:
+  serviceName: cockroachdb
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cockroachdb
+  template:
+    metadata:
+      labels:
+        app: cockroachdb
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - cockroachdb
+              topologyKey: topology.kubernetes.io/zone
+      containers:
+        - name: cockroachdb
+          image: cockroachdb/cockroach:v24.1.0
+          ports:
+            - containerPort: 26257
+              name: grpc
+            - containerPort: 8080
+              name: http
+          command:
+            - /cockroach/cockroach
+            - start
+            - --logtostderr
+            - --certs-dir=/cockroach/cockroach-certs
+            - --advertise-addr=$(POD_NAME).cockroachdb.ndsep.svc.cluster.local
+            - --join=cockroachdb-0.cockroachdb.ndsep.svc.cluster.local,cockroachdb-1.cockroachdb.ndsep.svc.cluster.local,cockroachdb-2.cockroachdb.ndsep.svc.cluster.local
+            - --locality=region=ng,zone=$(ZONE)
+            - --cache=.25
+            - --max-sql-memory=.25
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ZONE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['topology.kubernetes.io/zone']
+          volumeMounts:
+            - name: datadir
+              mountPath: /cockroach/cockroach-data
+            - name: certs
+              mountPath: /cockroach/cockroach-certs
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+          readinessProbe:
+            httpGet:
+              path: /health?ready=1
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: certs
+          secret:
+            secretName: cockroachdb-certs
+  volumeClaimTemplates:
+    - metadata:
+        name: datadir
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 100Gi
+        storageClassName: ssd-regional
+---
+# CockroachDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: cockroachdb
+  namespace: ndsep
+spec:
+  clusterIP: None
+  selector:
+    app: cockroachdb
+  ports:
+    - port: 26257
+      targetPort: 26257
+      name: grpc
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+# Global Load Balancer with geo-routing
+apiVersion: v1
+kind: Service
+metadata:
+  name: ndsep-global-lb
+  namespace: ndsep
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    external-dns.alpha.kubernetes.io/hostname: "api.ndsep.ng"
+spec:
+  type: LoadBalancer
+  selector:
+    app: ndsep-api
+  ports:
+    - port: 443
+      targetPort: 3000
+      protocol: TCP
+---
+# Geo-routing ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: geo-routing-config
+  namespace: ndsep
+data:
+  regions.json: |
+    {
+      "regions": [
+        {
+          "name": "ng-lagos",
+          "endpoint": "lagos.api.ndsep.ng",
+          "zone": "ng-west-1",
+          "priority": 1,
+          "health_endpoint": "/health"
+        },
+        {
+          "name": "ng-abuja",
+          "endpoint": "abuja.api.ndsep.ng",
+          "zone": "ng-central-1",
+          "priority": 2,
+          "health_endpoint": "/health"
+        },
+        {
+          "name": "gh-accra",
+          "endpoint": "accra.api.ndsep.ng",
+          "zone": "gh-south-1",
+          "priority": 3,
+          "role": "disaster-recovery",
+          "health_endpoint": "/health"
+        }
+      ],
+      "failover": {
+        "health_check_interval_ms": 5000,
+        "unhealthy_threshold": 3,
+        "rpo_target_seconds": 60,
+        "rto_target_seconds": 300
+      },
+      "data_residency": {
+        "primary_country": "NG",
+        "dr_country": "GH",
+        "encryption_at_rest": "AES-256-GCM",
+        "key_management": "AWS KMS ng-west-1"
+      }
+    }
+---
+# PodDisruptionBudget — ensure availability during updates
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ndsep-api-pdb
+  namespace: ndsep
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: ndsep-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cockroachdb-pdb
+  namespace: ndsep
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: cockroachdb

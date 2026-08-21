@@ -1,0 +1,29 @@
+<slide id="why_now">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="36" width="4" height="610" fill="hairline"/>
+  <text id="title" x="86" y="50" width="430" height="40" font="heading" size="30" color="ink" wrap="false">Why Nigeria needs this now</text>
+  <text id="intro" x="86" y="108" width="474" height="156" font="body" size="20" color="muted" line-height="1.38"><p>Nigeria’s land, housing, planning, and extractives systems already operate at a scale where fragmented workflows create real economic cost. The issue is no longer whether digitization is useful, but whether the approval backbone is strong enough to support national delivery.</p></text>
+
+  <shape id="metric-card-1" type="rect" x="640" y="110" width="558" height="132" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="metric-1-value" x="670" y="134" width="180" height="40" font="display" size="34" color="brand" wrap="false">550,000</text>
+  <text id="metric-1-title" x="858" y="134" width="300" height="28" font="strong" size="20" color="ink" wrap="false">Housing units needed annually</text>
+  <text id="metric-1-body" x="858" y="170" width="300" height="44" font="body" size="17" color="muted" line-height="1.3"><p>Federal housing leadership says this annual pace is needed to curb the national deficit. [1]</p></text>
+
+  <shape id="metric-card-2" type="rect" x="640" y="270" width="558" height="132" fill="paper" stroke="hairline" stroke-width="1"/>
+  <text id="metric-2-value" x="670" y="294" width="180" height="40" font="display" size="34" color="chart-blue" wrap="false">&lt;10% → 50%</text>
+  <text id="metric-2-title" x="858" y="294" width="300" height="28" font="strong" size="20" color="ink" wrap="false">Land formalisation ambition</text>
+  <text id="metric-2-body" x="858" y="330" width="300" height="44" font="body" size="17" color="muted" line-height="1.3"><p>The national target is to move from less than 10% formalisation to 50% in ten years. [1]</p></text>
+
+  <shape id="metric-card-3" type="rect" x="640" y="430" width="558" height="132" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="metric-3-value" x="670" y="454" width="180" height="40" font="display" size="34" color="accent" wrap="false">5,000+ titles</text>
+  <text id="metric-3-title" x="858" y="454" width="300" height="28" font="strong" size="20" color="ink" wrap="false">Mining cadastre scale</text>
+  <text id="metric-3-body" x="858" y="490" width="300" height="44" font="body" size="17" color="muted" line-height="1.3"><p>Nigeria’s Mining Cadastre Office reports 5,000+ mineral titles and 2,000+ applications annually. [2]</p></text>
+
+  <shape id="insight-strip" type="rect" x="86" y="454" width="474" height="108" fill="mist" stroke="hairline" stroke-width="1"/>
+  <text id="insight-strip-text" x="112" y="480" width="426" height="56" font="body" size="18" color="ink" line-height="1.35"><p><strong>What this means:</strong> Nigeria needs a platform that can coordinate land, permits, evidence, field validation, and trust controls at scale rather than improving each part in isolation.</p></text>
+
+  <shape id="footer-strip" type="rect" x="0" y="674" width="1280" height="46" fill="paper"/>
+  <shape id="footer-line" type="rect" x="0" y="674" width="1280" height="2" fill="brand"/>
+  <text id="footer-text" x="64" y="689" width="420" height="14" font="caption" size="13" color="muted" wrap="false">IDLR-PTS Platform | Nigeria stakeholder deck</text>
+  <text id="page-number" x="1210" y="689" width="24" height="14" font="caption" size="13" color="muted" align="right" wrap="false">2</text>
+</slide>

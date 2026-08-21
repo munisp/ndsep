@@ -1,0 +1,403 @@
+version: "3.9"
+
+networks:
+  ndsep-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  temporal_data:
+  keycloak_data:
+  tigerbeetle_data:
+
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ndsep
+      POSTGRES_USER: ndsep
+      POSTGRES_PASSWORD: ndsep_secure_2026
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+    networks: [ndsep-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ndsep"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redis_data:/data]
+    ports: ["6379:6379"]
+    networks: [ndsep-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks: [ndsep-net]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on: [zookeeper]
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes: [kafka_data:/var/lib/kafka/data]
+    networks: [ndsep-net]
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ndsep_admin_2026
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep
+      KC_DB_USERNAME: ndsep
+      KC_DB_PASSWORD: ndsep_secure_2026
+    ports: ["8080:8080"]
+    depends_on: [postgres]
+    networks: [ndsep-net]
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./keycloak/ndsep-realm.json:/opt/keycloak/data/import/ndsep-realm.json:ro
+
+  permify:
+    image: ghcr.io/permify/permify:latest
+    command: serve
+    environment:
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: postgres://ndsep:ndsep_secure_2026@postgres:5432/ndsep
+    ports: ["3476:3476", "3478:3478"]
+    depends_on: [postgres]
+    networks: [ndsep-net]
+
+  temporal:
+    image: temporalio/auto-setup:1.22
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: ndsep
+      POSTGRES_PWD: ndsep_secure_2026
+      POSTGRES_SEEDS: postgres
+    ports: ["7233:7233"]
+    depends_on: [postgres]
+    networks: [ndsep-net]
+
+  temporal-ui:
+    image: temporalio/ui:2.21.3
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports: ["8088:8080"]
+    depends_on: [temporal]
+    networks: [ndsep-net]
+
+  dapr-placement:
+    image: daprio/dapr:1.12.0
+    command: ["./placement", "-port", "50006"]
+    ports: ["50006:50006"]
+    networks: [ndsep-net]
+
+  # ── Go Microservices ────────────────────────────────────────────────────────
+
+  api-gateway:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args: {SERVICE: api_gateway}
+    ports: ["8130:8130"]
+    environment:
+      PORT: "8130"
+      KAFKA_BROKERS: kafka:29092
+      REDIS_ADDR: redis:6379
+    depends_on: [kafka, redis]
+    networks: [ndsep-net]
+
+  iam-service:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args: {SERVICE: iam_service}
+    ports: ["8150:8150"]
+    environment:
+      PORT: "8150"
+      KEYCLOAK_URL: http://keycloak:8080
+      PERMIFY_URL: http://permify:3476
+      REDIS_ADDR: redis:6379
+    depends_on: [keycloak, permify, redis]
+    networks: [ndsep-net]
+
+  event-bus:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args: {SERVICE: event_bus}
+    ports: ["8160:8160"]
+    environment:
+      PORT: "8160"
+      KAFKA_BROKERS: kafka:29092
+      REDIS_ADDR: redis:6379
+    depends_on: [kafka, redis]
+    networks: [ndsep-net]
+
+  workflow-engine:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args: {SERVICE: workflow_engine}
+    ports: ["8170:8170"]
+    environment:
+      PORT: "8170"
+      TEMPORAL_HOST: temporal:7233
+      KAFKA_BROKERS: kafka:29092
+    depends_on: [temporal, kafka]
+    networks: [ndsep-net]
+
+  tigerbeetle-init:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    command: ["format", "--cluster=0", "--replica=0", "--replica-count=1", "/data/0_0.tigerbeetle"]
+    volumes: [tigerbeetle_data:/data]
+    networks: [ndsep-net]
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    command: ["start", "--addresses=0.0.0.0:3000", "/data/0_0.tigerbeetle"]
+    ports: ["3000:3000"]
+    volumes: [tigerbeetle_data:/data]
+    depends_on:
+      tigerbeetle-init:
+        condition: service_completed_successfully
+    networks: [ndsep-net]
+
+  tigerbeetle-ledger:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args: {SERVICE: tigerbeetle_ledger}
+    ports: ["8240:8240"]
+    environment:
+      PORT: "8240"
+      TIGERBEETLE_CLUSTER_ID: "0"
+      TIGERBEETLE_ADDRESSES: tigerbeetle:3000
+    depends_on: [tigerbeetle]
+    networks: [ndsep-net]
+
+  # ── Python Microservices ────────────────────────────────────────────────────
+
+  ml-pipeline:
+    build:
+      context: ./python/ml_pipeline
+      dockerfile: Dockerfile
+    ports: ["8200:8200"]
+    environment:
+      PORT: "8200"
+      DATABASE_URL: postgresql://ndsep:ndsep_secure_2026@postgres:5432/ndsep
+      REDIS_URL: redis://redis:6379
+    depends_on: [postgres, redis]
+    networks: [ndsep-net]
+
+  lakehouse:
+    build:
+      context: ./python/lakehouse
+      dockerfile: Dockerfile
+    ports: ["8210:8210"]
+    environment:
+      PORT: "8210"
+      DELTA_LAKE_URI: s3://ndsep-lakehouse/delta
+      KAFKA_BROKERS: kafka:29092
+    depends_on: [kafka]
+    networks: [ndsep-net]
+
+  dapr-bindings:
+    build:
+      context: ./python/dapr_bindings
+      dockerfile: Dockerfile
+    ports: ["8220:8220"]
+    environment:
+      PORT: "8220"
+      DAPR_HTTP_PORT: "3500"
+      DAPR_GRPC_PORT: "50001"
+      APP_ID: ndsep-orchestration
+      KAFKA_BROKERS: kafka:29092
+    depends_on: [dapr-placement, kafka]
+    networks: [ndsep-net]
+
+  # ── DPCO Microservices ─────────────────────────────────────────────────────
+  dpco-audit-service:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args:
+        SERVICE: dpco_audit_service
+    image: ndsep/dpco-audit-service:latest
+    ports: ["8300:8300"]
+    environment:
+      PORT: "8300"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "true"
+      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ndsep
+      KEYCLOAK_CLIENT_ID: ndsep-dpco-audit
+      KEYCLOAK_CLIENT_SECRET: dpco-audit-secret-2026
+      KEYCLOAK_ENABLED: "true"
+      PERMIFY_URL: http://permify:3476
+      PERMIFY_TENANT_ID: t1
+      PERMIFY_ENABLED: "true"
+      REDIS_URL: redis://redis:6379
+      REDIS_ENABLED: "true"
+      DATABASE_URL: postgresql://ndsep:ndsep_secure_2026@postgres:5432/ndsep
+    depends_on: [kafka, temporal, keycloak, permify, redis, postgres]
+    networks: [ndsep-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8300/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dpco-registry-service:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args:
+        SERVICE: dpco_registry_service
+    image: ndsep/dpco-registry-service:latest
+    ports: ["8310:8310"]
+    environment:
+      PORT: "8310"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "true"
+      DAPR_HTTP_PORT: "3500"
+      DAPR_GRPC_PORT: "50001"
+      DAPR_APP_ID: dpco-registry
+      DAPR_ENABLED: "true"
+      REDIS_URL: redis://redis:6379
+      REDIS_ENABLED: "true"
+      TIGERBEETLE_ADDRESS: tigerbeetle:3000
+      TIGERBEETLE_ENABLED: "true"
+      APISIX_ADMIN_URL: http://apisix:9180
+      APISIX_ADMIN_KEY: edd1c9f034335f136f87ad84b625c8f1
+      APISIX_ENABLED: "true"
+      DATABASE_URL: postgresql://ndsep:ndsep_secure_2026@postgres:5432/ndsep
+    depends_on: [kafka, redis, postgres, dapr-placement]
+    networks: [ndsep-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8310/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dpco-verification-service:
+    build:
+      context: ./go
+      dockerfile: Dockerfile
+      args:
+        SERVICE: dpco_verification_service
+    image: ndsep/dpco-verification-service:latest
+    ports: ["8320:8320"]
+    environment:
+      PORT: "8320"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "true"
+      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_ENABLED: "true"
+      PERMIFY_URL: http://permify:3476
+      PERMIFY_TENANT_ID: t1
+      PERMIFY_ENABLED: "true"
+      NDSEP_CERT_PATH: /certs/ndsep-signing.crt
+      NDSEP_KEY_PATH: /certs/ndsep-signing.key
+    volumes:
+      - ../../certs:/certs:ro
+    depends_on: [kafka, temporal, permify]
+    networks: [ndsep-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8320/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dpco-analytics-service:
+    build:
+      context: ./python/dpco_analytics
+      dockerfile: Dockerfile
+    image: ndsep/dpco-analytics-service:latest
+    ports: ["8330:8330"]
+    environment:
+      PORT: "8330"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "true"
+      FLUVIO_HTTP_URL: http://fluvio:9003
+      FLUVIO_ENABLED: "true"
+      LAKEHOUSE_S3_ENDPOINT: http://minio:9000
+      LAKEHOUSE_S3_BUCKET: ndsep-lakehouse
+      LAKEHOUSE_S3_ACCESS_KEY: minioadmin
+      LAKEHOUSE_S3_SECRET_KEY: minioadmin
+      LAKEHOUSE_ENABLED: "true"
+      REDIS_URL: redis://redis:6379
+      DAPR_HTTP_PORT: "3500"
+      DAPR_APP_ID: dpco-analytics
+      DAPR_ENABLED: "true"
+    depends_on: [kafka, redis]
+    networks: [ndsep-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8330/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dpco-notification-service:
+    build:
+      context: ./python/dpco_notification
+      dockerfile: Dockerfile
+    image: ndsep/dpco-notification-service:latest
+    ports: ["8340:8340"]
+    environment:
+      PORT: "8340"
+      KAFKA_BROKERS: kafka:29092
+      KAFKA_ENABLED: "true"
+      DAPR_HTTP_PORT: "3500"
+      DAPR_APP_ID: dpco-notification
+      DAPR_ENABLED: "true"
+      REDIS_URL: redis://redis:6379
+      FLUVIO_HTTP_URL: http://fluvio:9003
+      FLUVIO_ENABLED: "true"
+      WORKER_RELAY_URL: http://ndsep-api:3000/api/workers/event
+    depends_on: [kafka, redis, dapr-placement]
+    networks: [ndsep-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8340/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

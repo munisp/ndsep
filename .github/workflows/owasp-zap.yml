@@ -1,0 +1,107 @@
+###############################################################################
+# NDSEP OWASP ZAP Dynamic Application Security Testing (DAST)
+# Runs ZAP against a live staging instance to discover runtime vulnerabilities
+# that static analysis cannot find: broken auth, misconfigured headers, etc.
+###############################################################################
+
+name: "OWASP ZAP DAST Scan"
+
+on:
+  # Run after successful deployment to staging
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to scan (staging environment)'
+        required: true
+        default: 'http://localhost:3000'
+  schedule:
+    # Weekly Thursday 02:00 UTC (after staging deploy)
+    - cron: '0 2 * * 4'
+
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
+jobs:
+  zap-scan:
+    name: OWASP ZAP Full Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ndsep_user
+          POSTGRES_PASSWORD: ndsep_test_pass
+          POSTGRES_DB: ndsep_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with: { version: '10.4.1' }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install and build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Start application
+        run: |
+          export DATABASE_URL="postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test"
+          export JWT_SECRET="test-jwt-secret-for-ci-only"
+          export NODE_ENV="production"
+          export ENFORCE_CSRF="false"
+          node dist/server/_core/index.js &
+          sleep 10
+        env:
+          PORT: 3000
+
+      - name: Wait for application
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:3000/api/health > /dev/null 2>&1; then
+              echo "Application is ready"
+              break
+            fi
+            echo "Waiting... ($i)"
+            sleep 2
+          done
+
+      - name: ZAP API Scan
+        uses: zaproxy/action-api-scan@v0.9.0
+        with:
+          target: 'http://localhost:3000/api/docs/openapi.json'
+          format: openapi
+          cmd_options: '-a -j -l WARN'
+          allow_issue_writing: true
+        continue-on-error: true
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.13.0
+        with:
+          target: 'http://localhost:3000'
+          rules_file_name: '.github/zap-rules.tsv'
+          cmd_options: '-a -j'
+          allow_issue_writing: true
+        continue-on-error: true
+
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: |
+            report_html.html
+            report_json.json
+            report_md.md

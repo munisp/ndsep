@@ -1,0 +1,32 @@
+FROM python:3.11-slim
+
+# Install system dependencies for OpenCV and dlib
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake \
+    build-essential \
+    libopencv-dev \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements-liveness.txt .
+RUN pip install --no-cache-dir -r requirements-liveness.txt
+
+# Copy application code
+COPY liveness/ ./liveness/
+COPY liveness_service.py .
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8150/health')" || exit 1
+
+# Run
+EXPOSE 8150
+ENV LIVENESS_SERVICE_PORT=8150
+CMD ["python", "liveness_service.py"]

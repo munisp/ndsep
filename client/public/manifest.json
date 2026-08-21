@@ -1,0 +1,35 @@
+{
+  "name": "NDSEP - Nigeria Data Sovereignty & Enforcement Platform",
+  "short_name": "NDSEP",
+  "description": "National data protection compliance, audit, and enforcement platform for Nigeria",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#111019",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "categories": ["business", "productivity", "government"],
+  "lang": "en-NG",
+  "dir": "ltr",
+  "scope": "/",
+  "prefer_related_applications": false,
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  }
+}

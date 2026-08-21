@@ -1,0 +1,169 @@
+###############################################################################
+# NDSEP Kubernetes NetworkPolicies
+# Enforces zero-trust network segmentation between services.
+# Apply: kubectl apply -f infra/k8s/network-policy.yaml
+###############################################################################
+
+# ─── Default deny all ingress/egress ────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: ndsep
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# ─── Allow API to receive traffic from ingress controller ───────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-api
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      app: ndsep-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+# ─── Allow API to connect to PostgreSQL ─────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-postgres
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      app: ndsep-api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# ─── Allow API to connect to Redis ──────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-redis
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      app: ndsep-api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# ─── Allow API to connect to Kafka ──────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-kafka
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      app: ndsep-api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+---
+# ─── Allow API egress to external HTTPS (Termii, SendGrid, Stripe, etc.) ────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-external-https
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      app: ndsep-api
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 53
+      to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+---
+# ─── Allow workers to connect to PostgreSQL ─────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-workers-to-postgres
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      role: worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# ─── Allow Prometheus to scrape API metrics ─────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      app: ndsep-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3000

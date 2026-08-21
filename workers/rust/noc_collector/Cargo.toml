@@ -1,0 +1,23 @@
+[package]
+name = "noc_collector"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "noc_collector"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full", "net"] }
+axum = { version = "0.7", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio-postgres = "0.7"
+reqwest = { version = "0.12", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+log = "0.4"
+env_logger = "0.11"
+sha2 = "0.10"
+hex = "0.4"

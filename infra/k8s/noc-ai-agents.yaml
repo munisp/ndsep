@@ -1,0 +1,185 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noc-ai-perception
+  labels:
+    app: noc-ai-perception
+    tier: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: noc-ai-perception
+  template:
+    metadata:
+      labels:
+        app: noc-ai-perception
+    spec:
+      containers:
+        - name: perception
+          image: ndsep/noc-ai-perception:latest
+          ports:
+            - containerPort: 8194
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: RELAY_URL
+              value: "http://ndsep-server:4000"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8194
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8194
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noc-ai-perception
+spec:
+  selector:
+    app: noc-ai-perception
+  ports:
+    - port: 8194
+      targetPort: 8194
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noc-ai-reasoning
+  labels:
+    app: noc-ai-reasoning
+    tier: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: noc-ai-reasoning
+  template:
+    metadata:
+      labels:
+        app: noc-ai-reasoning
+    spec:
+      containers:
+        - name: reasoning
+          image: ndsep/noc-ai-reasoning:latest
+          ports:
+            - containerPort: 8195
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: OLLAMA_URL
+              value: "http://ollama:11434"
+            - name: RELAY_URL
+              value: "http://ndsep-server:4000"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8195
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8195
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noc-ai-reasoning
+spec:
+  selector:
+    app: noc-ai-reasoning
+  ports:
+    - port: 8195
+      targetPort: 8195
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noc-ai-action
+  labels:
+    app: noc-ai-action
+    tier: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: noc-ai-action
+  template:
+    metadata:
+      labels:
+        app: noc-ai-action
+    spec:
+      containers:
+        - name: action
+          image: ndsep/noc-ai-action:latest
+          ports:
+            - containerPort: 8196
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: RELAY_URL
+              value: "http://ndsep-server:4000"
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8196
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8196
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: noc-ai-action
+spec:
+  selector:
+    app: noc-ai-action
+  ports:
+    - port: 8196
+      targetPort: 8196

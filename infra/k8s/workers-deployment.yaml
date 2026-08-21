@@ -1,0 +1,1119 @@
+# NDSEP Worker Services — Kubernetes Deployment Manifests
+# All workers: non-root, resource limits, liveness/readiness probes, graceful termination
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ndsep-worker-config
+  namespace: ndsep
+data:
+  KAFKA_BROKERS: "kafka:9092"
+  REDIS_URL: "redis://redis:6379"
+  TEMPORAL_HOST: "temporal:7233"
+  DAPR_HTTP_PORT: "3500"
+  LOG_LEVEL: "info"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+---
+# BGP Validator (Go) - 2 replicas with HPA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bgp-validator
+  namespace: ndsep
+  labels: { app: bgp-validator, tier: worker, language: go }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: bgp-validator }
+  template:
+    metadata:
+      labels: { app: bgp-validator, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: bgp-validator
+          image: ndsep/bgp-validator:latest
+          command: ["/app/bgp_validator"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8081, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8081 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Compliance Rescorer (Go) - 1 replica
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compliance-rescorer
+  namespace: ndsep
+  labels: { app: compliance-rescorer, tier: worker, language: go }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: compliance-rescorer }
+  template:
+    metadata:
+      labels: { app: compliance-rescorer, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: compliance-rescorer
+          image: ndsep/compliance-rescorer:latest
+          command: ["/app/compliance_rescorer"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8082, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8082 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Citizen SLA Tracker (Go)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: citizen-sla-tracker
+  namespace: ndsep
+  labels: { app: citizen-sla-tracker, tier: worker, language: go }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: citizen-sla-tracker }
+  template:
+    metadata:
+      labels: { app: citizen-sla-tracker, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: citizen-sla-tracker
+          image: ndsep/citizen-sla-tracker:latest
+          command: ["/app/citizen_sla_tracker"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8083, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8083 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Evidence Signer (Rust) - 2 replicas
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evidence-signer
+  namespace: ndsep
+  labels: { app: evidence-signer, tier: worker, language: rust }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: evidence-signer }
+  template:
+    metadata:
+      labels: { app: evidence-signer, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: evidence-signer
+          image: ndsep/evidence-signer:latest
+          command: ["/app/evidence_signer"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8091, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8091 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Financial Ledger (Rust) - 2 replicas
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: financial-ledger
+  namespace: ndsep
+  labels: { app: financial-ledger, tier: worker, language: rust }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: financial-ledger }
+  template:
+    metadata:
+      labels: { app: financial-ledger, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: financial-ledger
+          image: ndsep/financial-ledger:latest
+          command: ["/app/financial_ledger"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8092, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8092 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Residency Enforcer (Rust) - 2 replicas
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: residency-enforcer
+  namespace: ndsep
+  labels: { app: residency-enforcer, tier: worker, language: rust }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: residency-enforcer }
+  template:
+    metadata:
+      labels: { app: residency-enforcer, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: residency-enforcer
+          image: ndsep/residency-enforcer:latest
+          command: ["/app/residency_enforcer"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8093, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8093 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Remediation Engine (Python)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remediation-engine
+  namespace: ndsep
+  labels: { app: remediation-engine, tier: worker, language: python }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: remediation-engine }
+  template:
+    metadata:
+      labels: { app: remediation-engine, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: remediation-engine
+          image: ndsep/python-workers:latest
+          command: ["python3", "-u", "workers/python/remediation_engine.py"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8101, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8101 }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "200m", memory: "512Mi" }
+            limits: { cpu: "1000m", memory: "2Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+# ML Compliance Prediction (Python) - 2 replicas with HPA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-prediction
+  namespace: ndsep
+  labels: { app: ml-prediction, tier: worker, language: python }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: ml-prediction }
+  template:
+    metadata:
+      labels: { app: ml-prediction, tier: worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: ml-prediction
+          image: ndsep/python-workers:latest
+          command: ["python3", "-u", "workers/python/ml_compliance_prediction.py"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          ports: [{ containerPort: 8102, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8102 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { cpu: "2000m", memory: "4Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+# HorizontalPodAutoscalers
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: bgp-validator-hpa
+  namespace: ndsep
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: bgp-validator
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ml-prediction-hpa
+  namespace: ndsep
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-prediction
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 60 }
+---
+# PodDisruptionBudgets
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bgp-validator-pdb
+  namespace: ndsep
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: bgp-validator }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: evidence-signer-pdb
+  namespace: ndsep
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: evidence-signer }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: financial-ledger-pdb
+  namespace: ndsep
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: financial-ledger }
+---
+# ─── Banking Workers ──────────────────────────────────────────────────────────
+# KYC Verification Worker (Python)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyc-worker
+  namespace: ndsep
+  labels: { app: kyc-worker, tier: worker, language: python, domain: banking }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: kyc-worker }
+  template:
+    metadata:
+      labels: { app: kyc-worker, tier: worker, domain: banking }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: kyc-worker
+          image: ndsep/kyc-worker:latest
+          command: ["python", "-m", "kyc_worker.main"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          env:
+            - name: WORKER_PORT
+              value: "8116"
+          ports: [{ containerPort: 8116, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8116 }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health, port: 8116 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+---
+# AML Screening Worker (Python)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aml-worker
+  namespace: ndsep
+  labels: { app: aml-worker, tier: worker, language: python, domain: banking }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: aml-worker }
+  template:
+    metadata:
+      labels: { app: aml-worker, tier: worker, domain: banking }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: aml-worker
+          image: ndsep/aml-worker:latest
+          command: ["python", "-m", "aml_worker.main"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          env:
+            - name: WORKER_PORT
+              value: "8117"
+          ports: [{ containerPort: 8117, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8117 }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "300m", memory: "512Mi" }
+            limits: { cpu: "1500m", memory: "2Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+---
+# NIP/RTGS Payment Monitor (Python)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-monitor
+  namespace: ndsep
+  labels: { app: payment-monitor, tier: worker, language: python, domain: banking }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: payment-monitor }
+  template:
+    metadata:
+      labels: { app: payment-monitor, tier: worker, domain: banking }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: payment-monitor
+          image: ndsep/payment-monitor:latest
+          command: ["python", "-m", "payment_monitor.main"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          env:
+            - name: WORKER_PORT
+              value: "8118"
+          ports: [{ containerPort: 8118, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8118 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+---
+# Fraud Detection Engine (Python) - 3 replicas with HPA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-engine
+  namespace: ndsep
+  labels: { app: fraud-engine, tier: worker, language: python, domain: banking }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: fraud-engine }
+  template:
+    metadata:
+      labels: { app: fraud-engine, tier: worker, domain: banking }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: fraud-engine
+          image: ndsep/fraud-engine:latest
+          command: ["python", "-m", "fraud_engine.main"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          env:
+            - name: WORKER_PORT
+              value: "8119"
+          ports: [{ containerPort: 8119, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8119 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { cpu: "2000m", memory: "4Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+---
+# CBN Regulatory Reporting Worker (Python)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cbn-reporter
+  namespace: ndsep
+  labels: { app: cbn-reporter, tier: worker, language: python, domain: banking }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: cbn-reporter }
+  template:
+    metadata:
+      labels: { app: cbn-reporter, tier: worker, domain: banking }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: cbn-reporter
+          image: ndsep/cbn-reporter:latest
+          command: ["python", "-m", "cbn_reporter.main"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          env:
+            - name: WORKER_PORT
+              value: "8120"
+          ports: [{ containerPort: 8120, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8120 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: { drop: ["ALL"] }
+---
+# SWIFT Message Processor (Go)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swift-processor
+  namespace: ndsep
+  labels: { app: swift-processor, tier: worker, language: go, domain: banking }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: swift-processor }
+  template:
+    metadata:
+      labels: { app: swift-processor, tier: worker, domain: banking }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: swift-processor
+          image: ndsep/swift-processor:latest
+          command: ["/app/swift_processor"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          env:
+            - name: WORKER_PORT
+              value: "8121"
+          ports: [{ containerPort: 8121, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8121 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Banking Registry (Go)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: banking-registry
+  namespace: ndsep
+  labels: { app: banking-registry, tier: worker, language: go, domain: banking }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: banking-registry }
+  template:
+    metadata:
+      labels: { app: banking-registry, tier: worker, domain: banking }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000 }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: banking-registry
+          image: ndsep/banking-registry:latest
+          command: ["/app/banking_registry"]
+          envFrom:
+            - configMapRef: { name: ndsep-worker-config }
+            - secretRef: { name: ndsep-secrets }
+          env:
+            - name: WORKER_PORT
+              value: "8122"
+          ports: [{ containerPort: 8122, name: health }]
+          livenessProbe:
+            httpGet: { path: /health, port: 8122 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+# Banking Worker Services
+apiVersion: v1
+kind: Service
+metadata: { name: kyc-worker, namespace: ndsep }
+spec:
+  selector: { app: kyc-worker }
+  ports: [{ port: 8116, targetPort: 8116, name: http }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: aml-worker, namespace: ndsep }
+spec:
+  selector: { app: aml-worker }
+  ports: [{ port: 8117, targetPort: 8117, name: http }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: payment-monitor, namespace: ndsep }
+spec:
+  selector: { app: payment-monitor }
+  ports: [{ port: 8118, targetPort: 8118, name: http }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: fraud-engine, namespace: ndsep }
+spec:
+  selector: { app: fraud-engine }
+  ports: [{ port: 8119, targetPort: 8119, name: http }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: cbn-reporter, namespace: ndsep }
+spec:
+  selector: { app: cbn-reporter }
+  ports: [{ port: 8120, targetPort: 8120, name: http }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: swift-processor, namespace: ndsep }
+spec:
+  selector: { app: swift-processor }
+  ports: [{ port: 8121, targetPort: 8121, name: http }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: banking-registry, namespace: ndsep }
+spec:
+  selector: { app: banking-registry }
+  ports: [{ port: 8122, targetPort: 8122, name: http }]
+---
+# Banking PodDisruptionBudgets
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: kyc-worker-pdb, namespace: ndsep }
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: kyc-worker } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: aml-worker-pdb, namespace: ndsep }
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: aml-worker } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: fraud-engine-pdb, namespace: ndsep }
+spec:
+  minAvailable: 2
+  selector: { matchLabels: { app: fraud-engine } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: swift-processor-pdb, namespace: ndsep }
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: swift-processor } }
+---
+# Banking HPAs
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: fraud-engine-hpa, namespace: ndsep }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fraud-engine
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: payment-monitor-hpa, namespace: ndsep }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-monitor
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+---
+# ─── Sector Workers: Telecom / Healthcare / Energy / Insurance / Fintech ──────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telecom-monitor
+  namespace: ndsep
+  labels:
+    app: telecom-monitor
+    layer: telecom
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: telecom-monitor
+  template:
+    metadata:
+      labels:
+        app: telecom-monitor
+        layer: telecom
+    spec:
+      containers:
+        - name: telecom-monitor
+          image: ndsep/telecom-monitor:latest
+          ports:
+            - containerPort: 8122
+          env:
+            - name: TELECOM_MONITOR_PORT
+              value: "8122"
+            - name: WORKER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: NCC_API_BASE_URL
+              value: "https://ncc.gov.ng/api/v1"
+            - name: NCC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: ncc-api-key
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8122
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telecom-monitor
+  namespace: ndsep
+spec:
+  selector:
+    app: telecom-monitor
+  ports:
+    - port: 8122
+      targetPort: 8122
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcare-monitor
+  namespace: ndsep
+  labels:
+    app: healthcare-monitor
+    layer: healthcare
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: healthcare-monitor
+  template:
+    metadata:
+      labels:
+        app: healthcare-monitor
+        layer: healthcare
+    spec:
+      containers:
+        - name: healthcare-monitor
+          image: ndsep/healthcare-monitor:latest
+          ports:
+            - containerPort: 8123
+          env:
+            - name: HEALTHCARE_MONITOR_PORT
+              value: "8123"
+            - name: WORKER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: NHIA_API_BASE_URL
+              value: "https://nhia.gov.ng/api/v1"
+            - name: NHIA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: nhia-api-key
+                  optional: true
+            - name: FMOH_API_BASE_URL
+              value: "https://health.gov.ng/api/v1"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8123
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthcare-monitor
+  namespace: ndsep
+spec:
+  selector:
+    app: healthcare-monitor
+  ports:
+    - port: 8123
+      targetPort: 8123
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: energy-monitor
+  namespace: ndsep
+  labels:
+    app: energy-monitor
+    layer: energy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: energy-monitor
+  template:
+    metadata:
+      labels:
+        app: energy-monitor
+        layer: energy
+    spec:
+      containers:
+        - name: energy-monitor
+          image: ndsep/energy-monitor:latest
+          ports:
+            - containerPort: 8124
+          env:
+            - name: ENERGY_MONITOR_PORT
+              value: "8124"
+            - name: WORKER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: NERC_API_BASE_URL
+              value: "https://nerc.gov.ng/api/v1"
+            - name: NERC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: nerc-api-key
+                  optional: true
+            - name: DPR_API_BASE_URL
+              value: "https://dpr.gov.ng/api/v1"
+            - name: DPR_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: dpr-api-key
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8124
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: energy-monitor
+  namespace: ndsep
+spec:
+  selector:
+    app: energy-monitor
+  ports:
+    - port: 8124
+      targetPort: 8124
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insurance-monitor
+  namespace: ndsep
+  labels:
+    app: insurance-monitor
+    layer: insurance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: insurance-monitor
+  template:
+    metadata:
+      labels:
+        app: insurance-monitor
+        layer: insurance
+    spec:
+      containers:
+        - name: insurance-monitor
+          image: ndsep/insurance-monitor:latest
+          ports:
+            - containerPort: 8125
+          env:
+            - name: INSURANCE_MONITOR_PORT
+              value: "8125"
+            - name: WORKER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: NAICOM_API_BASE_URL
+              value: "https://naicom.gov.ng/api/v1"
+            - name: NAICOM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: naicom-api-key
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8125
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: insurance-monitor
+  namespace: ndsep
+spec:
+  selector:
+    app: insurance-monitor
+  ports:
+    - port: 8125
+      targetPort: 8125
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fintech-monitor
+  namespace: ndsep
+  labels:
+    app: fintech-monitor
+    layer: fintech
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fintech-monitor
+  template:
+    metadata:
+      labels:
+        app: fintech-monitor
+        layer: fintech
+    spec:
+      containers:
+        - name: fintech-monitor
+          image: ndsep/fintech-monitor:latest
+          ports:
+            - containerPort: 8126
+          env:
+            - name: FINTECH_MONITOR_PORT
+              value: "8126"
+            - name: WORKER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: database-url
+            - name: CBN_FINTECH_API_BASE_URL
+              value: "https://cbn.gov.ng/fintech/api/v1"
+            - name: CBN_FINTECH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ndsep-secrets
+                  key: cbn-fintech-api-key
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8126
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fintech-monitor
+  namespace: ndsep
+spec:
+  selector:
+    app: fintech-monitor
+  ports:
+    - port: 8126
+      targetPort: 8126

@@ -1,0 +1,218 @@
+###############################################################################
+# NDSEP Prometheus Alertmanager Configuration
+# ============================================
+# Routes alerts to Slack, PagerDuty, and email based on severity and team.
+#
+# Environment variables (set in .env.production):
+#   SLACK_WEBHOOK_URL          — Slack Incoming Webhook URL
+#   PAGERDUTY_INTEGRATION_KEY  — PagerDuty Events API v2 key
+#   NITDA_COMPLIANCE_EMAIL     — Compliance team email
+#   SMTP_HOST                  — SMTP server hostname
+#   SMTP_FROM                  — Sender email address
+###############################################################################
+
+global:
+  # How long to wait before sending a notification again if it has already been sent
+  resolve_timeout: 5m
+  # SMTP defaults (used by email receiver)
+  smtp_smarthost: "${SMTP_HOST:-smtp.gmail.com:587}"
+  smtp_from: "${SMTP_FROM:-ndsep-alerts@nitda.gov.ng}"
+  smtp_require_tls: true
+  # Slack defaults
+  slack_api_url: "${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/PLACEHOLDER}"
+  # HTTP client settings
+  http_config:
+    follow_redirects: true
+
+# ─── Templates ────────────────────────────────────────────────────────────────
+templates:
+  - "/etc/alertmanager/templates/*.tmpl"
+
+# ─── Routing Tree ─────────────────────────────────────────────────────────────
+route:
+  # Default receiver for unmatched alerts
+  receiver: slack-general
+  group_by: ["alertname", "severity", "team"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # ── Critical alerts → PagerDuty + Slack critical channel ──────────────────
+    - match:
+        severity: critical
+      receiver: pagerduty-critical
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 1h
+      continue: true  # Also send to Slack
+
+    - match:
+        severity: critical
+      receiver: slack-critical
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 1h
+
+    # ── Compliance alerts → compliance team email + Slack ─────────────────────
+    - match:
+        team: compliance
+      receiver: email-compliance
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 6h
+      continue: true
+
+    - match:
+        team: compliance
+      receiver: slack-compliance
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 6h
+
+    # ── Security alerts → security channel ───────────────────────────────────
+    - match:
+        team: security
+      receiver: slack-security
+      group_wait: 15s
+      group_interval: 3m
+      repeat_interval: 2h
+
+    # ── Platform/infra warnings → general channel ─────────────────────────────
+    - match:
+        severity: warning
+      receiver: slack-general
+      group_wait: 1m
+      group_interval: 10m
+      repeat_interval: 4h
+
+# ─── Inhibit Rules ────────────────────────────────────────────────────────────
+inhibit_rules:
+  # If API is down, suppress all downstream alerts
+  - source_match:
+      alertname: APIDown
+    target_match_re:
+      alertname: "SlowAPIResponses|HighAPIErrorRate"
+    equal: ["job"]
+
+  # If Postgres is down, suppress slow query alerts
+  - source_match:
+      alertname: PostgresDown
+    target_match:
+      alertname: PostgresSlowQueries
+    equal: ["instance"]
+
+  # Critical suppresses warning for the same alert
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ["alertname", "instance"]
+
+# ─── Receivers ────────────────────────────────────────────────────────────────
+receivers:
+
+  # ── Slack: General Platform Channel ─────────────────────────────────────────
+  - name: slack-general
+    slack_configs:
+      - channel: "#ndsep-alerts"
+        send_resolved: true
+        title: "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}"
+        text: |
+          *Severity:* {{ .CommonLabels.severity | toUpper }}
+          *Team:* {{ .CommonLabels.team }}
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Started:* {{ .StartsAt | since }}
+          {{ end }}
+        color: "{{ if eq .Status \"firing\" }}danger{{ else }}good{{ end }}"
+        footer: "NDSEP Monitoring | {{ .CommonLabels.instance }}"
+        actions:
+          - type: button
+            text: "View Dashboard"
+            url: "${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/metrics"
+
+  # ── Slack: Critical Alerts Channel ───────────────────────────────────────────
+  - name: slack-critical
+    slack_configs:
+      - channel: "#ndsep-critical"
+        send_resolved: true
+        title: "🚨 CRITICAL: {{ .GroupLabels.alertname }}"
+        text: |
+          *CRITICAL ALERT — Immediate Action Required*
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Instance:* {{ .Labels.instance }}
+          *Started:* {{ .StartsAt | since }}
+          {{ end }}
+        color: "danger"
+        mention_channel: "here"
+
+  # ── Slack: Compliance Channel ─────────────────────────────────────────────
+  - name: slack-compliance
+    slack_configs:
+      - channel: "#ndsep-compliance"
+        send_resolved: true
+        title: "⚖️ [{{ .Status | toUpper }}] Compliance Alert: {{ .GroupLabels.alertname }}"
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Started:* {{ .StartsAt | since }}
+          {{ end }}
+        color: "warning"
+        actions:
+          - type: button
+            text: "View Compliance Dashboard"
+            url: "${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/compliance"
+
+  # ── Slack: Security Channel ───────────────────────────────────────────────
+  - name: slack-security
+    slack_configs:
+      - channel: "#ndsep-security"
+        send_resolved: true
+        title: "🛡️ [{{ .Status | toUpper }}] Security Alert: {{ .GroupLabels.alertname }}"
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Started:* {{ .StartsAt | since }}
+          {{ end }}
+        color: "{{ if eq .Status \"firing\" }}danger{{ else }}good{{ end }}"
+
+  # ── PagerDuty: Critical Escalation ───────────────────────────────────────
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key: "${PAGERDUTY_INTEGRATION_KEY:-PLACEHOLDER_KEY}"
+        send_resolved: true
+        severity: "{{ .CommonLabels.severity }}"
+        description: "{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}"
+        details:
+          firing: "{{ .Alerts.Firing | len }}"
+          resolved: "{{ .Alerts.Resolved | len }}"
+          description: "{{ .CommonAnnotations.description }}"
+          platform: "NDSEP"
+          environment: "production"
+        links:
+          - href: "${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/metrics"
+            text: "View NDSEP Dashboard"
+
+  # ── Email: Compliance Team ────────────────────────────────────────────────
+  - name: email-compliance
+    email_configs:
+      - to: "${NITDA_COMPLIANCE_EMAIL:-compliance@nitda.gov.ng}"
+        send_resolved: true
+        headers:
+          Subject: "[NDSEP Alert] {{ .GroupLabels.alertname }} — {{ .Status | toUpper }}"
+        html: |
+          <h2>NDSEP Compliance Alert</h2>
+          <p><strong>Status:</strong> {{ .Status | toUpper }}</p>
+          <p><strong>Alert:</strong> {{ .GroupLabels.alertname }}</p>
+          {{ range .Alerts }}
+          <p><strong>Summary:</strong> {{ .Annotations.summary }}</p>
+          <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+          <p><strong>Started:</strong> {{ .StartsAt }}</p>
+          {{ end }}
+          <p><a href="${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/compliance">View Compliance Dashboard</a></p>

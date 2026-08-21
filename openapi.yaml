@@ -1,0 +1,758 @@
+openapi: "3.1.0"
+info:
+  title: NDSEP — National Data Sovereignty Enforcement Platform
+  version: "25.0.0"
+  description: |
+    The National Data Sovereignty Enforcement Platform (NDSEP) provides a comprehensive
+    API for managing data protection compliance across Nigeria's regulated sectors.
+    
+    All tRPC procedures are exposed as REST endpoints under `/api/trpc/{procedure}`.
+    Authentication uses Manus OAuth with JWT session cookies.
+    
+    **Sectors Covered:** Banking, AML/CFT, Fintech, Healthcare, Telecom, Energy,
+    Insurance, Capital Markets, Cross-Border, and 11 more.
+    
+    **Middleware Stack:** Kafka, Dapr, Fluvio, OpenSearch, Mojaloop, Temporal,
+    Keycloak, Permify, Redis, APISIX, TigerBeetle, Apache Iceberg Lakehouse.
+  contact:
+    name: NDSEP Platform Team
+    email: platform@ndsep.gov.ng
+  license:
+    name: Government of Nigeria — Restricted
+    url: https://ndsep.gov.ng/license
+
+servers:
+  - url: https://ndsep.gov.ng/api/trpc
+    description: Production
+  - url: https://staging.ndsep.gov.ng/api/trpc
+    description: Staging
+  - url: http://localhost:3000/api/trpc
+    description: Local development
+
+tags:
+  - name: auth
+    description: Authentication and session management
+  - name: banking
+    description: Banking sector compliance (CBN regulations)
+  - name: aml
+    description: Anti-Money Laundering / Counter-Terrorism Financing
+  - name: fines
+    description: Enforcement actions and fine management
+  - name: accreditation
+    description: DPCO accreditation lifecycle management
+  - name: dpco
+    description: Data Protection Compliance Officers registry
+  - name: kyc
+    description: Know Your Customer document verification
+  - name: reporting
+    description: Regulatory reporting and submissions
+  - name: monitoring
+    description: Continuous compliance monitoring
+  - name: crossBorder
+    description: Cross-border data transfer monitoring (NDPA Chapter 6)
+  - name: riskScoring
+    description: Composite risk scoring engine
+  - name: incidents
+    description: Security incident management
+  - name: billing
+    description: Platform billing and Stripe integration
+  - name: institutions
+    description: Regulated institution registry
+  - name: correspondents
+    description: Correspondent bank monitoring
+  - name: sanctions
+    description: Sanctions screening and watchlist management
+  - name: dataResidency
+    description: Data residency enforcement and geo-fencing
+  - name: security
+    description: Security audit and vulnerability management
+  - name: governance
+    description: Governance framework alignment
+  - name: healthcare
+    description: Healthcare sector compliance (HIPAA + NDPA)
+  - name: telecom
+    description: Telecommunications sector compliance (NCC)
+  - name: system
+    description: System health and notifications
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: ndsep_session
+      description: JWT session cookie issued after Manus OAuth login
+    bearerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token for API-to-API calls
+
+  schemas:
+    PaginatedResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {}
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        totalPages:
+          type: integer
+
+    ComplianceStatus:
+      type: string
+      enum: [compliant, non_compliant, under_review, suspended, revoked]
+
+    AccreditationState:
+      type: string
+      enum:
+        - DRAFT
+        - SUBMITTED
+        - UNDER_REVIEW
+        - COMMITTEE_REVIEW
+        - APPROVED
+        - REJECTED
+        - SUSPENDED
+        - REVOKED
+        - APPEALING
+
+    RiskLevel:
+      type: string
+      enum: [low, medium, high, critical]
+
+    SectorType:
+      type: string
+      enum:
+        - banking
+        - fintech
+        - healthcare
+        - telecom
+        - energy
+        - insurance
+        - capital_markets
+        - pension
+        - microfinance
+        - payment_service
+        - mobile_money
+        - crypto_exchange
+        - data_broker
+        - cloud_provider
+        - government
+        - education
+        - retail
+        - manufacturing
+        - logistics
+        - media
+
+    Bank:
+      type: object
+      required: [id, name, cbn_license_number, compliance_status]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        cbn_license_number:
+          type: string
+        bank_type:
+          type: string
+          enum: [commercial, merchant, microfinance, development, mortgage]
+        compliance_status:
+          $ref: "#/components/schemas/ComplianceStatus"
+        risk_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        created_at:
+          type: string
+          format: date-time
+
+    AmlCase:
+      type: object
+      required: [id, case_ref, status, risk_level]
+      properties:
+        id:
+          type: integer
+        case_ref:
+          type: string
+          example: "AML-2026-001234"
+        subject_name:
+          type: string
+        subject_type:
+          type: string
+          enum: [individual, corporate, pep, correspondent]
+        status:
+          type: string
+          enum: [open, under_investigation, escalated, closed, referred_to_efcc]
+        risk_level:
+          $ref: "#/components/schemas/RiskLevel"
+        transaction_amount:
+          type: number
+        currency:
+          type: string
+          default: NGN
+        created_at:
+          type: string
+          format: date-time
+
+    Fine:
+      type: object
+      required: [id, reference_number, amount, status]
+      properties:
+        id:
+          type: integer
+        reference_number:
+          type: string
+          example: "FINE-2026-00456"
+        regulated_entity_name:
+          type: string
+        violation_type:
+          type: string
+        amount:
+          type: number
+          description: Amount in kobo (1 NGN = 100 kobo)
+        currency:
+          type: string
+          default: NGN
+        status:
+          type: string
+          enum: [pending, paid, partially_paid, appealing, waived, written_off]
+        due_date:
+          type: string
+          format: date
+
+    AccreditationApplication:
+      type: object
+      required: [id, org_name, status]
+      properties:
+        id:
+          type: integer
+        org_name:
+          type: string
+        rc_number:
+          type: string
+        status:
+          $ref: "#/components/schemas/AccreditationState"
+        accreditation_type:
+          type: string
+          enum: [new, renewal]
+        sectors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SectorType"
+        created_at:
+          type: string
+          format: date-time
+
+    ComplianceEvent:
+      type: object
+      required: [eventType, entityType, entityId, data]
+      properties:
+        eventType:
+          type: string
+          example: "bank.created"
+        entityType:
+          type: string
+          example: "bank"
+        entityId:
+          type: string
+        sector:
+          type: string
+        userId:
+          type: string
+        data:
+          type: object
+        severity:
+          $ref: "#/components/schemas/RiskLevel"
+        timestamp:
+          type: integer
+          description: Unix timestamp in milliseconds
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        services:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              latency_ms:
+                type: integer
+              last_check:
+                type: string
+                format: date-time
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - NOT_FOUND
+            - BAD_REQUEST
+            - INTERNAL_SERVER_ERROR
+            - TOO_MANY_REQUESTS
+        message:
+          type: string
+        data:
+          type: object
+
+security:
+  - sessionCookie: []
+
+paths:
+  # ─── Authentication ────────────────────────────────────────────────────────
+
+  /auth.me:
+    get:
+      tags: [auth]
+      summary: Get current user
+      operationId: auth.me
+      responses:
+        "200":
+          description: Current authenticated user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  email:
+                    type: string
+                  role:
+                    type: string
+                    enum: [admin, user]
+        "401":
+          description: Not authenticated
+
+  /auth.logout:
+    post:
+      tags: [auth]
+      summary: Logout current user
+      operationId: auth.logout
+      responses:
+        "200":
+          description: Successfully logged out
+
+  # ─── Banking ──────────────────────────────────────────────────────────────
+
+  /banking.list:
+    get:
+      tags: [banking]
+      summary: List all regulated banks
+      operationId: banking.list
+      parameters:
+        - name: input
+          in: query
+          schema:
+            type: object
+            properties:
+              page:
+                type: integer
+                default: 1
+              pageSize:
+                type: integer
+                default: 25
+              search:
+                type: string
+              status:
+                $ref: "#/components/schemas/ComplianceStatus"
+      responses:
+        "200":
+          description: Paginated list of banks
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Bank"
+
+  /banking.create:
+    post:
+      tags: [banking]
+      summary: Register a new bank
+      operationId: banking.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, cbnLicenseNumber, bankType]
+              properties:
+                name:
+                  type: string
+                cbnLicenseNumber:
+                  type: string
+                bankType:
+                  type: string
+                  enum: [commercial, merchant, microfinance, development, mortgage]
+      responses:
+        "200":
+          description: Created bank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bank"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ─── AML ──────────────────────────────────────────────────────────────────
+
+  /aml.listCases:
+    get:
+      tags: [aml]
+      summary: List AML cases
+      operationId: aml.listCases
+      parameters:
+        - name: input
+          in: query
+          schema:
+            type: object
+            properties:
+              page:
+                type: integer
+              pageSize:
+                type: integer
+              status:
+                type: string
+              riskLevel:
+                $ref: "#/components/schemas/RiskLevel"
+      responses:
+        "200":
+          description: Paginated AML cases
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AmlCase"
+
+  # ─── Fines ────────────────────────────────────────────────────────────────
+
+  /fines.list:
+    get:
+      tags: [fines]
+      summary: List enforcement fines
+      operationId: fines.list
+      responses:
+        "200":
+          description: Paginated fines
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginatedResponse"
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Fine"
+
+  # ─── Accreditation ────────────────────────────────────────────────────────
+
+  /accreditation.submitApplication:
+    post:
+      tags: [accreditation]
+      summary: Submit DPCO accreditation application
+      operationId: accreditation.submitApplication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orgName, rcNumber, address, email, sectors, conflictDeclaration]
+              properties:
+                orgName:
+                  type: string
+                rcNumber:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                sectors:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SectorType"
+                conflictDeclaration:
+                  type: boolean
+      responses:
+        "200":
+          description: Application submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applicationId:
+                    type: integer
+                  referenceToken:
+                    type: string
+
+  /accreditation.adminListApplications:
+    get:
+      tags: [accreditation]
+      summary: Admin list of all applications
+      operationId: accreditation.adminListApplications
+      parameters:
+        - name: input
+          in: query
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+              limit:
+                type: integer
+                default: 50
+              offset:
+                type: integer
+                default: 0
+      responses:
+        "200":
+          description: List of applications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AccreditationApplication"
+
+  /accreditation.adminMakeDecision:
+    post:
+      tags: [accreditation]
+      summary: Make accreditation decision
+      operationId: accreditation.adminMakeDecision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, decision, reason]
+              properties:
+                id:
+                  type: integer
+                decision:
+                  type: string
+                  enum: [approved, conditionally_approved, rejected]
+                reason:
+                  type: string
+                  minLength: 5
+      responses:
+        "200":
+          description: Decision recorded
+
+  # ─── System Health ────────────────────────────────────────────────────────
+
+  /system.health:
+    get:
+      tags: [system]
+      summary: Platform health check
+      operationId: system.health
+      security: []
+      responses:
+        "200":
+          description: Health status of all services
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /system.notifyOwner:
+    post:
+      tags: [system]
+      summary: Send notification to platform owner
+      operationId: system.notifyOwner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, content]
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+      responses:
+        "200":
+          description: Notification sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  # ─── Middleware Worker Health ──────────────────────────────────────────────
+
+  /middleware/dapr/health:
+    get:
+      tags: [system]
+      summary: Dapr bridge health (port 8150)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/fluvio/health:
+    get:
+      tags: [system]
+      summary: Fluvio relay health (port 8151)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/mojaloop/health:
+    get:
+      tags: [system]
+      summary: Mojaloop adapter health (port 8152)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/apisix/health:
+    get:
+      tags: [system]
+      summary: APISIX manager health (port 8153)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/tigerbeetle/health:
+    get:
+      tags: [system]
+      summary: TigerBeetle ledger health (port 8160)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/opensearch/health:
+    get:
+      tags: [system]
+      summary: OpenSearch indexer health (port 8161)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/keycloak/health:
+    get:
+      tags: [system]
+      summary: Keycloak validator health (port 8162)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/lakehouse/health:
+    get:
+      tags: [system]
+      summary: Lakehouse ingest health (port 8163)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/permify/health:
+    get:
+      tags: [system]
+      summary: Permify RBAC sync health (port 8164)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/fluvio-consumer/health:
+    get:
+      tags: [system]
+      summary: Fluvio consumer health (port 8165)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/opensearch-query/health:
+    get:
+      tags: [system]
+      summary: OpenSearch query service health (port 8166)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+  /middleware/dapr-state/health:
+    get:
+      tags: [system]
+      summary: Dapr state bridge health (port 8167)
+      security: []
+      responses:
+        "200":
+          description: Healthy
+
+components:
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

@@ -1,0 +1,182 @@
+# NDSEP Zero-Trust Service Mesh — Istio Configuration
+# Enforces mTLS between all microservices, authorization policies,
+# circuit breaking, and canary deployment support.
+---
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: ndsep-strict-mtls
+  namespace: ndsep
+spec:
+  mtls:
+    mode: STRICT
+---
+# Only the API server can call wiredigg
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: wiredigg-access
+  namespace: ndsep
+spec:
+  selector:
+    matchLabels:
+      app: wiredigg
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/ndsep/sa/ndsep-api"]
+      to:
+        - operation:
+            ports: ["8160"]
+---
+# Only the API server can call liveness-service
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: liveness-access
+  namespace: ndsep
+spec:
+  selector:
+    matchLabels:
+      app: liveness-service
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/ndsep/sa/ndsep-api"]
+      to:
+        - operation:
+            ports: ["8150"]
+---
+# Circuit breaker for wiredigg (high-throughput service)
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: wiredigg-circuit-breaker
+  namespace: ndsep
+spec:
+  host: wiredigg.ndsep.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        h2UpgradePolicy: DEFAULT
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 200
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 50
+---
+# Circuit breaker for liveness service
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: liveness-circuit-breaker
+  namespace: ndsep
+spec:
+  host: liveness-service.ndsep.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 25
+        maxRetries: 2
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 15s
+      baseEjectionTime: 30s
+---
+# Rate limiting at mesh level
+apiVersion: networking.istio.io/v1
+kind: EnvoyFilter
+metadata:
+  name: ndsep-rate-limit
+  namespace: ndsep
+spec:
+  workloadSelector:
+    labels:
+      app: ndsep-api
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_INBOUND
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.local_ratelimit
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+            stat_prefix: http_local_rate_limiter
+            token_bucket:
+              max_tokens: 1000
+              tokens_per_fill: 100
+              fill_interval: 1s
+---
+# Service accounts for zero-trust identity
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ndsep-api
+  namespace: ndsep
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wiredigg
+  namespace: ndsep
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: liveness-service
+  namespace: ndsep
+---
+# Canary deployment support via VirtualService
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: ndsep-api-canary
+  namespace: ndsep
+spec:
+  hosts:
+    - ndsep-api
+  http:
+    - route:
+        - destination:
+            host: ndsep-api
+            subset: stable
+          weight: 95
+        - destination:
+            host: ndsep-api
+            subset: canary
+          weight: 5
+      retries:
+        attempts: 3
+        perTryTimeout: 5s
+        retryOn: 5xx
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: ndsep-api-subsets
+  namespace: ndsep
+spec:
+  host: ndsep-api
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary

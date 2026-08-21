@@ -1,0 +1,31 @@
+<slide id="ai_layer">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="36" width="4" height="610" fill="hairline"/>
+  <text id="title" x="86" y="50" width="540" height="40" font="heading" size="30" color="ink" wrap="false">AI reduces friction, not accountability</text>
+  <text id="subtitle" x="86" y="108" width="1038" height="52" font="body" size="20" color="muted" line-height="1.35"><p>The platform uses AI to reduce manual effort, improve signal quality, and support reviewers, while keeping human verification and auditability visible.</p></text>
+
+  <shape id="card-1" type="rect" x="86" y="190" width="528" height="168" fill="mist" stroke="hairline" stroke-width="1"/>
+  <icon id="card-1-icon" name="file-search" x="114" y="220" width="30" height="30" color="brand"/>
+  <text id="card-1-title" x="156" y="216" width="320" height="26" font="strong" size="21" color="ink" wrap="false">Document extraction from uploads</text>
+  <text id="card-1-body" x="114" y="264" width="456" height="64" font="body" size="18" color="muted" line-height="1.35"><p>PDF and image uploads can be parsed so key form fields are populated faster during intake and review, reducing manual re-entry.</p></text>
+
+  <shape id="card-2" type="rect" x="666" y="190" width="528" height="168" fill="mist" stroke="hairline" stroke-width="1"/>
+  <icon id="card-2-icon" name="scan-eye" x="694" y="220" width="30" height="30" color="chart-blue"/>
+  <text id="card-2-title" x="736" y="216" width="320" height="26" font="strong" size="21" color="ink" wrap="false">Side-by-side verification</text>
+  <text id="card-2-body" x="694" y="264" width="456" height="64" font="body" size="18" color="muted" line-height="1.35"><p>Reviewers can compare extracted data directly with the original uploaded evidence before accepting changes into the permit record.</p></text>
+
+  <shape id="card-3" type="rect" x="86" y="394" width="528" height="168" fill="mist" stroke="hairline" stroke-width="1"/>
+  <icon id="card-3-icon" name="message-square-text" x="114" y="424" width="30" height="30" color="accent"/>
+  <text id="card-3-title" x="156" y="420" width="320" height="26" font="strong" size="21" color="ink" wrap="false">Smarter notification reading</text>
+  <text id="card-3-body" x="114" y="468" width="456" height="64" font="body" size="18" color="muted" line-height="1.35"><p>Long or noisy alerts can be summarized so reviewers and supervisors process more operational information in less time.</p></text>
+
+  <shape id="card-4" type="rect" x="666" y="394" width="528" height="168" fill="mist" stroke="hairline" stroke-width="1"/>
+  <icon id="card-4-icon" name="arrow-up-wide-narrow" x="694" y="424" width="30" height="30" color="chart-teal"/>
+  <text id="card-4-title" x="736" y="420" width="320" height="26" font="strong" size="21" color="ink" wrap="false">Priority ranking with human traceability</text>
+  <text id="card-4-body" x="694" y="468" width="456" height="64" font="body" size="18" color="muted" line-height="1.35"><p>High-risk or high-value alerts can be surfaced sooner, while field-level provenance keeps visible what came from AI and what came from a person.</p></text>
+
+  <shape id="footer-strip" type="rect" x="0" y="674" width="1280" height="46" fill="paper"/>
+  <shape id="footer-line" type="rect" x="0" y="674" width="1280" height="2" fill="brand"/>
+  <text id="footer-text" x="64" y="689" width="420" height="14" font="caption" size="13" color="muted" wrap="false">IDLR-PTS Platform | Nigeria stakeholder deck</text>
+  <text id="page-number" x="1210" y="689" width="24" height="14" font="caption" size="13" color="muted" align="right" wrap="false">9</text>
+</slide>

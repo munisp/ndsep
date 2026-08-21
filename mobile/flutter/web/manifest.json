@@ -1,0 +1,17 @@
+{
+  "name": "NDSEP",
+  "short_name": "NDSEP",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#006338",
+  "theme_color": "#006338",
+  "description": "National Data Sovereignty Enforcement Platform",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "icons/Icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/Icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/Icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/Icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

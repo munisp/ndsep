@@ -1,0 +1,111 @@
+###############################################################################
+# NDSEP CodeQL SAST Analysis
+# Runs GitHub's CodeQL static analysis on every PR and weekly schedule.
+# Catches security vulnerabilities that manual review misses:
+#   - SQL injection, XSS, path traversal, insecure deserialization
+#   - Prototype pollution, regex denial-of-service, command injection
+###############################################################################
+
+name: "CodeQL SAST Analysis"
+
+on:
+  push:
+    branches: [main, develop, staging]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run weekly on Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze-javascript:
+    name: CodeQL — JavaScript/TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+          config: |
+            paths:
+              - server
+              - client/src
+              - shared
+            paths-ignore:
+              - node_modules
+              - '**/*.test.ts'
+              - '**/*.test.tsx'
+              - dist
+              - workers
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  analyze-go:
+    name: CodeQL — Go Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+          queries: security-extended
+          config: |
+            paths:
+              - workers/go
+
+      - name: Build Go workers
+        working-directory: workers/go
+        run: |
+          go mod download
+          for dir in cmd/*/; do
+            go build ./$dir 2>/dev/null || true
+          done
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:go"
+
+  analyze-python:
+    name: CodeQL — Python Workers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-extended
+          config: |
+            paths:
+              - workers/python
+              - orchestration
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

@@ -1,0 +1,49 @@
+###############################################################################
+# KEDA TriggerAuthentication — Credentials for Kafka, Prometheus, Redis
+# Apply: kubectl apply -f infra/k8s/keda-triggers.yaml
+###############################################################################
+
+# Kafka SASL authentication for KEDA Kafka triggers
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-trigger-auth
+  namespace: ndsep
+spec:
+  secretTargetRef:
+    - parameter: sasl
+      name: ndsep-secrets
+      key: kafka-sasl-mechanism
+    - parameter: username
+      name: ndsep-secrets
+      key: kafka-username
+    - parameter: password
+      name: ndsep-secrets
+      key: kafka-password
+    - parameter: tls
+      name: ndsep-secrets
+      key: kafka-tls-enable
+---
+# Prometheus authentication for HTTP-rate triggers
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: prometheus-trigger-auth
+  namespace: ndsep
+spec:
+  secretTargetRef:
+    - parameter: bearerToken
+      name: ndsep-secrets
+      key: prometheus-bearer-token
+---
+# Redis authentication for queue-length triggers
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: redis-trigger-auth
+  namespace: ndsep
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: ndsep-secrets
+      key: redis-password

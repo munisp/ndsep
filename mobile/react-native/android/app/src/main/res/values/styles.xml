@@ -1,0 +1,13 @@
+<resources>
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="colorPrimary">#006338</item>
+        <item name="colorPrimaryDark">#004D2B</item>
+        <item name="colorAccent">#009951</item>
+        <item name="android:statusBarColor">#006338</item>
+        <item name="android:windowBackground">#FFFFFF</item>
+    </style>
+    <style name="BootTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#006338</item>
+    </style>
+</resources>

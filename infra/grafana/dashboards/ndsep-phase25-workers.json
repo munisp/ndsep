@@ -1,0 +1,151 @@
+{
+  "uid": "ndsep-phase25-workers",
+  "title": "NDSEP Phase 25 — Middleware Workers",
+  "description": "Health and performance metrics for all Phase 25 Go/Rust/Python middleware workers",
+  "tags": ["ndsep", "middleware", "workers", "phase25"],
+  "timezone": "Africa/Lagos",
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Worker Health Overview",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 4 },
+      "targets": [
+        {
+          "expr": "up{job=~\"dapr-bridge|fluvio-relay|mojaloop-adapter|apisix-manager|tigerbeetle-worker|opensearch-indexer|keycloak-validator|lakehouse-ingest|permify-rbac-sync|fluvio-consumer|opensearch-query|dapr-state-bridge\"}",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal", "colorMode": "background" }
+    },
+    {
+      "id": 2,
+      "title": "Go Workers — Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(http_requests_total{job=~\"dapr-bridge|fluvio-relay|mojaloop-adapter|apisix-manager\"}[5m])", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Rust Workers — Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(http_requests_total{job=~\"tigerbeetle-worker|opensearch-indexer|keycloak-validator|lakehouse-ingest\"}[5m])", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Python Workers — Request Rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(http_requests_total{job=~\"permify-rbac-sync|fluvio-consumer|opensearch-query|dapr-state-bridge\"}[5m])", "legendFormat": "{{job}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Worker Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~\"dapr-bridge|fluvio-relay|mojaloop-adapter|apisix-manager|tigerbeetle-worker|opensearch-indexer|keycloak-validator|lakehouse-ingest|permify-rbac-sync|fluvio-consumer|opensearch-query|dapr-state-bridge\"}[5m]))",
+          "legendFormat": "{{job}} p95"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "TigerBeetle — Transfers",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 20, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "tigerbeetle_transfers_total", "legendFormat": "Total Transfers" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "OpenSearch — Documents Indexed",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 20, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "opensearch_documents_indexed_total", "legendFormat": "Documents Indexed" }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Keycloak — Token Validations",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 20, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "keycloak_validations_total", "legendFormat": "Token Validations" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Permify — RBAC Checks",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 20, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "permify_rbac_checks_total", "legendFormat": "RBAC Checks" }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Mojaloop — Payments Initiated",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 24, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "mojaloop_payments_total", "legendFormat": "Payments" }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Fluvio — Events Relayed",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 24, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "fluvio_events_published_total + fluvio_events_consumed_total", "legendFormat": "Events" }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Lakehouse — Records Ingested",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 24, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "lakehouse_records_ingested_total", "legendFormat": "Records" }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Dapr — Events Published",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 24, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "dapr_events_published_total + dapr_state_operations_total", "legendFormat": "Events" }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "version": 1
+}

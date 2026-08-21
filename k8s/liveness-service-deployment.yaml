@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: liveness-service
+  namespace: ndsep
+  labels:
+    app: liveness-service
+    component: biometric-verification
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: liveness-service
+  template:
+    metadata:
+      labels:
+        app: liveness-service
+        component: biometric-verification
+    spec:
+      containers:
+        - name: liveness-service
+          image: ndsep/liveness-service:latest
+          ports:
+            - containerPort: 8150
+              protocol: TCP
+          env:
+            - name: LIVENESS_SERVICE_PORT
+              value: "8150"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8150
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8150
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: liveness-service
+  namespace: ndsep
+  labels:
+    app: liveness-service
+spec:
+  selector:
+    app: liveness-service
+  ports:
+    - port: 8150
+      targetPort: 8150
+      protocol: TCP
+  type: ClusterIP

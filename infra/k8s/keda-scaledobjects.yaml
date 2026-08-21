@@ -1,0 +1,814 @@
+###############################################################################
+# KEDA ScaledObjects — Event-Driven Autoscaling for NDSEP Workers & API
+# Apply: kubectl apply -f infra/k8s/keda-scaledobjects.yaml
+#
+# Scaling triggers:
+#   - Kafka consumer lag (workers consuming from ndsep.* topics)
+#   - HTTP request rate via Prometheus (API pods)
+#   - Cron-based (compliance rescorer during WAT business hours)
+#   - Redis queue length (DLQ processor)
+#
+# All ScaledObjects use:
+#   - cooldownPeriod: 300s (prevent flapping)
+#   - pollingInterval: 30s (check every 30s)
+#   - fallback: replicas from Deployment spec
+###############################################################################
+
+# ─── API Layer: HTTP Request Rate ─────────────────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ndsep-api-keda
+  namespace: ndsep
+  labels:
+    app: ndsep-api
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: ndsep-api
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    # Scale on HTTP request rate (requests/second per pod)
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring:9090
+        metricName: http_requests_per_second
+        query: |
+          sum(rate(http_request_duration_seconds_count{app="ndsep-api"}[2m]))
+          / count(up{app="ndsep-api"})
+        threshold: "50"
+        activationThreshold: "10"
+      authenticationRef:
+        name: prometheus-trigger-auth
+    # Scale on P95 latency exceeding 500ms
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring:9090
+        metricName: http_p95_latency
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{app="ndsep-api"}[5m]))
+            by (le)
+          )
+        threshold: "0.5"
+      authenticationRef:
+        name: prometheus-trigger-auth
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 3
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+
+---
+# ─── Banking Workers: Kafka Consumer Lag ──────────────────────────────────────
+
+# KYC Verification Worker — scales on ndsep.kyc.updates topic lag
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kyc-worker-keda
+  namespace: ndsep
+  labels:
+    app: kyc-worker
+    domain: banking
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: kyc-worker
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-kyc-worker
+        topic: ndsep.kyc.updates
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# AML Screening Worker — scales on ndsep.aml.cases + ndsep.watchlist.hits
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: aml-worker-keda
+  namespace: ndsep
+  labels:
+    app: aml-worker
+    domain: banking
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: aml-worker
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-aml-worker
+        topic: ndsep.aml.cases
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-aml-worker
+        topic: ndsep.watchlist.hits
+        lagThreshold: "20"
+        activationLagThreshold: "3"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Payment Monitor — scales on ndsep.financial.payments + ndsep.mojaloop.payments
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: payment-monitor-keda
+  namespace: ndsep
+  labels:
+    app: payment-monitor
+    domain: banking
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: payment-monitor
+  pollingInterval: 15
+  cooldownPeriod: 180
+  minReplicaCount: 2
+  maxReplicaCount: 12
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-payment-monitor
+        topic: ndsep.financial.payments
+        lagThreshold: "200"
+        activationLagThreshold: "20"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-payment-monitor
+        topic: ndsep.mojaloop.payments
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Fraud Detection Engine — scales on ndsep.financial.payments (real-time scoring)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fraud-engine-keda
+  namespace: ndsep
+  labels:
+    app: fraud-engine
+    domain: banking
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: fraud-engine
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 2
+  maxReplicaCount: 15
+  fallback:
+    failureThreshold: 3
+    replicas: 3
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-fraud-engine
+        topic: ndsep.financial.payments
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    # Also scale on high ML inference queue depth
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring:9090
+        metricName: fraud_inference_queue
+        query: |
+          sum(fraud_engine_pending_inferences{app="fraud-engine"})
+        threshold: "100"
+      authenticationRef:
+        name: prometheus-trigger-auth
+
+---
+# SWIFT Message Processor — scales on ndsep.financial.payments
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: swift-processor-keda
+  namespace: ndsep
+  labels:
+    app: swift-processor
+    domain: banking
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: swift-processor
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 6
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-swift-processor
+        topic: ndsep.financial.payments
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# CBN Regulatory Reporting — cron-based (Nigerian business hours WAT 08-18)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: cbn-reporter-keda
+  namespace: ndsep
+  labels:
+    app: cbn-reporter
+    domain: banking
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: cbn-reporter
+  pollingInterval: 60
+  cooldownPeriod: 600
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  triggers:
+    # Scale up during WAT business hours (UTC+1: 07:00-17:00 UTC)
+    - type: cron
+      metadata:
+        timezone: Africa/Lagos
+        start: "0 8 * * 1-5"
+        end: "0 18 * * 1-5"
+        desiredReplicas: "2"
+    # Also scale on pending regulatory reports in Kafka
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-cbn-reporter
+        topic: ndsep.compliance.events
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# ─── Core Platform Workers: Kafka Consumer Lag ────────────────────────────────
+
+# BGP Validator — scales on ndsep.network.events
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: bgp-validator-keda
+  namespace: ndsep
+  labels:
+    app: bgp-validator
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: bgp-validator
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-bgp-validator
+        topic: ndsep.network.events
+        lagThreshold: "200"
+        activationLagThreshold: "20"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Compliance Rescorer — cron-based (WAT business hours) + Kafka lag
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: compliance-rescorer-keda
+  namespace: ndsep
+  labels:
+    app: compliance-rescorer
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: compliance-rescorer
+  pollingInterval: 60
+  cooldownPeriod: 600
+  minReplicaCount: 0
+  maxReplicaCount: 5
+  triggers:
+    # Scale up during WAT business hours (Mon-Fri 08:00-18:00 WAT)
+    - type: cron
+      metadata:
+        timezone: Africa/Lagos
+        start: "0 8 * * 1-5"
+        end: "0 18 * * 1-5"
+        desiredReplicas: "2"
+    # Also respond to compliance score recalculation events
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-compliance-rescorer
+        topic: ndsep.compliance.scores
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Evidence Signer (Rust) — scales on ndsep.enforcement.actions
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: evidence-signer-keda
+  namespace: ndsep
+  labels:
+    app: evidence-signer
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: evidence-signer
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 6
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-evidence-signer
+        topic: ndsep.enforcement.actions
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Financial Ledger (Rust) — scales on ndsep.tigerbeetle.ledger + ndsep.fine.payments
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: financial-ledger-keda
+  namespace: ndsep
+  labels:
+    app: financial-ledger
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: financial-ledger
+  pollingInterval: 15
+  cooldownPeriod: 180
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-financial-ledger
+        topic: ndsep.tigerbeetle.ledger
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-financial-ledger
+        topic: ndsep.fine.payments
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Residency Enforcer (Rust) — scales on ndsep.compliance.violations
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: residency-enforcer-keda
+  namespace: ndsep
+  labels:
+    app: residency-enforcer
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: residency-enforcer
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 6
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-residency-enforcer
+        topic: ndsep.compliance.violations
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Remediation Engine (Python) — scales on ndsep.breach.notifications
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: remediation-engine-keda
+  namespace: ndsep
+  labels:
+    app: remediation-engine
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: remediation-engine
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 0
+  maxReplicaCount: 5
+  fallback:
+    failureThreshold: 3
+    replicas: 1
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-remediation-engine
+        topic: ndsep.breach.notifications
+        lagThreshold: "20"
+        activationLagThreshold: "3"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# ML Compliance Prediction — scales on ndsep.ml.predictions + ndsep.compliance.scores
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ml-prediction-keda
+  namespace: ndsep
+  labels:
+    app: ml-prediction
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: ml-prediction
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-ml-prediction
+        topic: ndsep.ml.predictions
+        lagThreshold: "200"
+        activationLagThreshold: "20"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-ml-prediction
+        topic: ndsep.compliance.scores
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Citizen SLA Tracker — scales on ndsep.dpco.enforcement
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: citizen-sla-tracker-keda
+  namespace: ndsep
+  labels:
+    app: citizen-sla-tracker
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: citizen-sla-tracker
+  pollingInterval: 60
+  cooldownPeriod: 600
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-citizen-sla
+        topic: ndsep.dpco.enforcement
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    # Also respond during business hours
+    - type: cron
+      metadata:
+        timezone: Africa/Lagos
+        start: "0 7 * * 1-5"
+        end: "0 19 * * 1-5"
+        desiredReplicas: "1"
+
+---
+# ─── DLQ Processor: Redis Queue Length ────────────────────────────────────────
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: dlq-processor-keda
+  namespace: ndsep
+  labels:
+    app: dlq-processor
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: dlq-processor
+  pollingInterval: 30
+  cooldownPeriod: 600
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  triggers:
+    - type: redis
+      metadata:
+        address: redis:6379
+        listName: ndsep:dlq:pending
+        listLength: "50"
+        activationListLength: "5"
+        databaseIndex: "0"
+      authenticationRef:
+        name: redis-trigger-auth
+
+---
+# ─── Intelligence Platform Workers ───────────────────────────────────────────
+
+# SOCint IOC Processor — scales on ndsep.threat_intel.feeds
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: socint-processor-keda
+  namespace: ndsep
+  labels:
+    app: ndsep-api
+    scaler: keda
+    component: socint
+  annotations:
+    keda.sh/description: "Scales based on threat intelligence feed backlog"
+spec:
+  scaleTargetRef:
+    name: ndsep-api
+  pollingInterval: 60
+  cooldownPeriod: 300
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-socint-processor
+        topic: ndsep.threat_intel.feeds
+        lagThreshold: "500"
+        activationLagThreshold: "50"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# SIEM Alert Processor — scales on ndsep.siem.alerts
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: siem-processor-keda
+  namespace: ndsep
+  labels:
+    app: ndsep-api
+    scaler: keda
+    component: wazuh
+  annotations:
+    keda.sh/description: "Scales based on SIEM alert volume from Wazuh"
+spec:
+  scaleTargetRef:
+    name: ndsep-api
+  pollingInterval: 15
+  cooldownPeriod: 120
+  minReplicaCount: 2
+  maxReplicaCount: 15
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-siem-processor
+        topic: ndsep.siem.alerts
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-siem-processor
+        topic: ndsep.siem.audit_logs
+        lagThreshold: "500"
+        activationLagThreshold: "50"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# ─── Sector Workers: Scale-to-Zero Outside Business Hours ─────────────────────
+
+# Telecom Monitor — cron + compliance events
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: telecom-monitor-keda
+  namespace: ndsep
+  labels:
+    app: telecom-monitor
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: telecom-monitor
+  pollingInterval: 60
+  cooldownPeriod: 600
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  triggers:
+    - type: cron
+      metadata:
+        timezone: Africa/Lagos
+        start: "0 6 * * *"
+        end: "0 22 * * *"
+        desiredReplicas: "1"
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-telecom-monitor
+        topic: ndsep.sector.alerts
+        lagThreshold: "20"
+        activationLagThreshold: "3"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Healthcare Monitor — cron-based (always-on during business hours)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: healthcare-monitor-keda
+  namespace: ndsep
+  labels:
+    app: healthcare-monitor
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: healthcare-monitor
+  pollingInterval: 60
+  cooldownPeriod: 600
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  triggers:
+    - type: cron
+      metadata:
+        timezone: Africa/Lagos
+        start: "0 6 * * *"
+        end: "0 22 * * *"
+        desiredReplicas: "1"
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-healthcare-monitor
+        topic: ndsep.sector.alerts
+        lagThreshold: "20"
+        activationLagThreshold: "3"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+
+---
+# Energy Monitor — always-on (critical infrastructure, 24/7)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: energy-monitor-keda
+  namespace: ndsep
+  labels:
+    app: energy-monitor
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: energy-monitor
+  pollingInterval: 30
+  cooldownPeriod: 300
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-energy-monitor
+        topic: ndsep.sector.alerts
+        lagThreshold: "10"
+        activationLagThreshold: "2"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth
+    # Critical infra — scale on any network events (potential SCADA/ICS alerts)
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: ndsep-energy-monitor
+        topic: ndsep.network.events
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-trigger-auth

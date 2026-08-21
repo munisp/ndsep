@@ -1,0 +1,1983 @@
+###############################################################################
+# NDSEP Production Docker Compose
+# Deploys all platform services with production-grade settings.
+#
+# Usage:
+#   docker compose -f docker-compose.production.yml up -d
+#   docker compose -f docker-compose.production.yml logs -f ndsep-api
+#
+# Secrets: copy .env.production.example → .env.production and fill in values.
+###############################################################################
+
+version: "3.9"
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+x-restart: &default-restart
+  restart: unless-stopped
+
+x-resource-defaults: &resource-defaults
+  deploy:
+    resources:
+      limits:
+        cpus: "0.5"
+        memory: 512m
+      reservations:
+        cpus: "0.1"
+        memory: 128m
+
+
+x-healthcheck-defaults: &hc-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+services:
+
+  # ─── NDSEP API (Node.js/Express/tRPC) ───────────────────────────────────────
+  ndsep-api:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: ndsep/api:latest
+    container_name: ndsep-api
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: info
+      # CORS: comma-separated list of allowed origins for mobile apps
+      # Example: https://ndsep.nitda.gov.ng,https://app.ndsep.ng
+      CORS_ORIGINS: "${CORS_ORIGINS:?CORS_ORIGINS is required}"
+      NDSEP_DB_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db?sslmode=require
+      NDSEP_DB_POOL_MIN: "2"
+      NDSEP_DB_POOL_MAX: "20"
+      WORKER_RELAY_URL: http://ndsep-api:3000/api/workers/event
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db?sslmode=require
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+      OPA_ENABLED: "true"
+      OPA_URL: http://opa:8181
+      OPA_DECISION_PATH: /v1/data/ndsep/authz/allow
+      KEYCLOAK_ISSUER_URL: https://${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    <<: [*resource-defaults, *default-restart]
+    image: postgres:16-alpine
+    container_name: ndsep-postgres
+    environment:
+      POSTGRES_DB: ndsep_db
+      POSTGRES_USER: ndsep_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C --data-checksums"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - backup-data:/var/backups/ndsep
+      - ./drizzle/production-indexes.sql:/docker-entrypoint-initdb.d/02-indexes.sql:ro
+      - ./drizzle/0019_field_encryption.sql:/docker-entrypoint-initdb.d/03-encryption.sql:ro
+      - ./drizzle/0020_citizen_requests_columns.sql:/docker-entrypoint-initdb.d/04-citizen-requests.sql:ro
+      - ./infra/postgres/server.crt:/var/lib/postgresql/server.crt:ro
+      - ./infra/postgres/server.key:/var/lib/postgresql/server.key:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ndsep_user -d ndsep_db"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+    # Tuning for production workload
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c log_min_duration_statement=1000
+      -c log_checkpoints=on
+      -c log_connections=off
+      -c log_disconnections=off
+      -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/server.crt
+      -c ssl_key_file=/var/lib/postgresql/server.key
+      -c wal_level=replica
+      -c archive_mode=on
+      -c archive_command='test ! -f /var/backups/ndsep/wal/%f && cp %p /var/backups/ndsep/wal/%f'
+      -c archive_timeout=300
+
+  # ─── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    <<: [*resource-defaults, *default-restart]
+    image: redis:7-alpine
+    container_name: ndsep-redis
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --appendonly yes
+      --aof-use-rdb-preamble yes
+      --loglevel warning
+      --rename-command FLUSHALL ""
+      --rename-command FLUSHDB ""
+      --rename-command DEBUG ""
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── PostgreSQL Backup Service ──────────────────────────────────────────────
+  pg-backup:
+    <<: [*resource-defaults, *default-restart]
+    image: postgres:16-alpine
+    container_name: ndsep-pg-backup
+    environment:
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: ndsep_user
+      PG_DB: ndsep_db
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_DIR: /var/backups/ndsep
+      BACKUP_RETENTION: "30"
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_PREFIX: ndsep-backups
+      ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-af-south-1}
+    volumes:
+      - ./scripts/backup-postgres.sh:/opt/ndsep/scripts/backup-postgres.sh:ro
+      - ./scripts/restore-postgres.sh:/opt/ndsep/scripts/restore-postgres.sh:ro
+      - backup-data:/var/backups/ndsep
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache aws-cli bash
+        chmod +x /opt/ndsep/scripts/*.sh
+        mkdir -p /var/backups/ndsep/wal /var/log/ndsep
+        echo "0 * * * * /opt/ndsep/scripts/backup-postgres.sh --upload-s3 >> /var/log/ndsep/backup.log 2>&1" | crontab -
+        echo "0 3 * * 0 /opt/ndsep/scripts/backup-postgres.sh --verify >> /var/log/ndsep/backup-verify.log 2>&1" >> /tmp/cron
+        cat /tmp/cron | crontab -
+        /opt/ndsep/scripts/backup-postgres.sh
+        crond -f
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Apache Kafka ─────────────────────────────────────────────────────────────
+  zookeeper:
+    <<: [*resource-defaults, *default-restart]
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: ndsep-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  kafka:
+    <<: [*resource-defaults, *default-restart]
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: ndsep-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Temporal Workflow Engine ─────────────────────────────────────────────────
+  temporal:
+    <<: [*resource-defaults, *default-restart]
+    image: temporalio/auto-setup:1.24
+    container_name: ndsep-temporal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: ndsep_user
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      TEMPORAL_ADDRESS: temporal:7233
+      LOG_LEVEL: warn
+    healthcheck:
+      test: ["CMD", "temporal", "workflow", "list", "--address", "temporal:7233"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Keycloak (Identity Provider) ────────────────────────────────────────────
+  keycloak:
+    <<: [*resource-defaults, *default-restart]
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: ndsep-keycloak
+    command: start
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep_db
+      KC_DB_USERNAME: ndsep_user
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+      KC_HOSTNAME_STRICT: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:?KEYCLOAK_ADMIN_USER is required}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_LOG_LEVEL: WARN
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 90s
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Permify (Authorization Engine) ──────────────────────────────────────────
+  permify:
+    <<: [*resource-defaults, *default-restart]
+    image: ghcr.io/permify/permify:latest
+    container_name: ndsep-permify
+    command: serve
+    environment:
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      PERMIFY_LOG_LEVEL: warn
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3476/healthz"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Apache APISIX (API Gateway) ─────────────────────────────────────────────
+  apisix:
+    <<: [*resource-defaults, *default-restart]
+    image: ghcr.io/openappsec/apisix-attachment:latest
+    container_name: ndsep-apisix
+    # The OpenAppSec APISIX attachment shares IPC with the inspection agent.
+    # Do not replace this image with stock APISIX in a production profile.
+    ipc: service:openappsec-agent
+    volumes:
+      - ./config/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    environment:
+      APISIX_STAND_ALONE: "true"
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY is required}
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /usr/local/apisix/logs
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      - ndsep-api
+      - openappsec-agent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9180/apisix/admin/routes"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── OpenAppSec inline WAF agent ────────────────────────────────────────────
+  openappsec-agent:
+    <<: [*resource-defaults, *default-restart]
+    image: ghcr.io/openappsec/agent:latest
+    container_name: ndsep-openappsec-agent
+    ipc: shareable
+    environment:
+      registered_server: "NDSEP APISIX"
+      # Central-management registration is optional. Declarative prevent-mode
+      # policy remains local and reviewable when this value is blank.
+      user_email: ${OPENAPPSEC_OPERATOR_EMAIL:-}
+      AGENT_TOKEN: ${OPENAPPSEC_AGENT_TOKEN:-}
+    volumes:
+      - waf-config:/etc/cp/conf
+      - waf-data:/etc/cp/data
+      - waf-logs:/var/log/nano_agent
+      - ./infra/openappsec:/ext/appsec:ro
+    command: /cp-nano-agent
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Caddy public edge ───────────────────────────────────────────────────────
+  caddy:
+    <<: [*resource-defaults, *default-restart]
+    image: caddy:2.8.4-alpine
+    container_name: ndsep-caddy
+    environment:
+      NDSEP_PUBLIC_HOST: ${NDSEP_PUBLIC_HOST:?NDSEP_PUBLIC_HOST is required}
+      KEYCLOAK_PUBLIC_HOST: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-public
+      - ndsep-internal
+
+  # ─── Open Policy Agent (OPA) ─────────────────────────────────────────────────
+  opa:
+    <<: [*resource-defaults, *default-restart]
+    image: openpolicyagent/opa:0.67.0-static
+    container_name: ndsep-opa
+    command: ["run", "--server", "--addr=:8181", "/policies"]
+    volumes:
+      - ./infra/opa/policies:/policies:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "opa", "eval", "--format=raw", "--data", "/policies", "data.ndsep.authz.allow"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Prometheus ───────────────────────────────────────────────────────────────
+  prometheus:
+    <<: [*resource-defaults, *default-restart]
+    image: prom/prometheus:v2.51.0
+    container_name: ndsep-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+      - "--log.level=warn"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Alertmanager ───────────────────────────────────────────────────────────────
+  alertmanager:
+    <<: [*resource-defaults, *default-restart]
+    image: prom/alertmanager:v0.27.0
+    container_name: ndsep-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.external-url=http://alertmanager:9093"
+      - "--log.level=warn"
+    volumes:
+      - ./infra/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./infra/prometheus/templates:/etc/alertmanager/templates:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/PLACEHOLDER}
+      PAGERDUTY_INTEGRATION_KEY: ${PAGERDUTY_INTEGRATION_KEY:-PLACEHOLDER_KEY}
+      NITDA_COMPLIANCE_EMAIL: ${NITDA_COMPLIANCE_EMAIL:-compliance@nitda.gov.ng}
+      PLATFORM_URL: ${PLATFORM_URL:-https://ndsep.nitda.gov.ng}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com:587}
+      SMTP_FROM: ${SMTP_FROM:-ndsep-alerts@nitda.gov.ng}
+
+  # ─── Grafana ──────────────────────────────────────────────────────────────────
+  grafana:
+    <<: [*resource-defaults, *default-restart]
+    image: grafana/grafana:10.4.0
+    container_name: ndsep-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER is required}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
+      GF_LOG_LEVEL: warn
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Banking Workers ────────────────────────────────────────────────────────────
+  nip-rtgs-processor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: nip_rtgs_processor
+    container_name: ndsep-nip-rtgs
+    environment:
+      NIP_RTGS_PORT: "8130"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      CBN_NIP_ENDPOINT: ${CBN_NIP_ENDPOINT:-https://nip.cbn.gov.ng/api/v1}
+      CBN_RTGS_ENDPOINT: ${CBN_RTGS_ENDPOINT:-https://rtgs.cbn.gov.ng/api/v1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8130/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  swift-gateway:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: swift_gateway
+    container_name: ndsep-swift-gateway
+    environment:
+      SWIFT_GATEWAY_PORT: "8131"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      SWIFT_BIC: ${SWIFT_BIC:-NDPCNGLA}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8131/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  fraud-detection-engine:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: fraud_detection_engine
+    container_name: ndsep-fraud-engine
+    environment:
+      FRAUD_ENGINE_PORT: "8132"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8132/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  watchlist-screener:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/watchlist_screener
+      dockerfile: Dockerfile
+    container_name: ndsep-watchlist-screener
+    environment:
+      WATCHLIST_PORT: "8133"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      OFAC_API_KEY: ${OFAC_API_KEY:-demo-ofac-key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8133/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  aml-scorer:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-aml-scorer
+    command: ["python3", "aml_scoring_worker.py"]
+    environment:
+      AML_SCORER_PORT: "8134"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      NFIU_STR_ENDPOINT: ${NFIU_STR_ENDPOINT:-https://api.nfiu.gov.ng/v1/str}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8134/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  kyc-analyzer:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-kyc-analyzer
+    command: ["python3", "kyc_analysis_worker.py"]
+    environment:
+      KYC_ANALYZER_PORT: "8135"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      BVN_API_ENDPOINT: ${BVN_API_ENDPOINT:-https://api.nibss-plc.org.ng/v1/bvn}
+      NIN_API_ENDPOINT: ${NIN_API_ENDPOINT:-https://api.nimc.gov.ng/v1/nin}
+      NIBSS_API_KEY: ${NIBSS_API_KEY:-demo-nibss-key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8135/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  cbn-reporter:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-cbn-reporter
+    command: ["python3", "cbn_report_generator.py"]
+    environment:
+      CBN_REPORTER_PORT: "8136"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      CBN_PORTAL_ENDPOINT: ${CBN_PORTAL_ENDPOINT:-https://portal.cbn.gov.ng/api/v1}
+      CBN_API_KEY: ${CBN_API_KEY:-demo-cbn-key}
+      NFIU_GOAML_ENDPOINT: ${NFIU_GOAML_ENDPOINT:-https://goaml.nfiu.gov.ng/api/v1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8136/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── Sector Workers: Telecom / Healthcare / Energy / Insurance / Fintech ─────────
+  telecom-monitor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-telecom-monitor
+    command: ["python3", "telecom_monitor.py"]
+    environment:
+      TELECOM_MONITOR_PORT: "8122"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      NCC_API_BASE_URL: ${NCC_API_BASE_URL:-https://ncc.gov.ng/api/v1}
+      NCC_API_KEY: ${NCC_API_KEY:-ncc-api-key-placeholder}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8122/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  healthcare-monitor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-healthcare-monitor
+    command: ["python3", "healthcare_monitor.py"]
+    environment:
+      HEALTHCARE_MONITOR_PORT: "8123"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      NHIA_API_BASE_URL: ${NHIA_API_BASE_URL:-https://nhia.gov.ng/api/v1}
+      NHIA_API_KEY: ${NHIA_API_KEY:-nhia-api-key-placeholder}
+      FMOH_API_BASE_URL: ${FMOH_API_BASE_URL:-https://health.gov.ng/api/v1}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  energy-monitor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-energy-monitor
+    command: ["python3", "energy_monitor.py"]
+    environment:
+      ENERGY_MONITOR_PORT: "8124"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      NERC_API_BASE_URL: ${NERC_API_BASE_URL:-https://nerc.gov.ng/api/v1}
+      NERC_API_KEY: ${NERC_API_KEY:-nerc-api-key-placeholder}
+      DPR_API_BASE_URL: ${DPR_API_BASE_URL:-https://dpr.gov.ng/api/v1}
+      DPR_API_KEY: ${DPR_API_KEY:-dpr-api-key-placeholder}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8124/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  insurance-monitor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-insurance-monitor
+    command: ["python3", "insurance_monitor.py"]
+    environment:
+      INSURANCE_MONITOR_PORT: "8125"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      NAICOM_API_BASE_URL: ${NAICOM_API_BASE_URL:-https://naicom.gov.ng/api/v1}
+      NAICOM_API_KEY: ${NAICOM_API_KEY:-naicom-api-key-placeholder}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8125/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  fintech-monitor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/python
+      dockerfile: Dockerfile
+    container_name: ndsep-fintech-monitor
+    command: ["python3", "fintech_monitor.py"]
+    environment:
+      FINTECH_MONITOR_PORT: "8126"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      CBN_FINTECH_API_BASE_URL: ${CBN_FINTECH_API_BASE_URL:-https://cbn.gov.ng/fintech/api/v1}
+      CBN_FINTECH_API_KEY: ${CBN_FINTECH_API_KEY:-cbn-fintech-api-key-placeholder}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8126/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ─── WAF (Web Application Firewall) — OpenAppSec / ModSecurity ────────────────
+  # Provides layer-7 application firewall with OWASP CRS ruleset.
+  # All external traffic passes through WAF before reaching nginx.
+  # Learning mode: first 2 weeks in detection-only, then switch to prevention.
+  waf:
+    image: openappsec/open-appsec-nginx:latest
+    container_name: ndsep-waf
+    <<: *default-restart
+    environment:
+      # WAF mode: detect-learn (2 weeks) → prevent (production)
+      OPEN_APPSEC_MODE: ${WAF_MODE:-detect-learn}
+      # Backend upstream
+      UPSTREAM_HOST: nginx
+      UPSTREAM_PORT: "8080"
+      # Logging
+      LOG_LEVEL: info
+      # OWASP Core Rule Set
+      CRS_ENABLED: "true"
+      CRS_PARANOIA_LEVEL: "2"
+      # Trust forwarded headers from load balancer
+      REAL_IP_HEADER: X-Forwarded-For
+      TRUSTED_SOURCES: ${WAF_TRUSTED_CIDRS:-10.0.0.0/8,172.16.0.0/12}
+      # Rate limiting at WAF level (defense-in-depth)
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_REQUESTS: "1000"
+      RATE_LIMIT_WINDOW: "60"
+      # Bot protection
+      BOT_PROTECTION: "true"
+      # Anti-automation
+      ANTI_AUTOMATION: "true"
+    volumes:
+      - waf-config:/etc/open-appsec
+      - waf-logs:/var/log/open-appsec
+      - tls-certs:/etc/nginx/ssl:ro
+    depends_on:
+      nginx:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/api/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+        reservations:
+          cpus: "0.25"
+          memory: 256m
+    networks:
+      - ndsep-public
+
+  # ─── Nginx Reverse Proxy (TLS Termination) ────────────────────────────────────
+  # Now sits behind WAF — only accepts traffic from WAF container.
+  nginx:
+    <<: [*resource-defaults, *default-restart]
+    image: nginx:1.25-alpine
+    container_name: ndsep-nginx
+    # No longer exposed to host — WAF handles external ports
+    expose:
+      - "8080"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - tls-certs:/etc/nginx/ssl:ro
+    depends_on:
+      ndsep-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-public
+      - ndsep-internal
+
+# ─── Additional Go Workers ────────────────────────────────────────────────────
+  anomaly-alert-dispatcher:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: anomaly_alert_dispatcher
+    container_name: ndsep-anomaly-alert-dispatcher
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PORT: "8140"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8140/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  apisix-manager:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: apisix_manager
+    container_name: ndsep-apisix-manager
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:-http://apisix:9180}
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}
+      PORT: "8141"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8141/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  arkime-pcap:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: arkime_pcap
+    container_name: ndsep-arkime-pcap
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      ARKIME_URL: ${ARKIME_URL:-http://arkime:8005}
+      PORT: "8142"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8142/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  bgp-live-monitor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: bgp_live_monitor
+    container_name: ndsep-bgp-live-monitor
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      BGP_STREAM_URL: ${BGP_STREAM_URL:-https://ris-live.ripe.net/v1/stream/}
+      PORT: "8143"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8143/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  car-pdf-generator:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: car_pdf_generator
+    container_name: ndsep-car-pdf-generator
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      S3_BUCKET: ${S3_BUCKET:-ndsep-reports}
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
+      PORT: "8144"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8144/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  citizen-sla-tracker:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: citizen_sla_tracker
+    container_name: ndsep-citizen-sla-tracker
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PORT: "8145"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8145/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  compliance-engine:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: compliance_engine
+    container_name: ndsep-compliance-engine
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      OPA_URL: ${OPA_URL:-http://opa:8181}
+      PORT: "8146"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8146/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  compliance-rescorer:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: compliance_rescorer
+    container_name: ndsep-compliance-rescorer
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8147"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8147/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  dapr-bridge:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: dapr_bridge
+    container_name: ndsep-dapr-bridge
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      DAPR_HTTP_PORT: ${DAPR_HTTP_PORT:-3500}
+      PORT: "8148"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8148/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  discovery-agent:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: discovery_agent
+    container_name: ndsep-discovery-agent
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      NMAP_PATH: /usr/bin/nmap
+      PORT: "8149"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8149/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  dpi-engine:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: dpi_engine
+    container_name: ndsep-dpi-engine
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8150"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8150/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  falkordb-kg-worker:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: falkordb_kg_worker
+    container_name: ndsep-falkordb-kg-worker
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      FALKORDB_URL: ${FALKORDB_URL:-redis://falkordb:6379}
+      PORT: "8151"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8151/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  fluvio-relay:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: fluvio_relay
+    container_name: ndsep-fluvio-relay
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      FLUVIO_ENDPOINT: ${FLUVIO_ENDPOINT:-localhost:9003}
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8152"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8152/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  gitops-sync:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: gitops_sync
+    container_name: ndsep-gitops-sync
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      GITOPS_REPO_URL: ${GITOPS_REPO_URL:-https://github.com/nitda-ng/ndsep-policies}
+      GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
+      PORT: "8153"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8153/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  kafka-monitor:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: kafka_monitor
+    container_name: ndsep-kafka-monitor
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      PORT: "8154"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8154/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  kyverno-policy:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: kyverno_policy
+    container_name: ndsep-kyverno-policy
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KYVERNO_URL: ${KYVERNO_URL:-http://kyverno:9443}
+      PORT: "8155"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8155/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  middleware-bridge:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: middleware_bridge
+    container_name: ndsep-middleware-bridge
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PORT: "8156"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8156/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  mojaloop-adapter:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: mojaloop_adapter
+    container_name: ndsep-mojaloop-adapter
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      MOJALOOP_HUB_URL: ${MOJALOOP_HUB_URL:-http://mojaloop-hub:3001}
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8157"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8157/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  ndsep-agent:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: ndsep_agent
+    container_name: ndsep-agent-worker
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      NDSEP_API_URL: ${NDSEP_API_URL:-http://ndsep-api:3000}
+      PORT: "8158"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8158/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  netbox-ipam:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: netbox_ipam
+    container_name: ndsep-netbox-ipam
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      NETBOX_URL: ${NETBOX_URL:-http://netbox:8080}
+      NETBOX_TOKEN: ${NETBOX_TOKEN:-0123456789abcdef0123456789abcdef01234567}
+      PORT: "8159"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8159/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  nmap-scanner:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: nmap_scanner
+    container_name: ndsep-nmap-scanner
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8160"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8160/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  policy-evaluator:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: policy_evaluator
+    container_name: ndsep-policy-evaluator
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      OPA_URL: ${OPA_URL:-http://opa:8181}
+      PERMIFY_URL: ${PERMIFY_URL:-http://permify:3476}
+      PORT: "8161"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8161/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  prometheus-exporter:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: prometheus_exporter
+    container_name: ndsep-prometheus-exporter
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      PORT: "8162"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8162/metrics"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  rag-orchestrator:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: rag_orchestrator
+    container_name: ndsep-rag-orchestrator
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      REDIS_URL: redis://redis:6379
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      PORT: "8163"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8163/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  ranger-policy:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: ranger_policy
+    container_name: ndsep-ranger-policy
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      RANGER_URL: ${RANGER_URL:-http://ranger:6080}
+      RANGER_ADMIN_USER: ${RANGER_ADMIN_USER:-admin}
+      RANGER_ADMIN_PASS: ${RANGER_ADMIN_PASS:-rangerR0cks!}
+      PORT: "8164"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8164/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  rss-webhook-server:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: rss_webhook_server
+    container_name: ndsep-rss-webhook-server
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8165"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8165/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  webhook-delivery:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: webhook_delivery
+    container_name: ndsep-webhook-delivery
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      REDIS_URL: redis://redis:6379
+      PORT: "8166"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8166/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+# ─── Orchestration Go Services ────────────────────────────────────────────────
+  dpco-api-gateway:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: dpco_api_gateway
+    container_name: ndsep-dpco-api-gateway
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-ndsep-jwt-secret-change-in-production}
+      PORT: "8200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8200/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  dpco-audit-service:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: dpco_audit_service
+    container_name: ndsep-dpco-audit-service
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8201"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8201/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  dpco-registry-service:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: dpco_registry_service
+    container_name: ndsep-dpco-registry-service
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      PORT: "8202"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8202/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  dpco-verification-service:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: dpco_verification_service
+    container_name: ndsep-dpco-verification-service
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      PORT: "8203"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8203/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  event-bus:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: event_bus
+    container_name: ndsep-event-bus
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PORT: "8204"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8204/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  iam-service:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: iam_service
+    container_name: ndsep-iam-service
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:8080}
+      PERMIFY_URL: ${PERMIFY_URL:-http://permify:3476}
+      PORT: "8205"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8205/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  tigerbeetle-ledger-service:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: tigerbeetle_ledger
+    container_name: ndsep-tigerbeetle-ledger-service
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
+      PORT: "8206"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8206/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  workflow-engine:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        CMD: workflow_engine
+    container_name: ndsep-workflow-engine
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      TEMPORAL_HOST: temporal:7233
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8207"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8207/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+# ─── Rust Workers ─────────────────────────────────────────────────────────────
+  bgp-validator:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/bgp_validator
+      dockerfile: Dockerfile
+    container_name: ndsep-bgp-validator
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8300"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8300/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  evidence-signer:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/evidence_signer
+      dockerfile: Dockerfile
+    container_name: ndsep-evidence-signer
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      SIGNING_KEY: ${EVIDENCE_SIGNING_KEY:-ndsep-evidence-signing-key-change-in-prod}
+      PORT: "8301"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8301/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  financial-ledger:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/financial_ledger
+      dockerfile: Dockerfile
+    container_name: ndsep-financial-ledger
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
+      PORT: "8302"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8302/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  keycloak-validator:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/keycloak_validator
+      dockerfile: Dockerfile
+    container_name: ndsep-keycloak-validator
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:8080}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ndsep}
+      PORT: "8303"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8303/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  lakehouse-ingest:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/lakehouse_ingest
+      dockerfile: Dockerfile
+    container_name: ndsep-lakehouse-ingest
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
+      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
+      PORT: "8304"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8304/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  lakehouse-writer:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/lakehouse_writer
+      dockerfile: Dockerfile
+    container_name: ndsep-lakehouse-writer
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
+      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
+      PORT: "8305"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8305/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  middleware-cache:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/middleware_cache
+      dockerfile: Dockerfile
+    container_name: ndsep-middleware-cache
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      REDIS_URL: redis://redis:6379
+      PORT: "8306"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8306/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  opensearch-indexer:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/opensearch_indexer
+      dockerfile: Dockerfile
+    container_name: ndsep-opensearch-indexer
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      PORT: "8307"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8307/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  portability-exporter:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/portability_exporter
+      dockerfile: Dockerfile
+    container_name: ndsep-portability-exporter
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
+      S3_BUCKET: ${S3_BUCKET:-ndsep-exports}
+      PORT: "8308"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8308/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  residency-enforcer:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/residency_enforcer
+      dockerfile: Dockerfile
+    container_name: ndsep-residency-enforcer
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8309"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8309/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  sla-tracker:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/sla_tracker
+      dockerfile: Dockerfile
+    container_name: ndsep-sla-tracker
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      PORT: "8310"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8310/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  tigerbeetle-ledger-rust:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/tigerbeetle_ledger
+      dockerfile: Dockerfile
+    container_name: ndsep-tigerbeetle-ledger-rust
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
+      PORT: "8311"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8311/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  vector-cache:
+    <<: [*resource-defaults, *default-restart]
+    build:
+      context: ./workers/rust/vector_cache
+      dockerfile: Dockerfile
+    container_name: ndsep-vector-cache
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      REDIS_URL: redis://redis:6379
+      PORT: "8312"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8312/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      # Mount an encrypted filesystem (LUKS/dm-crypt) for data-at-rest encryption.
+      # On AWS: use EBS encryption. On GCP: use CMEK. On-prem: use LUKS.
+      # Example: sudo cryptsetup luksOpen /dev/sdb encrypted_pg && mount /dev/mapper/encrypted_pg /mnt/pg-data
+      device: ${PG_DATA_DIR:-/var/lib/ndsep/postgres-data}
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      # Same encrypted filesystem recommendation as PostgreSQL
+      device: ${REDIS_DATA_DIR:-/var/lib/ndsep/redis-data}
+  backup-data:
+    driver: local
+  kafka-data:
+    driver: local
+  zookeeper-data:
+    driver: local
+  zookeeper-logs:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  waf-config:
+    driver: local
+  waf-data:
+    driver: local
+  waf-logs:
+    driver: local
+  tls-certs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      # For Let's Encrypt production: point to /etc/letsencrypt/live/${DOMAIN}/
+      # For local dev self-signed: point to ./infra/nginx/ssl/
+      device: ${TLS_CERT_DIR:-./infra/nginx/ssl}
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  ndsep-internal:
+    driver: bridge
+    internal: true   # No external access to internal services
+  ndsep-public:
+    driver: bridge   # Only the Caddy edge connects this network to the internal service mesh

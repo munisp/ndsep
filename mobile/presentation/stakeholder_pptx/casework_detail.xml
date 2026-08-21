@@ -1,0 +1,28 @@
+<slide id="casework_detail">
+  <background color="paper"/>
+  <shape id="workflow-line" type="rect" x="48" y="40" width="4" height="620" fill="hairline"/>
+  <text id="title" x="86" y="52" width="860" height="46" font="heading" size="30" color="ink" wrap="false">Casework built for real approvals</text>
+  <text id="subtitle" x="86" y="102" width="1070" height="48" font="body" size="20" color="muted" line-height="1.3"><p>This real seeded permit case shows how assignment, timed handoffs, evidence ingestion, extracted data verification, and final decision support all live in one workflow.</p></text>
+
+  <shape id="shot-frame" type="rect" x="86" y="166" width="770" height="490" fill="surface" stroke="hairline" stroke-width="1"/>
+  <image id="permit-detail-shot" src="https://private-us-east-1.manuscdn.com/sessionFile/i7Z8860JB409ZwkKDDtAu7/sandbox/slides_resource_ilxvirqgh4ifccy9plf8t-99b462a3-e2b-prod-us2_1784578003086_na1fn_L2hvbWUvdWJ1bnR1L2lkbHJfcHRzX21vYmlsZS9wcmVzZW50YXRpb25fYXNzZXRzL3Blcm1pdF9kZXRhaWxfc2VlZGVkX3Yz.png?x-oss-process=image/resize,w_1560,h_1560/format,webp&Expires=1786752000&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvaTdaODg2MEpCNDA5WndrS0REdEF1Ny9zYW5kYm94L3NsaWRlc19yZXNvdXJjZV9pbHh2aXJxZ2g0aWZjY3k5cGxmOHQtOTliNDYyYTMtZTJiLXByb2QtdXMyXzE3ODQ1NzgwMDMwODZfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwybGtiSEpmY0hSelgyMXZZbWxzWlM5d2NtVnpaVzUwWVhScGIyNWZZWE56WlhSekwzQmxjbTFwZEY5a1pYUmhhV3hmYzJWbFpHVmtYM1l6LnBuZz94LW9zcy1wcm9jZXNzPWltYWdlL3Jlc2l6ZSx3XzE1NjAsaF8xNTYwL2Zvcm1hdCx3ZWJwIiwiQ29uZGl0aW9uIjp7IkRhdGVMZXNzVGhhbiI6eyJBV1M6RXBvY2hUaW1lIjoxNzg2NzUyMDAwfX19XX0_&Key-Pair-Id=K2QY5QTL8JSY6C&Signature=MEYCIQCqiIYlABnSVG~xXO2cAy1SGUWW8kU0q76q22NdCSy4wAIhAN5AnWSKJKC3VgF0C8N~AaIBa3gLup8hQuJxvvILlJZV" x="98" y="178" width="746" height="466" fit="contain"/>
+
+  <shape id="detail-card-1" type="rect" x="884" y="176" width="310" height="102" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="detail-card-1-title" x="906" y="194" width="252" height="24" font="body" size="19" color="ink" wrap="false"><strong>Assignment and handoff</strong></text>
+  <text id="detail-card-1-body" x="906" y="226" width="258" height="38" font="body" size="16" color="muted" line-height="1.35"><p>Escalated cases move with explicit ownership, due times, and supervisor control.</p></text>
+
+  <shape id="detail-card-2" type="rect" x="884" y="294" width="310" height="102" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="detail-card-2-title" x="906" y="312" width="252" height="24" font="body" size="19" color="ink" wrap="false"><strong>Editable permit forms</strong></text>
+  <text id="detail-card-2-body" x="906" y="344" width="258" height="38" font="body" size="16" color="muted" line-height="1.35"><p>Applicants and reviewers work from the same structured intake sections with role-sensitive controls.</p></text>
+
+  <shape id="detail-card-3" type="rect" x="884" y="412" width="310" height="102" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="detail-card-3-title" x="906" y="430" width="252" height="24" font="body" size="19" color="ink" wrap="false"><strong>AI-assisted evidence handling</strong></text>
+  <text id="detail-card-3-body" x="906" y="462" width="258" height="38" font="body" size="16" color="muted" line-height="1.35"><p>Uploaded documents can be parsed and checked side by side against extracted field values.</p></text>
+
+  <shape id="detail-card-4" type="rect" x="884" y="530" width="310" height="102" fill="surface" stroke="hairline" stroke-width="1"/>
+  <text id="detail-card-4-title" x="906" y="548" width="252" height="24" font="body" size="19" color="ink" wrap="false"><strong>Secure audit package access</strong></text>
+  <text id="detail-card-4-body" x="906" y="580" width="258" height="38" font="body" size="16" color="muted" line-height="1.35"><p>Audit outputs can be exported, verified, cached offline, and protected for field use.</p></text>
+
+  <text id="footer" x="70" y="684" width="520" height="18" font="caption" size="14" color="muted" wrap="false">IDLR-PTS Platform | Stakeholder PowerPoint deck</text>
+  <text id="page-number" x="1210" y="684" width="24" height="18" font="caption" size="14" color="muted" align="right" wrap="false">9</text>
+</slide>
