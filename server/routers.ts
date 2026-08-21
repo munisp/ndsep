@@ -553,13 +553,21 @@ export const appRouter = router({
         actionType: z.enum(["notice", "audit", "penalty", "suspension", "revocation"]),
         notes: z.string().optional(),
       }))
-      .mutation(async ({ input }) => createEnforcementAction(input)),
+      .mutation(async ({ input, ctx }) => {
+        const result = await createEnforcementAction(input);
+        createAuditLog({ userId: ctx.user.id, action: "enforcement.action.create", resourceType: "enforcement_action", details: `Enforcement action: ${input.actionType} for org #${input.organizationId}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+        return result;
+      }),
     updateStatus: protectedProcedure
       .input(z.object({
         actionId: z.number().int().positive(),
         status: z.enum(["pending", "notice_sent", "audit_scheduled", "penalty_imposed", "settled", "escalated"]),
       }))
-      .mutation(async ({ input }) => updateEnforcementStatus(input.actionId, input.status)),
+      .mutation(async ({ input, ctx }) => {
+        const result = await updateEnforcementStatus(input.actionId, input.status);
+        createAuditLog({ userId: ctx.user.id, action: "enforcement.status.update", resourceType: "enforcement_action", resourceId: input.actionId, details: `Enforcement action #${input.actionId} → ${input.status}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+        return result;
+      }),
     deletePolicy: deleteProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ input }) => {
@@ -842,7 +850,11 @@ export const appRouter = router({
         penaltyId: z.number().int().positive(),
         status: z.enum(["pending", "processing", "completed", "failed", "overdue"]),
       }))
-      .mutation(async ({ input }) => updatePenaltyStatus(input.penaltyId, input.status)),
+      .mutation(async ({ input, ctx }) => {
+        const result = await updatePenaltyStatus(input.penaltyId, input.status);
+        createAuditLog({ userId: ctx.user.id, action: "financial.penalty.updateStatus", resourceType: "financial_penalty", resourceId: input.penaltyId, details: `Penalty #${input.penaltyId} → ${input.status}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+        return result;
+      }),
     receipt: protectedProcedure
       .input(z.object({ penaltyId: z.number().int().positive() }))
       .query(async ({ input }) => getPenaltyReceipt(input.penaltyId)),
@@ -899,7 +911,11 @@ export const appRouter = router({
         evidenceSummary: z.string().optional(),
         requestedOutcome: z.string().optional(),
       }))
-      .mutation(async ({ input }) => createPenaltyAppeal(input)),
+      .mutation(async ({ input, ctx }) => {
+        const result = await createPenaltyAppeal(input);
+        createAuditLog({ userId: ctx.user.id, action: "financial.penalty.appeal", resourceType: "penalty_appeal", details: `Penalty appeal filed for penalty #${input.penaltyId}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+        return result;
+      }),
     reviewAppeal: protectedProcedure
       .input(z.object({
         appealId: z.number().int().positive(),
@@ -1066,7 +1082,8 @@ export const appRouter = router({
     status: protectedProcedure.query(async () => getWorkersStatus()),
     restart: protectedProcedure
       .input(z.object({ workerId: z.string() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        createAuditLog({ userId: ctx.user.id, action: "worker.restart", resourceType: "worker", details: `Worker restart requested: ${input.workerId}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
         const { restartWorker } = await import("./workerManager.js");
         const ok = restartWorker(input.workerId);
         return { success: ok, workerId: input.workerId };
@@ -1231,7 +1248,11 @@ export const appRouter = router({
         evidenceSummary: z.string().optional(),
         requestedOutcome: z.enum(["full_waiver", "reduction", "payment_plan", "extension"]).default("reduction"),
       }))
-      .mutation(async ({ input }) => createPenaltyAppeal(input)),
+      .mutation(async ({ input, ctx }) => {
+        const result = await createPenaltyAppeal(input);
+        createAuditLog({ userId: ctx.user.id, action: "financial.penalty.appeal", resourceType: "penalty_appeal", details: `Penalty appeal filed for penalty #${input.penaltyId}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+        return result;
+      }),
     listAppeals: protectedProcedure
       .input(z.object({ organizationId: z.number().optional(), limit: z.number().default(50) }).optional())
       .query(async ({ input }) => getPenaltyAppeals(input?.organizationId, input?.limit ?? 50)),

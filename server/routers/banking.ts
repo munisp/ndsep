@@ -17,6 +17,7 @@ import pg from "pg";
 import { getPgSslConfig } from "../dbSslConfig";
 import { getDatabaseUrl } from "../config";
 import { logger } from "../logger";
+import { createAuditLog, createInAppNotification } from "../db";
 const { Pool } = pg;
 let _pool: InstanceType<typeof Pool> | null = null;
 function getPool(): InstanceType<typeof Pool> {
@@ -100,7 +101,7 @@ const bankingRouter = router({
       dataProtectionOfficer: z.string().optional(),
       dpcoOrgId: z.number().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Business rule: CAR must be >= 10% for commercial banks (CBN minimum)
       if (input.capitalAdequacyRatio !== undefined && input.licenseType === "commercial" && input.capitalAdequacyRatio < 10) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Commercial banks must maintain minimum 10% Capital Adequacy Ratio per CBN guidelines" });
@@ -116,6 +117,7 @@ const bankingRouter = router({
           input.nonPerformingLoanRatio ?? null, input.dataProtectionOfficer ?? null, input.dpcoOrgId ?? null]);
       await broadcastUpdate("banking_institution_created", { name: input.name, licenseType: input.licenseType });
       emitMutationEvent(EVENTS.CORRESPONDENT_BANK, { action: "institution_created", name: input.name, licenseType: input.licenseType, cbnCode: input.cbnCode }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.institution.create", resourceType: "banking_institution", details: `Created institution: ${input.name} (${input.licenseType})` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
@@ -131,7 +133,7 @@ const bankingRouter = router({
       lastExaminationDate: z.string().optional(),
       nextExaminationDate: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { id, ...fields } = input;
       const sets: string[] = [];
       const params: unknown[] = [];
@@ -148,6 +150,7 @@ const bankingRouter = router({
       params.push(id);
       await query(`UPDATE banking_institutions SET ${sets.join(", ")} WHERE id = ?`, params);
       emitMutationEvent(EVENTS.CORRESPONDENT_BANK, { action: "institution_updated", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.institution.update", resourceType: "banking_institution", resourceId: input.id, details: `Updated institution #${input.id}${input.status ? ` status=${input.status}` : ""}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
@@ -231,7 +234,7 @@ const kycRouter = router({
       selfieUrl: z.string().url().optional(),
       tier: z.enum(["tier1","tier2","tier3"]).default("tier1"),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Business rule: Tier 2 requires BVN, Tier 3 requires BVN + NIN + ID document
       if (input.tier === "tier2" && !input.bvn) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Tier 2 KYC requires BVN per CBN KYC Manual 2023" });
@@ -259,6 +262,7 @@ const kycRouter = router({
           input.email ?? null, input.address ?? null, input.selfieUrl ?? null,
           input.idDocumentType ?? null, input.idDocumentUrl ?? null, input.tier, expiresAt.toISOString()]);
       emitMutationEvent(EVENTS.KYC_VERIFICATION, { action: "kyc_submitted", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.kyc.create", resourceType: "kyc_record", details: `KYC submitted: ${input.fullName} (${input.tier}) Ref: ${refId}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, referenceId: refId };
     }),
 
@@ -337,7 +341,11 @@ const kycRouter = router({
           input.addressVerified !== undefined ? (input.addressVerified ? 1 : 0) : null,
           ctx.user.name ?? ctx.user.email ?? "System",
           input.notes ?? null, input.id]);
-      emitMutationEvent(EVENTS.KYC_VERIFICATION, { action: "kyc_approved", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent(EVENTS.KYC_VERIFICATION, { action: `kyc_${input.action}`, ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: `banking.kyc.${input.action}`, resourceType: "kyc_record", resourceId: input.id, details: `KYC ${input.action}: ${record.full_name} → ${newStatus}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      if (input.action === "flag_sanctions") {
+        createInAppNotification({ title: "Sanctions Match — KYC Alert", message: `KYC subject ${record.full_name} flagged for sanctions match. Immediate escalation required.`, severity: "critical", category: "banking", userId: ctx.user.id, actionUrl: "/banking/kyc", metadata: { kycId: input.id } }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      }
       return { success: true, newStatus };
     }),
 
@@ -476,7 +484,7 @@ const amlRouter = router({
       sanctionsMatch: z.boolean().default(false),
       adverseMediaMatch: z.boolean().default(false),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const caseRef = genRef("AML");
       // Business rule: Sanctions match auto-escalates to highest priority
       const initialStatus = input.sanctionsMatch ? "escalated" : "open";
@@ -499,6 +507,10 @@ const amlRouter = router({
         await triggerWorkflow("AmlEscalationWorkflow", `aml-${caseRef}`, { caseRef, caseType: input.caseType, riskScore: input.riskScore });
       }
       emitMutationEvent(EVENTS.AML_CASE_CREATED, { action: "aml_case_created", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.aml.create", resourceType: "aml_case", details: `AML case created: ${caseRef} (${input.caseType}) risk=${input.riskScore}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      if (status === "escalated") {
+        createInAppNotification({ title: "AML Case Escalated", message: `AML case ${caseRef} auto-escalated: ${input.caseType} (risk score: ${input.riskScore})`, severity: "critical", category: "banking", userId: ctx.user.id, actionUrl: "/banking/aml", metadata: { caseRef } }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      }
       return { success: true, caseRef, status };
     }),
 
@@ -511,7 +523,7 @@ const amlRouter = router({
       strReference: z.string().optional(),
       closureNotes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Business rule: STR must be filed within 24 hours of detection per NFIU guidelines
       const sets = ["status = ?", "updated_at = NOW()"];
       const params: unknown[] = [input.status];
@@ -523,6 +535,7 @@ const amlRouter = router({
       params.push(input.id);
       await query(`UPDATE aml_cases SET ${sets.join(", ")} WHERE id = ?`, params);
       emitMutationEvent(EVENTS.AML_CASE_UPDATED, { action: "str_filed", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.aml.updateStatus", resourceType: "aml_case", resourceId: input.id, details: `AML case #${input.id} status → ${input.status}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
@@ -581,7 +594,7 @@ const watchlistRouter = router({
       nationality: z.string().optional(),
       passportNumber: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Fuzzy name screening against watchlist
       const nameParts = input.name.toLowerCase().split(" ");
       const params: unknown[] = [];
@@ -633,7 +646,7 @@ const watchlistRouter = router({
       category: z.enum(["sanctions","pep","adverse_media","terrorism","fraud","corruption","money_laundering"]),
       reason: z.string().min(10),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const entityId = genRef("WL");
       await query(`
         INSERT INTO watchlist_entries (entity_id, entity_type, primary_name, aliases, date_of_birth, nationality,
@@ -643,14 +656,16 @@ const watchlistRouter = router({
           input.dateOfBirth ?? null, input.nationality ?? null, input.passportNumber ?? null,
           input.source, input.category, input.reason]);
       emitMutationEvent(EVENTS.FRAUD_ALERT, { action: "watchlist_entity_added", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.watchlist.add", resourceType: "watchlist_entry", details: `Watchlist entry added: ${input.primaryName} (${input.category}/${input.source})` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, entityId };
     }),
 
   delistEntry: adminProcedure
     .input(z.object({ id: z.number(), reason: z.string().min(5) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       await query(`UPDATE watchlist_entries SET is_active = false, delisting_date = NOW(), updated_at = NOW() WHERE id = ?`, [input.id]);
       emitMutationEvent(EVENTS.FRAUD_ALERT, { action: "watchlist_entity_delisted", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.watchlist.delist", resourceType: "watchlist_entry", resourceId: input.id, details: `Watchlist entry #${input.id} delisted: ${input.reason}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
@@ -722,7 +737,7 @@ const paymentsRouter = router({
       narration: z.string().max(255).optional(),
       channelCode: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Business rule: NIP single transaction limit is ₦10M (CBN Circular)
       if (input.amount > 10_000_000) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "NIP single transaction limit is ₦10,000,000. Use RTGS for higher amounts." });
@@ -817,6 +832,10 @@ const paymentsRouter = router({
       }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[TigerBeetle] NIP ledger fire-and-forget"));
 
       emitMutationEvent(EVENTS.SWIFT_TRANSACTION, { action: "nip_initiate", sessionId, amount: input.amount, amlFlagged, fraudFlagged, structuringRisk, velocityFlagged, ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.nip.initiate", resourceType: "nip_transaction", details: `NIP ₦${input.amount.toLocaleString()} ${input.senderBankCode}→${input.receiverBankCode}${amlFlagged ? " [AML]" : ""}${fraudFlagged ? " [FRAUD]" : ""}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      if (fraudFlagged) {
+        createInAppNotification({ title: "NIP Fraud Alert", message: `NIP ₦${input.amount.toLocaleString()} flagged for fraud. Session: ${sessionId}`, severity: "critical", category: "banking", userId: ctx.user.id, actionUrl: "/banking/payments" }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      }
       return { success: true, sessionId, nibssRef, amlFlagged, fraudFlagged, structuringRisk, velocityFlagged };
     }),
 
@@ -858,7 +877,7 @@ const paymentsRouter = router({
       narration: z.string().optional(),
       priority: z.enum(["normal","urgent","critical"]).default("normal"),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Business rule: RTGS minimum is ₦10M
       if (input.amount < 10_000_000) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "RTGS minimum transaction amount is ₦10,000,000" });
@@ -951,6 +970,10 @@ const paymentsRouter = router({
       }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[TigerBeetle] RTGS ledger fire-and-forget"));
 
       emitMutationEvent(EVENTS.SWIFT_TRANSACTION, { action: "rtgs_initiate", reference, amount: input.amount, amlFlagged, enhancedDueDiligence, sanctionsFlagged, velocityFlagged, ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.rtgs.initiate", resourceType: "rtgs_transaction", details: `RTGS ₦${input.amount.toLocaleString()} ${input.senderBankCode}→${input.receiverBankCode} (${settlementCycle})${enhancedDueDiligence ? " [EDD]" : ""}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      if (enhancedDueDiligence) {
+        createInAppNotification({ title: "RTGS Enhanced Due Diligence", message: `RTGS ₦${input.amount.toLocaleString()} requires enhanced due diligence (≥₦100M). Ref: ${reference}`, severity: "high", category: "banking", userId: ctx.user.id, actionUrl: "/banking/payments" }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      }
       return { success: true, reference, cbnRef, settlementCycle, amlFlagged, enhancedDueDiligence, velocityFlagged };
     }),
 
@@ -1016,7 +1039,7 @@ const swiftRouter = router({
       remittanceInfo: z.string().optional(),
       correspondentBic: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const messageRef = genRef("SWIFT");
       // Business rule: All outgoing SWIFT messages must be sanctions-screened
       // Simulate screening (in production, this would call OFAC/UN API)
@@ -1033,12 +1056,13 @@ const swiftRouter = router({
           input.remittanceInfo ?? null, input.correspondentBic ?? null,
           sanctionsScreened ? 1 : 0, sanctionsFlagged ? 1 : 0]);
       emitMutationEvent(EVENTS.SWIFT_TRANSACTION, { action: "swift_message_sent", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.swift.create", resourceType: "swift_message", details: `SWIFT ${input.messageType} ${input.senderBic}→${input.receiverBic}${input.amount ? ` ${input.currency ?? ""}${input.amount}` : ""}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, messageRef, sanctionsScreened, sanctionsFlagged };
     }),
 
   send: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const rows = await query(`SELECT * FROM swift_messages WHERE id = ?`, [input.id]) as any[];
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
       if (rows[0].sanctions_flagged) {
@@ -1046,6 +1070,7 @@ const swiftRouter = router({
       }
       await query(`UPDATE swift_messages SET status = 'sent', sent_at = NOW(), updated_at = NOW() WHERE id = ?`, [input.id]);
       emitMutationEvent(EVENTS.SWIFT_TRANSACTION, { action: "swift_message_processed", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.swift.send", resourceType: "swift_message", resourceId: input.id, details: `SWIFT message #${input.id} sent` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
@@ -1108,7 +1133,7 @@ const fraudRouter = router({
       mlConfidence: z.number().min(0).max(100).optional(),
       ruleTriggered: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const alertRef = genRef("FRD");
       // Business rule: Risk score >= 90 triggers automatic account block
       const autoBlocked = input.riskScore >= 90;
@@ -1120,6 +1145,10 @@ const fraudRouter = router({
           input.accountNumber ?? null, input.alertType, input.riskScore, input.mlModel ?? null,
           input.mlConfidence ?? null, input.ruleTriggered ?? null, autoBlocked ? new Date().toISOString() : null]);
       emitMutationEvent(EVENTS.FRAUD_ALERT, { action: "fraud_alert_created", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.fraud.create", resourceType: "fraud_alert", details: `Fraud alert ${alertRef}: ${input.alertType} (risk=${input.riskScore})${autoBlocked ? " [BLOCKED]" : ""}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      if (autoBlocked) {
+        createInAppNotification({ title: "Account Auto-Blocked — Fraud", message: `Account ${input.accountNumber ?? "N/A"} auto-blocked: ${input.alertType} (risk score ${input.riskScore}). Alert: ${alertRef}`, severity: "critical", category: "banking", userId: ctx.user.id, actionUrl: "/banking/fraud" }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      }
       return { success: true, alertRef, autoBlocked };
     }),
 
@@ -1149,6 +1178,7 @@ const fraudRouter = router({
       params.push(input.id);
       await query(`UPDATE fraud_alerts SET ${sets.join(", ")} WHERE id = ?`, params);
       emitMutationEvent(EVENTS.FRAUD_ALERT, { action: "fraud_alert_updated", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: `banking.fraud.${input.action}`, resourceType: "fraud_alert", resourceId: input.id, details: `Fraud alert #${input.id} → ${newStatus}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, newStatus };
     }),
 
@@ -1208,7 +1238,7 @@ const cbnReportsRouter = router({
       totalAmount: z.number().optional(),
       preparedBy: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const reportRef = genRef("CBN");
       // Business rule: STR must be filed within 24 hours, CTR within 7 days
       await query(`
@@ -1219,12 +1249,13 @@ const cbnReportsRouter = router({
           input.filingDeadline, input.totalTransactions ?? null, input.totalAmount ?? null,
           input.preparedBy ?? null]);
       emitMutationEvent(EVENTS.CBN_REPORT, { action: "cbn_report_submitted", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.cbn.create", resourceType: "cbn_report", details: `CBN report ${reportRef}: ${input.reportType} (${input.reportingPeriod})` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, reportRef };
     }),
 
   submit: protectedProcedure
     .input(z.object({ id: z.number(), approvedBy: z.string().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const rows = await query(`SELECT * FROM cbn_reports WHERE id = ?`, [input.id]) as any[];
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND" });
       if (rows[0].status === "submitted") throw new TRPCError({ code: "CONFLICT", message: "Report already submitted" });
@@ -1239,6 +1270,7 @@ const cbnReportsRouter = router({
         WHERE id = ?
       `, [cbnAckRef, input.approvedBy ?? null, input.id]);
       emitMutationEvent(EVENTS.CBN_REPORT, { action: "cbn_report_approved", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.cbn.submit", resourceType: "cbn_report", resourceId: input.id, details: `CBN report #${input.id} submitted. ACK: ${cbnAckRef}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, cbnAckRef };
     }),
 
@@ -1305,7 +1337,7 @@ const correspondentRouter = router({
       amlRiskRating: z.enum(["low","medium","high","very_high"]).default("low"),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       // Business rule: KYC must be completed for high/very_high risk correspondents
       if ((input.amlRiskRating === "high" || input.amlRiskRating === "very_high") && !input.kycCompleted) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "KYC must be completed for high-risk correspondent banks per FATF Recommendation 13" });
@@ -1322,6 +1354,7 @@ const correspondentRouter = router({
           input.dailyLimit ?? null, input.monthlyLimit ?? null, input.kycCompleted ? 1 : 0,
           input.amlRiskRating, nextReview.toISOString(), input.notes ?? null]);
       emitMutationEvent(EVENTS.CORRESPONDENT_BANK, { action: "correspondent_onboarded", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.correspondent.create", resourceType: "correspondent_bank", details: `Correspondent onboarded: ${input.correspondentName} (${input.correspondentBic}) ${input.country}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
@@ -1331,10 +1364,11 @@ const correspondentRouter = router({
       status: z.enum(["active","suspended","terminated","under_review"]),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       await query(`UPDATE correspondent_banks SET status = ?, notes = COALESCE(?, notes), updated_at = NOW() WHERE id = ?`,
         [input.status, input.notes ?? null, input.id]);
       emitMutationEvent(EVENTS.CORRESPONDENT_BANK, { action: "correspondent_status_updated", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      createAuditLog({ userId: ctx.user.id, action: "banking.correspondent.updateStatus", resourceType: "correspondent_bank", resourceId: input.id, details: `Correspondent #${input.id} → ${input.status}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
