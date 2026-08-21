@@ -12,12 +12,12 @@
 | `pnpm run check` | Passed | TypeScript has no reported errors. |
 | `pnpm run build` | Passed | The server bundle builds successfully. |
 | `pnpm run lint` | Passed with 0 warnings | Lint configuration and all previously reported source warnings were resolved without rule suppression. |
-| Full PostgreSQL-backed tests | 139 passed, 1 skipped | Includes payment audit, webhook reconciliation, dual-control approval, and reconciliation exception tests against the dedicated `idlr_payment_test` database. |
-| Full core coverage | 58.51% statements/lines, 68.94% functions, 63.82% branches | Measured over server and library TypeScript, excluding app UI, native configuration, generated files, and deployment manifests. |
+| Full PostgreSQL-backed tests | 141 passed, 1 skipped | Includes payment audit, webhook reconciliation, dual-control approval, and recovery-controller fail-closed tests against the dedicated `idlr_payment_test` database. |
+| Full core coverage | 57.22% statements/lines, 66.66% functions, 62.73% branches | Measured over server and library TypeScript, excluding app UI, native configuration, generated files, and deployment manifests. The slight decline reflects newly added recovery-controller code whose real KMS/WebAuthn success path requires external staging evidence. |
 
 ## High-assurance controls covered by deterministic tests
 
-The current tests exercise fail-closed OIDC configuration and login readiness, rejected refresh-token cleanup, revocation cleanup, tamper-evident security audit verification, malformed Keycloak administrative configuration rejection, distinct-principal dual-approval recovery invariants, PostgreSQL-backed payment audit and webhook controls, offline queue validation and retry rules, audit receipt cryptography, WAF preset filtering, and policy/threshold domain behavior.
+The current tests exercise fail-closed OIDC configuration and login readiness, rejected refresh-token cleanup, revocation cleanup, tamper-evident security audit verification, malformed Keycloak administrative configuration rejection, dual-approval recovery status and unavailable-controller safeguards, PostgreSQL-backed payment audit and webhook controls, offline queue validation and retry rules, audit receipt cryptography, WAF preset filtering, and policy/threshold domain behavior.
 
 ## Explicit gaps
 
@@ -25,7 +25,7 @@ The coverage percentage cannot safely be treated as an overall quality score. Na
 
 ## Next quality work
 
-The isolated PostgreSQL dependency has now been restored and the full suite passes. The highest-value remaining evidence is native-device integration testing for OIDC biometrics, file encryption, camera, maps, and push notification behavior, followed by authenticated target-environment checks of external providers and additional UI component/route coverage.
+The isolated PostgreSQL dependency has now been restored and the full suite passes. The highest-value remaining evidence is a Keycloak/KMS/replay-worker recovery drill using two enrolled distinct passkeys, followed by native-device integration testing for OIDC biometrics, file encryption, camera, maps, and push notification behavior.
 
 ## Preview verification limitation
 

@@ -6,6 +6,7 @@ export const ENTERPRISE_AGENCY_ROLES = [
   "petroleum_reviewer",
   "environment_reviewer",
   "planning_supervisor",
+  "security_engineer",
 ] as const;
 
 export type EnterpriseAgencyRole = (typeof ENTERPRISE_AGENCY_ROLES)[number];

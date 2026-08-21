@@ -69,6 +69,29 @@ import { acknowledgeHighRiskReconciliationAlert, getOfflinePaymentSummary, getPa
 import { getGatewayActivationStatus } from "./paymentGatewayConfig";
 import { attestDiagnosticExport, getDiagnosticAttestationStatus } from "./diagnosticExportAttestation";
 import { bulkRevokeDiagnosticAttestations, exportDiagnosticAttestations, getDiagnosticAttestationDetail, getDiagnosticAttestationStatusByReceiptId, listDiagnosticAttestations, listReceiptRevocationNotifications, markReceiptRevocationNotificationRead, revokeDiagnosticAttestation, setReceiptRevocationNotificationArchive } from "./diagnosticAttestationRepository";
+import { approveRecoveryAuthorization, createRecoveryAuthorization, getRecoveryAuthorization, getRecoveryControllerStatus, type RecoveryApproverRole } from "./recoveryRepository";
+
+const PERMIT_AGENCY_ROLES = ["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"] as const;
+type PermitAgencyRole = (typeof PERMIT_AGENCY_ROLES)[number];
+
+function currentPermitRole(roles: EnterpriseAgencyRole[]): PermitAgencyRole {
+  const role = roles.find((candidate): candidate is PermitAgencyRole => (PERMIT_AGENCY_ROLES as readonly string[]).includes(candidate));
+  if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "The authenticated enterprise role is not permitted to perform permit-workflow actions." });
+  return role;
+}
+
+const recoveryAssertionSchema = z.object({
+  id: z.string().min(1).max(2048),
+  rawId: z.string().min(1).max(2048),
+  type: z.literal("public-key"),
+  response: z.object({
+    authenticatorData: z.string().min(1).max(16_384),
+    clientDataJSON: z.string().min(1).max(16_384),
+    signature: z.string().min(1).max(16_384),
+    userHandle: z.string().max(2048).optional(),
+  }),
+  clientExtensionResults: z.record(z.string(), z.unknown()),
+});
 
 const businessProfileSchema = z.object({
   stakeholderType: z.enum(["individual", "business"]),
@@ -265,6 +288,24 @@ export const appRouter = router({
       const url = new URL(template.replaceAll("{eventId}", encodeURIComponent(input.auditEventId))); if (url.protocol !== "https:" || !allowlist.includes(url.hostname.toLowerCase())) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "SIEM correlation endpoint is not allowlisted." });
       const audit = recordSiemCorrelationOpen({ actor: ctx.user.openId, auditEventId: input.auditEventId, destinationHost: url.hostname }); return { url: url.toString(), audit };
     }),
+  }),
+  recovery: router({
+    status: protectedProcedure.query(() => getRecoveryControllerStatus()),
+    authorization: enterpriseProcedure
+      .input(z.object({ authorizationId: z.string().uuid() }))
+      .query(async ({ ctx, input }) => {
+        const authorization = await getRecoveryAuthorization(input.authorizationId);
+        if (!authorization) return null;
+        const isApprover = ctx.enterprise.agencyRoles.some((role) => role === "security_engineer" || role === "planning_supervisor");
+        if (authorization.ownerSubject !== ctx.enterprise.subject && !isApprover) throw new TRPCError({ code: "FORBIDDEN", message: "Recovery authorization visibility is limited to the request owner and designated recovery approvers." });
+        return authorization;
+      }),
+    request: enterpriseProcedure
+      .input(z.object({ queueId: z.string().min(1).max(512), payloadHash: z.string().regex(/^[a-f0-9]{64}$/i), idempotencyKey: z.string().uuid(), targetDeviceFingerprint: z.string().regex(/^[a-f0-9]{64}$/i), kmsCiphertext: z.string().min(24).max(32_768) }))
+      .mutation(async ({ ctx, input }) => createRecoveryAuthorization({ principal: ctx.enterprise, ...input, payloadHash: input.payloadHash.toLowerCase(), targetDeviceFingerprint: input.targetDeviceFingerprint.toLowerCase() })),
+    approve: enterpriseProcedure
+      .input(z.object({ authorizationId: z.string().uuid(), approvalRole: z.enum(["security_engineer", "planning_supervisor"]), assertion: recoveryAssertionSchema }))
+      .mutation(async ({ ctx, input }) => approveRecoveryAuthorization({ principal: ctx.enterprise, authorizationId: input.authorizationId, approvalRole: input.approvalRole as RecoveryApproverRole, assertion: input.assertion })),
   }),
   diagnosticExports: router({
     attestationStatus: publicProcedure.query(() => getDiagnosticAttestationStatus()),
@@ -479,7 +520,7 @@ export const appRouter = router({
         }),
       )
       .mutation(({ ctx, input }) => {
-        const actorRole = (input.actorRole ?? ctx.enterprise.agencyRoles[0]) as EnterpriseAgencyRole;
+        const actorRole = input.actorRole ?? currentPermitRole(ctx.enterprise.agencyRoles);
         assertEnterpriseRole(ctx.enterprise, [actorRole]);
         return updatePermitFormSections({ ...input, actorRole });
       }),
@@ -496,7 +537,7 @@ export const appRouter = router({
       )
       .mutation(({ ctx, input }) => {
         assertEnterpriseRole(ctx.enterprise, ["mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"]);
-        const role = ctx.enterprise.agencyRoles[0];
+        const role = currentPermitRole(ctx.enterprise.agencyRoles);
         return appendPermitReviewNote({
           ...input,
           author: ctx.user?.name ?? ctx.enterprise.subject,
@@ -527,7 +568,7 @@ export const appRouter = router({
         }),
       )
       .mutation(async ({ ctx, input }) => {
-        const role = ctx.enterprise.agencyRoles[0];
+        const role = currentPermitRole(ctx.enterprise.agencyRoles);
         assertEnterpriseRole(ctx.enterprise, [role]);
         return uploadPermitDocumentAndExtract({ ...input, uploadedByRole: role });
       }),

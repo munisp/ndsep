@@ -3,6 +3,7 @@ import type { Request } from "express";
 import { createRemoteJWKSet, SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
+import { getConfiguredIntegrationValue } from "../integrationSettingsRepository";
 import { type EnterpriseAgencyRole, type EnterprisePrincipal, isEnterpriseAgencyRole } from "./enterpriseAuth";
 import { ENV } from "./env";
 
@@ -37,6 +38,21 @@ function isPasskeyAuthenticated(value: unknown) {
   return methods.some((method) => ["webauthn", "passkey", "fido2"].includes(String(method).toLowerCase()));
 }
 
+function enterpriseOidcConfig() {
+  const issuer = getConfiguredIntegrationValue("OIDC_ISSUER")?.trim() || ENV.oidcIssuer;
+  const audience = getConfiguredIntegrationValue("OIDC_AUDIENCE")?.trim() || ENV.oidcAudience;
+  const jwksUrl = getConfiguredIntegrationValue("OIDC_JWKS_URL")?.trim() || ENV.oidcJwksUrl;
+  if (!issuer || !audience || !jwksUrl) return null;
+  try {
+    const issuerUrl = new URL(issuer);
+    const jwks = new URL(jwksUrl);
+    if (issuerUrl.protocol !== "https:" || jwks.protocol !== "https:") return null;
+    return { issuer, audience, jwksUrl };
+  } catch {
+    return null;
+  }
+}
+
 class SDKServer {
   private parseCookies(cookieHeader: string | undefined) {
     if (!cookieHeader) {
@@ -50,18 +66,18 @@ class SDKServer {
     return new TextEncoder().encode(ENV.cookieSecret);
   }
 
-  private getExternalJwks() {
-    if (!ENV.oidcJwksUrl) return null;
-    return createRemoteJWKSet(new URL(ENV.oidcJwksUrl));
+  private getExternalJwks(jwksUrl: string) {
+    return createRemoteJWKSet(new URL(jwksUrl));
   }
 
   private async verifyEnterpriseToken(token: string): Promise<{ identity: SessionPayload; principal: EnterprisePrincipal } | null> {
-    if (!ENV.oidcIssuer || !ENV.oidcAudience || !ENV.oidcJwksUrl) return null;
-    const jwks = this.getExternalJwks();
+    const oidc = enterpriseOidcConfig();
+    if (!oidc) return null;
+    const jwks = this.getExternalJwks(oidc.jwksUrl);
     if (!jwks) return null;
     const { payload } = await jwtVerify(token, jwks, {
-      issuer: ENV.oidcIssuer,
-      audience: ENV.oidcAudience,
+      issuer: oidc.issuer,
+      audience: oidc.audience,
     });
     const claims = payload as Record<string, unknown>;
     const subject = typeof claims.sub === "string" ? claims.sub : null;
@@ -74,7 +90,7 @@ class SDKServer {
     const name = typeof claims.name === "string" ? claims.name : email ?? subject;
     return {
       identity: {
-        openId: `${ENV.oidcIssuer}:${subject}`.slice(0, 63),
+        openId: `${oidc.issuer}:${subject}`.slice(0, 63),
         appId: ENV.appId,
         name,
         email,
@@ -82,7 +98,7 @@ class SDKServer {
       },
       principal: {
         subject,
-        issuer: ENV.oidcIssuer,
+        issuer: oidc.issuer,
         agencyId,
         agencyRoles,
         authMethod: "oidc",

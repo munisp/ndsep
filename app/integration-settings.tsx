@@ -25,7 +25,14 @@ type FieldName =
   | "WAF_TELEMETRY_URL"
   | "WAF_TELEMETRY_BEARER_TOKEN"
   | "SECURITY_TELEMETRY_ALLOWED_HOSTS"
-  | "SIEM_CORRELATION_URL_TEMPLATE";
+  | "SIEM_CORRELATION_URL_TEMPLATE"
+  | "RECOVERY_KMS_REGION"
+  | "RECOVERY_KMS_KEY_ID"
+  | "RECOVERY_WEBAUTHN_ORIGIN"
+  | "RECOVERY_WEBAUTHN_RP_ID"
+  | "RECOVERY_REPLAY_URL"
+  | "RECOVERY_REPLAY_SHARED_SECRET"
+  | "RECOVERY_REPLAY_ALLOWED_HOSTS";
 
 const groups: { title: string; note: string; fields: { key: FieldName; label: string; secret?: boolean }[] }[] = [
   {
@@ -74,6 +81,19 @@ const groups: { title: string; note: string; fields: { key: FieldName; label: st
       { key: "WAF_TELEMETRY_BEARER_TOKEN", label: "Telemetry bearer token", secret: true },
       { key: "SECURITY_TELEMETRY_ALLOWED_HOSTS", label: "Allowed telemetry and SIEM hosts" },
       { key: "SIEM_CORRELATION_URL_TEMPLATE", label: "SIEM URL template using {eventId}" },
+    ],
+  },
+  {
+    title: "Dual-approval recovery controller",
+    note: "Recovery remains unavailable until all WebAuthn, KMS, and worker-replay boundaries are configured. The server re-encrypts envelopes through KMS; it never accepts a locally decrypted payload or a client-side bypass.",
+    fields: [
+      { key: "RECOVERY_WEBAUTHN_ORIGIN", label: "WebAuthn HTTPS origin" },
+      { key: "RECOVERY_WEBAUTHN_RP_ID", label: "WebAuthn RP ID" },
+      { key: "RECOVERY_KMS_REGION", label: "KMS region" },
+      { key: "RECOVERY_KMS_KEY_ID", label: "KMS destination key ID" },
+      { key: "RECOVERY_REPLAY_URL", label: "Approved replay-worker URL" },
+      { key: "RECOVERY_REPLAY_ALLOWED_HOSTS", label: "Allowed replay-worker hosts" },
+      { key: "RECOVERY_REPLAY_SHARED_SECRET", label: "Replay-worker credential", secret: true },
     ],
   },
 ];

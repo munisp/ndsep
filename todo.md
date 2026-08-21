@@ -429,13 +429,20 @@
 - [x] Produce an evidence-supported code-readiness score and residual-risk register without claiming certainty from code alone
 - [x] Restore isolated PostgreSQL test infrastructure and make the payment integration suite green in a repeatable environment
 - [ ] Add native-device and approved-external-provider integration evidence for biometric, map, camera, KMS, OIDC, document-intelligence, and notification boundaries
-- [ ] Restore disposable PostgreSQL validation infrastructure and make the complete payment suite pass
-- [ ] Eliminate all remaining ESLint warnings without suppressing valid safety checks
-- [ ] Improve availability-aware Keycloak OIDC login UX with clear progress, recovery, and secure-session states
-- [ ] Improve the dual-approval recovery UX with explicit quorum, device-binding, and fail-closed state communication
-- [ ] Validate the completed payment, lint, OIDC, and recovery changes through repeatable checks before reporting results
 - [x] Restore disposable PostgreSQL validation infrastructure and make the complete payment suite pass
 - [x] Eliminate all remaining ESLint warnings without suppressing valid safety checks
 - [x] Improve availability-aware Keycloak OIDC login UX with clear progress, recovery, and secure-session states
 - [x] Improve the dual-approval recovery UX with explicit quorum, device-binding, and fail-closed state communication
 - [x] Validate the completed payment, lint, OIDC, and recovery changes through repeatable checks before reporting results
+- [x] Restore disposable PostgreSQL validation infrastructure and make the complete payment suite pass
+- [x] Eliminate all remaining ESLint warnings without suppressing valid safety checks
+- [x] Improve availability-aware Keycloak OIDC login UX with clear progress, recovery, and secure-session states
+- [x] Improve the dual-approval recovery UX with explicit quorum, device-binding, and fail-closed state communication
+- [x] Validate the completed payment, lint, OIDC, and recovery changes through repeatable checks before reporting results
+- [x] Implement a server-side dual-approval recovery controller with durable request, approval, audit, and replay state
+- [x] Enforce fresh WebAuthn verification, distinct approvers, role quorum, device binding, payload hash binding, and idempotent recovery replay
+- [x] Add fail-closed KMS envelope-rewrap integration contracts and secure administrator configuration fields
+- [ ] Configure approved real Keycloak staging issuer, client, redirect URI, audience, and JWKS through secure settings
+- [x] Add recovery-flow loading, progress, retryable-error, and terminal-state feedback without offering local bypasses
+- [x] Add deterministic recovery-controller and staging-readiness tests with explicit external-provider exclusions
+- [x] Preserve default-unavailable Keycloak staging and KMS activation while approved configuration values are pending
