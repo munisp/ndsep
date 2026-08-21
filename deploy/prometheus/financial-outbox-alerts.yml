@@ -1,0 +1,75 @@
+groups:
+  - name: ndsep-financial-outbox
+    interval: 30s
+    rules:
+      - alert: NDSEPFinancialTransferQuarantineNonZero
+        expr: ndsep_financial_outbox_reconciliation_required > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: financial-outbox
+          action: freeze-funds-movement
+        annotations:
+          summary: "Financial transfer quarantine is non-zero"
+          description: "{{ $value }} transfer intent(s) require provider reconciliation. Do not blind-retry or edit settlement state directly."
+          runbook: "docs/runbooks/incident-response.md#runbook-financial-transfer-quarantine-sev-1"
+
+      - alert: NDSEPFinancialTransferDeadLetterNonZero
+        expr: ndsep_financial_outbox_dead_letter > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: financial-outbox
+          action: manual-review
+        annotations:
+          summary: "Financial transfer dead-letter queue is non-zero"
+          description: "{{ $value }} financial transfer(s) require two-person operations and financial-control review."
+          runbook: "docs/runbooks/incident-response.md#runbook-financial-transfer-quarantine-sev-1"
+
+      - alert: NDSEPFinancialTransferQuarantineOldestTooOld
+        expr: ndsep_financial_outbox_oldest_reconciliation_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+          service: financial-outbox
+          action: escalate
+        annotations:
+          summary: "Financial transfer quarantine is older than five minutes"
+          description: "Oldest quarantined transfer age is {{ $value | humanizeDuration }}."
+          runbook: "docs/runbooks/incident-response.md#runbook-financial-transfer-quarantine-sev-1"
+
+      - alert: NDSEPFinancialTransferProviderConflict
+        expr: increase(ndsep_financial_provider_conflict_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: financial-reconciliation
+          action: manual-review
+        annotations:
+          summary: "Conflicting provider states observed for a financial transfer"
+          description: "At least one TigerBeetle/Mojaloop state conflict occurred in the last five minutes."
+          runbook: "docs/runbooks/incident-response.md#runbook-financial-transfer-quarantine-sev-1"
+
+      - alert: NDSEPFinancialOutboxLeaseStale
+        expr: ndsep_financial_outbox_stale_leases > 0
+        for: 2m
+        labels:
+          severity: high
+          service: financial-outbox
+          action: inspect-worker
+        annotations:
+          summary: "Financial outbox lease is stale"
+          description: "{{ $value }} leased transfer(s) exceed the configured lease timeout."
+          runbook: "docs/runbooks/incident-response.md#runbook-financial-transfer-quarantine-sev-1"
+
+      - alert: NDSEPFinancialReconciliationLookupFailures
+        expr: increase(ndsep_financial_reconciliation_lookup_failure_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: high
+          service: financial-reconciliation
+          action: preserve-quarantine
+        annotations:
+          summary: "Provider reconciliation lookup failed"
+          description: "Provider lookup failure is not an authoritative not-found result; retain quarantine state."
+          runbook: "docs/runbooks/incident-response.md#runbook-financial-transfer-quarantine-sev-1"

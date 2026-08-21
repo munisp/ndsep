@@ -1,0 +1,31 @@
+# Test-only provider contract simulation. Never include this file in a production compose command.
+services:
+  ndsep-contract-simulator:
+    profiles: ["contract-simulation"]
+    build:
+      context: ./orchestration/python/contract_simulator
+    environment:
+      NODE_ENV: test
+      NDSEP_ALLOW_TEST_PROVIDER_EMULATORS: "true"
+      NDSEP_SIM_NIMC_OUTCOME: ${NDSEP_SIM_NIMC_OUTCOME:-not_verified}
+      NDSEP_SIM_CAC_OUTCOME: ${NDSEP_SIM_CAC_OUTCOME:-not_verified}
+      PORT: "8346"
+    ports:
+      - "127.0.0.1:8346:8346"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://127.0.0.1:8346/health'', timeout=2)"',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

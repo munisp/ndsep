@@ -1,262 +1,201 @@
-// NDSEP Kafka Broker Monitor & Event Producer (Go)
-// ==================================================
-// Monitors Kafka topic health and simulates event production across all topics.
-// Performs:
-//   - Kafka topic throughput monitoring (simulated)
-//   - Consumer group lag tracking
-//   - Event production for all NDSEP topics
-//   - Broker health checks
-//   - Fluvio vs Kafka throughput comparison
-//
-// Broadcasts topic metrics and broker health via WebSocket relay.
-
+// NDSEP streaming monitor. It consumes authoritative Kafka/Fluvio metrics from a
+// configured broker-metrics gateway and never produces synthetic stream events.
 package main
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
 	"log"
-	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
-	"sync/atomic"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"ndsep/workers/shared"
 )
 
-var (
-	eventsProduced  int64
-	workerStart     = time.Now()
-)
-
-type KafkaTopic struct {
-	Name        string
-	Partitions  int
-	Replication int
-	RetentionH  int
-	Description string
-	Layer       string
+type config struct {
+	listenAddr string
+	metricsURL *url.URL
+	authHeader string
+	pollEvery  time.Duration
+	timeout    time.Duration
+}
+type metricsClient struct {
+	endpoint   *url.URL
+	authHeader string
+	http       *http.Client
+}
+type healthState struct {
+	mu          sync.RWMutex
+	lastSuccess time.Time
+	lastError   string
+}
+type topicMetric struct {
+	Name              string    `json:"name"`
+	Partitions        int       `json:"partitions"`
+	Replication       int       `json:"replication"`
+	MessagesPerSecond float64   `json:"messages_per_second"`
+	ConsumerLag       int64     `json:"consumer_lag"`
+	TotalMessages     int64     `json:"total_messages"`
+	ObservedAt        time.Time `json:"observed_at"`
+}
+type brokerMetric struct {
+	BrokerCount       int       `json:"broker_count"`
+	LeadersOnline     int       `json:"leaders_online"`
+	ReplicasInSync    int       `json:"replicas_in_sync"`
+	UnderReplicated   int       `json:"under_replicated"`
+	MessagesInPerSec  float64   `json:"messages_in_per_second"`
+	MessagesOutPerSec float64   `json:"messages_out_per_second"`
+	ObservedAt        time.Time `json:"observed_at"`
+}
+type snapshot struct {
+	KafkaTopics  []topicMetric `json:"kafka_topics"`
+	FluvioTopics []topicMetric `json:"fluvio_topics"`
+	Broker       brokerMetric  `json:"broker"`
 }
 
-var kafkaTopics = []KafkaTopic{
-	{Name: "ndsep.assets.discovered", Partitions: 12, Replication: 3, RetentionH: 168, Description: "Asset discovery events from all agents", Layer: "L1"},
-	{Name: "ndsep.assets.updated", Partitions: 12, Replication: 3, RetentionH: 168, Description: "Asset metadata update events", Layer: "L1"},
-	{Name: "ndsep.catalog.metadata", Partitions: 6, Replication: 3, RetentionH: 720, Description: "Data catalog metadata change events", Layer: "L2"},
-	{Name: "ndsep.catalog.lineage", Partitions: 6, Replication: 3, RetentionH: 720, Description: "Data lineage tracking events", Layer: "L2"},
-	{Name: "ndsep.compliance.violations", Partitions: 8, Replication: 3, RetentionH: 2160, Description: "Compliance violation detection events", Layer: "L3"},
-	{Name: "ndsep.compliance.scores", Partitions: 4, Replication: 3, RetentionH: 720, Description: "Organization compliance score updates", Layer: "L3"},
-	{Name: "ndsep.enforcement.actions", Partitions: 4, Replication: 3, RetentionH: 8760, Description: "Enforcement action lifecycle events", Layer: "L3"},
-	{Name: "ndsep.siem.alerts", Partitions: 16, Replication: 3, RetentionH: 61320, Description: "Security alerts (7-year retention)", Layer: "L4"},
-	{Name: "ndsep.siem.audit_logs", Partitions: 16, Replication: 3, RetentionH: 61320, Description: "Immutable audit log stream (7-year)", Layer: "L4"},
-	{Name: "ndsep.threat_intel.feeds", Partitions: 4, Replication: 3, RetentionH: 720, Description: "OpenCTI threat intelligence feeds", Layer: "L4"},
-	{Name: "ndsep.network.events", Partitions: 24, Replication: 3, RetentionH: 720, Description: "Network DPI events from IXP sites", Layer: "L5"},
-	{Name: "ndsep.network.blocks", Partitions: 8, Replication: 3, RetentionH: 2160, Description: "Blocking mechanism trigger events", Layer: "L5"},
-	{Name: "ndsep.financial.penalties", Partitions: 4, Replication: 3, RetentionH: 87600, Description: "TigerBeetle penalty ledger events", Layer: "Financial"},
-	{Name: "ndsep.financial.payments", Partitions: 4, Replication: 3, RetentionH: 87600, Description: "Mojaloop payment switch events", Layer: "Financial"},
-	{Name: "ndsep.ml.predictions", Partitions: 4, Replication: 3, RetentionH: 720, Description: "ML risk prediction updates", Layer: "L6"},
-	{Name: "ndsep.dashboard.metrics", Partitions: 2, Replication: 3, RetentionH: 168, Description: "Real-time dashboard metric updates", Layer: "L6"},
-}
-
-type FluvioTopic struct {
-	Name        string
-	Description string
-	Layer       string
-}
-
-var fluvioTopics = []FluvioTopic{
-	{Name: "fluvio.edge.telemetry", Description: "Low-latency edge agent telemetry", Layer: "L1"},
-	{Name: "fluvio.ixp.packets", Description: "Real-time IXP packet metadata stream", Layer: "L5"},
-	{Name: "fluvio.alerts.realtime", Description: "Sub-100ms alert delivery stream", Layer: "L4"},
-	{Name: "fluvio.enforcement.fast", Description: "Fast-path enforcement trigger stream", Layer: "L3"},
-}
-
-// runKafkaTopicMonitor broadcasts Kafka topic health metrics
-func runKafkaTopicMonitor() {
-	log.Println("[Kafka] Starting topic health monitor...")
-	ticker := time.NewTicker(12 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		topicMetrics := make([]map[string]interface{}, 0, len(kafkaTopics))
-		for _, topic := range kafkaTopics {
-			messagesPerSec := shared.RandomBetween(10, 5000)
-			consumerLag := shared.RandomBetween(0, 500)
-			status := "healthy"
-			if consumerLag > 400 {
-				status = "lagging"
-			}
-
-			topicMetrics = append(topicMetrics, map[string]interface{}{
-				"name":           topic.Name,
-				"partitions":     topic.Partitions,
-				"replication":    topic.Replication,
-				"retentionHours": topic.RetentionH,
-				"description":    topic.Description,
-				"layer":          topic.Layer,
-				"messagesPerSec": messagesPerSec,
-				"consumerLag":    consumerLag,
-				"status":         status,
-				"totalMessages":  shared.RandomBetween(10000, 10000000),
-			})
+func loadConfig() (config, error) {
+	raw := strings.TrimSpace(os.Getenv("STREAM_METRICS_URL"))
+	auth := strings.TrimSpace(os.Getenv("STREAM_METRICS_AUTHORIZATION"))
+	if raw == "" || auth == "" {
+		return config{}, errors.New("STREAM_METRICS_URL and STREAM_METRICS_AUTHORIZATION are required")
+	}
+	endpoint, err := url.Parse(raw)
+	if err != nil || endpoint.Scheme == "" || endpoint.Host == "" {
+		return config{}, errors.New("STREAM_METRICS_URL must be an absolute URL")
+	}
+	if os.Getenv("NODE_ENV") == "production" {
+		if endpoint.Scheme != "https" {
+			return config{}, errors.New("STREAM_METRICS_URL must use HTTPS in production")
 		}
-
-		shared.Broadcast("kafka_topics_update", map[string]interface{}{
-			"type":      "kafka_topics_update",
-			"topics":    topicMetrics,
-			"brokers":   3,
-			"status":    "healthy",
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-		})
-		log.Printf("[Kafka] Broadcast metrics for %d topics\n", len(kafkaTopics))
-	}
-}
-
-// runFluvioMonitor broadcasts Fluvio edge topic metrics
-func runFluvioMonitor() {
-	log.Println("[Fluvio] Starting Fluvio edge stream monitor...")
-	ticker := time.NewTicker(8 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		fluvioMetrics := make([]map[string]interface{}, 0, len(fluvioTopics))
-		for _, topic := range fluvioTopics {
-			fluvioMetrics = append(fluvioMetrics, map[string]interface{}{
-				"name":           topic.Name,
-				"description":    topic.Description,
-				"layer":          topic.Layer,
-				"messagesPerSec": shared.RandomBetween(100, 50000),
-				"latencyMs":      shared.RandomBetween(1, 15),
-				"status":         "healthy",
-				"edgeNodes":      shared.RandomBetween(5, 50),
-			})
+		host := strings.ToLower(endpoint.Hostname())
+		if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" {
+			return config{}, errors.New("STREAM_METRICS_URL must not target a local address in production")
 		}
-
-		shared.Broadcast("fluvio_topics_update", map[string]interface{}{
-			"type":      "fluvio_topics_update",
-			"topics":    fluvioMetrics,
-			"status":    "healthy",
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-		})
 	}
-}
-
-// runEventProducer simulates producing events to Kafka topics
-func runEventProducer() {
-	log.Println("[Kafka] Starting event producer...")
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		// Pick a random topic and produce a synthetic event
-		topic := kafkaTopics[rand.Intn(len(kafkaTopics))]
-		eventKey := fmt.Sprintf("evt-%d-%d", time.Now().UnixMilli(), rand.Intn(10000))
-
-		atomic.AddInt64(&eventsProduced, 1)
-
-		shared.Broadcast("kafka_event_produced", map[string]interface{}{
-			"type":      "kafka_event_produced",
-			"topic":     topic.Name,
-			"layer":     topic.Layer,
-			"eventKey":  eventKey,
-			"partition": rand.Intn(topic.Partitions),
-			"offset":    shared.RandomBetween(100000, 10000000),
-			"sizeBytes": shared.RandomBetween(128, 65536),
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-		})
-	}
-}
-
-// runBrokerHealthCheck broadcasts broker cluster health
-func runBrokerHealthCheck() {
-	ticker := time.NewTicker(20 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		shared.Broadcast("kafka_broker_health", map[string]interface{}{
-			"type":              "kafka_broker_health",
-			"brokerCount":       3,
-			"leadersOnline":     3,
-			"replicasInSync":    shared.RandomBetween(45, 48),
-			"underReplicated":   shared.RandomBetween(0, 2),
-			"totalTopics":       len(kafkaTopics),
-			"totalPartitions":   128,
-			"messagesInPerSec":  shared.RandomBetween(5000, 50000),
-			"messagesOutPerSec": shared.RandomBetween(5000, 50000),
-			"bytesInPerSec":     shared.RandomBetween(1000000, 100000000),
-			"status":            "healthy",
-			"timestamp":         time.Now().UTC().Format(time.RFC3339),
-		})
-	}
-}
-
-func startStatusServer(port string) {
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "worker": "kafka_monitor"})
-	})
-
-	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(shared.WorkerStatus{
-			ID:              "kafka-monitor",
-			Name:            "Kafka Broker Monitor",
-			Layer:           "Streaming",
-			Language:        "Go",
-			Status:          "running",
-			LastRun:         time.Now(),
-			EventsProcessed: atomic.LoadInt64(&eventsProduced),
-			Description:     "Monitors 16 Kafka topics and 4 Fluvio edge streams. Tracks consumer lag, broker health, and produces synthetic events for all NDSEP data pipelines.",
-			Technology:      "Go · Apache Kafka · Fluvio · Confluent",
-		})
-	})
-
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"eventsProduced": atomic.LoadInt64(&eventsProduced),
-			"topicsMonitored": len(kafkaTopics),
-			"fluvioTopics":   len(fluvioTopics),
-			"uptimeSeconds":  time.Since(workerStart).Seconds(),
-		})
-	})
-
-	log.Printf("[Kafka] Status server on :%s\n", port)
-	shared.RunGracefulServer("kafka_monitor", port, nil, func() { shared.DB.Close() })
-}
-
-func main() {
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)
-	log.SetPrefix("[NDSEP-Kafka] ")
-
-	port := os.Getenv("KAFKA_PORT")
+	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
-		port = "8084"
+		port = "8154"
 	}
-
-	log.Println("=== NDSEP Kafka Broker Monitor (Go) ===")
-
+	seconds := 15
+	if v := os.Getenv("STREAM_METRICS_POLL_SECONDS"); v != "" {
+		parsed, parseErr := strconv.Atoi(v)
+		if parseErr != nil || parsed < 5 || parsed > 3600 {
+			return config{}, errors.New("STREAM_METRICS_POLL_SECONDS must be between 5 and 3600")
+		}
+		seconds = parsed
+	}
+	return config{listenAddr: ":" + port, metricsURL: endpoint, authHeader: auth, pollEvery: time.Duration(seconds) * time.Second, timeout: 10 * time.Second}, nil
+}
+func newMetricsClient(cfg config) *metricsClient {
+	return &metricsClient{endpoint: cfg.metricsURL, authHeader: cfg.authHeader, http: &http.Client{Timeout: cfg.timeout}}
+}
+func (client *metricsClient) fetch(ctx context.Context) (snapshot, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, client.endpoint.String(), nil)
+	if err != nil {
+		return snapshot{}, err
+	}
+	request.Header.Set("Authorization", client.authHeader)
+	request.Header.Set("Accept", "application/json")
+	response, err := client.http.Do(request)
+	if err != nil {
+		return snapshot{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return snapshot{}, errors.New("stream metrics gateway returned HTTP " + strconv.Itoa(response.StatusCode))
+	}
+	var value snapshot
+	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(&value); err != nil {
+		return snapshot{}, err
+	}
+	if value.Broker.ObservedAt.IsZero() || value.Broker.BrokerCount < 1 || value.Broker.LeadersOnline < 0 || value.Broker.UnderReplicated < 0 {
+		return snapshot{}, errors.New("stream metrics gateway returned incomplete broker metrics")
+	}
+	for _, topic := range append(value.KafkaTopics, value.FluvioTopics...) {
+		if topic.Name == "" || topic.Partitions < 1 || topic.Replication < 1 || topic.ConsumerLag < 0 || topic.TotalMessages < 0 || topic.ObservedAt.IsZero() {
+			return snapshot{}, errors.New("stream metrics gateway returned incomplete topic metrics")
+		}
+	}
+	return value, nil
+}
+func recordError(state *healthState, err error) {
+	state.mu.Lock()
+	state.lastError = err.Error()
+	state.mu.Unlock()
+	log.Printf("stream metrics unavailable: %v", err)
+}
+func healthHandler(state *healthState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		state.mu.RLock()
+		lastSuccess, lastError := state.lastSuccess, state.lastError
+		state.mu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		if lastSuccess.IsZero() || time.Since(lastSuccess) > 2*time.Minute {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "unavailable", "dependency": "stream_metrics_gateway", "last_error": lastError})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready", "service": "kafka_monitor", "last_success": lastSuccess.Format(time.RFC3339)})
+	}
+}
+func statusHandler(state *healthState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		state.mu.RLock()
+		lastError := state.lastError
+		state.mu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "authoritative_only", "last_error": lastError})
+	}
+}
+func main() {
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
 	shared.InitRelay()
-shared.InitTracing(shared.TraceConfig{
-ServiceName:    "kafka_monitor",
-ServiceVersion: "3.0.0",
-})
 	if err := shared.InitDB(); err != nil {
-		log.Fatalf("DB init failed: %v\n", err)
+		log.Fatal(err)
 	}
 	defer shared.DB.Close()
-
-	shared.Broadcast("worker_started", map[string]interface{}{
-		"worker":    "kafka_monitor",
-		"layer":     "Streaming",
-		"language":  "Go",
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-	})
-
-	go runKafkaTopicMonitor()
-	go runFluvioMonitor()
-	go runEventProducer()
-	go runBrokerHealthCheck()
-
-	startStatusServer(port)
+	client, state := newMetricsClient(cfg), &healthState{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(cfg.pollEvery)
+		defer ticker.Stop()
+		for {
+			pollCtx, pollCancel := context.WithTimeout(ctx, 2*cfg.timeout)
+			value, fetchErr := client.fetch(pollCtx)
+			pollCancel()
+			if fetchErr != nil {
+				recordError(state, fetchErr)
+			} else {
+				shared.Broadcast("kafka_topics_update", map[string]interface{}{"type": "kafka_topics_update", "topics": value.KafkaTopics, "broker": value.Broker, "observedAt": value.Broker.ObservedAt.UTC().Format(time.RFC3339)})
+				shared.Broadcast("fluvio_topics_update", map[string]interface{}{"type": "fluvio_topics_update", "topics": value.FluvioTopics, "observedAt": value.Broker.ObservedAt.UTC().Format(time.RFC3339)})
+				state.mu.Lock()
+				state.lastSuccess = time.Now().UTC()
+				state.lastError = ""
+				state.mu.Unlock()
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", healthHandler(state))
+	mux.HandleFunc("GET /status", statusHandler(state))
+	server := &http.Server{Addr: cfg.listenAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
 }

@@ -1,5 +1,6 @@
 {
   "version": "7",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
@@ -96,147 +97,126 @@
       "idx": 13,
       "version": "7",
       "when": 1774096114921,
-      "tag": "0013_dpco_engagement_requests",
+      "tag": "0100_audit_reconciled_dpco_engagement_requests",
       "breakpoints": true
     },
     {
       "idx": 14,
       "version": "7",
       "when": 1774096114922,
-      "tag": "0014_dpco_accreditation_applications",
+      "tag": "0101_audit_reconciled_dpco_accreditation_applications",
       "breakpoints": true
     },
     {
       "idx": 15,
       "version": "7",
       "when": 1774096114923,
-      "tag": "0015_dpco_ai_features",
+      "tag": "0102_audit_reconciled_phase27_missing_tables",
       "breakpoints": true
     },
     {
       "idx": 16,
       "version": "7",
       "when": 1774096114924,
-      "tag": "0016_billing_tables",
+      "tag": "0103_audit_reconciled_phase29_30_fixes",
       "breakpoints": true
     },
     {
       "idx": 17,
       "version": "7",
       "when": 1774096114925,
-      "tag": "0017_phase27_missing_tables",
+      "tag": "0104_audit_reconciled_performance_indexes",
       "breakpoints": true
     },
     {
       "idx": 18,
       "version": "7",
       "when": 1774096114926,
-      "tag": "0018_phase29_30_fixes",
+      "tag": "0105_audit_reconciled_canonical_schema_reconciliation",
       "breakpoints": true
     },
     {
       "idx": 19,
       "version": "7",
       "when": 1774096114927,
-      "tag": "0019_field_encryption",
+      "tag": "0106_audit_reconciled_phase13_runtime_contracts",
       "breakpoints": true
     },
     {
       "idx": 20,
       "version": "7",
       "when": 1774096114928,
-      "tag": "0020_citizen_requests_columns",
+      "tag": "0107_audit_reconciled_foreign_key_indexes",
       "breakpoints": true
     },
     {
       "idx": 21,
       "version": "7",
       "when": 1774096114929,
-      "tag": "0021_performance_indexes",
+      "tag": "0108_audit_reconciled_mobile_push_devices",
       "breakpoints": true
     },
     {
       "idx": 22,
       "version": "7",
       "when": 1774096114930,
-      "tag": "0022_v2_recommendations",
+      "tag": "0109_audit_reconciled_api_usage_log_fk_index",
       "breakpoints": true
     },
     {
       "idx": 23,
       "version": "7",
       "when": 1774096114931,
-      "tag": "0023_kms_key_metadata",
+      "tag": "0110_audit_reconciled_bootstrap_tables_canonical",
       "breakpoints": true
     },
     {
       "idx": 24,
       "version": "7",
       "when": 1774096114932,
-      "tag": "0024_canonical_schema_reconciliation",
+      "tag": "0111_audit_reconciled_dpco_audit_service_records",
       "breakpoints": true
     },
     {
       "idx": 25,
       "version": "7",
       "when": 1774096114933,
-      "tag": "0025_phase13_runtime_contracts",
+      "tag": "0112_audit_reconciled_dpco_registry_service_records",
       "breakpoints": true
     },
     {
       "idx": 26,
       "version": "7",
       "when": 1774096114934,
-      "tag": "0026_foreign_key_indexes",
+      "tag": "0113_audit_reconciled_dpco_verification_service_records",
       "breakpoints": true
     },
     {
       "idx": 27,
       "version": "7",
       "when": 1774096114935,
-      "tag": "0027_mobile_push_devices",
+      "tag": "0114_audit_reconciled_dpco_lifecycle_reference_keys",
       "breakpoints": true
     },
     {
       "idx": 28,
       "version": "7",
-      "when": 1786637530000,
-      "tag": "0028_api_usage_log_fk_index",
+      "when": 1774096114936,
+      "tag": "0115_dpco_notification_outbox",
       "breakpoints": true
     },
     {
       "idx": 29,
       "version": "7",
-      "when": 1786639100000,
-      "tag": "0029_bootstrap_tables_canonical",
+      "when": 1774096114937,
+      "tag": "0116_cac_business_verifications",
       "breakpoints": true
     },
     {
       "idx": 30,
       "version": "7",
-      "when": 1786640000000,
-      "tag": "0030_dpco_audit_service_records",
-      "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "7",
-      "when": 1786640100000,
-      "tag": "0031_dpco_registry_service_records",
-      "breakpoints": true
-    },
-    {
-      "idx": 32,
-      "version": "7",
-      "when": 1786640200000,
-      "tag": "0032_dpco_verification_service_records",
-      "breakpoints": true
-    },
-    {
-      "idx": 33,
-      "version": "7",
-      "when": 1786640300000,
-      "tag": "0033_dpco_lifecycle_reference_keys",
+      "when": 1774096114938,
+      "tag": "0117_financial_integrity_and_settlement_events",
       "breakpoints": true
     }
   ]

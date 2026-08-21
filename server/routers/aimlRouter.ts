@@ -18,8 +18,23 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "../_core/llm";
 import { getPool } from "../db";
-import { emitEvent, logAuditEvent, broadcastEvent, cacheGetJson, cacheSetJson, cacheDel, triggerWorkflow } from "../middlewareHelpers";
-import { emitComplianceEvent, opensearchIndex, lakehouseIngest, daprPublish, fluvioPublish, permifyCheck } from "../middlewareExtensions";
+import {
+  emitEvent,
+  logAuditEvent,
+  broadcastEvent,
+  cacheGetJson,
+  cacheSetJson,
+  cacheDel,
+  triggerWorkflow,
+} from "../middlewareHelpers";
+import {
+  emitComplianceEvent,
+  opensearchIndex,
+  lakehouseIngest,
+  daprPublish,
+  fluvioPublish,
+  permifyCheck,
+} from "../middlewareExtensions";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import { logger } from "../logger";
@@ -33,27 +48,42 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     const rows = result.rows ?? [];
     return autoDecryptRows(query, rows);
   } catch (err: unknown) {
-    logger.error({ err: err instanceof Error ? err.message : String(err) }, "[aiml] DB query error");
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      "[aiml] DB query error"
+    );
     return [];
   }
 }
 
 // ── Worker base URLs (configurable via env) ────────────────────────────────────
 const QDRANT_URL = process.env.QDRANT_URL || "http://localhost:6333";
-const FALKORDB_WORKER_URL = process.env.FALKORDB_WORKER_URL || "http://localhost:8210";
-const RAG_ORCHESTRATOR_URL = process.env.RAG_ORCHESTRATOR_URL || "http://localhost:8211";
-const ANOMALY_DISPATCHER_URL = process.env.ANOMALY_DISPATCHER_URL || "http://localhost:8212";
+const FALKORDB_WORKER_URL =
+  process.env.FALKORDB_WORKER_URL || "http://localhost:8210";
+const RAG_ORCHESTRATOR_URL =
+  process.env.RAG_ORCHESTRATOR_URL || "http://localhost:8211";
+const ANOMALY_DISPATCHER_URL =
+  process.env.ANOMALY_DISPATCHER_URL || "http://localhost:8212";
 const RSS_SERVER_URL = process.env.RSS_SERVER_URL || "http://localhost:8213";
-const VECTOR_CACHE_URL = process.env.VECTOR_CACHE_URL || "http://localhost:8214";
-const LAKEHOUSE_WRITER_URL = process.env.LAKEHOUSE_WRITER_URL || "http://localhost:8215";
+const VECTOR_CACHE_URL =
+  process.env.VECTOR_CACHE_URL || "http://localhost:8214";
+const LAKEHOUSE_WRITER_URL =
+  process.env.LAKEHOUSE_WRITER_URL || "http://localhost:8215";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const PYTHON_WORKER_URL = process.env.PYTHON_WORKER_URL || "http://localhost:8300";
-const LAKEHOUSE_ANALYTICS_URL = process.env.LAKEHOUSE_ANALYTICS_URL || "http://localhost:8140";
-const ML_PRODUCTION_URL = process.env.ML_PRODUCTION_URL || "http://localhost:8085";
+const PYTHON_WORKER_URL =
+  process.env.PYTHON_WORKER_URL || "http://localhost:8300";
+const LAKEHOUSE_ANALYTICS_URL =
+  process.env.LAKEHOUSE_ANALYTICS_URL || "http://localhost:8140";
+const ML_PRODUCTION_URL =
+  process.env.ML_PRODUCTION_URL || "http://localhost:8085";
 const GNN_ENGINE_URL = process.env.GNN_ENGINE_URL || "http://localhost:8216";
 
 // ── Helper: safe fetch with timeout ───────────────────────────────────────────
-async function safeFetch(url: string, options?: RequestInit, timeoutMs = 5000): Promise<any> {
+async function safeFetch(
+  url: string,
+  options?: RequestInit,
+  timeoutMs = 5000
+): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -63,7 +93,10 @@ async function safeFetch(url: string, options?: RequestInit, timeoutMs = 5000): 
     return await resp.json();
   } catch (err: unknown) {
     clearTimeout(timer);
-    return { error: err instanceof Error ? err.message : "worker_unavailable", available: false };
+    return {
+      error: err instanceof Error ? err.message : "worker_unavailable",
+      available: false,
+    };
   }
 }
 
@@ -81,12 +114,14 @@ export const qdrantRouter = router({
   }),
 
   search: protectedProcedure
-    .input(z.object({
-      query: z.string().min(1).max(500),
-      collection: z.string().default("compliance_docs"),
-      limit: z.number().min(1).max(50).default(10),
-      threshold: z.number().min(0).max(1).default(0.7),
-    }))
+    .input(
+      z.object({
+        query: z.string().min(1).max(500),
+        collection: z.string().default("compliance_docs"),
+        limit: z.number().min(1).max(50).default(10),
+        threshold: z.number().min(0).max(1).default(0.7),
+      })
+    )
     .query(async ({ input }) => {
       // First check vector cache
       const cacheResult = await safeFetch(`${VECTOR_CACHE_URL}/lookup`, {
@@ -105,16 +140,20 @@ export const qdrantRouter = router({
       }
 
       // Fall through to RAG orchestrator
-      const ragResult = await safeFetch(`${RAG_ORCHESTRATOR_URL}/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: input.query,
-          collection: input.collection,
-          limit: input.limit,
-          threshold: input.threshold,
-        }),
-      }, 10000);
+      const ragResult = await safeFetch(
+        `${RAG_ORCHESTRATOR_URL}/search`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: input.query,
+            collection: input.collection,
+            limit: input.limit,
+            threshold: input.threshold,
+          }),
+        },
+        10000
+      );
 
       return {
         results: ragResult.results || [],
@@ -135,19 +174,33 @@ export const qdrantRouter = router({
   }),
 
   ingestDocument: protectedProcedure
-    .input(z.object({
-      title: z.string(),
-      content: z.string(),
-      collection: z.string().default("compliance_docs"),
-      metadata: z.record(z.string(), z.string()).optional(),
-    }))
+    .input(
+      z.object({
+        title: z.string(),
+        content: z.string(),
+        collection: z.string().default("compliance_docs"),
+        metadata: z.record(z.string(), z.string()).optional(),
+      })
+    )
     .mutation(async ({ input }) => {
-      const result = await safeFetch(`${RAG_ORCHESTRATOR_URL}/ingest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      }, 30000);
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      const result = await safeFetch(
+        `${RAG_ORCHESTRATOR_URL}/ingest`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        },
+        30000
+      );
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return {
         status: result.error ? "failed" : "ingested",
         id: result.id,
@@ -167,61 +220,87 @@ export const knowledgeGraphRouter = router({
   }),
 
   rebuild: protectedProcedure.mutation(async () => {
-    emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${FALKORDB_WORKER_URL}/graph/build`, {
-      method: "POST",
-    }, 60000);
+    emitMutationEvent("ndsep.ai.mutation", {
+      action: "aimlRouter",
+      ts: new Date().toISOString(),
+    }).catch((e: unknown) =>
+      logger.debug(
+        { err: e instanceof Error ? e.message : String(e) },
+        "fire-and-forget failed"
+      )
+    );
+    return await safeFetch(
+      `${FALKORDB_WORKER_URL}/graph/build`,
+      {
+        method: "POST",
+      },
+      60000
+    );
   }),
 
   getNeighbors: protectedProcedure
-    .input(z.object({
-      nodeId: z.string(),
-      relation: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        nodeId: z.string(),
+        relation: z.string().optional(),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(
-        `${FALKORDB_WORKER_URL}/graph/neighbors?node_id=${encodeURIComponent(input.nodeId)}&relation=${input.relation || ""}`,
+        `${FALKORDB_WORKER_URL}/graph/neighbors?node_id=${encodeURIComponent(input.nodeId)}&relation=${input.relation || ""}`
       );
     }),
 
   findPath: protectedProcedure
-    .input(z.object({
-      fromId: z.string(),
-      toId: z.string(),
-      maxDepth: z.number().min(1).max(6).default(4),
-    }))
+    .input(
+      z.object({
+        fromId: z.string(),
+        toId: z.string(),
+        maxDepth: z.number().min(1).max(6).default(4),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(
-        `${FALKORDB_WORKER_URL}/graph/path?from=${encodeURIComponent(input.fromId)}&to=${encodeURIComponent(input.toId)}&depth=${input.maxDepth}`,
+        `${FALKORDB_WORKER_URL}/graph/path?from=${encodeURIComponent(input.fromId)}&to=${encodeURIComponent(input.toId)}&depth=${input.maxDepth}`
       );
     }),
 
   gnnEmbedding: protectedProcedure
-    .input(z.object({
-      nodeId: z.string(),
-      depth: z.number().min(1).max(3).default(2),
-    }))
+    .input(
+      z.object({
+        nodeId: z.string(),
+        depth: z.number().min(1).max(3).default(2),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(
-        `${FALKORDB_WORKER_URL}/graph/embedding?node_id=${encodeURIComponent(input.nodeId)}&depth=${input.depth}`,
+        `${FALKORDB_WORKER_URL}/graph/embedding?node_id=${encodeURIComponent(input.nodeId)}&depth=${input.depth}`
       );
     }),
 
   kgqa: protectedProcedure
-    .input(z.object({
-      question: z.string().min(5).max(500),
-    }))
+    .input(
+      z.object({
+        question: z.string().min(5).max(500),
+      })
+    )
     .query(async ({ input }) => {
       // EPR-KGQA: answer questions using the knowledge graph
-      const kgResult = await safeFetch(`${FALKORDB_WORKER_URL}/graph/query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: input.question }),
-      }, 15000);
+      const kgResult = await safeFetch(
+        `${FALKORDB_WORKER_URL}/graph/query`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: input.question }),
+        },
+        15000
+      );
 
       if (kgResult.error || !kgResult.answer) {
         // Fallback to LLM with graph context
-        const graphStats = await safeFetch(`${FALKORDB_WORKER_URL}/graph/stats`);
+        const graphStats = await safeFetch(
+          `${FALKORDB_WORKER_URL}/graph/stats`
+        );
         const llmResp = await invokeLLM({
           messages: [
             {
@@ -253,7 +332,7 @@ Knowledge graph context: ${JSON.stringify(graphStats)}`,
     .input(z.object({ orgId: z.string() }))
     .query(async ({ input }) => {
       return await safeFetch(
-        `${FALKORDB_WORKER_URL}/graph/neighbors?node_id=org:${input.orgId}&relation=SECTOR_PEER`,
+        `${FALKORDB_WORKER_URL}/graph/neighbors?node_id=org:${input.orgId}&relation=SECTOR_PEER`
       );
     }),
 });
@@ -278,33 +357,48 @@ export const ollamaRouter = router({
   }),
 
   generate: protectedProcedure
-    .input(z.object({
-      model: z.string().default("llama3.2"),
-      prompt: z.string().min(1).max(2000),
-      system: z.string().optional(),
-      temperature: z.number().min(0).max(2).default(0.7),
-    }))
+    .input(
+      z.object({
+        model: z.string().default("llama3.2"),
+        prompt: z.string().min(1).max(2000),
+        system: z.string().optional(),
+        temperature: z.number().min(0).max(2).default(0.7),
+      })
+    )
     .mutation(async ({ input }) => {
       // Try Ollama first, fall back to built-in LLM
-      const ollamaResult = await safeFetch(`${OLLAMA_URL}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: input.model,
-          prompt: input.prompt,
-          system: input.system,
-          stream: false,
-          options: { temperature: input.temperature },
-        }),
-      }, 30000);
+      const ollamaResult = await safeFetch(
+        `${OLLAMA_URL}/api/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: input.model,
+            prompt: input.prompt,
+            system: input.system,
+            stream: false,
+            options: { temperature: input.temperature },
+          }),
+        },
+        30000
+      );
 
       if (ollamaResult.error) {
         // Fallback to built-in LLM
         const messages: any[] = [];
-        if (input.system) messages.push({ role: "system", content: input.system });
+        if (input.system)
+          messages.push({ role: "system", content: input.system });
         messages.push({ role: "user", content: input.prompt });
         const llmResp = await invokeLLM({ messages });
-        emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+        emitMutationEvent("ndsep.ai.mutation", {
+          action: "aimlRouter",
+          ts: new Date().toISOString(),
+        }).catch((e: unknown) =>
+          logger.debug(
+            { err: e instanceof Error ? e.message : String(e) },
+            "fire-and-forget failed"
+          )
+        );
         return {
           response: llmResp.choices?.[0]?.message?.content || "",
           model: "built-in",
@@ -313,7 +407,15 @@ export const ollamaRouter = router({
         };
       }
 
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return {
         response: ollamaResult.response || "",
         model: ollamaResult.model || input.model,
@@ -325,25 +427,38 @@ export const ollamaRouter = router({
     }),
 
   complianceQA: protectedProcedure
-    .input(z.object({
-      question: z.string().min(5).max(1000),
-      orgId: z.string().optional(),
-      useRAG: z.boolean().default(true),
-    }))
+    .input(
+      z.object({
+        question: z.string().min(5).max(1000),
+        orgId: z.string().optional(),
+        useRAG: z.boolean().default(true),
+      })
+    )
     .query(async ({ input }) => {
       let context = "";
 
       // Retrieve relevant context from Qdrant if RAG is enabled
       if (input.useRAG) {
-        const ragResult = await safeFetch(`${RAG_ORCHESTRATOR_URL}/search`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: input.question, limit: 5, threshold: 0.6 }),
-        }, 10000);
+        const ragResult = await safeFetch(
+          `${RAG_ORCHESTRATOR_URL}/search`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: input.question,
+              limit: 5,
+              threshold: 0.6,
+            }),
+          },
+          10000
+        );
 
         if (!ragResult.error && ragResult.results?.length > 0) {
           context = ragResult.results
-            .map((r: Record<string, unknown>) => { const p = r.payload as Record<string, unknown> | undefined; return p?.content || p?.text || ""; })
+            .map((r: Record<string, unknown>) => {
+              const p = r.payload as Record<string, unknown> | undefined;
+              return p?.content || p?.text || "";
+            })
             .filter(Boolean)
             .join("\n\n");
         }
@@ -377,39 +492,55 @@ export const artRouter = router({
   }),
 
   runTest: protectedProcedure
-    .input(z.object({
-      modelName: z.string(),
-      attackType: z.enum(["fgsm", "pgd", "deepfool", "carlini_wagner", "boundary"]),
-      epsilon: z.number().min(0.001).max(0.5).default(0.1),
-      iterations: z.number().min(1).max(100).default(20),
-    }))
+    .input(
+      z.object({
+        modelName: z.string(),
+        attackType: z.enum([
+          "fgsm",
+          "pgd",
+          "deepfool",
+          "carlini_wagner",
+          "boundary",
+        ]),
+        epsilon: z.number().min(0.001).max(0.5).default(0.1),
+        iterations: z.number().min(1).max(100).default(20),
+      })
+    )
     .mutation(async ({ input }) => {
-      const result = await safeFetch(`${PYTHON_WORKER_URL}/art/test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      }, 60000);
+      const result = await safeFetch(
+        `${PYTHON_WORKER_URL}/art/test`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        },
+        60000
+      );
 
       if (result.error) {
-        // Return simulated ART results when worker is unavailable
-        // Deterministic fallback based on model name hash (no Math.random)
-        const modelHash = input.modelName.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
-        const epsilonFactor = Math.min(input.epsilon * 10, 1);
-        emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-        return {
-          model_name: input.modelName,
-          attack_type: input.attackType,
-          epsilon: input.epsilon,
-          clean_accuracy: 0.87 + (modelHash % 10) * 0.01,
-          adversarial_accuracy: Math.max(0.2, 0.75 - epsilonFactor * 0.5),
-          robustness_score: Math.max(0.3, 0.85 - epsilonFactor * 0.4),
-          perturbation_norm: input.epsilon * 1.0,
-          success_rate: Math.min(0.9, epsilonFactor * 0.7),
-          status: "estimated",
-          note: "ART worker unavailable — showing deterministic estimates based on epsilon",
-        };
+        logger.warn(
+          {
+            modelName: input.modelName,
+            attackType: input.attackType,
+            error: String(result.error),
+          },
+          "ART robustness worker unavailable; no test result was produced"
+        );
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message:
+            "ART robustness worker is unavailable; no adversarial-test result was produced",
+        });
       }
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return result;
     }),
 
@@ -422,7 +553,7 @@ export const artRouter = router({
          FROM art_test_results
          ${input.modelName ? "WHERE model_name = $1" : ""}
          ORDER BY created_at DESC LIMIT 50`,
-        input.modelName ? [input.modelName] : [],
+        input.modelName ? [input.modelName] : []
       );
       return { results: rows || [] };
     }),
@@ -430,7 +561,9 @@ export const artRouter = router({
   modelVulnerabilities: protectedProcedure
     .input(z.object({ modelName: z.string() }))
     .query(async ({ input }) => {
-      return await safeFetch(`${PYTHON_WORKER_URL}/art/vulnerabilities?model=${encodeURIComponent(input.modelName)}`);
+      return await safeFetch(
+        `${PYTHON_WORKER_URL}/art/vulnerabilities?model=${encodeURIComponent(input.modelName)}`
+      );
     }),
 });
 
@@ -441,10 +574,12 @@ export const featureStoreRouter = router({
   }),
 
   getFeatures: protectedProcedure
-    .input(z.object({
-      featureGroup: z.string(),
-      entityId: z.string(),
-    }))
+    .input(
+      z.object({
+        featureGroup: z.string(),
+        entityId: z.string(),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(`${LAKEHOUSE_WRITER_URL}/features/get`, {
         method: "POST",
@@ -468,10 +603,12 @@ export const featureStoreRouter = router({
   }),
 
   getPredictionLog: protectedProcedure
-    .input(z.object({
-      modelName: z.string().optional(),
-      limit: z.number().min(1).max(200).default(50),
-    }))
+    .input(
+      z.object({
+        modelName: z.string().optional(),
+        limit: z.number().min(1).max(200).default(50),
+      })
+    )
     .query(async ({ input }) => {
       const rows = await exec(
         `SELECT id::text, model_name, model_version, entity_id,
@@ -479,7 +616,7 @@ export const featureStoreRouter = router({
          FROM ml_prediction_log
          ${input.modelName ? "WHERE model_name = $1" : ""}
          ORDER BY predicted_at DESC LIMIT ${input.limit}`,
-        input.modelName ? [input.modelName] : [],
+        input.modelName ? [input.modelName] : []
       );
       return { predictions: rows || [] };
     }),
@@ -493,39 +630,64 @@ export const featureStoreRouter = router({
          FROM ml_lineage
          ${input.pipelineRunId ? "WHERE pipeline_run_id = $1" : ""}
          ORDER BY created_at DESC LIMIT 100`,
-        input.pipelineRunId ? [input.pipelineRunId] : [],
+        input.pipelineRunId ? [input.pipelineRunId] : []
       );
-       return { lineage: rows || [] };
+      return { lineage: rows || [] };
     }),
   createFeatureGroup: protectedProcedure
-    .input(z.object({
-      featureName: z.string().min(1).max(255),
-      featureType: z.string().min(1).max(100),
-      description: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        featureName: z.string().min(1).max(255),
+        featureType: z.string().min(1).max(100),
+        description: z.string().optional(),
+      })
+    )
     .mutation(async ({ input }) => {
       const rows = await exec(
         `INSERT INTO ml_feature_store (feature_name, feature_type, description, recorded_at)
          VALUES ($1, $2, $3, NOW()) RETURNING id::text, feature_name, feature_type`,
         [input.featureName, input.featureType, input.description ?? null]
       );
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return rows[0] ?? null;
     }),
   logPrediction: protectedProcedure
-    .input(z.object({
-      modelName: z.string().min(1),
-      inputFeatures: z.record(z.string(), z.unknown()),
-      prediction: z.string(),
-      confidence: z.number().min(0).max(1).optional(),
-    }))
+    .input(
+      z.object({
+        modelName: z.string().min(1),
+        inputFeatures: z.record(z.string(), z.unknown()),
+        prediction: z.string(),
+        confidence: z.number().min(0).max(1).optional(),
+      })
+    )
     .mutation(async ({ input }) => {
       const rows = await exec(
         `INSERT INTO ml_prediction_log (model_name, input_features, prediction, confidence, predicted_at)
          VALUES ($1, $2::jsonb, $3, $4, NOW()) RETURNING id::text`,
-        [input.modelName, JSON.stringify(input.inputFeatures), input.prediction, input.confidence ?? null]
+        [
+          input.modelName,
+          JSON.stringify(input.inputFeatures),
+          input.prediction,
+          input.confidence ?? null,
+        ]
       );
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return rows[0] ?? null;
     }),
 });
@@ -550,7 +712,7 @@ export const modelRegistryRouter = router({
          FROM ml_model_metrics
          WHERE model_id = $1::uuid
          ORDER BY recorded_at DESC`,
-        [input.modelId],
+        [input.modelId]
       );
       return { metrics: rows || [] };
     }),
@@ -569,7 +731,7 @@ export const modelRegistryRouter = router({
            AND predicted_at >= NOW() - INTERVAL '30 days'
          GROUP BY day
          ORDER BY day`,
-        [input.modelName],
+        [input.modelName]
       );
       return {
         model: input.modelName,
@@ -579,37 +741,78 @@ export const modelRegistryRouter = router({
       };
     }),
   register: protectedProcedure
-    .input(z.object({
-      name: z.string().min(1).max(255),
-      version: z.string().min(1).max(50),
-      algorithm: z.string().min(1).max(100),
-      framework: z.string().optional(),
-      accuracy: z.number().min(0).max(1).optional(),
-      f1Score: z.number().min(0).max(1).optional(),
-      aucRoc: z.number().min(0).max(1).optional(),
-      description: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        name: z.string().min(1).max(255),
+        version: z.string().min(1).max(50),
+        algorithm: z.string().min(1).max(100),
+        framework: z.string().optional(),
+        accuracy: z.number().min(0).max(1).optional(),
+        f1Score: z.number().min(0).max(1).optional(),
+        aucRoc: z.number().min(0).max(1).optional(),
+        description: z.string().optional(),
+      })
+    )
     .mutation(async ({ input }) => {
       const rows = await exec(
         `INSERT INTO ml_model_registry (name, version, algorithm, framework, accuracy, f1_score, auc_roc, description, status, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'staging', NOW()) RETURNING id::text, name, version, status`,
-        [input.name, input.version, input.algorithm, input.framework ?? null, input.accuracy ?? null, input.f1Score ?? null, input.aucRoc ?? null, input.description ?? null]
+        [
+          input.name,
+          input.version,
+          input.algorithm,
+          input.framework ?? null,
+          input.accuracy ?? null,
+          input.f1Score ?? null,
+          input.aucRoc ?? null,
+          input.description ?? null,
+        ]
       );
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return rows[0] ?? null;
     }),
   deploy: protectedProcedure
     .input(z.object({ modelId: z.string() }))
     .mutation(async ({ input }) => {
-      await exec(`UPDATE ml_model_registry SET status = 'deployed', deployed_at = NOW() WHERE id = $1::uuid`, [input.modelId]);
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      await exec(
+        `UPDATE ml_model_registry SET status = 'deployed', deployed_at = NOW() WHERE id = $1::uuid`,
+        [input.modelId]
+      );
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return { success: true };
     }),
   retire: protectedProcedure
     .input(z.object({ modelId: z.string() }))
     .mutation(async ({ input }) => {
-      await exec(`UPDATE ml_model_registry SET status = 'retired' WHERE id = $1::uuid`, [input.modelId]);
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      await exec(
+        `UPDATE ml_model_registry SET status = 'retired' WHERE id = $1::uuid`,
+        [input.modelId]
+      );
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return { success: true };
     }),
 });
@@ -637,7 +840,15 @@ export const anomalyAlertsRouter = router({
   }),
 
   triggerScan: protectedProcedure.mutation(async () => {
-    emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+    emitMutationEvent("ndsep.ai.mutation", {
+      action: "aimlRouter",
+      ts: new Date().toISOString(),
+    }).catch((e: unknown) =>
+      logger.debug(
+        { err: e instanceof Error ? e.message : String(e) },
+        "fire-and-forget failed"
+      )
+    );
     return await safeFetch(`${ANOMALY_DISPATCHER_URL}/scan`, {
       method: "POST",
     });
@@ -649,9 +860,17 @@ export const anomalyAlertsRouter = router({
       await exec(
         `UPDATE security_alerts SET status = 'acknowledged', updated_at = NOW()
          WHERE id = $1::uuid`,
-        [input.alertId],
+        [input.alertId]
       );
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return { status: "acknowledged", alertId: input.alertId };
     }),
 });
@@ -677,10 +896,22 @@ export const cocoIndexRouter = router({
   }),
 
   triggerRun: protectedProcedure.mutation(async () => {
-    emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${PYTHON_WORKER_URL}/cocoindex/run`, {
-      method: "POST",
-    }, 30000);
+    emitMutationEvent("ndsep.ai.mutation", {
+      action: "aimlRouter",
+      ts: new Date().toISOString(),
+    }).catch((e: unknown) =>
+      logger.debug(
+        { err: e instanceof Error ? e.message : String(e) },
+        "fire-and-forget failed"
+      )
+    );
+    return await safeFetch(
+      `${PYTHON_WORKER_URL}/cocoindex/run`,
+      {
+        method: "POST",
+      },
+      30000
+    );
   }),
 });
 
@@ -691,13 +922,25 @@ export const rssFeedRouter = router({
   }),
 
   subscribeWebhook: protectedProcedure
-    .input(z.object({
-      url: z.string().url(),
-      events: z.array(z.string()).default(["changelog.published", "compliance.alert"]),
-      secret: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        url: z.string().url(),
+        events: z
+          .array(z.string())
+          .default(["changelog.published", "compliance.alert"]),
+        secret: z.string().optional(),
+      })
+    )
     .mutation(async ({ input }) => {
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return await safeFetch(`${RSS_SERVER_URL}/api/webhooks/subscribe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -706,12 +949,22 @@ export const rssFeedRouter = router({
     }),
 
   triggerWebhook: protectedProcedure
-    .input(z.object({
-      event: z.string(),
-      payload: z.record(z.string(), z.unknown()),
-    }))
+    .input(
+      z.object({
+        event: z.string(),
+        payload: z.record(z.string(), z.unknown()),
+      })
+    )
     .mutation(async ({ input }) => {
-      emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "aimlRouter",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
       return await safeFetch(`${RSS_SERVER_URL}/api/webhooks/trigger`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -727,8 +980,20 @@ export const lakehouseAnalyticsRouter = router({
   }),
 
   triggerETL: protectedProcedure.mutation(async () => {
-    emitMutationEvent("ndsep.ai.mutation", { action: "lakehouse_etl", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/etl/run`, { method: "POST" }, 60000);
+    emitMutationEvent("ndsep.ai.mutation", {
+      action: "lakehouse_etl",
+      ts: new Date().toISOString(),
+    }).catch((e: unknown) =>
+      logger.debug(
+        { err: e instanceof Error ? e.message : String(e) },
+        "fire-and-forget failed"
+      )
+    );
+    return await safeFetch(
+      `${LAKEHOUSE_ANALYTICS_URL}/etl/run`,
+      { method: "POST" },
+      60000
+    );
   }),
 
   etlStatus: protectedProcedure.query(async () => {
@@ -736,15 +1001,21 @@ export const lakehouseAnalyticsRouter = router({
   }),
 
   query: protectedProcedure
-    .input(z.object({
-      sql: z.string().min(1).max(5000),
-    }))
+    .input(
+      z.object({
+        sql: z.string().min(1).max(5000),
+      })
+    )
     .query(async ({ input }) => {
-      return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: input.sql }),
-      }, 30000);
+      return await safeFetch(
+        `${LAKEHOUSE_ANALYTICS_URL}/query`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: input.sql }),
+        },
+        30000
+      );
     }),
 
   tables: protectedProcedure.query(async () => {
@@ -754,13 +1025,17 @@ export const lakehouseAnalyticsRouter = router({
   materializedView: protectedProcedure
     .input(z.object({ viewName: z.string() }))
     .query(async ({ input }) => {
-      return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/views/${encodeURIComponent(input.viewName)}`);
+      return await safeFetch(
+        `${LAKEHOUSE_ANALYTICS_URL}/views/${encodeURIComponent(input.viewName)}`
+      );
     }),
 
   features: protectedProcedure
     .input(z.object({ featureGroup: z.string() }))
     .query(async ({ input }) => {
-      return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/features/${encodeURIComponent(input.featureGroup)}`);
+      return await safeFetch(
+        `${LAKEHOUSE_ANALYTICS_URL}/features/${encodeURIComponent(input.featureGroup)}`
+      );
     }),
 
   snapshots: protectedProcedure.query(async () => {
@@ -770,12 +1045,24 @@ export const lakehouseAnalyticsRouter = router({
   compact: protectedProcedure
     .input(z.object({ table: z.string() }))
     .mutation(async ({ input }) => {
-      emitMutationEvent("ndsep.ai.mutation", { action: "lakehouse_compact", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/compact`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ table: input.table }),
-      }, 30000);
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "lakehouse_compact",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
+      return await safeFetch(
+        `${LAKEHOUSE_ANALYTICS_URL}/compact`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ table: input.table }),
+        },
+        30000
+      );
     }),
 
   lineage: protectedProcedure.query(async () => {
@@ -787,16 +1074,28 @@ export const lakehouseAnalyticsRouter = router({
   }),
 
   resetIncremental: protectedProcedure.mutation(async () => {
-    emitMutationEvent("ndsep.ai.mutation", { action: "lakehouse_reset_incremental", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/etl/reset`, { method: "POST" });
+    emitMutationEvent("ndsep.ai.mutation", {
+      action: "lakehouse_reset_incremental",
+      ts: new Date().toISOString(),
+    }).catch((e: unknown) =>
+      logger.debug(
+        { err: e instanceof Error ? e.message : String(e) },
+        "fire-and-forget failed"
+      )
+    );
+    return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/etl/reset`, {
+      method: "POST",
+    });
   }),
 
   ingest: protectedProcedure
-    .input(z.object({
-      namespace: z.string().default("ndsep"),
-      table: z.string(),
-      records: z.array(z.record(z.string(), z.unknown())),
-    }))
+    .input(
+      z.object({
+        namespace: z.string().default("ndsep"),
+        table: z.string(),
+        records: z.array(z.record(z.string(), z.unknown())),
+      })
+    )
     .mutation(async ({ input }) => {
       return await safeFetch(`${LAKEHOUSE_ANALYTICS_URL}/ingest`, {
         method: "POST",
@@ -813,23 +1112,47 @@ export const mlProductionRouter = router({
   }),
 
   trainAll: protectedProcedure.mutation(async () => {
-    emitMutationEvent("ndsep.ai.mutation", { action: "ml_train", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${ML_PRODUCTION_URL}/train`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ models: ["all"] }),
-    }, 120000);
+    emitMutationEvent("ndsep.ai.mutation", {
+      action: "ml_train",
+      ts: new Date().toISOString(),
+    }).catch((e: unknown) =>
+      logger.debug(
+        { err: e instanceof Error ? e.message : String(e) },
+        "fire-and-forget failed"
+      )
+    );
+    return await safeFetch(
+      `${ML_PRODUCTION_URL}/train`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ models: ["all"] }),
+      },
+      120000
+    );
   }),
 
   trainModel: protectedProcedure
     .input(z.object({ modelName: z.string() }))
     .mutation(async ({ input }) => {
-      emitMutationEvent("ndsep.ai.mutation", { action: "ml_train", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return await safeFetch(`${ML_PRODUCTION_URL}/train`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ models: [input.modelName] }),
-      }, 120000);
+      emitMutationEvent("ndsep.ai.mutation", {
+        action: "ml_train",
+        ts: new Date().toISOString(),
+      }).catch((e: unknown) =>
+        logger.debug(
+          { err: e instanceof Error ? e.message : String(e) },
+          "fire-and-forget failed"
+        )
+      );
+      return await safeFetch(
+        `${ML_PRODUCTION_URL}/train`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ models: [input.modelName] }),
+        },
+        120000
+      );
     }),
 
   models: protectedProcedure.query(async () => {
@@ -839,47 +1162,67 @@ export const mlProductionRouter = router({
   modelDetail: protectedProcedure
     .input(z.object({ modelName: z.string() }))
     .query(async ({ input }) => {
-      return await safeFetch(`${ML_PRODUCTION_URL}/models/${encodeURIComponent(input.modelName)}`);
+      return await safeFetch(
+        `${ML_PRODUCTION_URL}/models/${encodeURIComponent(input.modelName)}`
+      );
     }),
 
   predictBreach: protectedProcedure
     .input(z.object({ orgFeatures: z.record(z.string(), z.number()) }))
     .query(async ({ input }) => {
-      return await safeFetch(`${ML_PRODUCTION_URL}/predict/breach`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_features: input.orgFeatures }),
-      }, 15000);
+      return await safeFetch(
+        `${ML_PRODUCTION_URL}/predict/breach`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ org_features: input.orgFeatures }),
+        },
+        15000
+      );
     }),
 
   predictViolations: protectedProcedure.query(async () => {
-    return await safeFetch(`${ML_PRODUCTION_URL}/predict/violations`, { method: "POST" }, 15000);
+    return await safeFetch(
+      `${ML_PRODUCTION_URL}/predict/violations`,
+      { method: "POST" },
+      15000
+    );
   }),
 
   detectAnomaly: protectedProcedure
     .input(z.object({ orgFeatures: z.record(z.string(), z.number()) }))
     .query(async ({ input }) => {
-      return await safeFetch(`${ML_PRODUCTION_URL}/predict/anomaly`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_features: input.orgFeatures }),
-      }, 15000);
+      return await safeFetch(
+        `${ML_PRODUCTION_URL}/predict/anomaly`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ org_features: input.orgFeatures }),
+        },
+        15000
+      );
     }),
 
   scoreRisk: protectedProcedure
     .input(z.object({ orgFeatures: z.record(z.string(), z.number()) }))
     .query(async ({ input }) => {
-      return await safeFetch(`${ML_PRODUCTION_URL}/predict/risk`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_features: input.orgFeatures }),
-      }, 15000);
+      return await safeFetch(
+        `${ML_PRODUCTION_URL}/predict/risk`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ org_features: input.orgFeatures }),
+        },
+        15000
+      );
     }),
 
   shapExplanation: protectedProcedure
     .input(z.object({ modelName: z.string() }))
     .query(async ({ input }) => {
-      return await safeFetch(`${ML_PRODUCTION_URL}/shap/${encodeURIComponent(input.modelName)}`);
+      return await safeFetch(
+        `${ML_PRODUCTION_URL}/shap/${encodeURIComponent(input.modelName)}`
+      );
     }),
 
   pipelineStatus: protectedProcedure.query(async () => {
@@ -894,12 +1237,24 @@ export const gnnRouter = router({
   }),
 
   buildGraph: protectedProcedure.mutation(async () => {
-    emitMutationEvent("ndsep.ai.mutation", { action: "gnn_build", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${GNN_ENGINE_URL}/graph/build`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: "database" }),
-    }, 60000);
+    emitMutationEvent("ndsep.ai.mutation", {
+      action: "gnn_build",
+      ts: new Date().toISOString(),
+    }).catch((e: unknown) =>
+      logger.debug(
+        { err: e instanceof Error ? e.message : String(e) },
+        "fire-and-forget failed"
+      )
+    );
+    return await safeFetch(
+      `${GNN_ENGINE_URL}/graph/build`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "database" }),
+      },
+      60000
+    );
   }),
 
   graphStats: protectedProcedure.query(async () => {
@@ -907,10 +1262,12 @@ export const gnnRouter = router({
   }),
 
   embedding: protectedProcedure
-    .input(z.object({
-      nodeId: z.string(),
-      depth: z.number().min(1).max(3).default(2),
-    }))
+    .input(
+      z.object({
+        nodeId: z.string(),
+        depth: z.number().min(1).max(3).default(2),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(`${GNN_ENGINE_URL}/embedding`, {
         method: "POST",
@@ -920,14 +1277,20 @@ export const gnnRouter = router({
     }),
 
   allEmbeddings: protectedProcedure.query(async () => {
-    return await safeFetch(`${GNN_ENGINE_URL}/embeddings/all`, undefined, 30000);
+    return await safeFetch(
+      `${GNN_ENGINE_URL}/embeddings/all`,
+      undefined,
+      30000
+    );
   }),
 
   predictLink: protectedProcedure
-    .input(z.object({
-      source: z.string(),
-      target: z.string(),
-    }))
+    .input(
+      z.object({
+        source: z.string(),
+        target: z.string(),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(`${GNN_ENGINE_URL}/predict/link`, {
         method: "POST",
@@ -947,36 +1310,42 @@ export const gnnRouter = router({
     }),
 
   neighbors: protectedProcedure
-    .input(z.object({
-      nodeId: z.string(),
-      relation: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        nodeId: z.string(),
+        relation: z.string().optional(),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(
-        `${GNN_ENGINE_URL}/graph/neighbors/${encodeURIComponent(input.nodeId)}?relation=${input.relation || ""}`,
+        `${GNN_ENGINE_URL}/graph/neighbors/${encodeURIComponent(input.nodeId)}?relation=${input.relation || ""}`
       );
     }),
 
   findPath: protectedProcedure
-    .input(z.object({
-      src: z.string(),
-      dst: z.string(),
-      maxDepth: z.number().min(1).max(6).default(4),
-    }))
+    .input(
+      z.object({
+        src: z.string(),
+        dst: z.string(),
+        maxDepth: z.number().min(1).max(6).default(4),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(
-        `${GNN_ENGINE_URL}/graph/path?src=${encodeURIComponent(input.src)}&dst=${encodeURIComponent(input.dst)}&max_depth=${input.maxDepth}`,
+        `${GNN_ENGINE_URL}/graph/path?src=${encodeURIComponent(input.src)}&dst=${encodeURIComponent(input.dst)}&max_depth=${input.maxDepth}`
       );
     }),
 
   similarity: protectedProcedure
-    .input(z.object({
-      nodeA: z.string(),
-      nodeB: z.string(),
-    }))
+    .input(
+      z.object({
+        nodeA: z.string(),
+        nodeB: z.string(),
+      })
+    )
     .query(async ({ input }) => {
       return await safeFetch(
-        `${GNN_ENGINE_URL}/graph/similarity/${encodeURIComponent(input.nodeA)}/${encodeURIComponent(input.nodeB)}`,
+        `${GNN_ENGINE_URL}/graph/similarity/${encodeURIComponent(input.nodeA)}/${encodeURIComponent(input.nodeB)}`
       );
     }),
 });
@@ -984,7 +1353,18 @@ export const gnnRouter = router({
 // ── Platform AI Health (aggregate) ────────────────────────────────────────────
 export const aiHealthRouter = router({
   summary: protectedProcedure.query(async () => {
-    const [qdrant, falkordb, ollama, vectorCache, lakehouse, anomaly, rss, lakehouseAnalytics, mlProd, gnn] = await Promise.allSettled([
+    const [
+      qdrant,
+      falkordb,
+      ollama,
+      vectorCache,
+      lakehouse,
+      anomaly,
+      rss,
+      lakehouseAnalytics,
+      mlProd,
+      gnn,
+    ] = await Promise.allSettled([
       safeFetch(`${QDRANT_URL}/healthz`, undefined, 3000),
       safeFetch(`${FALKORDB_WORKER_URL}/health`, undefined, 3000),
       safeFetch(`${OLLAMA_URL}/api/tags`, undefined, 3000),
@@ -1000,7 +1380,8 @@ export const aiHealthRouter = router({
     const resolve = (r: PromiseSettledResult<any>, name: string) => ({
       name,
       available: r.status === "fulfilled" && !r.value?.error,
-      status: r.status === "fulfilled" && !r.value?.error ? "healthy" : "unavailable",
+      status:
+        r.status === "fulfilled" && !r.value?.error ? "healthy" : "unavailable",
       details: r.status === "fulfilled" ? r.value : { error: "request_failed" },
     });
 
@@ -1017,7 +1398,7 @@ export const aiHealthRouter = router({
       resolve(gnn, "GNN Compliance Engine"),
     ];
 
-    const healthy = services.filter((s) => s.available).length;
+    const healthy = services.filter(s => s.available).length;
     return {
       total_services: services.length,
       healthy_services: healthy,

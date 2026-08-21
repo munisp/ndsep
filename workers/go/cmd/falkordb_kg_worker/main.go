@@ -63,6 +63,22 @@ func getEnv(key, def string) string {
 	return def
 }
 
+// inMemoryGraphAllowed is deliberately opt-in and is never enabled in
+// production. An in-memory graph cannot be treated as a durable FalkorDB
+// substitute because it loses state on restart and can return stale topology.
+func inMemoryGraphAllowed() bool {
+	return os.Getenv("NODE_ENV") != "production" && os.Getenv("ALLOW_IN_MEMORY_FALKOR") == "true"
+}
+
+func requireAuthoritativeGraph(w http.ResponseWriter) bool {
+	if inMemoryGraphAllowed() {
+		return true
+	}
+	atomic.AddInt64(&errors, 1)
+	http.Error(w, "authoritative FalkorDB graph is unavailable", http.StatusServiceUnavailable)
+	return false
+}
+
 // ── Graph node types ───────────────────────────────────────────────────────────
 type GraphNode struct {
 	ID         string            `json:"id"`
@@ -355,6 +371,9 @@ func computeGNNEmbedding(nodeID string, depth int) []float64 {
 		fmt.Sscanf(s, "%f", &score)
 	}
 
+	// Only structural graph features are available in this local implementation.
+	// Temporal and text-embedding dimensions are deliberately omitted rather than
+	// represented as zeroes, which would make incomplete data look authoritative.
 	embedding := []float64{
 		degree / 10.0,
 		violationCount / 5.0,
@@ -362,8 +381,6 @@ func computeGNNEmbedding(nodeID string, depth int) []float64 {
 		sectorPeerCount / 10.0,
 		score / 100.0,
 		float64(len(node.Properties)) / 10.0,
-		0.0, // placeholder for temporal feature
-		0.0, // placeholder for text embedding
 	}
 
 	// Aggregate neighbor embeddings (1-hop)
@@ -390,20 +407,31 @@ func computeGNNEmbedding(nodeID string, depth int) []float64 {
 // ── HTTP Handlers ──────────────────────────────────────────────────────────────
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if !inMemoryGraphAllowed() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "unavailable", "worker": "falkordb_kg_worker",
+			"falkor_status": "authoritative_falkordb_required",
+		})
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":         "healthy",
+		"status":         "development_only",
 		"worker":         "falkordb_kg_worker",
 		"nodes":          atomic.LoadInt64(&nodesCreated),
 		"edges":          atomic.LoadInt64(&edgesCreated),
 		"queries_run":    atomic.LoadInt64(&queriesRun),
 		"errors":         atomic.LoadInt64(&errors),
 		"last_build":     lastBuildTime,
-		"falkor_status":  "in_memory_fallback",
+		"falkor_status":  "non_authoritative_in_memory",
 		"uptime_seconds": time.Since(workerStart).Seconds(),
 	})
 }
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {
+	if !requireAuthoritativeGraph(w) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return
@@ -452,11 +480,18 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 			"length":     len(path),
 		})
 	case "gnn_embedding":
+		if os.Getenv("NODE_ENV") == "production" {
+			http.Error(w, "authoritative temporal and text embedding providers are required for production GNN features", http.StatusServiceUnavailable)
+			return
+		}
 		embedding := computeGNNEmbedding(req.NodeID, 1)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"node_id":   req.NodeID,
-			"embedding": embedding,
-			"dim":       len(embedding),
+			"node_id":            req.NodeID,
+			"embedding":          embedding,
+			"dim":                len(embedding),
+			"complete":           false,
+			"provenance":         "development_structural_features_only",
+			"missing_dimensions": []string{"temporal", "text_embedding"},
 		})
 	case "node":
 		node, ok := graph.Nodes[req.NodeID]
@@ -482,6 +517,9 @@ func queryHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func rebuildHandler(w http.ResponseWriter, r *http.Request) {
+	if !requireAuthoritativeGraph(w) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return

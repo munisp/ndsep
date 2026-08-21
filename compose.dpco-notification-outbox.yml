@@ -1,0 +1,37 @@
+# Production overlay for the durable DPCO notification outbox.
+# Apply only with docker-compose.production.yml after production secrets are injected.
+services:
+  ndsep-api:
+    depends_on:
+      dpco-notification-outbox-service:
+        condition: service_healthy
+
+  dpco-notification-outbox-service:
+    restart: unless-stopped
+    build:
+      context: ./orchestration/go
+      dockerfile: Dockerfile
+      args:
+        SERVICE: dpco_notification_outbox_service
+    container_name: ndsep-dpco-notification-outbox-service
+    environment:
+      PORT: "8340"
+      DATABASE_URL: ${DPCO_NOTIFICATION_DATABASE_URL:?DPCO_NOTIFICATION_DATABASE_URL must be supplied from the secret manager}
+      DPCO_NOTIFICATION_PROVIDER_URL: ${DPCO_NOTIFICATION_PROVIDER_URL:?DPCO_NOTIFICATION_PROVIDER_URL must be supplied}
+      DPCO_NOTIFICATION_INTERNAL_TOKEN: ${DPCO_NOTIFICATION_INTERNAL_TOKEN:?DPCO_NOTIFICATION_INTERNAL_TOKEN must be supplied from the secret manager}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8340/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - ndsep-internal

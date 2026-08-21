@@ -1,0 +1,92 @@
+name: mTLS Prebuild Security Gate
+
+on:
+  pull_request:
+    branches: [production]
+  push:
+    branches: [production]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mtls-prebuild-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mtls-validation:
+    name: Validate Mojaloop callback mTLS before image build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify formatting of security sources
+        run: >-
+          pnpm exec prettier --check
+          server/mojaloopCallback.ts
+          server/envValidation.ts
+          server/envValidation.mtls.test.ts
+          server/mojaloopCallback.mtls.test.ts
+          server/mojaloopCallback.local.integration.test.ts
+          server/mojaloopCallback.proxy.integration.test.ts
+          config/envoy/local-mojaloop.yaml
+          compose.local-mojaloop-mtls.yml
+
+      - name: Run environment startup-gate tests
+        run: pnpm exec vitest run server/envValidation.test.ts server/envValidation.mtls.test.ts
+
+      - name: Run callback mTLS unit tests
+        run: pnpm exec vitest run server/mojaloopCallback.mtls.test.ts
+
+      - name: Run simulated-proxy integration tests
+        run: pnpm exec vitest run server/mojaloopCallback.local.integration.test.ts server/mojaloopCallback.proxy.integration.test.ts
+
+      - name: Validate local Envoy Compose model
+        run: |
+          export LOCAL_MTLS_CERT_DIR="$RUNNER_TEMP/ndsep-local-mtls"
+          mkdir -p "$LOCAL_MTLS_CERT_DIR"
+          touch "$LOCAL_MTLS_CERT_DIR/ca.crt" "$LOCAL_MTLS_CERT_DIR/server.crt" "$LOCAL_MTLS_CERT_DIR/server.key"
+          docker compose --env-file /dev/null -f compose.local-mojaloop-mtls.yml config
+
+      - name: Validate Kubernetes manifest syntax
+        run: |
+          pnpm exec prettier --check \
+            infra/istio/mojaloop-callback-mtls.yaml \
+            infra/k8s/mojaloop-callback-mtls-ingress.yaml \
+            infra/k8s/mojaloop-callback-networkpolicy.yaml
+          if command -v kubectl >/dev/null 2>&1; then
+            kubectl apply --dry-run=client -f infra/istio/mojaloop-callback-mtls.yaml
+            kubectl apply --dry-run=client -f infra/k8s/mojaloop-callback-mtls-ingress.yaml
+            kubectl apply --dry-run=client -f infra/k8s/mojaloop-callback-networkpolicy.yaml
+          else
+            echo 'kubectl unavailable; YAML formatting check completed; cluster validation remains a staging gate.'
+          fi
+
+  container-build:
+    name: Build container only after mTLS gate
+    needs: mtls-validation
+    runs-on: ubuntu-24.04
+    if: ${{ needs.mtls-validation.result == 'success' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Build application image
+        run: docker build --file Dockerfile --tag ndsep:mTLS-gated-${{ github.sha }} .

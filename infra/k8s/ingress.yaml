@@ -16,6 +16,12 @@ metadata:
       add_header X-Frame-Options "SAMEORIGIN" always;
       add_header X-Content-Type-Options "nosniff" always;
       add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      # Public paths must never forward caller-controlled mTLS identity headers.
+      proxy_set_header X-NDSEP-mTLS-Verified "";
+      proxy_set_header X-NDSEP-mTLS-Subject "";
+      proxy_set_header X-NDSEP-mTLS-Issuer "";
+      proxy_set_header X-NDSEP-mTLS-Serial "";
+      proxy_set_header X-NDSEP-mTLS-Cert "";
     # Rate limiting
     nginx.ingress.kubernetes.io/limit-rps: "60"
     nginx.ingress.kubernetes.io/limit-connections: "20"

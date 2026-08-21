@@ -1,0 +1,122 @@
+# Optional Istio ingress deployment profile. Apply only when the cluster uses Istio ingressgateway.
+# The NGINX manifests remain authoritative for clusters using ingress-nginx.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: ndsep-mojaloop-callback
+  namespace: ndsep
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 443
+        name: https-mojaloop
+        protocol: HTTPS
+      hosts:
+        - callbacks.ndsep.nitda.gov.ng
+      tls:
+        mode: MUTUAL
+        credentialName: mojaloop-callback-istio-credential
+        caCertificates: /etc/istio/ingressgateway-ca-certs/ca.crt
+        minProtocolVersion: TLSV1_3
+        cipherSuites:
+          - ECDHE-ECDSA-AES256-GCM-SHA384
+          - ECDHE-RSA-AES256-GCM-SHA384
+          - ECDHE-ECDSA-CHACHA20-POLY1305
+          - ECDHE-RSA-CHACHA20-POLY1305
+        subjectAltNames:
+          - provider-preprod.example.invalid
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: ndsep-mojaloop-callback
+  namespace: ndsep
+spec:
+  hosts:
+    - callbacks.ndsep.nitda.gov.ng
+  gateways:
+    - ndsep/ndsep-mojaloop-callback
+  http:
+    - match:
+        - uri:
+            prefix: /api/mojaloop/
+      headers:
+        request:
+          remove:
+            - x-ndsep-mtls-verified
+            - x-ndsep-mtls-subject
+            - x-ndsep-mtls-issuer
+            - x-ndsep-mtls-serial
+            - x-forwarded-for
+            - x-real-ip
+      route:
+        - destination:
+            host: ndsep-api.ndsep.svc.cluster.local
+            port:
+              number: 5000
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: ndsep-mojaloop-callback-ingress-only
+  namespace: ndsep
+spec:
+  selector:
+    matchLabels:
+      app: ndsep-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account
+      to:
+        - operation:
+            paths:
+              - /api/mojaloop/*
+            methods:
+              - PUT
+---
+apiVersion: networking.istio.io/v1
+kind: EnvoyFilter
+metadata:
+  name: ndsep-mojaloop-client-subject-forwarding
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+              subFilter:
+                name: envoy.filters.http.router
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.lua
+          typed_config:
+            '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              function envoy_on_request(handle)
+                -- Envoy derives these values from the verified downstream TLS session.
+                -- Never copy client-supplied request headers into trust headers.
+                local verified = handle:streamInfo():downstreamSslConnection():sslCiphers()
+                if verified == nil then
+                  handle:respond({[":status"] = "401"}, "mTLS verification unavailable")
+                  return
+                end
+                handle:headers():remove("x-ndsep-mtls-verified")
+                handle:headers():remove("x-ndsep-mtls-subject")
+                handle:headers():remove("x-ndsep-mtls-issuer")
+                handle:headers():remove("x-ndsep-mtls-serial")
+                handle:headers():remove("x-forwarded-for")
+                handle:headers():remove("x-real-ip")
+              end

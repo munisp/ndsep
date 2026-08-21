@@ -1,345 +1,335 @@
-// NDSEP Layer 1 — Discovery Agent Heartbeat Worker (Go)
-// =======================================================
-// Simulates NMAP, Censys, CloudQuery, GLPI, and Nessus agent check-ins.
-// Performs:
-//   - Active and passive asset scanning with OS/service fingerprinting
-//   - Hardware/software/cloud/network asset identification
-//   - CVE vulnerability assessment (NVD/MITRE database simulation)
-//   - Asset geolocation tagging (lat/lon within Nigeria/Africa)
-//   - Agent health monitoring and status updates
-//   - New asset discovery events with full metadata
-//
-// Writes to assets table in PostgreSQL.
-
+// NDSEP Discovery and vulnerability-ingestion worker.
+// It accepts only authoritative asset and vulnerability observations from configured
+// providers; it never generates assets, CVEs, agent health, or security alerts.
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
 	"log"
-	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"ndsep/workers/shared"
 )
 
-var (
-	eventsProcessed  int64
-	assetsDiscovered int64
-	cvesDetected     int64
-	workerStart      = time.Now()
-)
-
-// Nigerian/African datacenter locations with lat/lon
-var locations = []struct {
-	name string
-	lat  float64
-	lon  float64
-}{
-	{"Lagos-DC1", 6.5244, 3.3792},
-	{"Abuja-DC2", 9.0765, 7.3986},
-	{"PortHarcourt-DC3", 4.8156, 7.0498},
-	{"Kano-Edge1", 12.0022, 8.5920},
-	{"Ibadan-Edge2", 7.3775, 3.9470},
-	{"Nairobi-DC1", -1.2921, 36.8219},
-	{"Johannesburg-DC1", -26.2041, 28.0473},
-	{"Cairo-DC1", 30.0444, 31.2357},
+type config struct {
+	listenAddr         string
+	assetProviderURL   *url.URL
+	assetAuthorization string
+	vulnerabilityURL   *url.URL
+	vulnerabilityAuth  string
+	pollEvery          time.Duration
+	requestTimeout     time.Duration
 }
 
-var operatingSystems = []string{
-	"Ubuntu 22.04 LTS", "Ubuntu 20.04 LTS", "CentOS 7", "RHEL 8",
-	"Windows Server 2022", "Windows Server 2019", "Debian 11",
-	"FreeBSD 13", "Alpine Linux 3.18", "Amazon Linux 2",
+type upstreamClient struct {
+	endpoint      *url.URL
+	authorization string
+	http          *http.Client
+}
+type healthState struct {
+	mu               sync.RWMutex
+	lastAssetSuccess time.Time
+	lastVulnSuccess  time.Time
+	lastError        string
 }
 
-var cloudProviders = []string{"AWS", "Azure", "GCP", "OCI", "Alibaba", "Local"}
-var cloudRegions = []string{"af-south-1", "westeurope", "us-east-1", "me-central-1", "ap-southeast-1"}
-
-// CVE database simulation
-var cveDatabase = []struct {
-	id       string
-	severity string
-	cvss     float64
-	desc     string
-}{
-	{"CVE-2024-3094", "critical", 10.0, "XZ Utils backdoor in liblzma"},
-	{"CVE-2024-21762", "critical", 9.6, "Fortinet FortiOS out-of-bound write"},
-	{"CVE-2023-44487", "high", 7.5, "HTTP/2 Rapid Reset Attack (DDoS)"},
-	{"CVE-2023-4966", "critical", 9.4, "Citrix Bleed - session token leak"},
-	{"CVE-2023-46604", "critical", 10.0, "Apache ActiveMQ RCE"},
-	{"CVE-2023-20198", "critical", 10.0, "Cisco IOS XE privilege escalation"},
-	{"CVE-2024-1709", "critical", 10.0, "ConnectWise ScreenConnect auth bypass"},
-	{"CVE-2024-6387", "high", 8.1, "OpenSSH regreSSHion race condition"},
-	{"CVE-2023-42793", "critical", 9.8, "JetBrains TeamCity auth bypass"},
-	{"CVE-2024-23897", "critical", 9.8, "Jenkins arbitrary file read"},
-	{"CVE-2024-27198", "critical", 9.8, "JetBrains TeamCity auth bypass 2"},
-	{"CVE-2023-34048", "critical", 9.8, "VMware vCenter RCE"},
-	{"CVE-2024-21887", "critical", 9.1, "Ivanti Connect Secure command injection"},
-	{"CVE-2023-22527", "critical", 10.0, "Atlassian Confluence SSTI RCE"},
-	{"CVE-2024-3400", "critical", 10.0, "PAN-OS GlobalProtect command injection"},
+type assetObservation struct {
+	OrganizationID     int       `json:"organization_id"`
+	OrganizationName   string    `json:"organization_name"`
+	ExternalID         string    `json:"external_id"`
+	Name               string    `json:"name"`
+	AssetType          string    `json:"asset_type"`
+	DataClassification string    `json:"data_classification"`
+	Status             string    `json:"status"`
+	Location           string    `json:"location"`
+	IPAddress          string    `json:"ip_address"`
+	MACAddress         string    `json:"mac_address"`
+	Hostname           string    `json:"hostname"`
+	OperatingSystem    string    `json:"operating_system"`
+	OSVersion          string    `json:"os_version"`
+	Latitude           float64   `json:"latitude"`
+	Longitude          float64   `json:"longitude"`
+	CloudProvider      string    `json:"cloud_provider"`
+	CloudRegion        string    `json:"cloud_region"`
+	WithinBorders      bool      `json:"is_within_borders"`
+	ObservedAt         time.Time `json:"observed_at"`
 }
 
-var assetTypes = []string{"hardware", "software", "cloud", "network", "database", "saas"}
-var assetStatuses = []string{"active", "active", "active", "inactive", "quarantined"}
-var scanTools = []string{"nmap", "censys", "cloudquery", "glpi", "nessus"}
-var classificationLevels = []string{"tier1_pii", "tier2_financial", "tier3_health", "tier4_government", "tier5_public"}
-var agentStatuses = []string{"active", "active", "active", "active", "inactive", "error"}
+type vulnerabilityFinding struct {
+	AssetExternalID string    `json:"asset_external_id"`
+	CVEID           string    `json:"cve_id"`
+	Severity        string    `json:"severity"`
+	CVSS            float64   `json:"cvss_score"`
+	Description     string    `json:"description"`
+	ObservedAt      time.Time `json:"observed_at"`
+}
 
-// runAssetScanWorker simulates discovery agents scanning for assets with fingerprinting
-func runAssetScanWorker() {
-	log.Println("[Discovery] Starting asset scan worker (NMAP/Censys/CloudQuery/GLPI/Nessus)...")
-	ticker := time.NewTicker(8 * time.Second)
-	defer ticker.Stop()
+var eventsProcessed int64
+var assetsDiscovered int64
+var cvesDetected int64
+var workerStart = time.Now()
 
-	for range ticker.C {
-		orgIDs, orgNames, err := shared.GetOrgIDs()
-		if err != nil || len(orgIDs) == 0 {
-			continue
-		}
-
-		idx := rand.Intn(len(orgIDs))
-		orgID := orgIDs[idx]
-		orgName := orgNames[idx]
-		tool := shared.RandomChoice(scanTools)
-		assetType := shared.RandomChoice(assetTypes)
-
-		if rand.Float64() < 0.35 {
-			assetName := fmt.Sprintf("%s-%s-%04d", assetType, tool, shared.RandomBetween(1000, 9999))
-			classification := shared.RandomChoice(classificationLevels)
-			status := shared.RandomChoice(assetStatuses)
-			locIdx := rand.Intn(len(locations))
-			loc := locations[locIdx]
-			os := shared.RandomChoice(operatingSystems)
-			osVer := fmt.Sprintf("%d.%d.%d", rand.Intn(5)+1, rand.Intn(20), rand.Intn(100))
-			ip := fmt.Sprintf("10.%d.%d.%d", rand.Intn(255), rand.Intn(255), rand.Intn(254)+1)
-			mac := fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X",
-				rand.Intn(256), rand.Intn(256), rand.Intn(256),
-				rand.Intn(256), rand.Intn(256), rand.Intn(256))
-			hostname := fmt.Sprintf("%s-%s-%04d.ndsep.internal", assetType, loc.name, rand.Intn(9999))
-			cloudProv := shared.RandomChoice(cloudProviders)
-			cloudReg := shared.RandomChoice(cloudRegions)
-			vulnCount := rand.Intn(25)
-			isWithin := loc.lat >= -35 && loc.lat <= 37 && loc.lon >= -17 && loc.lon <= 51
-
-			var assetID int
-			err = shared.DB.QueryRow(`
-				INSERT INTO assets
-					(organization_id, name, asset_type, data_classification, status, location,
-					 ip_address, mac_address, hostname, operating_system, os_version,
-					 latitude, longitude, cloud_provider, cloud_region,
-					 is_within_borders, vulnerability_count, discovered_at, last_seen, created_at)
-				VALUES ($1, $2, $3::asset_type, $4::data_classification, $5::asset_status, $6,
-					$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW(), NOW())
-				RETURNING id`,
-				orgID, assetName, assetType, classification, status, loc.name,
-				ip, mac, hostname, os, osVer,
-				loc.lat, loc.lon, cloudProv, cloudReg,
-				isWithin, vulnCount,
-			).Scan(&assetID)
-
-			if err == nil {
-				atomic.AddInt64(&assetsDiscovered, 1)
-				shared.Broadcast("new_asset_discovered", map[string]interface{}{
-					"type":             "new_asset_discovered",
-					"assetId":          assetID,
-					"assetName":        assetName,
-					"assetType":        assetType,
-					"classification":   classification,
-					"status":           status,
-					"location":         loc.name,
-					"latitude":         loc.lat,
-					"longitude":        loc.lon,
-					"ipAddress":        ip,
-					"hostname":         hostname,
-					"operatingSystem":  os,
-					"cloudProvider":    cloudProv,
-					"cloudRegion":      cloudReg,
-					"isWithinBorders":  isWithin,
-					"vulnerabilities":  vulnCount,
-					"organizationId":   orgID,
-					"organizationName": orgName,
-					"scanTool":         tool,
-					"timestamp":        time.Now().UTC().Format(time.RFC3339),
-				})
-				log.Printf("[Discovery] New asset: %s (%s) @ %s for %s via %s\n",
-					assetName, assetType, loc.name, orgName, tool)
-			}
-		}
-
-		// Always broadcast heartbeat
-		atomic.AddInt64(&eventsProcessed, 1)
-		shared.Broadcast("asset_heartbeat", map[string]interface{}{
-			"type":             "asset_heartbeat",
-			"organizationId":   orgID,
-			"organizationName": orgName,
-			"agentId":          fmt.Sprintf("agent-%s-%03d", tool, orgID),
-			"scanTool":         tool,
-			"status":           shared.RandomChoice([]string{"online", "online", "online", "degraded"}),
-			"assetsScanned":    shared.RandomBetween(10, 500),
-			"newAssetsFound":   shared.RandomBetween(0, 5),
-			"vulnerabilities":  shared.RandomBetween(0, 20),
-			"timestamp":        time.Now().UTC().Format(time.RFC3339),
-		})
+func loadConfig() (config, error) {
+	assetsURL, err := requiredURL("DISCOVERY_ASSET_PROVIDER_URL")
+	if err != nil {
+		return config{}, err
 	}
+	vulnURL, err := requiredURL("VULNERABILITY_SOURCE_URL")
+	if err != nil {
+		return config{}, err
+	}
+	assetAuth := strings.TrimSpace(os.Getenv("DISCOVERY_ASSET_PROVIDER_AUTHORIZATION"))
+	vulnAuth := strings.TrimSpace(os.Getenv("VULNERABILITY_SOURCE_AUTHORIZATION"))
+	if assetAuth == "" || vulnAuth == "" {
+		return config{}, errors.New("DISCOVERY_ASSET_PROVIDER_AUTHORIZATION and VULNERABILITY_SOURCE_AUTHORIZATION are required")
+	}
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8149"
+	}
+	interval := 60
+	if raw := os.Getenv("DISCOVERY_POLL_SECONDS"); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 15 || parsed > 3600 {
+			return config{}, errors.New("DISCOVERY_POLL_SECONDS must be between 15 and 3600")
+		}
+		interval = parsed
+	}
+	return config{listenAddr: ":" + port, assetProviderURL: assetsURL, assetAuthorization: assetAuth, vulnerabilityURL: vulnURL, vulnerabilityAuth: vulnAuth, pollEvery: time.Duration(interval) * time.Second, requestTimeout: 15 * time.Second}, nil
 }
 
-// runCVEScanner simulates Nessus/OpenVAS vulnerability scanning against discovered assets
-func runCVEScanner() {
-	log.Println("[Discovery] Starting CVE vulnerability scanner (Nessus/OpenVAS simulation)...")
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		var assetID int
-		var assetName, orgName string
-		var orgID int
-		err := shared.DB.QueryRow(`
-			SELECT a.id, a.name, a.organization_id, o.name
-			FROM assets a
-			JOIN organizations o ON o.id = a.organization_id
-			ORDER BY RANDOM() LIMIT 1`).Scan(&assetID, &assetName, &orgID, &orgName)
+func requiredURL(name string) (*url.URL, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil, errors.New(name + " is required")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, errors.New(name + " must be an absolute URL")
+	}
+	if os.Getenv("NODE_ENV") == "production" {
+		if parsed.Scheme != "https" {
+			return nil, errors.New(name + " must use HTTPS in production")
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" {
+			return nil, errors.New(name + " must not target a local address in production")
+		}
+	}
+	return parsed, nil
+}
+
+func newUpstreamClient(endpoint *url.URL, authorization string, timeout time.Duration) *upstreamClient {
+	return &upstreamClient{endpoint: endpoint, authorization: authorization, http: &http.Client{Timeout: timeout}}
+}
+
+func (client *upstreamClient) getJSON(ctx context.Context, query url.Values, destination interface{}) error {
+	endpoint := *client.endpoint
+	endpoint.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", client.authorization)
+	request.Header.Set("Accept", "application/json")
+	response, err := client.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return errors.New("authoritative source returned HTTP " + strconv.Itoa(response.StatusCode))
+	}
+	return json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(destination)
+}
+
+func fetchAssets(ctx context.Context, client *upstreamClient) ([]assetObservation, error) {
+	var envelope struct {
+		Assets []assetObservation `json:"assets"`
+	}
+	if err := client.getJSON(ctx, url.Values{}, &envelope); err != nil {
+		return nil, err
+	}
+	for index, asset := range envelope.Assets {
+		if asset.OrganizationID <= 0 || strings.TrimSpace(asset.ExternalID) == "" || strings.TrimSpace(asset.Name) == "" || asset.ObservedAt.IsZero() {
+			return nil, errors.New("asset provider returned incomplete asset at index " + strconv.Itoa(index))
+		}
+	}
+	return envelope.Assets, nil
+}
+func fetchFindings(ctx context.Context, client *upstreamClient) ([]vulnerabilityFinding, error) {
+	var envelope struct {
+		Findings []vulnerabilityFinding `json:"findings"`
+	}
+	if err := client.getJSON(ctx, url.Values{}, &envelope); err != nil {
+		return nil, err
+	}
+	for index, finding := range envelope.Findings {
+		if strings.TrimSpace(finding.AssetExternalID) == "" || strings.TrimSpace(finding.CVEID) == "" || strings.TrimSpace(finding.Severity) == "" || finding.ObservedAt.IsZero() {
+			return nil, errors.New("vulnerability source returned incomplete finding at index " + strconv.Itoa(index))
+		}
+	}
+	return envelope.Findings, nil
+}
+
+func persistAsset(asset assetObservation) (int, error) {
+	var id int
+	err := shared.DB.QueryRow(`SELECT id FROM assets WHERE organization_id=$1 AND hostname=$2 ORDER BY id DESC LIMIT 1`, asset.OrganizationID, asset.Hostname).Scan(&id)
+	if err == nil {
+		_, err = shared.DB.Exec(`UPDATE assets SET name=$1,asset_type=$2,data_classification=$3,status=$4,location=$5,ip_address=$6,mac_address=$7,operating_system=$8,os_version=$9,latitude=$10,longitude=$11,cloud_provider=$12,cloud_region=$13,is_within_borders=$14,last_seen=$15 WHERE id=$16`, asset.Name, asset.AssetType, asset.DataClassification, asset.Status, asset.Location, asset.IPAddress, asset.MACAddress, asset.OperatingSystem, asset.OSVersion, asset.Latitude, asset.Longitude, asset.CloudProvider, asset.CloudRegion, asset.WithinBorders, asset.ObservedAt, id)
+		return id, err
+	}
+	if !errors.Is(err, sqlErrNoRows()) {
+		return 0, err
+	}
+	err = shared.DB.QueryRow(`INSERT INTO assets (organization_id,name,asset_type,data_classification,status,location,ip_address,mac_address,hostname,operating_system,os_version,latitude,longitude,cloud_provider,cloud_region,is_within_borders,vulnerability_count,discovered_at,last_seen,created_at) VALUES ($1,$2,$3::asset_type,$4::data_classification,$5::asset_status,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,0,$17,$17,NOW()) RETURNING id`, asset.OrganizationID, asset.Name, asset.AssetType, asset.DataClassification, asset.Status, asset.Location, asset.IPAddress, asset.MACAddress, asset.Hostname, asset.OperatingSystem, asset.OSVersion, asset.Latitude, asset.Longitude, asset.CloudProvider, asset.CloudRegion, asset.WithinBorders, asset.ObservedAt).Scan(&id)
+	return id, err
+}
+
+// sqlErrNoRows is isolated to avoid broad error suppression in provider ingestion.
+func sqlErrNoRows() error { return sql.ErrNoRows }
+
+func process(ctx context.Context, assetsClient, vulnerabilityClient *upstreamClient, state *healthState) {
+	assets, err := fetchAssets(ctx, assetsClient)
+	if err != nil {
+		recordError(state, err)
+		return
+	}
+	lookup := make(map[string]assetObservation, len(assets))
+	for _, asset := range assets {
+		id, saveErr := persistAsset(asset)
+		if saveErr != nil {
+			recordError(state, saveErr)
+			return
+		}
+		lookup[asset.ExternalID] = asset
+		atomic.AddInt64(&assetsDiscovered, 1)
+		shared.Broadcast("asset_observed", map[string]interface{}{"type": "asset_observed", "assetId": id, "externalId": asset.ExternalID, "organizationId": asset.OrganizationID, "observedAt": asset.ObservedAt.UTC().Format(time.RFC3339)})
+	}
+	state.mu.Lock()
+	state.lastAssetSuccess = time.Now().UTC()
+	state.mu.Unlock()
+	findings, err := fetchFindings(ctx, vulnerabilityClient)
+	if err != nil {
+		recordError(state, err)
+		return
+	}
+	for _, finding := range findings {
+		asset, ok := lookup[finding.AssetExternalID]
+		if !ok {
+			recordError(state, errors.New("vulnerability source referenced asset absent from authoritative asset snapshot"))
+			return
+		}
+		atomic.AddInt64(&cvesDetected, 1)
+		_, err := shared.DB.Exec(`UPDATE assets SET vulnerability_count=vulnerability_count+1,last_seen=$1 WHERE organization_id=$2 AND hostname=$3`, finding.ObservedAt, asset.OrganizationID, asset.Hostname)
 		if err != nil {
-			continue
+			recordError(state, err)
+			return
 		}
-		numCVEs := rand.Intn(4)
-		foundCVEs := make([]map[string]interface{}, 0, numCVEs)
-		for i := 0; i < numCVEs; i++ {
-			cve := cveDatabase[rand.Intn(len(cveDatabase))]
-			atomic.AddInt64(&cvesDetected, 1)
-			foundCVEs = append(foundCVEs, map[string]interface{}{
-				"cveId":       cve.id,
-				"severity":    cve.severity,
-				"cvssScore":   cve.cvss,
-				"description": cve.desc,
-			})
-			if cve.severity == "critical" {
-				title := fmt.Sprintf("[CVE] %s on %s", cve.id, assetName)
-				desc := fmt.Sprintf("Critical CVE %s (CVSS %.1f) detected on asset %s belonging to %s. %s",
-					cve.id, cve.cvss, assetName, orgName, cve.desc)
-				_, _ = shared.DB.Exec(`
-					INSERT INTO security_alerts (organization_id, title, description, severity, source, alert_type, detected_at)
-					VALUES ($1, $2, $3, 'critical'::severity, 'Nessus-CVE-Scanner', 'vulnerability', NOW())`,
-					orgID, title, desc)
+		if strings.EqualFold(finding.Severity, "critical") {
+			_, err = shared.DB.Exec(`INSERT INTO security_alerts (organization_id,title,description,severity,source,alert_type,detected_at) VALUES ($1,$2,$3,'critical'::severity,'authoritative-vulnerability-source','vulnerability',$4)`, asset.OrganizationID, "[CVE] "+finding.CVEID+" on "+asset.Name, finding.Description, finding.ObservedAt)
+			if err != nil {
+				recordError(state, err)
+				return
 			}
 		}
-		if numCVEs > 0 {
-			_, _ = shared.DB.Exec(`UPDATE assets SET vulnerability_count = vulnerability_count + $1, last_seen = NOW() WHERE id = $2`,
-				numCVEs, assetID)
-		}
-		shared.Broadcast("cve_scan_complete", map[string]interface{}{
-			"type":             "cve_scan_complete",
-			"assetId":          assetID,
-			"assetName":        assetName,
-			"organizationId":   orgID,
-			"organizationName": orgName,
-			"cves":             foundCVEs,
-			"scanTool":         "nessus",
-			"totalCves":        numCVEs,
-			"timestamp":        time.Now().UTC().Format(time.RFC3339),
-		})
-		if numCVEs > 0 {
-			log.Printf("[Discovery] CVE scan: %s -> %d CVEs found\n", assetName, numCVEs)
-		}
+		shared.Broadcast("vulnerability_observed", map[string]interface{}{"type": "vulnerability_observed", "assetExternalId": finding.AssetExternalID, "cveId": finding.CVEID, "severity": finding.Severity, "cvssScore": finding.CVSS, "observedAt": finding.ObservedAt.UTC().Format(time.RFC3339)})
 	}
+	state.mu.Lock()
+	state.lastVulnSuccess = time.Now().UTC()
+	state.lastError = ""
+	state.mu.Unlock()
+	atomic.AddInt64(&eventsProcessed, 1)
 }
 
-// runAgentStatusUpdater broadcasts periodic agent status updates for all organizations
-func runAgentStatusUpdater() {
-	log.Println("[Discovery] Starting agent status broadcaster...")
-	ticker := time.NewTicker(20 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		orgIDs, orgNames, err := shared.GetOrgIDs()
-		if err != nil || len(orgIDs) == 0 {
-			continue
+func recordError(state *healthState, err error) {
+	state.mu.Lock()
+	state.lastError = err.Error()
+	state.mu.Unlock()
+	log.Printf("Discovery dependency unavailable: %v", err)
+}
+func healthHandler(state *healthState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		state.mu.RLock()
+		assets, vulns, lastError := state.lastAssetSuccess, state.lastVulnSuccess, state.lastError
+		state.mu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		if assets.IsZero() || vulns.IsZero() || time.Since(assets) > 3*time.Minute || time.Since(vulns) > 3*time.Minute {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "unavailable", "last_error": lastError})
+			return
 		}
-
-		for i, orgID := range orgIDs {
-			status := shared.RandomChoice(agentStatuses)
-			shared.Broadcast("agent_status_update", map[string]interface{}{
-				"type":             "agent_status_update",
-				"organizationId":   orgID,
-				"organizationName": orgNames[i],
-				"agentId":          fmt.Sprintf("agent-%03d", orgID),
-				"status":           status,
-			"assetsCount":      shared.RandomBetween(10, 1000),
-			"cvesDetected":     atomic.LoadInt64(&cvesDetected),
-			"timestamp":        time.Now().UTC().Format(time.RFC3339),
-			})
-		}
-		log.Printf("[Discovery] Broadcast agent status for %d organizations\n", len(orgIDs))
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready", "service": "discovery-agent", "asset_source_last_success": assets.Format(time.RFC3339), "vulnerability_source_last_success": vulns.Format(time.RFC3339)})
 	}
 }
-
-func startStatusServer(port string) {
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+func statusHandler(state *healthState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		state.mu.RLock()
+		lastError := state.lastError
+		state.mu.RUnlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "worker": "discovery_agent"})
-	})
-
-	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(shared.WorkerStatus{
-			ID:              "discovery-agent",
-			Name:            "Discovery Agent Heartbeat",
-			Layer:           "L1",
-			Language:        "Go",
-			Status:          "running",
-			LastRun:         time.Now(),
-			EventsProcessed: atomic.LoadInt64(&eventsProcessed),
-			Description:     "Polls NMAP, Censys, CloudQuery, GLPI, and Nessus agents for asset inventory updates. Performs OS/service fingerprinting, CVE scanning, and geolocation tagging.",
-			Technology:      "Go · NMAP · Censys · CloudQuery · GLPI · Nessus · NVD",
-		})
-	})
-
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"eventsProcessed":  atomic.LoadInt64(&eventsProcessed),
-		"assetsDiscovered": atomic.LoadInt64(&assetsDiscovered),
-		"cvesDetected":     atomic.LoadInt64(&cvesDetected),
-		"uptimeSeconds":    time.Since(workerStart).Seconds(),
-		})
-	})
-
-	log.Printf("[Discovery] Status server on :%s\n", port)
-	shared.RunGracefulServer("discovery_agent", port, nil, func() { shared.DB.Close() })
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "authoritative_only", "eventsProcessed": atomic.LoadInt64(&eventsProcessed), "assetsObserved": atomic.LoadInt64(&assetsDiscovered), "cvesObserved": atomic.LoadInt64(&cvesDetected), "uptimeSeconds": time.Since(workerStart).Seconds(), "last_error": lastError})
+	}
 }
 
 func main() {
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmsgprefix)
-	log.SetPrefix("[NDSEP-Discovery] ")
-
-	port := os.Getenv("DISCOVERY_PORT")
-	if port == "" {
-		port = "8082"
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	log.Println("=== NDSEP Layer 1 Discovery Agent Worker (Go) ===")
-
 	shared.InitRelay()
-shared.InitTracing(shared.TraceConfig{
-ServiceName:    "discovery_agent",
-ServiceVersion: "3.0.0",
-})
 	if err := shared.InitDB(); err != nil {
-		log.Fatalf("DB init failed: %v\n", err)
+		log.Fatal(err)
 	}
 	defer shared.DB.Close()
-
-	shared.Broadcast("worker_started", map[string]interface{}{
-		"worker":    "discovery_agent",
-		"layer":     "L1",
-		"language":  "Go",
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-	})
-
-	go runAssetScanWorker()
-	go runCVEScanner()
-	go runAgentStatusUpdater()
-
-	startStatusServer(port)
+	assetsClient := newUpstreamClient(cfg.assetProviderURL, cfg.assetAuthorization, cfg.requestTimeout)
+	vulnerabilityClient := newUpstreamClient(cfg.vulnerabilityURL, cfg.vulnerabilityAuth, cfg.requestTimeout)
+	state := &healthState{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		ticker := time.NewTicker(cfg.pollEvery)
+		defer ticker.Stop()
+		for {
+			processCtx, processCancel := context.WithTimeout(ctx, 2*cfg.requestTimeout)
+			process(processCtx, assetsClient, vulnerabilityClient, state)
+			processCancel()
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", healthHandler(state))
+	mux.HandleFunc("GET /status", statusHandler(state))
+	server := &http.Server{Addr: cfg.listenAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("Discovery server: %v", err)
+			cancel()
+		}
+	}()
+	wait := make(chan os.Signal, 1)
+	signal.Notify(wait, os.Interrupt)
+	select {
+	case <-ctx.Done():
+	case <-wait:
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	_ = server.Shutdown(shutdownCtx)
 }

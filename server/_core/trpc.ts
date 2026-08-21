@@ -1,4 +1,4 @@
-import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
+import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from "@shared/const";
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
@@ -31,7 +31,7 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
+    if (!ctx.user || ctx.user.role !== "admin") {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 
@@ -41,7 +41,10 @@ export const adminProcedure = t.procedure.use(
     const { checkPermission } = await import("../middlewareIntegration");
     const allowed = await checkPermission(ctx.user.id, "admin", "write");
     if (!allowed) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Permify: admin write permission denied" });
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Permify: admin write permission denied",
+      });
     }
 
     return next({
@@ -50,7 +53,7 @@ export const adminProcedure = t.procedure.use(
         user: ctx.user,
       },
     });
-  }),
+  })
 );
 
 // ─── NDSEP RBAC Procedures ────────────────────────────────────────────────────
@@ -59,49 +62,69 @@ export const adminProcedure = t.procedure.use(
 export const governmentStaffProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
-    const allowedRoles: string[] = ['admin', 'government_staff'];
+    const allowedRoles: string[] = ["admin", "government_staff"];
     if (!ctx.user || !allowedRoles.includes(ctx.user.role)) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Government staff access required" });
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Government staff access required",
+      });
     }
     return next({ ctx: { ...ctx, user: ctx.user } });
-  }),
+  })
 );
 
 /** Org admin: can manage their own organization's data only */
 export const orgAdminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
-    const allowedRoles: string[] = ['admin', 'government_staff', 'org_admin'];
+    const allowedRoles: string[] = ["admin", "government_staff", "org_admin"];
     if (!ctx.user || !allowedRoles.includes(ctx.user.role)) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Organization admin access required" });
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Organization admin access required",
+      });
     }
     return next({ ctx: { ...ctx, user: ctx.user } });
-  }),
+  })
 );
 
 /** Auditor: read-only access to audit trail, compliance, and violations */
 export const auditorProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
-    const allowedRoles: string[] = ['admin', 'government_staff', 'org_admin', 'auditor'];
+    const allowedRoles: string[] = [
+      "admin",
+      "government_staff",
+      "org_admin",
+      "auditor",
+    ];
     if (!ctx.user || !allowedRoles.includes(ctx.user.role)) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Auditor access required" });
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Auditor access required",
+      });
     }
     return next({ ctx: { ...ctx, user: ctx.user } });
-  }),
+  })
 );
 
 // ─── PBAC-enforced procedure factories ───────────────────────────────────────
 import { pbacMiddleware } from "../security/pbac";
 
 /** protectedProcedure + PBAC export guard (admin-only export operations) */
-export const exportProcedure = protectedProcedure.use(pbacMiddleware("*", "export"));
+export const exportProcedure = protectedProcedure.use(
+  pbacMiddleware("*", "export")
+);
 
 /** protectedProcedure + PBAC delete guard (admin-only delete operations) */
-export const deleteProcedure = protectedProcedure.use(pbacMiddleware("*", "delete"));
+export const deleteProcedure = protectedProcedure.use(
+  pbacMiddleware("*", "delete")
+);
 
 /** protectedProcedure + PBAC approve guard (admin-only approval operations) */
-export const approveProcedure = protectedProcedure.use(pbacMiddleware("*", "approve"));
+export const approveProcedure = protectedProcedure.use(
+  pbacMiddleware("*", "approve")
+);
 
 // ─── Permify ReBAC middleware ────────────────────────────────────────────────
 import { checkPermission } from "../middlewareIntegration";
@@ -115,7 +138,10 @@ import { checkPermission } from "../middlewareIntegration";
 export function permifyGuard(resource: string, action: string) {
   return t.middleware(async ({ ctx, next }) => {
     if (!ctx.user) {
-      throw new TRPCError({ code: "UNAUTHORIZED", message: "Authentication required" });
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Authentication required",
+      });
     }
     const allowed = await checkPermission(ctx.user.id, resource, action);
     if (!allowed) {
@@ -129,17 +155,34 @@ export function permifyGuard(resource: string, action: string) {
 }
 
 /** Procedures with Permify enforcement for specific domains */
-export const complianceMutationProcedure = protectedProcedure.use(permifyGuard("compliance", "write"));
-export const enforcementMutationProcedure = protectedProcedure.use(permifyGuard("enforcement", "write"));
-export const bankingMutationProcedure = protectedProcedure.use(permifyGuard("banking", "write"));
-export const auditMutationProcedure = protectedProcedure.use(permifyGuard("audit", "write"));
+export const complianceMutationProcedure = protectedProcedure.use(
+  permifyGuard("compliance", "write")
+);
+export const enforcementMutationProcedure = protectedProcedure.use(
+  permifyGuard("enforcement", "write")
+);
+export const bankingMutationProcedure = protectedProcedure.use(
+  permifyGuard("banking", "write")
+);
+export const auditMutationProcedure = protectedProcedure.use(
+  permifyGuard("audit", "write")
+);
+
+/**
+ * Irreversible money-movement actions require the administrative platform role
+ * plus an explicit relationship-based transfer permission. Neither an ordinary
+ * authenticated session nor a broad read/write role is sufficient.
+ */
+export const fundsMovementProcedure = adminProcedure.use(
+  permifyGuard("financial_transfer", "execute")
+);
 
 /** Helper: check if a user can access a specific organization's data */
 export function canAccessOrg(
   user: { role: string; organizationId?: number | null },
   orgId: number
 ): boolean {
-  if (['admin', 'government_staff'].includes(user.role)) return true;
-  if (user.role === 'org_admin' && user.organizationId === orgId) return true;
+  if (["admin", "government_staff"].includes(user.role)) return true;
+  if (user.role === "org_admin" && user.organizationId === orgId) return true;
   return false;
 }

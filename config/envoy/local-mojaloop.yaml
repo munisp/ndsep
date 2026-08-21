@@ -1,0 +1,87 @@
+# LOCAL TEST ONLY. Do not use this file in production.
+static_resources:
+  listeners:
+    - name: mojaloop_mtls_local
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 8443
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              require_client_certificate: true
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: /etc/envoy/tls/server.crt
+                    private_key:
+                      filename: /etc/envoy/tls/server.key
+                validation_context:
+                  trusted_ca:
+                    filename: /etc/envoy/tls/ca.crt
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: mojaloop_local
+                route_config:
+                  name: mojaloop_local_route
+                  virtual_hosts:
+                    - name: api
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: /api/mojaloop/
+                          route:
+                            cluster: ndsep_api
+                http_filters:
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      inlineCode: |
+                        function envoy_on_request(handle)
+                          local tls = handle:streamInfo():downstreamSslConnection()
+                          if tls == nil or tls:subjectPeerCertificate() == nil then
+                            handle:respond({[":status"] = "401"}, "mTLS client certificate required")
+                            return
+                          end
+                          -- LOCAL TEST ONLY: use the certificate CN configured by the local fixture.
+                          -- Production must derive the subject from the verified certificate, not a constant.
+                          handle:headers():remove("x-ndsep-mtls-verified")
+                          handle:headers():remove("x-ndsep-mtls-subject")
+                          handle:headers():remove("x-ndsep-mtls-issuer")
+                          handle:headers():remove("x-ndsep-mtls-serial")
+                          handle:headers():remove("x-forwarded-for")
+                          handle:headers():remove("x-real-ip")
+                          handle:headers():add("x-ndsep-mtls-verified", "SUCCESS")
+                          handle:headers():add("x-ndsep-mtls-subject", "CN=local-provider,O=NDSEP Test,C=NG")
+                          handle:headers():add("x-ndsep-mtls-gateway-attestation", "local-only-gateway-attestation-change-this-to-32-plus-random-characters")
+                        end
+                  - name: envoy.filters.http.router
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+  clusters:
+    - name: ndsep_api
+      type: LOGICAL_DNS
+      connect_timeout: 2s
+      load_assignment:
+        cluster_name: ndsep_api
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: host.docker.internal
+                      port_value: 3000
+      transport_socket:
+        name: envoy.transport_sockets.raw_buffer
+admin:
+  access_log_path: /tmp/envoy_admin.log
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
