@@ -115,6 +115,16 @@ export const diagnosticReceiptRevocationNotifications = mysqlTable("diagnosticRe
   archivedAt: timestamp("archivedAt"),
 });
 
+export const wafThreatFilterPresets = mysqlTable("wafThreatFilterPresets", {
+  presetId: varchar("presetId", { length: 80 }).primaryKey(),
+  agencyId: varchar("agencyId", { length: 120 }).notNull(),
+  name: varchar("name", { length: 80 }).notNull(),
+  query: varchar("query", { length: 160 }).notNull(),
+  createdBy: varchar("createdBy", { length: 255 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type PermittingAgency = typeof permittingAgencies.$inferSelect;
@@ -130,3 +140,4 @@ export type InsertServiceTopology = typeof serviceTopology.$inferInsert;
 export type DiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferSelect;
 export type InsertDiagnosticAttestationReceipt = typeof diagnosticAttestationReceipts.$inferInsert;
 export type DiagnosticReceiptRevocationNotification = typeof diagnosticReceiptRevocationNotifications.$inferSelect;
+export type WafThreatFilterPreset = typeof wafThreatFilterPresets.$inferSelect;

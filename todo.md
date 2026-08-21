@@ -429,3 +429,6 @@
 - [x] Add CSV and PDF export for administrator audit-integrity investigation reports
 - [x] Add durable custom WAF threat-filter preset saving and loading in the security dashboard
 - [x] Add role-aware other-user session termination controls with explicit confirmation safeguards
+- [x] Add fail-closed Keycloak session-directory integration for authorized supervisor cross-user session administration
+- [x] Add governed team publishing and sharing of custom WAF threat-filter presets
+- [x] Add signed audit export receipts and hash-chained download events for investigation reports
