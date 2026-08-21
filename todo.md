@@ -426,3 +426,6 @@
 - [x] Add visual audit-chain timeline that isolates invalid integrity records
 - [x] Add confirmation-protected bulk Keycloak session revocation for administrators
 - [x] Add threat-category search and filtering within WAF interval details
+- [x] Add CSV and PDF export for administrator audit-integrity investigation reports
+- [x] Add durable custom WAF threat-filter preset saving and loading in the security dashboard
+- [x] Add role-aware other-user session termination controls with explicit confirmation safeguards
