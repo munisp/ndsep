@@ -1,5 +1,5 @@
 import { Link } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PanResponder, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import Animated, {
   Easing,
@@ -31,7 +31,7 @@ const toneStyles = {
   warning: "bg-warning/10 text-warning border-warning/20",
 } as const;
 
-const filters: Array<{ key: ActivityFilter; label: string }> = [
+const filters: { key: ActivityFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "unread", label: "Unread" },
   { key: "field", label: "Field" },
@@ -70,7 +70,7 @@ function SwipeActivityCard({
     });
   }, [item.unread, unreadProgress]);
 
-  const resetPosition = () => {
+  const resetPosition = useCallback(() => {
     translateX.value = withTiming(0, {
       duration: 180,
       easing: Easing.out(Easing.cubic),
@@ -79,9 +79,9 @@ function SwipeActivityCard({
       duration: 180,
       easing: Easing.out(Easing.cubic),
     });
-  };
+  }, [opacity, translateX]);
 
-  const animateDismiss = () => {
+  const animateDismiss = useCallback(() => {
     translateX.value = withTiming(-220, {
       duration: 220,
       easing: Easing.out(Easing.cubic),
@@ -98,9 +98,9 @@ function SwipeActivityCard({
         }
       },
     );
-  };
+  }, [item.id, onDismiss, opacity, translateX]);
 
-  const animateMarkRead = () => {
+  const animateMarkRead = useCallback(() => {
     translateX.value = withTiming(
       28,
       {
@@ -132,7 +132,7 @@ function SwipeActivityCard({
         }
       },
     );
-  };
+  }, [item.id, onMarkRead, opacity, translateX]);
 
   const panResponder = useMemo(
     () =>
@@ -158,7 +158,7 @@ function SwipeActivityCard({
           resetPosition();
         },
       }),
-    [item.id, item.unread, onDismiss, onMarkRead],
+    [animateDismiss, animateMarkRead, item.unread, opacity, resetPosition, translateX],
   );
 
   const animatedCardStyle = useAnimatedStyle(() => ({

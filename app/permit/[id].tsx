@@ -92,7 +92,7 @@ export default function PermitDetailScreen() {
   const record = recordQuery.data;
   const agencies = platformQuery.data?.agencies ?? [];
   const services = platformQuery.data?.services ?? [];
-  const agencyUsers = platformQuery.data?.agencyUsers ?? [];
+  const agencyUsers = useMemo(() => platformQuery.data?.agencyUsers ?? [], [platformQuery.data?.agencyUsers]);
   const activeAgencyUser = activeAgencyUserQuery.data;
 
   const [summary, setSummary] = useState("");

@@ -16,7 +16,7 @@ export default function SlaPoliciesScreen() {
   const update = trpc.localPolicy.update.useMutation({ onSuccess: async (policy) => { await policies.refetch(); setMessage(`${policy.label} is now local policy version ${policy.version}.`); }, onError: (error) => setMessage(error.message || "A configured administrator session is required.") });
   const exportPdf = trpc.localPolicy.exportPdf.useMutation({ onSuccess: (exported) => { setMessage(`${exported.fileName} prepared. SHA-256: ${exported.sha256.slice(0, 16)}… ${exported.disclaimer}`); void Linking.openURL(`data:${exported.mimeType};base64,${exported.contentBase64}`); }, onError: (error) => setMessage(error.message || "Export requires a configured administrator session.") });
 
-  useEffect(() => { if (current) { setHours(String(current.slaHours)); setChecklist(current.checklist.join("\n")); } }, [current?.jurisdiction, current?.version]);
+  useEffect(() => { if (current) { setHours(String(current.slaHours)); setChecklist(current.checklist.join("\n")); } }, [current]);
   function save() {
     const items = checklist.split("\n").map((item) => item.trim()).filter(Boolean);
     const slaHours = Number(hours);

@@ -1,7 +1,8 @@
 import { Link } from "expo-router";
-import { ScrollView, StyleSheet, Text, View, Platform, Pressable } from "react-native";
+import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import { useMemo, useState } from "react";
 
+import { FullscreenLeafletCanvas } from "@/components/fullscreen-leaflet-canvas";
 import { ScreenContainer } from "@/components/screen-container";
 import {
   countTitleMix,
@@ -15,19 +16,9 @@ import {
   type OverlayKey,
   type StateKey,
 } from "@/lib/fullscreen-map-data";
-import type { ParcelRecord } from "@/lib/mobile-data";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 
-let leafletCssLoaded = false;
-
-function ensureLeafletCss() {
-  if (Platform.OS === "web" && !leafletCssLoaded) {
-    require("leaflet/dist/leaflet.css");
-    leafletCssLoaded = true;
-  }
-}
-
-function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
+function MapExperience({ parcels }: { parcels: import("@/lib/mobile-data").ParcelRecord[] }) {
   const [activeOverlays, setActiveOverlays] = useState<OverlayKey[]>(["housing", "row", "mining", "infrastructure"]);
   const [activeLayers, setActiveLayers] = useState<LayerKey[]>(["parcels", "boundaries", "districts"]);
   const [selectedState, setSelectedState] = useState<StateKey>("lagos");
@@ -47,29 +38,7 @@ function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
     return fromSelection ?? stateParcels[0] ?? null;
   }, [selectedParcelId, stateParcels]);
 
-  const center = useMemo<[number, number]>(() => {
-    if (selectedParcel) {
-      return [selectedParcel.latitude, selectedParcel.longitude];
-    }
-    return stateDataset.center;
-  }, [selectedParcel, stateDataset.center]);
-
   const titleMix = useMemo(() => countTitleMix(stateParcels), [stateParcels]);
-
-  if (Platform.OS !== "web") {
-    return (
-      <View className="rounded-[28px] border border-border bg-surface p-6">
-        <Text className="text-xl font-semibold text-foreground">Full-screen geospatial map is available on web</Text>
-        <Text className="mt-3 text-sm leading-6 text-muted">
-          Use the web surface for presentation-grade map review with state parcel layers, administrative boundaries, legends, and corridor overlays. Native builds continue to support in-field map workflows.
-        </Text>
-      </View>
-    );
-  }
-
-  ensureLeafletCss();
-
-  const { MapContainer, TileLayer, CircleMarker, Popup, Polyline, Polygon } = require("react-leaflet");
 
   const overlaysToRender = overlayDefinitions.filter((overlay) => activeOverlays.includes(overlay.key));
 
@@ -108,62 +77,7 @@ function MapExperience({ parcels }: { parcels: ParcelRecord[] }) {
           })}
         </View>
 
-        <View style={styles.mapShell}>
-          <MapContainer center={center} zoom={stateDataset.zoom} scrollWheelZoom style={styles.mapCanvas} key={selectedState}>
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            {activeLayers.includes("boundaries") ? (
-              <Polygon
-                positions={stateDataset.boundary}
-                pathOptions={{ color: "#0A5C36", weight: 3, fillColor: "#22C55E", fillOpacity: 0.08 }}
-              />
-            ) : null}
-            {activeLayers.includes("districts")
-              ? stateDataset.districtLines.map((line, index) => (
-                  <Polyline
-                    key={`${stateDataset.key}-district-${index}`}
-                    positions={line}
-                    pathOptions={{ color: "#1D4ED8", weight: 2, opacity: 0.7, dashArray: "8 8" }}
-                  />
-                ))
-              : null}
-            {activeLayers.includes("parcels")
-              ? stateParcels.map((parcel) => (
-                  <CircleMarker
-                    key={parcel.id}
-                    center={[parcel.latitude, parcel.longitude]}
-                    radius={selectedParcel?.id === parcel.id ? 12 : 9}
-                    pathOptions={{
-                      color: selectedParcel?.id === parcel.id ? "#0A5C36" : "#1D4ED8",
-                      fillColor: selectedParcel?.id === parcel.id ? "#22C55E" : "#3B82F6",
-                      fillOpacity: 0.86,
-                      weight: 3,
-                    }}
-                    eventHandlers={{ click: () => setSelectedParcelId(parcel.id) }}
-                  >
-                    <Popup>
-                      <strong>{parcel.parcelNumber}</strong>
-                      <br />
-                      {parcel.owner}
-                      <br />
-                      {parcel.lga}, {parcel.state}
-                      <br />
-                      Title: {parcel.titleStatus}
-                    </Popup>
-                  </CircleMarker>
-                ))
-              : null}
-            {overlaysToRender.map((overlay) => (
-              <Polyline
-                key={overlay.key}
-                positions={overlay.points}
-                pathOptions={{ color: overlay.color, weight: 6, opacity: 0.75, dashArray: "10 8" }}
-              />
-            ))}
-          </MapContainer>
-        </View>
+        <FullscreenLeafletCanvas activeLayers={activeLayers} mapKey={selectedState} overlays={overlaysToRender} selectedParcelId={selectedParcel?.id ?? null} stateDataset={stateDataset} stateParcels={stateParcels} onSelectParcel={setSelectedParcelId} />
       </View>
 
       <View className="flex-row gap-4">
@@ -320,18 +234,6 @@ const styles = StyleSheet.create({
   },
   stateChipLabelActive: {
     color: "#0A5C36",
-  },
-  mapShell: {
-    width: "100%",
-    height: 620,
-    marginTop: 18,
-    overflow: "hidden",
-    borderRadius: 24,
-    backgroundColor: "#E5E7EB",
-  },
-  mapCanvas: {
-    width: "100%",
-    height: "100%",
   },
   legendRow: {
     flexDirection: "row",

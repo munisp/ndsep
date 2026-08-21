@@ -1,7 +1,7 @@
 # Code Quality and Coverage Baseline
 
 **Assessment date:** 21 August 2026  
-**Scope:** Source as checked out in `/home/ubuntu/idlr_pts_mobile`, excluding native-device execution and unavailable local PostgreSQL payment integration.
+**Scope:** Source as checked out in `/home/ubuntu/idlr_pts_mobile`, including a disposable local PostgreSQL 16 payment-audit test database; native-device and external-provider execution remain outside this assessment.
 
 > **This is a measured engineering baseline, not a production certification or a claim of complete feature coverage.**
 
@@ -11,19 +11,22 @@
 |---|---:|---|
 | `pnpm run check` | Passed | TypeScript has no reported errors. |
 | `pnpm run build` | Passed | The server bundle builds successfully. |
-| `pnpm run lint` | Passed with 23 warnings | The two React hook-order errors were fixed. Remaining warnings are tracked style/dependency hygiene items, not lint errors. |
-| Local runnable tests | 128 passed, 1 skipped | Includes current security, OIDC lifecycle, receipts, offline queue, recovery-invariant, and domain tests. |
-| Full test suite in this sandbox | Blocked by 10 payment tests | The PostgreSQL payment audit socket is absent; this is an environment dependency, not an assertion that payment behavior passed. |
-| Locally runnable core coverage | 55.42% statements/lines, 56.63% functions, 64.24% branches | Measured over server and library TypeScript, excluding app UI, native configuration, generated files, and deployment manifests. |
+| `pnpm run lint` | Passed with 0 warnings | Lint configuration and all previously reported source warnings were resolved without rule suppression. |
+| Full PostgreSQL-backed tests | 139 passed, 1 skipped | Includes payment audit, webhook reconciliation, dual-control approval, and reconciliation exception tests against the dedicated `idlr_payment_test` database. |
+| Full core coverage | 58.51% statements/lines, 68.94% functions, 63.82% branches | Measured over server and library TypeScript, excluding app UI, native configuration, generated files, and deployment manifests. |
 
 ## High-assurance controls covered by deterministic tests
 
-The current tests exercise fail-closed OIDC configuration, rejected refresh-token cleanup, revocation cleanup, tamper-evident security audit verification, malformed Keycloak administrative configuration rejection, distinct-principal dual-approval recovery invariants, offline queue validation and retry rules, audit receipt cryptography, WAF preset filtering, and policy/threshold domain behavior.
+The current tests exercise fail-closed OIDC configuration and login readiness, rejected refresh-token cleanup, revocation cleanup, tamper-evident security audit verification, malformed Keycloak administrative configuration rejection, distinct-principal dual-approval recovery invariants, PostgreSQL-backed payment audit and webhook controls, offline queue validation and retry rules, audit receipt cryptography, WAF preset filtering, and policy/threshold domain behavior.
 
 ## Explicit gaps
 
-The coverage percentage cannot safely be treated as an overall quality score. Native Expo UI, device biometrics, maps/camera, browser-only flows, external Keycloak/NIMC/CAC/Docling services, payment PostgreSQL integration, payment gateways, SIEM/WAF telemetry, and deployment controls require device, integration, and target-environment evidence. The repository now includes `test:coverage` for target environments with PostgreSQL and `test:coverage:local` for transparent local-only evidence; neither command may be used to claim 100% feature correctness.
+The coverage percentage cannot safely be treated as an overall quality score. Native Expo UI, device biometrics, maps/camera, browser-only flows, external Keycloak/NIMC/CAC/Docling services, live payment gateways, SIEM/WAF telemetry, and deployment controls require device, integration, and target-environment evidence. The repository now includes `test:coverage` for PostgreSQL-enabled environments and `test:coverage:local` for transparent non-payment evidence; neither command may be used to claim 100% feature correctness.
 
 ## Next quality work
 
-The most valuable remaining code-test investment is an isolated PostgreSQL test service to make all payment integration tests deterministic, followed by native-device integration testing for OIDC biometrics, file encryption, camera, maps, and push notification behavior. UI component and end-to-end route tests should then exercise the remaining user-facing paths that unit coverage intentionally does not execute.
+The isolated PostgreSQL dependency has now been restored and the full suite passes. The highest-value remaining evidence is native-device integration testing for OIDC biometrics, file encryption, camera, maps, and push notification behavior, followed by authenticated target-environment checks of external providers and additional UI component/route coverage.
+
+## Preview verification limitation
+
+Two browser checks of the sandbox PWA `/login` route returned the sandbox “page currently unavailable” response while the managed development process reported itself as running and TypeScript reported no errors. The revised login and recovery flows therefore have compilation, lint, and deterministic readiness-test evidence, but **do not yet have independent browser-render evidence from this sandbox proxy**. This limitation must not be represented as visual acceptance.

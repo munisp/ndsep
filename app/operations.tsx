@@ -8,14 +8,14 @@ import * as Haptics from "expo-haptics";
 import { Link } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { trpc } from "@/lib/trpc";
+import { deleteSupervisorFilterPreset, loadSupervisorFilterPresets, saveSupervisorFilterPreset, shareSupervisorFilterPreset, validateSharedSupervisorFilterPreset, type SupervisorFilterPreset } from "@/lib/supervisor-filter-presets";
 function HighlightText({ text, query, className: cls }: { text: string; query: string; className?: string }) {
   if (!query.trim()) return <Text className={cls}>{text}</Text>;
   const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const parts = text.split(new RegExp(`(${escaped})`, "i"));
   return <Text className={cls}>{parts.map((part, i) => part.toLowerCase() === query.trim().toLowerCase() ? <Text key={i} className="bg-warning/30 font-bold">{part}</Text> : <Text key={i}>{part}</Text>)}</Text>;
 }
-import { trpc } from "@/lib/trpc";
-import { deleteSupervisorFilterPreset, loadSupervisorFilterPresets, saveSupervisorFilterPreset, shareSupervisorFilterPreset, validateSharedSupervisorFilterPreset, type SupervisorFilterPreset } from "@/lib/supervisor-filter-presets";
 
 function Metric({ label, value, detail, tone = "primary" }: { label: string; value: string; detail: string; tone?: "primary" | "warning" | "error" | "success" }) {
   const color = tone === "error" ? "text-error" : tone === "warning" ? "text-warning" : tone === "success" ? "text-success" : "text-primary";
@@ -133,6 +133,28 @@ export default function OperationsScreen() {
           <Metric label="Retry outcomes · 7 days" value={String((retryTrend.data ?? []).reduce((sum, day) => sum + day.succeeded, 0))} detail={retryTrend.isError ? "Retry trend unavailable." : `${(retryTrend.data ?? []).reduce((sum, day) => sum + day.scheduled + day.blocked + day.exhausted, 0)} non-success retry outcomes; successful provider re-verifications shown in green.`} tone={(retryTrend.data ?? []).some((day) => day.blocked || day.exhausted) ? "warning" : "success"} />
           {retryTrendStatus ? <View className="rounded-2xl border border-border bg-surface p-4"><Text className="text-sm text-muted">{retryTrendStatus}</Text>{retryTrend.isError ? <Pressable onPress={() => retryTrend.refetch()}><Text className="mt-2 font-semibold text-primary">Retry chart load</Text></Pressable> : <View className="mt-3 h-3 rounded-full bg-border" />}</View> : null}
           {gatewayHealth.data?.openExceptionCount ? <Link href={"/payment-reconciliation" as never} asChild><View className="rounded-full border border-error bg-error/10 px-4 py-3"><Text className="text-center text-sm font-bold text-error">{gatewayHealth.data.openExceptionCount} HIGH-RISK RECONCILIATION EXCEPTION{gatewayHealth.data.openExceptionCount === 1 ? "" : "S"} NEED REVIEW</Text></View></Link> : null}
+        </View>
+        <View className="rounded-3xl border border-border bg-surface p-5">
+          <View className="flex-row items-start justify-between gap-3">
+            <View className="flex-1">
+              <Text className="text-lg font-semibold text-foreground">Weekly escalation resolution snapshot</Text>
+              <Text className="mt-2 text-sm leading-5 text-muted">Internal management timing only. It does not validate field evidence or determine any legal outcome.</Text>
+            </View>
+            <Pressable onPress={() => setWeeklyDetailVisible((visible) => !visible)} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }]}>
+              <Text className="text-sm font-semibold text-primary">{weeklyDetailVisible ? "Hide details" : "Show details"}</Text>
+            </Pressable>
+          </View>
+          <View className="mt-4 flex-row gap-3">
+            <Metric label="Resolved this week" value={String(weeklyResolved.length)} detail="Internal escalations resolved during the past seven days." tone={weeklyResolved.length > 0 ? "success" : "primary"} />
+            <Metric label="Weekly average" value={weeklyResolutionHours === null ? "—" : `${weeklyResolutionHours}h`} detail="Average elapsed time between local escalation and recorded resolution." tone={weeklyResolutionHours !== null && weeklyResolutionHours > 48 ? "warning" : "success"} />
+            <Metric label="30-day average" value={averageResolutionHours === null ? "—" : `${averageResolutionHours}h`} detail="Monthly view of local escalation resolution timing." tone={averageResolutionHours !== null && averageResolutionHours > 48 ? "warning" : "success"} />
+          </View>
+          {weeklyDetailVisible ? <Text className="mt-3 text-xs leading-5 text-muted">{weeklyResolved.length ? `${weeklyResolved.length} locally resolved escalation${weeklyResolved.length === 1 ? "" : "s"} fall within the current seven-day snapshot.` : "No locally resolved escalations fall within the current seven-day snapshot."}</Text> : null}
+          <View className="mt-4 flex-row gap-3">
+            <Pressable onPress={() => setCustomRangeVisible(true)} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl border border-border bg-background px-3 py-3"><Text className="text-center text-sm font-semibold text-foreground">Choose CSV date range</Text></View></Pressable>
+            <Pressable onPress={confirmAndExportCsv} style={({ pressed }) => [{ flex: 1, opacity: pressed ? 0.8 : 1 }]}><View className="rounded-xl bg-foreground px-3 py-3"><Text className="text-center text-sm font-semibold text-background">Export resolution CSV</Text></View></Pressable>
+          </View>
+          <Text className="mt-2 text-xs text-muted">Active range: {csvStartDate || "Last 7 days"} to {csvEndDate || "Today"}</Text>
         </View>
         <View className="flex-row gap-3"><Link href={"/offline-payments" as never} asChild><View className="flex-1 rounded-2xl border border-primary bg-primary px-4 py-4"><Text className="text-center font-semibold text-white">Review offline payments</Text></View></Link><Link href={"/qr-scanner" as never} asChild><View className="flex-1 rounded-2xl border border-border bg-surface px-4 py-4"><Text className="text-center font-semibold text-foreground">Verify receipt QR</Text></View></Link></View>
         <Link href={"/payment-audit" as never} asChild><View className="rounded-2xl border border-border bg-surface px-4 py-4"><Text className="text-center font-semibold text-foreground">Open payment audit events and CSV export</Text></View></Link>

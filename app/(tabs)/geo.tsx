@@ -1,92 +1,9 @@
 import { Link } from "expo-router";
-import { ScrollView, StyleSheet, Text, View, Platform } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { WebLeafletMap } from "@/components/web-leaflet-map";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
-import type { ParcelRecord } from "@/lib/mobile-data";
-
-let leafletCssLoaded = false;
-
-function WebLeafletMap({ parcel }: { parcel: ParcelRecord }) {
-  if (Platform.OS !== "web") {
-    return (
-      <View className="rounded-[28px] border border-border bg-surface p-5">
-        <Text className="text-lg font-semibold text-foreground">Native map available on device builds</Text>
-        <Text className="mt-2 text-sm leading-5 text-muted">
-          The native iOS and Android builds use the richer device map surface. The web view now includes a true browser-rendered parcel map for dashboard review and presentation capture.
-        </Text>
-      </View>
-    );
-  }
-
-  if (!leafletCssLoaded) {
-    require("leaflet/dist/leaflet.css");
-    leafletCssLoaded = true;
-  }
-
-  const { MapContainer, TileLayer, CircleMarker, Popup } = require("react-leaflet");
-
-  return (
-    <View className="rounded-[28px] border border-border bg-surface p-5">
-      <View className="flex-row items-start justify-between gap-4">
-        <View className="flex-1">
-          <Text className="text-lg font-semibold text-foreground">Live parcel map in web preview</Text>
-          <Text className="mt-2 text-sm leading-5 text-muted">
-            This browser-rendered map is centered on {parcel.parcelNumber} in {parcel.lga}, {parcel.state}. It uses seeded parcel coordinates and OpenStreetMap tiles to provide a true web geospatial view.
-          </Text>
-        </View>
-        <View className="rounded-full bg-background px-3 py-1">
-          <Text className="text-xs font-semibold text-foreground">Web map</Text>
-        </View>
-      </View>
-
-      <View style={styles.mapShell as never}>
-        <MapContainer
-          center={[parcel.latitude, parcel.longitude]}
-          zoom={12}
-          scrollWheelZoom={false}
-          attributionControl={true}
-          style={styles.leafletMap as never}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <CircleMarker
-            center={[parcel.latitude, parcel.longitude]}
-            radius={12}
-            pathOptions={{ color: "#0A5C36", fillColor: "#2563EB", fillOpacity: 0.85, weight: 3 }}
-          >
-            <Popup>
-              <strong>{parcel.parcelNumber}</strong>
-              <br />
-              {parcel.owner}
-              <br />
-              {parcel.lga}, {parcel.state}
-            </Popup>
-          </CircleMarker>
-        </MapContainer>
-      </View>
-
-      <View className="mt-4 rounded-2xl bg-background p-4">
-        <Text className="text-sm text-muted">Current parcel focus</Text>
-        <Text className="mt-2 text-lg font-semibold text-foreground">{parcel.parcelNumber}</Text>
-        <Text className="mt-1 text-sm text-muted">
-          {parcel.owner} · {parcel.lga}, {parcel.state}
-        </Text>
-        <Text className="mt-1 text-sm text-muted">
-          Coordinates: {parcel.latitude.toFixed(4)}, {parcel.longitude.toFixed(4)}
-        </Text>
-      </View>
-
-      <Link href="/fullscreen-map" asChild>
-        <View className="mt-4 rounded-2xl bg-foreground px-4 py-3">
-          <Text className="text-center font-semibold text-background">Open full-screen parcel map</Text>
-        </View>
-      </Link>
-    </View>
-  );
-}
 
 export default function GeoScreen() {
   const { bundle } = useMobilePlatformBundle();
@@ -175,17 +92,5 @@ const styles = StyleSheet.create({
   contentContainer: {
     padding: 20,
     gap: 16,
-  },
-  mapShell: {
-    width: "100%",
-    height: 360,
-    marginTop: 16,
-    overflow: "hidden",
-    borderRadius: 20,
-    backgroundColor: "#F3F4F6",
-  },
-  leafletMap: {
-    width: "100%",
-    height: "100%",
   },
 });

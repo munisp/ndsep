@@ -408,7 +408,7 @@
 - [x] Add date and read-status filtering to the organization receipt alert center
 - [x] Complete an evidence-based production readiness audit against all stated business and technical requirements
 - [x] Classify all remaining requirements into code-resolvable work and external evidence gates
-- [ ] Restore local payment validation infrastructure and achieve a fully green repeatable test suite
+- [x] Restore local payment validation infrastructure and achieve a fully green repeatable test suite
 - [ ] Implement remaining code-resolvable production controls with explicit fail-closed boundaries
 - [ ] Add clearly labelled local emulators for infrastructure assumed available in target environments
 - [ ] Produce deployment, recovery, monitoring, and governance code artifacts for target-environment activation
@@ -427,5 +427,15 @@
 - [x] Close confirmed code-resolvable defects and high-risk untested paths discovered by the baseline
 - [x] Add deterministic tests for security-sensitive, payment, authentication, and offline replay boundaries
 - [x] Produce an evidence-supported code-readiness score and residual-risk register without claiming certainty from code alone
-- [ ] Restore isolated PostgreSQL test infrastructure and make the payment integration suite green in a repeatable environment
+- [x] Restore isolated PostgreSQL test infrastructure and make the payment integration suite green in a repeatable environment
 - [ ] Add native-device and approved-external-provider integration evidence for biometric, map, camera, KMS, OIDC, document-intelligence, and notification boundaries
+- [ ] Restore disposable PostgreSQL validation infrastructure and make the complete payment suite pass
+- [ ] Eliminate all remaining ESLint warnings without suppressing valid safety checks
+- [ ] Improve availability-aware Keycloak OIDC login UX with clear progress, recovery, and secure-session states
+- [ ] Improve the dual-approval recovery UX with explicit quorum, device-binding, and fail-closed state communication
+- [ ] Validate the completed payment, lint, OIDC, and recovery changes through repeatable checks before reporting results
+- [x] Restore disposable PostgreSQL validation infrastructure and make the complete payment suite pass
+- [x] Eliminate all remaining ESLint warnings without suppressing valid safety checks
+- [x] Improve availability-aware Keycloak OIDC login UX with clear progress, recovery, and secure-session states
+- [x] Improve the dual-approval recovery UX with explicit quorum, device-binding, and fail-closed state communication
+- [x] Validate the completed payment, lint, OIDC, and recovery changes through repeatable checks before reporting results

@@ -10,11 +10,10 @@ import { describeStakeholderRetrySchedule } from "@/lib/stakeholder-sync-retry";
 import { exportAdministrativePublicKeyStakeholderDiagnostics, exportEncryptedStakeholderSyncDiagnostics, exportStakeholderSyncDiagnostics } from "@/lib/stakeholder-sync-diagnostics";
 import { confirmEncryptedDiagnosticsExport } from "@/lib/biometric-diagnostic-export";
 import { getAdministrativeSupportKeyFingerprint } from "@/lib/stakeholder-support-crypto";
-import { createAndDownloadDiagnosticExportReceipt } from "@/lib/stakeholder-export-receipt";
+import { createAndDownloadDiagnosticExportReceipt , downloadServerDiagnosticExportReceipt } from "@/lib/stakeholder-export-receipt";
 import { shouldShowTechnicalRetryAudit } from "@/lib/stakeholder-sync-audit-visibility";
 import { confirmTechnicalQueueViewAuthorization } from "@/lib/technical-queue-view";
 import { TECHNICAL_VIEW_INACTIVITY_MS, formatTechnicalViewCountdown, isTechnicalViewExpired, isTechnicalViewLockWarning, technicalViewExpiresAt, technicalViewRemainingSeconds } from "@/lib/technical-view-session";
-import { downloadServerDiagnosticExportReceipt } from "@/lib/stakeholder-export-receipt";
 import { trpc } from "@/lib/trpc";
 
 const LABELS: Record<PendingStakeholderSyncItem["kind"], string> = { profile: "Stakeholder profile", identity_document: "Identity document", business_document: "Business document" };

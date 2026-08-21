@@ -4,7 +4,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { trpc } from "@/lib/trpc";
 
 type GatewayField = "PAYMENT_GATEWAY_ACTIVE_PROVIDER" | "PAYMENT_GATEWAY_PUBLIC_BASE_URL" | "PAYSTACK_SECRET_KEY" | "FLUTTERWAVE_WEBHOOK_SECRET_HASH" | "FLUTTERWAVE_SECRET_KEY";
-const fields: Array<{ key: GatewayField; label: string; secret?: boolean; placeholder: string }> = [
+const fields: { key: GatewayField; label: string; secret?: boolean; placeholder: string }[] = [
   { key: "PAYMENT_GATEWAY_ACTIVE_PROVIDER", label: "Active provider", placeholder: "paystack or flutterwave" },
   { key: "PAYMENT_GATEWAY_PUBLIC_BASE_URL", label: "Public HTTPS origin", placeholder: "https://land.example.gov.ng" },
   { key: "PAYSTACK_SECRET_KEY", label: "Paystack secret key", secret: true, placeholder: "Enter replacement key" },

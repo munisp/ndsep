@@ -34,7 +34,7 @@ function AudiencePill({ label, active, onPress }: { label: string; active: boole
   );
 }
 
-function ScenarioCard({ title, description, metrics }: { title: string; description: string; metrics: Array<{ label: string; value: string }> }) {
+function ScenarioCard({ title, description, metrics }: { title: string; description: string; metrics: { label: string; value: string }[] }) {
   return (
     <View className="rounded-3xl border border-border bg-surface p-5">
       <Text className="text-lg font-semibold text-foreground">{title}</Text>

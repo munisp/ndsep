@@ -27,7 +27,7 @@ type FieldName =
   | "SECURITY_TELEMETRY_ALLOWED_HOSTS"
   | "SIEM_CORRELATION_URL_TEMPLATE";
 
-const groups: Array<{ title: string; note: string; fields: Array<{ key: FieldName; label: string; secret?: boolean }> }> = [
+const groups: { title: string; note: string; fields: { key: FieldName; label: string; secret?: boolean }[] }[] = [
   {
     title: "Keycloak access tokens",
     note: "Tokens must carry agency_id and agency_roles claims. The values are saved only by the server when secure persistence is configured.",

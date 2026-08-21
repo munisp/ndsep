@@ -1,7 +1,6 @@
-import { ScrollView, Text, View, Pressable } from "react-native";
+import { ScrollView, Text, View, Pressable , Alert, Image, TextInput } from "react-native";
 
 import { useEffect, useRef, useState } from "react";
-import { Alert, Image, TextInput } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as DocumentPicker from "expo-document-picker";
 
