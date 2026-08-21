@@ -103,7 +103,7 @@
       "participatingAgencyIds": [
         "environment-agency"
       ],
-      "updatedAt": "2026-08-21T15:24:18.230Z",
+      "updatedAt": "2026-08-21T15:43:03.461Z",
       "summary": "Awaiting work-programme validation, financial capability confirmation, and environmental screening before payment confirmation.",
       "timeline": [
         {
@@ -348,7 +348,7 @@
       "uploadedDocuments": [],
       "activeAssignment": {
         "assignedUserId": "user-mining-1",
-        "assignedAt": "2026-08-21T15:24:18.230Z",
+        "assignedAt": "2026-08-21T15:43:03.461Z",
         "reason": "Obligation risk triggered escalation",
         "status": "active"
       },
@@ -357,8 +357,8 @@
           "id": "handoff-permit-mining-001-mining_reviewer",
           "fromRole": "system",
           "toRole": "mining_reviewer",
-          "startedAt": "2026-08-21T15:24:18.230Z",
-          "dueAt": "2026-08-22T15:24:18.230Z",
+          "startedAt": "2026-08-21T15:43:03.461Z",
+          "dueAt": "2026-08-22T15:43:03.461Z",
           "status": "pending",
           "reason": "Obligation risk triggered escalation"
         }
@@ -367,8 +367,8 @@
       "custodyTimeline": [],
       "auditHistory": [
         {
-          "id": "audit-1787325858230-aadqw2",
-          "createdAt": "2026-08-21T15:24:18.230Z",
+          "id": "audit-1787326983461-r0oe4k",
+          "createdAt": "2026-08-21T15:43:03.461Z",
           "actor": "Haruna Bello",
           "role": "mining_reviewer",
           "type": "assignment",
@@ -407,7 +407,7 @@
         "environment-agency",
         "planning-authority"
       ],
-      "updatedAt": "2026-08-21T15:24:19.464Z",
+      "updatedAt": "2026-08-21T15:43:04.686Z",
       "summary": "Local infrastructure dependencies cleared, but mitigation conditions and abandonment security confirmation remain outstanding.",
       "timeline": [
         {
@@ -651,7 +651,7 @@
       ],
       "lastAiExtraction": {
         "documentName": "petroleum.txt",
-        "extractedAt": "2026-08-21T15:24:19.464Z",
+        "extractedAt": "2026-08-21T15:43:04.686Z",
         "model": "gpt-5-nano",
         "populatedKeys": [
           "operator_name",
@@ -667,12 +667,12 @@
       },
       "uploadedDocuments": [
         {
-          "id": "doc-1787325859464",
+          "id": "doc-1787326984687",
           "fileName": "petroleum.txt",
           "mimeType": "text/plain",
-          "storagePath": "permits/permit-oilgas-014/petroleum_14d05193.txt",
-          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_14d05193.txt",
-          "uploadedAt": "2026-08-21T15:24:19.464Z",
+          "storagePath": "permits/permit-oilgas-014/petroleum_e8d8899a.txt",
+          "publicUrl": "/uploads/permits/permit-oilgas-014/petroleum_e8d8899a.txt",
+          "uploadedAt": "2026-08-21T15:43:04.686Z",
           "uploadedByRole": "petroleum_reviewer",
           "extractedTextPreview": "Operator: Delta Frontier Energy\nBlock: OML-500\nWell: WELL-55\nOperation Type: Offshore intervention",
           "extractionStatus": "requires_review"
@@ -680,7 +680,7 @@
       ],
       "activeAssignment": {
         "assignedUserId": "user-petroleum-1",
-        "assignedAt": "2026-08-21T15:24:18.230Z",
+        "assignedAt": "2026-08-21T15:43:03.461Z",
         "reason": "Critical permit priority escalation",
         "status": "active"
       },
@@ -689,8 +689,8 @@
           "id": "handoff-permit-oilgas-014-petroleum_reviewer",
           "fromRole": "system",
           "toRole": "petroleum_reviewer",
-          "startedAt": "2026-08-21T15:24:18.230Z",
-          "dueAt": "2026-08-22T15:24:18.230Z",
+          "startedAt": "2026-08-21T15:43:03.461Z",
+          "dueAt": "2026-08-22T15:43:03.461Z",
           "status": "escalated",
           "reason": "Critical permit priority escalation"
         }
@@ -699,24 +699,24 @@
       "custodyTimeline": [],
       "auditHistory": [
         {
-          "id": "audit-1787325859464-6br4hl",
-          "createdAt": "2026-08-21T15:24:19.464Z",
+          "id": "audit-1787326984687-olacew",
+          "createdAt": "2026-08-21T15:43:04.686Z",
           "actor": "system",
           "role": "system",
           "type": "ai_extraction",
           "summary": "Rule-based extraction completed for petroleum.txt; this is not an AI-verified result and requires reviewer confirmation."
         },
         {
-          "id": "audit-1787325859464-kl38ok",
-          "createdAt": "2026-08-21T15:24:19.464Z",
+          "id": "audit-1787326984687-9prkt5",
+          "createdAt": "2026-08-21T15:43:04.686Z",
           "actor": "petroleum_reviewer",
           "role": "petroleum_reviewer",
           "type": "document_upload",
           "summary": "Uploaded petroleum.txt; extraction status is requires_review with 4 populated fields."
         },
         {
-          "id": "audit-1787325858230-kvf1ks",
-          "createdAt": "2026-08-21T15:24:18.230Z",
+          "id": "audit-1787326983461-ew43gh",
+          "createdAt": "2026-08-21T15:43:03.461Z",
           "actor": "Ijeoma Peters",
           "role": "petroleum_reviewer",
           "type": "assignment",
@@ -756,7 +756,7 @@
         "mining-cadastre",
         "petroleum-regulator"
       ],
-      "updatedAt": "2026-08-21T15:24:18.230Z",
+      "updatedAt": "2026-08-21T15:43:03.461Z",
       "summary": "Unified intake completed. The case is in parallel agency review with one deficiency notice pending from environmental compliance.",
       "timeline": [
         {
@@ -883,7 +883,7 @@
       "uploadedDocuments": [],
       "activeAssignment": {
         "assignedUserId": "user-env-1",
-        "assignedAt": "2026-08-21T15:24:18.230Z",
+        "assignedAt": "2026-08-21T15:43:03.461Z",
         "reason": "Obligation risk triggered escalation",
         "status": "active"
       },
@@ -892,8 +892,8 @@
           "id": "handoff-permit-multi-023-environment_reviewer",
           "fromRole": "system",
           "toRole": "environment_reviewer",
-          "startedAt": "2026-08-21T15:24:18.230Z",
-          "dueAt": "2026-08-22T15:24:18.230Z",
+          "startedAt": "2026-08-21T15:43:03.461Z",
+          "dueAt": "2026-08-22T15:43:03.461Z",
           "status": "pending",
           "reason": "Obligation risk triggered escalation"
         }
@@ -902,8 +902,8 @@
       "custodyTimeline": [],
       "auditHistory": [
         {
-          "id": "audit-1787325858230-5nuvrx",
-          "createdAt": "2026-08-21T15:24:18.230Z",
+          "id": "audit-1787326983461-8s9et1",
+          "createdAt": "2026-08-21T15:43:03.461Z",
           "actor": "Grace Ogbodo",
           "role": "environment_reviewer",
           "type": "assignment",
@@ -1135,8 +1135,8 @@
     {
       "keyId": "test-audit-rsa-key",
       "algorithm": "RSA-SHA256",
-      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxyJIkwL88V6zv1Y0aFHB\nagbSVFRMjqWWzMCgCs/U6xKU6MoFVEG7+RoPTOkwPnFFxK2ze84qDg1xVtPiXQK7\nRNKZppoEFDL9yV7Me783979PN4Kzuh35sSqZSN+6aPLB9PduTEDkUb3Ask/LRsnU\nGCWpaSpKX0Qb7z23gLP7hMGl/x4i/U1sxoQtFE779OJhLh61VPTx4ErEF9kbj7cW\n0TJ+6JtnJfgv+gCyxMBO/vpHAB708OOGoyRtTKuI3rvuhEGpf73udSpKTFrdBrcQ\nErofefmdbvC2MB/YKN7Af6LR/uJacc+iF2dQEf8GZ2jyU/k1SbXikndK48Vaxiy/\nGQIDAQAB\n-----END PUBLIC KEY-----\n",
-      "createdAt": "2026-08-21T15:24:18.230Z",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyMaz+GirKdb303VW42em\nLZNIuRtv3ClvEEIRE86Rmfmhh+Es8/qbXB1zvcegHTk/bXibXyNdxS6WBTygTDTN\nGf0o2V+P8LwPgYYTTM3LGlLhBJy/7+jfZu0f1Yu5uIj6jr+UBfrS3DrVcBXIlYpW\nu76QBC6H9DWaomkrJHHSkr4E4LcAtB8UaJ6GWl90j85PbZ12rJX3M0pwZwsh1o+9\nD6FqUM8RYt1RnYwl7tSBehgMCiXS67bfuzZT8JNwl32jG3sVKG2lKqmVD+a9aUks\nBQ7Wuz+fzrJ5e7zFjXMXw0WWtYJR/RUf3Q+MBaTGwOj/EbyEV/4GgaE0cfuMJS4e\n0QIDAQAB\n-----END PUBLIC KEY-----\n",
+      "createdAt": "2026-08-21T15:43:03.461Z",
       "active": true
     }
   ],
@@ -1146,8 +1146,8 @@
       "caseId": "permit-mining-001",
       "handoffId": "handoff-permit-mining-001-mining_reviewer",
       "role": "mining_reviewer",
-      "reminderAt": "2026-08-22T09:24:18.230Z",
-      "dueAt": "2026-08-22T15:24:18.230Z",
+      "reminderAt": "2026-08-22T09:43:03.461Z",
+      "dueAt": "2026-08-22T15:43:03.461Z",
       "severity": "warning",
       "status": "scheduled",
       "summary": "North Plateau Lithium Exploration Licence is due for mining reviewer review in 24h."
@@ -1157,8 +1157,8 @@
       "caseId": "permit-oilgas-014",
       "handoffId": "handoff-permit-oilgas-014-petroleum_reviewer",
       "role": "petroleum_reviewer",
-      "reminderAt": "2026-08-22T09:24:18.230Z",
-      "dueAt": "2026-08-22T15:24:18.230Z",
+      "reminderAt": "2026-08-22T09:43:03.461Z",
+      "dueAt": "2026-08-22T15:43:03.461Z",
       "severity": "critical",
       "status": "triggered",
       "summary": "Offshore Delta Appraisal Well Package is due for petroleum reviewer review in 24h."
@@ -1168,8 +1168,8 @@
       "caseId": "permit-multi-023",
       "handoffId": "handoff-permit-multi-023-environment_reviewer",
       "role": "environment_reviewer",
-      "reminderAt": "2026-08-22T09:24:18.230Z",
-      "dueAt": "2026-08-22T15:24:18.230Z",
+      "reminderAt": "2026-08-22T09:43:03.461Z",
+      "dueAt": "2026-08-22T15:43:03.461Z",
       "severity": "warning",
       "status": "scheduled",
       "summary": "Eastern Corridor Logistics Hub Approval is due for environment reviewer review in 24h."
@@ -1219,7 +1219,7 @@
     {
       "id": "digest-email-mining-cadastre",
       "agencyId": "mining-cadastre",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "email",
       "subject": "Mining Cadastre Office queue digest",
       "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
@@ -1229,7 +1229,7 @@
     {
       "id": "digest-inapp-mining-cadastre",
       "agencyId": "mining-cadastre",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "in_app",
       "subject": "Mining Cadastre Office supervisor digest",
       "summary": "1 queued reviews and 0 overdue handoffs require supervisor attention.",
@@ -1239,7 +1239,7 @@
     {
       "id": "digest-email-petroleum-regulator",
       "agencyId": "petroleum-regulator",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "email",
       "subject": "Petroleum Licensing Authority queue digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1249,7 +1249,7 @@
     {
       "id": "digest-inapp-petroleum-regulator",
       "agencyId": "petroleum-regulator",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "in_app",
       "subject": "Petroleum Licensing Authority supervisor digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1259,7 +1259,7 @@
     {
       "id": "digest-email-environment-agency",
       "agencyId": "environment-agency",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "email",
       "subject": "Environmental Compliance Agency queue digest",
       "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1269,7 +1269,7 @@
     {
       "id": "digest-inapp-environment-agency",
       "agencyId": "environment-agency",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "in_app",
       "subject": "Environmental Compliance Agency supervisor digest",
       "summary": "3 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1279,7 +1279,7 @@
     {
       "id": "digest-email-planning-authority",
       "agencyId": "planning-authority",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "email",
       "subject": "Regional Planning and Infrastructure Authority queue digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",
@@ -1289,7 +1289,7 @@
     {
       "id": "digest-inapp-planning-authority",
       "agencyId": "planning-authority",
-      "generatedAt": "2026-08-21T15:24:18.230Z",
+      "generatedAt": "2026-08-21T15:43:03.461Z",
       "channel": "in_app",
       "subject": "Regional Planning and Infrastructure Authority supervisor digest",
       "summary": "1 queued reviews and 1 overdue handoffs require supervisor attention.",

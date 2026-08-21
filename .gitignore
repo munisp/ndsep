@@ -127,3 +127,4 @@ workers/python/vendor/
 workers/python/models/
 workers/go/bin/
 workers/rust/target/
+.project-config.json
