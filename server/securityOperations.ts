@@ -30,7 +30,7 @@ function appendEvent(input: { type: SecurityAuditEvent["type"]; actor: string; p
   const event: SecurityAuditEvent = { ...draft, eventHash, hmac: key ? crypto.createHmac("sha256", key).update(eventHash).digest("hex") : null };
   fs.mkdirSync(path.dirname(storePath()), { recursive: true });
   fs.writeFileSync(storePath(), JSON.stringify([...events, event], null, 2));
-  return { eventId: event.eventId, signed: Boolean(event.hmac) };
+  return { eventId: event.eventId, eventHash: event.eventHash, hmac: event.hmac, signed: Boolean(event.hmac) };
 }
 
 export function recordSiemCorrelationOpen(input: { actor: string; auditEventId: string; destinationHost: string }) {
@@ -53,4 +53,11 @@ export function verifySecurityAuditChain() {
     previousHash = event.eventHash;
   }
   return { valid: true, totalEvents: events.length, hmacStatus: key ? "verified" : "not_configured", firstInvalidEventId: null, reason: events.length ? null : "No security audit events have been recorded yet." } as const;
+}
+
+export function verifyAuditInvestigationExportReceipt(eventId: string) {
+  const event = readEvents().find((item) => item.eventId === eventId && item.type === "audit_investigation_exported");
+  if (!event) return { found: false, valid: false, reason: "No investigation export receipt was found for this identifier." } as const;
+  const chain = verifySecurityAuditChain();
+  return { found: true, valid: chain.valid, reason: chain.valid ? null : chain.reason, receipt: { eventId: event.eventId, occurredAt: event.occurredAt, eventHash: event.eventHash, hmac: event.hmac, signed: Boolean(event.hmac), payload: event.payload } } as const;
 }

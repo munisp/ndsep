@@ -432,3 +432,6 @@
 - [x] Add fail-closed Keycloak session-directory integration for authorized supervisor cross-user session administration
 - [x] Add governed team publishing and sharing of custom WAF threat-filter presets
 - [x] Add signed audit export receipts and hash-chained download events for investigation reports
+- [x] Add version history and approval workflow for agency-shared WAF threat presets
+- [x] Add external read-only auditor verification view for hash-chained investigation export receipts
+- [x] Add verified session geographic context and risk badges with explicit unavailable states

@@ -43,6 +43,13 @@
       "when": 1787273064294,
       "tag": "0005_good_bromley",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787274322022,
+      "tag": "0006_cool_gateway",
+      "breakpoints": true
     }
   ]
 }
