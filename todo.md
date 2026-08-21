@@ -446,3 +446,8 @@
 - [x] Add recovery-flow loading, progress, retryable-error, and terminal-state feedback without offering local bypasses
 - [x] Add deterministic recovery-controller and staging-readiness tests with explicit external-provider exclusions
 - [x] Preserve default-unavailable Keycloak staging and KMS activation while approved configuration values are pending
+- [x] Build native WebAuthn credential enrollment screen with biometric-bound key generation and server registration
+- [x] Build passkey approval screen for dual-approval recovery with challenge signing and visual quorum feedback
+- [x] Configure staging Keycloak defaults through secure settings and wire OIDC activation readiness into the login flow
+- [x] Implement a deterministic two-passkey KMS/replay-worker recovery drill test verifying the full dual-approval lifecycle
+- [x] Run full validation suite and update readiness evidence after WebAuthn enrollment, Keycloak staging, and drill work

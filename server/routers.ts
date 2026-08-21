@@ -69,7 +69,9 @@ import { acknowledgeHighRiskReconciliationAlert, getOfflinePaymentSummary, getPa
 import { getGatewayActivationStatus } from "./paymentGatewayConfig";
 import { attestDiagnosticExport, getDiagnosticAttestationStatus } from "./diagnosticExportAttestation";
 import { bulkRevokeDiagnosticAttestations, exportDiagnosticAttestations, getDiagnosticAttestationDetail, getDiagnosticAttestationStatusByReceiptId, listDiagnosticAttestations, listReceiptRevocationNotifications, markReceiptRevocationNotificationRead, revokeDiagnosticAttestation, setReceiptRevocationNotificationArchive } from "./diagnosticAttestationRepository";
-import { approveRecoveryAuthorization, createRecoveryAuthorization, getRecoveryAuthorization, getRecoveryControllerStatus, type RecoveryApproverRole } from "./recoveryRepository";
+import { approveRecoveryAuthorization, completeEnrollment, createRecoveryAuthorization, generateEnrollmentChallenge, getRecoveryAuthorization, getRecoveryControllerStatus, listEnrolledCredentials, revokeCredential, type RecoveryApproverRole } from "./recoveryRepository";
+
+import type { RegistrationResponseJSON as ServerRegistrationResponseJSON } from "@simplewebauthn/server";
 
 const PERMIT_AGENCY_ROLES = ["applicant", "mining_reviewer", "petroleum_reviewer", "environment_reviewer", "planning_supervisor"] as const;
 type PermitAgencyRole = (typeof PERMIT_AGENCY_ROLES)[number];
@@ -79,6 +81,22 @@ function currentPermitRole(roles: EnterpriseAgencyRole[]): PermitAgencyRole {
   if (!role) throw new TRPCError({ code: "FORBIDDEN", message: "The authenticated enterprise role is not permitted to perform permit-workflow actions." });
   return role;
 }
+
+const registrationResponseSchema = z.object({
+  id: z.string().min(1).max(2048),
+  rawId: z.string().min(1).max(2048),
+  type: z.literal("public-key"),
+  response: z.object({
+    attestationObject: z.string().min(1).max(65_536),
+    clientDataJSON: z.string().min(1).max(16_384),
+    transports: z.array(z.string()).optional(),
+    publicKeyAlgorithm: z.number().optional(),
+    publicKey: z.string().optional(),
+    authenticatorData: z.string().optional(),
+  }),
+  clientExtensionResults: z.record(z.string(), z.unknown()),
+  authenticatorAttachment: z.string().optional(),
+});
 
 const recoveryAssertionSchema = z.object({
   id: z.string().min(1).max(2048),
@@ -291,6 +309,17 @@ export const appRouter = router({
   }),
   recovery: router({
     status: protectedProcedure.query(() => getRecoveryControllerStatus()),
+    enrollmentChallenge: enterpriseProcedure.mutation(async ({ ctx }) => generateEnrollmentChallenge(ctx.enterprise)),
+    completeEnrollment: enterpriseProcedure
+      .input(z.object({ response: registrationResponseSchema, expectedChallenge: z.string().min(16).max(512) }))
+      .mutation(async ({ ctx, input }) => {
+        const response = input.response as unknown as ServerRegistrationResponseJSON;
+        return completeEnrollment(ctx.enterprise, response, input.expectedChallenge);
+      }),
+    credentials: enterpriseProcedure.query(async ({ ctx }) => listEnrolledCredentials(ctx.enterprise.subject)),
+    revokeCredential: enterpriseProcedure
+      .input(z.object({ credentialId: z.string().uuid() }))
+      .mutation(async ({ ctx, input }) => revokeCredential(ctx.enterprise, input.credentialId)),
     authorization: enterpriseProcedure
       .input(z.object({ authorizationId: z.string().uuid() }))
       .query(async ({ ctx, input }) => {

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { KMSClient, ReEncryptCommand } from "@aws-sdk/client-kms";
 import { verifyAuthenticationResponse, type AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { generateRegistrationOptions, verifyRegistrationResponse, type RegistrationResponseJSON } from "@simplewebauthn/server";
 import { Pool, type PoolClient } from "pg";
 
 import { type EnterprisePrincipal } from "./_core/enterpriseAuth";
@@ -47,6 +48,58 @@ const RECOVERY_TTL_MS = 10 * 60_000;
 
 export class RecoveryUnavailableError extends Error {}
 export class RecoveryAuthorizationError extends Error {}
+
+export async function generateEnrollmentChallenge(principal: EnterprisePrincipal) {
+  if (!isRecoveryApproverRole(principal.agencyRoles[0] ?? "")) throw new RecoveryAuthorizationError("Only designated recovery approvers can enroll passkeys.");
+  const config = recoveryConfig();
+  if (!config.rpId || !config.origin) throw new RecoveryUnavailableError("WebAuthn enrollment requires a configured RP ID and origin.");
+  const pool = await readyPool();
+  const existing = await pool.query<{ credential_id: string }>("SELECT credential_id FROM webauthn_credentials WHERE subject = $1 AND revoked_at IS NULL", [principal.subject]);
+  const excludeCredentials = existing.rows.map((row) => ({ id: row.credential_id, type: "public-key" as const }));
+  const options = await generateRegistrationOptions({
+    rpName: "IDLR-PTS Recovery",
+    rpID: config.rpId,
+    userName: principal.subject,
+    userDisplayName: principal.subject,
+    attestationType: "none",
+    authenticatorSelection: { residentKey: "preferred", userVerification: "required", authenticatorAttachment: "platform" },
+    excludeCredentials,
+  });
+  return { options, rpId: config.rpId, origin: config.origin.origin };
+}
+
+export async function completeEnrollment(principal: EnterprisePrincipal, response: RegistrationResponseJSON, expectedChallenge: string) {
+  if (!isRecoveryApproverRole(principal.agencyRoles[0] ?? "")) throw new RecoveryAuthorizationError("Only designated recovery approvers can enroll passkeys.");
+  const config = recoveryConfig();
+  if (!config.rpId || !config.origin) throw new RecoveryUnavailableError("WebAuthn enrollment requires a configured RP ID and origin.");
+  const verification = await verifyRegistrationResponse({
+    response,
+    expectedChallenge,
+    expectedOrigin: config.origin.origin,
+    expectedRPID: config.rpId,
+    requireUserVerification: true,
+  });
+  if (!verification.verified || !verification.registrationInfo) throw new RecoveryAuthorizationError("WebAuthn registration verification failed.");
+  const { credential } = verification.registrationInfo;
+  return transaction(async (client) => {
+    const id = crypto.randomUUID();
+    await client.query("INSERT INTO webauthn_credentials (id, subject, credential_id, credential_public_key, sign_count, transports, created_at) VALUES ($1::uuid,$2,$3,$4,$5,$6::jsonb,now())", [id, principal.subject, credential.id, Buffer.from(credential.publicKey).toString("base64"), credential.counter, JSON.stringify(response.response.transports ?? [])]);
+    return { credentialId: id, credentialExternalId: credential.id, subject: principal.subject };
+  });
+}
+
+export async function listEnrolledCredentials(subject: string) {
+  const pool = await readyPool();
+  const result = await pool.query<{ id: string; credential_id: string; sign_count: string; created_at: Date }>("SELECT id, credential_id, sign_count, created_at FROM webauthn_credentials WHERE subject = $1 AND revoked_at IS NULL ORDER BY created_at DESC", [subject]);
+  return result.rows.map((row) => ({ id: row.id, credentialIdHash: sha256(row.credential_id).slice(0, 16), signCount: Number(row.sign_count), createdAt: row.created_at.toISOString() }));
+}
+
+export async function revokeCredential(principal: EnterprisePrincipal, credentialId: string) {
+  const pool = await readyPool();
+  const result = await pool.query("UPDATE webauthn_credentials SET revoked_at = now() WHERE id = $1::uuid AND subject = $2 AND revoked_at IS NULL RETURNING id", [credentialId, principal.subject]);
+  if (!result.rowCount) throw new RecoveryAuthorizationError("Credential was not found or already revoked.");
+  return { revoked: true, credentialId };
+}
 
 function configuredValue(field: IntegrationField) {
   return getConfiguredIntegrationValue(field)?.trim() || process.env[field]?.trim() || null;

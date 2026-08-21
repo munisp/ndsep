@@ -40,8 +40,26 @@ export default function RecoveryApprovalScreen() {
         <View className="rounded-3xl border border-border bg-surface p-5">
           <Text className="text-lg font-semibold text-foreground">Current identity evidence</Text>
           <Text className="mt-2 text-sm leading-6 text-muted">{identity.isLoading ? "Checking signed session claims…" : hasPasskeyProof ? "A current session reports verified passkey authentication. This is necessary but does not authorize recovery; a fresh controller challenge is still required." : "No current session reports verified passkey authentication. Enrollment and a passkey claim may be required before a future recovery approval."}</Text>
-          {identity.isError ? <Text className="mt-3 text-xs leading-5 text-error">Session evidence is unavailable: {identity.error.message}</Text> : null}
+        {identity.isError ? <Text className="mt-3 text-xs leading-5 text-error">Session evidence is unavailable: {identity.error.message}</Text> : null}
         </View>
+
+        <Link href={"/passkey-enrollment" as never} asChild>
+          <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.82 : 1 }]}>
+            <View className="rounded-3xl border border-primary bg-primary/5 p-5">
+              <Text className="text-lg font-semibold text-primary">Enroll a recovery passkey</Text>
+              <Text className="mt-2 text-sm leading-5 text-muted">Register a platform-bound passkey that can sign recovery approval challenges. Each passkey requires user verification (biometric or PIN).</Text>
+            </View>
+          </Pressable>
+        </Link>
+
+        <Link href={"/passkey-approve" as never} asChild>
+          <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.82 : 1 }]}>
+            <View className="rounded-3xl border border-foreground/20 bg-surface p-5">
+              <Text className="text-lg font-semibold text-foreground">Sign a recovery approval</Text>
+              <Text className="mt-2 text-sm leading-5 text-muted">Enter a recovery authorization ID and use your enrolled passkey to sign an approval. Two distinct approvers are required.</Text>
+            </View>
+          </Pressable>
+        </Link>
       </ScrollView>
     </ScreenContainer>
   );

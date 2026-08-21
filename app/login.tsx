@@ -6,7 +6,15 @@ import { ScreenContainer } from "@/components/screen-container";
 import { getOidcLoginReadiness } from "@/lib/oidc-login-readiness";
 import { signInWithPkce } from "@/lib/oidc-session";
 
-const oidc = { issuer: process.env.EXPO_PUBLIC_OIDC_ISSUER ?? "", clientId: process.env.EXPO_PUBLIC_OIDC_CLIENT_ID ?? "", redirectUri: process.env.EXPO_PUBLIC_OIDC_REDIRECT_URI ?? "idlrpts://oauth/callback" };
+const STAGING_ISSUER = "https://identity.staging.idlrpts.gov.ng/realms/idlrpts";
+const STAGING_CLIENT_ID = "idlrpts-mobile";
+const STAGING_REDIRECT_URI = "idlrpts://oauth/callback";
+
+const oidc = {
+  issuer: process.env.EXPO_PUBLIC_OIDC_ISSUER || STAGING_ISSUER,
+  clientId: process.env.EXPO_PUBLIC_OIDC_CLIENT_ID || STAGING_CLIENT_ID,
+  redirectUri: process.env.EXPO_PUBLIC_OIDC_REDIRECT_URI || STAGING_REDIRECT_URI,
+};
 export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
