@@ -2,12 +2,12 @@
 
 ## Severity Levels
 
-| Level | Description | Response Time | Escalation |
-|-------|-------------|---------------|------------|
-| **SEV-1** | Platform down, data breach, financial loss | 15 min | Immediate page to on-call + NITDA notification |
-| **SEV-2** | Major feature degraded (payments, compliance) | 30 min | Page on-call engineer |
-| **SEV-3** | Minor feature issue, non-critical worker down | 2 hours | Slack alert |
-| **SEV-4** | Cosmetic, logging noise | Next business day | Ticket |
+| Level     | Description                                   | Response Time     | Escalation                                     |
+| --------- | --------------------------------------------- | ----------------- | ---------------------------------------------- |
+| **SEV-1** | Platform down, data breach, financial loss    | 15 min            | Immediate page to on-call + NITDA notification |
+| **SEV-2** | Major feature degraded (payments, compliance) | 30 min            | Page on-call engineer                          |
+| **SEV-3** | Minor feature issue, non-critical worker down | 2 hours           | Slack alert                                    |
+| **SEV-4** | Cosmetic, logging noise                       | Next business day | Ticket                                         |
 
 ## Runbook: API Down (SEV-1)
 
@@ -109,23 +109,104 @@ kubectl -n ndsep logs -l app=ndsep-api --tail=100 | grep "kafka"
 
 ## Runbook: TigerBeetle Ledger Failure (SEV-1)
 
-**Alert:** TigerBeetle health check failing
+**Alert:** TigerBeetle health check failing or `financial_transfer_outbox` quarantine backlog increasing.
+
+> **Safety rule:** PostgreSQL is not a substitute for the authoritative TigerBeetle ledger. Do not enable a fallback that presents a PostgreSQL row as a committed ledger transfer. New funds movement must be stopped or held in durable `reconciliation_required` state until the ledger authority is restored or an approved reconciliation decision is recorded.
+
+### Immediate Containment
+
+```bash
+# Freeze new NIP/RTGS initiation at the gateway/feature flag layer.
+kubectl -n ndsep scale deploy/ndsep-api --replicas=0
+
+# Preserve evidence; do not delete or replay outbox rows.
+kubectl -n ndsep logs deploy/ndsep-api --since=30m > /secure/evidence/ndsep-api-tigerbeetle-$(date -u +%Y%m%dT%H%M%SZ).log
+```
+
+If the API cannot be scaled down because it serves non-financial traffic, apply the approved funds-mutation deny policy instead and verify that ordinary read endpoints remain available.
 
 ### Diagnosis
 
 ```bash
-# Check TigerBeetle pod
-kubectl -n ndsep get pods -l app=tigerbeetle
+kubectl -n ndsep get pods -l app=tigerbeetle -o wide
+kubectl -n ndsep describe pods -l app=tigerbeetle
+kubectl -n ndsep logs -l app=tigerbeetle --since=30m
+kubectl -n ndsep logs -l app=ndsep-api --since=30m | grep "FinancialOutbox\|reconciliation_required\|TigerBeetle"
 
-# Verify PG fallback is active
-kubectl -n ndsep logs -l app=ndsep-api --tail=50 | grep "TigerBeetle\|financial_ledger"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+SELECT state, count(*)
+FROM financial_transfer_outbox
+GROUP BY state
+ORDER BY state;
+SELECT transfer_reference, state, attempts, last_error, updated_at
+FROM financial_transfer_outbox
+WHERE state IN ('reconciliation_required','dead_letter')
+ORDER BY updated_at;
+SQL
 ```
 
-### Resolution
+### Resolution and Reconciliation
 
-1. **PG fallback active** → Financial operations continue via PostgreSQL `financial_ledger` table
-2. **Cluster quorum lost** → Check all TB replicas, restore from snapshot
-3. **Disk full** → Expand PV or archive old data
+1. **Quorum or pod failure:** restore TigerBeetle quorum, verify cluster identity and replica health, and do not dispatch new funds until the immutable-reference lookup endpoint is healthy.
+2. **For each quarantined transfer:** record the incident ID, actor, reference, amount, currency, and timestamps. Query TigerBeetle and Mojaloop independently by the immutable transfer reference. Never infer success from an HTTP timeout or client exception.
+3. **Both providers `not_found`:** the reconciler may return the intent to `pending`; dispatch one time under the original reference and monitor the resulting signed callback.
+4. **TigerBeetle `committed`, Mojaloop `not_found`:** the reconciler may reissue only the missing Mojaloop leg with the original immutable reference. Record the provider response and keep the item quarantined if the reissue is ambiguous.
+5. **TigerBeetle `pending`, Mojaloop `not_found`:** keep the item in manual review/dead-letter state. Do not release or replay the payment.
+6. **Mojaloop exists while TigerBeetle is absent, provider conflict, malformed response, timeout, or unauthorized lookup:** keep the item in manual review/dead-letter state and escalate to the payment operations owner.
+7. **Manual release:** requires two-person approval from payment operations and financial control, with provider evidence attached. Operators must use a purpose-built audited reconciliation command; direct SQL state edits are prohibited.
+8. **Recovery:** after the backlog is cleared or explicitly dispositioned, restore the API deployment, run a read-only health check, then execute one controlled canary transfer with provider approval before lifting the funds-movement freeze.
+
+### Abort Criteria
+
+Abort recovery if provider states disagree, an immutable-reference lookup is unavailable, a callback fails mTLS/HMAC verification, the reconciliation evidence is incomplete, or any operator would need to edit settlement state directly in SQL.
+
+---
+
+## Runbook: Financial Transfer Quarantine (SEV-1)
+
+**Trigger:** an outbox row enters `reconciliation_required` after a dispatch timeout/error, or enters `dead_letter` after provider conflict or manual review.
+
+### Step 1 — Declare and contain
+
+Declare a SEV-1 financial-integrity incident, assign an incident commander, payment-operations lead, ledger owner, database operator, and security/compliance observer. Freeze new NIP/RTGS/SWIFT initiation through the approved policy control. Do not restart the dispatcher repeatedly, delete rows, reset attempts, or run blind retries.
+
+### Step 2 — Capture immutable evidence
+
+Capture UTC timestamps, deployment versions, worker IDs, transfer references, outbox state/attempt/lease fields, provider correlation IDs, callback event IDs, and sanitized logs. Hash exported evidence and place it in the incident record. Do not include secrets, account credentials, or unnecessary personal data.
+
+```sql
+SELECT id, transfer_reference, transfer_kind, amount_minor, currency, state,
+       attempts, lease_owner, lease_expires_at, last_error, created_at, updated_at
+FROM financial_transfer_outbox
+WHERE state IN ('reconciliation_required','dead_letter')
+ORDER BY updated_at;
+
+SELECT transfer_reference, provider, observed_state, response_sha256,
+       action, detail, created_at
+FROM financial_provider_reconciliation
+WHERE transfer_reference = :'reference'
+ORDER BY created_at;
+```
+
+### Step 3 — Establish provider truth
+
+Query both provider adapters by the exact immutable reference. Record the raw provider correlation ID and normalized result in the reconciliation evidence table. Treat timeout, TLS failure, malformed JSON, 401/403, and 5xx as **unknown**, never as `not_found`.
+
+### Step 4 — Apply the state decision
+
+Use the TigerBeetle/Mojaloop decision table in the ledger-failure section above. Only an authoritative `not_found` from both providers permits re-queueing. Only `committed` TigerBeetle plus authoritative Mojaloop absence permits a single missing-leg reissue. Every conflict, pending ledger state, or ambiguous response remains manual review/dead-letter.
+
+### Step 5 — Approve and execute recovery
+
+Require two independent approvers. The operator executes the audited reconciliation worker or approved command, not a direct SQL update. Monitor the original reference, callback HMAC/mTLS result, ledger state, and outbox transition. Confirm there is no duplicate provider transfer before closing the incident.
+
+### Step 6 — Validate and close
+
+Lift the freeze only after the provider owners confirm healthy lookups, the quarantine queue is zero or explicitly dispositioned, the canary transfer is reconciled, and security/compliance sign off. Schedule a post-incident review covering acknowledgment loss, alerting, lease behavior, and any control failure.
+
+### Severity and escalation
+
+A single ambiguous transfer is SEV-1 until provider truth is established. Multiple quarantines, any provider conflict, any unauthorized callback, or any duplicate settlement suspicion requires immediate executive, security, financial-control, and regulatory escalation under the applicable incident policy.
 
 ---
 

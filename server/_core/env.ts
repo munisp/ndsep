@@ -15,16 +15,19 @@ export const ENV = {
   // Priority 3: Manus Forge notification relay (always available, zero config).
   smtpHost: process.env.SMTP_HOST ?? "",
   smtpPort: parseInt(process.env.SMTP_PORT ?? "587", 10),
-  smtpSecure: process.env.SMTP_SECURE === "true",   // true = TLS on port 465; false = STARTTLS on 587
+  smtpSecure: process.env.SMTP_SECURE === "true", // true = TLS on port 465; false = STARTTLS on 587
   smtpUser: process.env.SMTP_USER ?? "",
   smtpPass: process.env.SMTP_PASS ?? "",
-  smtpFrom: process.env.SMTP_FROM ?? "NDSEP Platform <noreply@ndsep.nitda.gov.ng>",
+  smtpFrom:
+    process.env.SMTP_FROM ?? "NDSEP Platform <noreply@ndsep.nitda.gov.ng>",
   resendApiKey: process.env.RESEND_API_KEY ?? "",
-  emailFrom: process.env.EMAIL_FROM ?? "NDSEP Platform <noreply@ndsep.nitda.gov.ng>",
+  emailFrom:
+    process.env.EMAIL_FROM ?? "NDSEP Platform <noreply@ndsep.nitda.gov.ng>",
   platformUrl: process.env.PLATFORM_URL ?? "https://ndsep.nitda.gov.ng",
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
   pagerdutyKey: process.env.PAGERDUTY_INTEGRATION_KEY ?? "",
-  nitdaComplianceEmail: process.env.NITDA_COMPLIANCE_EMAIL ?? "compliance@nitda.gov.ng",
+  nitdaComplianceEmail:
+    process.env.NITDA_COMPLIANCE_EMAIL ?? "compliance@nitda.gov.ng",
 
   // ── Temporal Cloud / self-hosted Temporal ─────────────────────────────────
   // Set TEMPORAL_ADDRESS to <namespace>.tmprl.cloud:7233 for Temporal Cloud.
@@ -86,7 +89,8 @@ export const ENV = {
   // The TigerBeetle ledger Go service runs on port 8240.
   tigerbeetleClusterId: process.env.TIGERBEETLE_CLUSTER_ID ?? "0",
   tigerbeetleAddresses: process.env.TIGERBEETLE_ADDRESSES ?? "localhost:3000",
-  tigerbeetleServiceUrl: process.env.TIGERBEETLE_SERVICE_URL ?? "http://localhost:8240",
+  tigerbeetleServiceUrl:
+    process.env.TIGERBEETLE_SERVICE_URL ?? "http://localhost:8240",
   tigerbeetleEnabled: process.env.TIGERBEETLE_ENABLED !== "false",
 
   // ── Fluvio Edge Streaming ─────────────────────────────────────────────────
@@ -108,8 +112,10 @@ export const ENV = {
   // ── Lakehouse / Apache Iceberg ────────────────────────────────────────────
   // Set LAKEHOUSE_CATALOG_URL for Apache Iceberg REST catalog endpoint.
   // Set LAKEHOUSE_S3_ENDPOINT, LAKEHOUSE_S3_BUCKET for object storage.
-  lakehouseCatalogUrl: process.env.LAKEHOUSE_CATALOG_URL ?? "http://localhost:8181",
-  lakehouseS3Endpoint: process.env.LAKEHOUSE_S3_ENDPOINT ?? "http://localhost:9000",
+  lakehouseCatalogUrl:
+    process.env.LAKEHOUSE_CATALOG_URL ?? "http://localhost:8181",
+  lakehouseS3Endpoint:
+    process.env.LAKEHOUSE_S3_ENDPOINT ?? "http://localhost:9000",
   lakehouseS3Bucket: process.env.LAKEHOUSE_S3_BUCKET ?? "ndsep-lakehouse",
   lakehouseS3AccessKey: process.env.LAKEHOUSE_S3_ACCESS_KEY ?? "minioadmin",
   lakehouseS3SecretKey: process.env.LAKEHOUSE_S3_SECRET_KEY ?? "minioadmin",
@@ -118,14 +124,22 @@ export const ENV = {
   // ── Orchestration Service URLs ────────────────────────────────────────────
   // These are the internal ports for the orchestration Go/Python services.
   // Override with ORCHESTRATION_* env vars if running in separate containers.
-  orchestrationApiGatewayUrl: process.env.ORCHESTRATION_API_GATEWAY_URL ?? "http://localhost:8130",
-  orchestrationEventBusUrl: process.env.ORCHESTRATION_EVENT_BUS_URL ?? "http://localhost:8160",
-  orchestrationIamServiceUrl: process.env.ORCHESTRATION_IAM_SERVICE_URL ?? "http://localhost:8150",
-  orchestrationTigerbeetleUrl: process.env.ORCHESTRATION_TIGERBEETLE_URL ?? "http://localhost:8240",
-  orchestrationWorkflowEngineUrl: process.env.ORCHESTRATION_WORKFLOW_ENGINE_URL ?? "http://localhost:8170",
-  orchestrationDaprBindingsUrl: process.env.ORCHESTRATION_DAPR_BINDINGS_URL ?? "http://localhost:8120",
-  orchestrationLakehouseUrl: process.env.ORCHESTRATION_LAKEHOUSE_URL ?? "http://localhost:8140",
-  orchestrationMlPipelineUrl: process.env.ORCHESTRATION_ML_PIPELINE_URL ?? "http://localhost:8125",
+  orchestrationApiGatewayUrl:
+    process.env.ORCHESTRATION_API_GATEWAY_URL ?? "http://localhost:8130",
+  orchestrationEventBusUrl:
+    process.env.ORCHESTRATION_EVENT_BUS_URL ?? "http://localhost:8160",
+  orchestrationIamServiceUrl:
+    process.env.ORCHESTRATION_IAM_SERVICE_URL ?? "http://localhost:8150",
+  orchestrationTigerbeetleUrl:
+    process.env.ORCHESTRATION_TIGERBEETLE_URL ?? "http://localhost:8240",
+  orchestrationWorkflowEngineUrl:
+    process.env.ORCHESTRATION_WORKFLOW_ENGINE_URL ?? "http://localhost:8170",
+  orchestrationDaprBindingsUrl:
+    process.env.ORCHESTRATION_DAPR_BINDINGS_URL ?? "http://localhost:8120",
+  orchestrationLakehouseUrl:
+    process.env.ORCHESTRATION_LAKEHOUSE_URL ?? "http://localhost:8140",
+  orchestrationMlPipelineUrl:
+    process.env.ORCHESTRATION_ML_PIPELINE_URL ?? "http://localhost:8125",
 
   // ── Termii SMS Enforcement Alerts ─────────────────────────────────────────
   termiiApiKey: process.env.TERMII_API_KEY ?? "TLtest_default_key_ndsep_2026",
@@ -138,8 +152,11 @@ export const ENV = {
 
   // ── PDF Generation & Certificate Service ─────────────────────────────────
   pdfBaseUrl: process.env.PDF_BASE_URL ?? "https://certs.ndsep.gov.ng/pdf",
-  certVerifyBaseUrl: process.env.CERT_VERIFY_BASE_URL ?? "https://verify.ndsep.gov.ng/cert",
-  certIssuerName: process.env.CERT_ISSUER_NAME ?? "National Information Technology Development Agency (NITDA)",
+  certVerifyBaseUrl:
+    process.env.CERT_VERIFY_BASE_URL ?? "https://verify.ndsep.gov.ng/cert",
+  certIssuerName:
+    process.env.CERT_ISSUER_NAME ??
+    "National Information Technology Development Agency (NITDA)",
   certIssuerUrl: process.env.CERT_ISSUER_URL ?? "https://nitda.gov.ng",
   certValidityDays: parseInt(process.env.CERT_VALIDITY_DAYS ?? "365", 10),
   carSubmissionEmail: process.env.CAR_SUBMISSION_EMAIL ?? "car@ndpc.gov.ng",
@@ -152,19 +169,82 @@ export const ENV = {
   vaultMaxFileSizeMb: parseInt(process.env.VAULT_MAX_FILE_SIZE_MB ?? "50", 10),
 
   // ── API Key Management ────────────────────────────────────────────────────
-  apiKeySalt: process.env.API_KEY_SALT ?? "ndsep_api_key_salt_2026_production_default",
+  apiKeySalt:
+    process.env.API_KEY_SALT ?? "ndsep_api_key_salt_2026_production_default",
   apiKeyPrefix: process.env.API_KEY_PREFIX ?? "ndsep_live_",
   apiKeyTestPrefix: process.env.API_KEY_TEST_PREFIX ?? "ndsep_test_",
 
   // ── Webhook Delivery ──────────────────────────────────────────────────────
-  webhookSigningSecret: process.env.WEBHOOK_SIGNING_SECRET ?? "ndsep_webhook_signing_secret_2026_default",
+  webhookSigningSecret:
+    process.env.WEBHOOK_SIGNING_SECRET ??
+    "ndsep_webhook_signing_secret_2026_default",
   webhookTimeoutMs: parseInt(process.env.WEBHOOK_TIMEOUT_MS ?? "10000", 10),
   webhookMaxRetries: parseInt(process.env.WEBHOOK_MAX_RETRIES ?? "3", 10),
 
   // ── AI Risk Scoring Engine ────────────────────────────────────────────────
   aiRiskModelVersion: process.env.AI_RISK_MODEL_VERSION ?? "ndsep-risk-v2.1.0",
-  aiRiskThresholdCritical: parseFloat(process.env.AI_RISK_THRESHOLD_CRITICAL ?? "0.75"),
+  aiRiskThresholdCritical: parseFloat(
+    process.env.AI_RISK_THRESHOLD_CRITICAL ?? "0.75"
+  ),
   aiRiskThresholdHigh: parseFloat(process.env.AI_RISK_THRESHOLD_HIGH ?? "0.50"),
-  aiRiskThresholdMedium: parseFloat(process.env.AI_RISK_THRESHOLD_MEDIUM ?? "0.25"),
+  aiRiskThresholdMedium: parseFloat(
+    process.env.AI_RISK_THRESHOLD_MEDIUM ?? "0.25"
+  ),
   rescoringBatchSize: parseInt(process.env.RESCORING_BATCH_SIZE ?? "100", 10),
 };
+
+function isUnsafeProductionValue(value: string): boolean {
+  return (
+    value.trim() === "" ||
+    /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(value) ||
+    /minioadmin|default_key|production_default|ndsep_secure_2026|change_me|set_from_secret_manager|\.invalid/i.test(
+      value
+    )
+  );
+}
+
+function requireProductionRuntimeConfiguration(): void {
+  if (!ENV.isProduction) return;
+
+  const required: Array<[string, string, boolean]> = [
+    ["DATABASE_URL", ENV.databaseUrl, true],
+    ["JWT_SECRET", ENV.cookieSecret, true],
+    ["REDIS_URL", ENV.redisUrl, true],
+    ["KEYCLOAK_URL", ENV.keycloakUrl, ENV.keycloakEnabled],
+    ["KEYCLOAK_CLIENT_SECRET", ENV.keycloakClientSecret, ENV.keycloakEnabled],
+    ["PERMIFY_URL", ENV.permifyUrl, ENV.permifyEnabled],
+    ["APISIX_ADMIN_URL", ENV.apisixAdminUrl, ENV.apisixEnabled],
+    ["APISIX_ADMIN_KEY", ENV.apisixAdminKey, ENV.apisixEnabled],
+    ["TIGERBEETLE_ADDRESSES", ENV.tigerbeetleAddresses, ENV.tigerbeetleEnabled],
+    ["FLUVIO_HTTP_URL", ENV.fluvioHttpUrl, ENV.fluvioEnabled],
+    ["LAKEHOUSE_CATALOG_URL", ENV.lakehouseCatalogUrl, ENV.lakehouseEnabled],
+    ["LAKEHOUSE_S3_ENDPOINT", ENV.lakehouseS3Endpoint, ENV.lakehouseEnabled],
+    ["LAKEHOUSE_S3_ACCESS_KEY", ENV.lakehouseS3AccessKey, ENV.lakehouseEnabled],
+    ["LAKEHOUSE_S3_SECRET_KEY", ENV.lakehouseS3SecretKey, ENV.lakehouseEnabled],
+    [
+      "DPCO_NOTIFICATION_OUTBOX_URL",
+      process.env.DPCO_NOTIFICATION_OUTBOX_URL ?? "",
+      true,
+    ],
+    [
+      "DPCO_NOTIFICATION_INTERNAL_TOKEN",
+      process.env.DPCO_NOTIFICATION_INTERNAL_TOKEN ?? "",
+      true,
+    ],
+    ["NIMC_NVS_URL", process.env.NIMC_NVS_URL ?? "", true],
+    ["NIMC_NVS_TOKEN", process.env.NIMC_NVS_TOKEN ?? "", true],
+    ["CAC_BRIDGE_URL", process.env.CAC_BRIDGE_URL ?? "", true],
+    ["CAC_BRIDGE_TOKEN", process.env.CAC_BRIDGE_TOKEN ?? "", true],
+  ];
+  const invalid = required
+    .filter(([, value, enabled]) => enabled && isUnsafeProductionValue(value))
+    .map(([name]) => name);
+  if (invalid.length > 0) {
+    throw new Error(
+      `Production configuration is unsafe or incomplete: ${invalid.join(", ")}. ` +
+        "Explicit non-local endpoints and non-placeholder credentials are required."
+    );
+  }
+}
+
+requireProductionRuntimeConfiguration();

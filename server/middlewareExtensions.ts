@@ -9,16 +9,26 @@ import { permifyCheck as checkPermifyPermission } from "./permify";
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
 const DAPR_BRIDGE_URL = process.env.DAPR_BRIDGE_URL || "http://localhost:8150";
-const FLUVIO_RELAY_URL = process.env.FLUVIO_RELAY_URL || "http://localhost:8151";
-const MOJALOOP_ADAPTER_URL = process.env.MOJALOOP_ADAPTER_URL || "http://localhost:8152";
-const APISIX_MANAGER_URL = process.env.APISIX_MANAGER_URL || "http://localhost:8153";
-const TIGERBEETLE_LEDGER_URL = process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8160";
-const OPENSEARCH_INDEXER_URL = process.env.OPENSEARCH_INDEXER_URL || "http://localhost:8161";
-const KEYCLOAK_VALIDATOR_URL = process.env.KEYCLOAK_VALIDATOR_URL || "http://localhost:8162";
-const LAKEHOUSE_INGEST_URL = process.env.LAKEHOUSE_INGEST_URL || "http://localhost:8163";
-const PERMIFY_SYNC_URL = process.env.PERMIFY_SYNC_URL || "http://localhost:8164";
-const FLUVIO_CONSUMER_URL = process.env.FLUVIO_CONSUMER_URL || "http://localhost:8165";
-const OPENSEARCH_QUERY_URL = process.env.OPENSEARCH_QUERY_URL || "http://localhost:8166";
+const FLUVIO_RELAY_URL =
+  process.env.FLUVIO_RELAY_URL || "http://localhost:8151";
+const MOJALOOP_ADAPTER_URL =
+  process.env.MOJALOOP_ADAPTER_URL || "http://localhost:8152";
+const APISIX_MANAGER_URL =
+  process.env.APISIX_MANAGER_URL || "http://localhost:8153";
+const TIGERBEETLE_LEDGER_URL =
+  process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8160";
+const OPENSEARCH_INDEXER_URL =
+  process.env.OPENSEARCH_INDEXER_URL || "http://localhost:8161";
+const KEYCLOAK_VALIDATOR_URL =
+  process.env.KEYCLOAK_VALIDATOR_URL || "http://localhost:8162";
+const LAKEHOUSE_INGEST_URL =
+  process.env.LAKEHOUSE_INGEST_URL || "http://localhost:8163";
+const PERMIFY_SYNC_URL =
+  process.env.PERMIFY_SYNC_URL || "http://localhost:8164";
+const FLUVIO_CONSUMER_URL =
+  process.env.FLUVIO_CONSUMER_URL || "http://localhost:8165";
+const OPENSEARCH_QUERY_URL =
+  process.env.OPENSEARCH_QUERY_URL || "http://localhost:8166";
 const DAPR_STATE_URL = process.env.DAPR_STATE_URL || "http://localhost:8167";
 
 // ─── Shared fetch helper ─────────────────────────────────────────────────────
@@ -33,11 +43,15 @@ async function postJSON(url: string, body: object): Promise<void> {
       signal: AbortSignal.timeout(3000),
     });
   } catch (err) {
-    throw new Error(`Required integration POST ${url} is unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `Required integration POST ${url} is unavailable: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`Required integration POST ${url} failed with HTTP ${response.status}: ${detail}`);
+    throw new Error(
+      `Required integration POST ${url} failed with HTTP ${response.status}: ${detail}`
+    );
   }
 }
 
@@ -64,17 +78,25 @@ export async function daprStateGet(key: string): Promise<unknown> {
       signal: AbortSignal.timeout(2000),
     });
   } catch (err) {
-    throw new Error(`Dapr state lookup for ${key} is unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(
+      `Dapr state lookup for ${key} is unavailable: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
-  if (!resp.ok) throw new Error(`Dapr state lookup for ${key} failed with HTTP ${resp.status}`);
-  const data = await resp.json() as { value: unknown };
+  if (!resp.ok)
+    throw new Error(
+      `Dapr state lookup for ${key} failed with HTTP ${resp.status}`
+    );
+  const data = (await resp.json()) as { value: unknown };
   return data.value;
 }
 
 // ─── Fluvio ──────────────────────────────────────────────────────────────────
 
 /** Relay an event to Fluvio (high-throughput streaming) */
-export async function fluvioPublish(topic: string, event: object): Promise<void> {
+export async function fluvioPublish(
+  topic: string,
+  event: object
+): Promise<void> {
   await postJSON(`${FLUVIO_RELAY_URL}/publish`, { topic, event });
   // Also push to consumer for routing
   await postJSON(`${FLUVIO_CONSUMER_URL}/publish`, {
@@ -86,40 +108,58 @@ export async function fluvioPublish(topic: string, event: object): Promise<void>
 // ─── OpenSearch ──────────────────────────────────────────────────────────────
 
 /** Index a document in OpenSearch */
-export async function opensearchIndex(index: string, doc: object): Promise<void> {
+export async function opensearchIndex(
+  index: string,
+  doc: object
+): Promise<void> {
   await postJSON(`${OPENSEARCH_INDEXER_URL}/index`, { index, document: doc });
 }
 
 /** Search OpenSearch (returns results or empty array on error) */
-export async function opensearchSearch(index: string, params: object): Promise<unknown[]> {
+export async function opensearchSearch(
+  index: string,
+  params: object
+): Promise<unknown[]> {
   const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ index, ...params }),
     signal: AbortSignal.timeout(5000),
   });
-  if (!resp.ok) throw new Error(`OpenSearch query failed with HTTP ${resp.status}`);
-  const data = await resp.json() as { result?: { hits?: { hits?: unknown[] } } };
+  if (!resp.ok)
+    throw new Error(`OpenSearch query failed with HTTP ${resp.status}`);
+  const data = (await resp.json()) as {
+    result?: { hits?: { hits?: unknown[] } };
+  };
   return data.result?.hits?.hits ?? [];
 }
 
 /** Global search across all NDSEP indices */
-export async function opensearchGlobalSearch(q: string, sectors?: string[]): Promise<unknown[]> {
+export async function opensearchGlobalSearch(
+  q: string,
+  sectors?: string[]
+): Promise<unknown[]> {
   const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search/global`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q, sectors }),
     signal: AbortSignal.timeout(5000),
   });
-  if (!resp.ok) throw new Error(`OpenSearch global query failed with HTTP ${resp.status}`);
-  const data = await resp.json() as { result?: { hits?: { hits?: unknown[] } } };
+  if (!resp.ok)
+    throw new Error(`OpenSearch global query failed with HTTP ${resp.status}`);
+  const data = (await resp.json()) as {
+    result?: { hits?: { hits?: unknown[] } };
+  };
   return data.result?.hits?.hits ?? [];
 }
 
 // ─── Lakehouse ───────────────────────────────────────────────────────────────
 
 /** Ingest records into the NDSEP data lakehouse */
-export async function lakehouseIngest(table: string, records: object[]): Promise<void> {
+export async function lakehouseIngest(
+  table: string,
+  records: object[]
+): Promise<void> {
   await postJSON(`${LAKEHOUSE_INGEST_URL}/ingest`, {
     table,
     records,
@@ -171,7 +211,10 @@ export async function mojaloopTransfer(params: {
 // ─── Keycloak ────────────────────────────────────────────────────────────────
 
 /** Validate a Keycloak token and extract NDSEP roles */
-export async function keycloakValidate(token: string, requiredRoles?: string[]): Promise<{
+export async function keycloakValidate(
+  token: string,
+  requiredRoles?: string[]
+): Promise<{
   valid: boolean;
   roles: string[];
   sub?: string;
@@ -184,7 +227,12 @@ export async function keycloakValidate(token: string, requiredRoles?: string[]):
       body: JSON.stringify({ token, required_roles: requiredRoles }),
       signal: AbortSignal.timeout(3000),
     });
-    return await resp.json() as { valid: boolean; roles: string[]; sub?: string; username?: string };
+    return (await resp.json()) as {
+      valid: boolean;
+      roles: string[];
+      sub?: string;
+      username?: string;
+    };
   } catch (err) {
     return { valid: false, roles: [] };
   }
@@ -210,7 +258,11 @@ export async function permifyWriteRelationship(
   subjectId: string
 ): Promise<void> {
   await postJSON(`${PERMIFY_SYNC_URL}/relationships/write`, {
-    entityType, entityId, relation, subjectType: "user", subjectId,
+    entityType,
+    entityId,
+    relation,
+    subjectType: "user",
+    subjectId,
   });
 }
 
@@ -263,4 +315,74 @@ export async function emitComplianceEvent(params: {
     lakehouseIngest("compliance_events", [event]),
     daprPublish("compliance-events", event),
   ]);
+}
+
+// ─── Financial-provider reconciliation ──────────────────────────────────────
+
+export type FinancialProviderTransferState =
+  | "not_found"
+  | "pending"
+  | "committed"
+  | "aborted";
+
+async function lookupTransferState(
+  adapter: "tigerbeetle" | "mojaloop",
+  reference: string
+): Promise<FinancialProviderTransferState> {
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(reference))
+    throw new Error("Invalid financial transfer reference");
+  const base =
+    adapter === "tigerbeetle" ? TIGERBEETLE_LEDGER_URL : MOJALOOP_ADAPTER_URL;
+  let response: Response;
+  try {
+    response = await fetch(
+      `${base}/transfers/${encodeURIComponent(reference)}`,
+      {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(3_000),
+      }
+    );
+  } catch (error) {
+    throw new Error(
+      `${adapter} reconciliation lookup unavailable: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (response.status === 404) return "not_found";
+  if (!response.ok)
+    throw new Error(
+      `${adapter} reconciliation lookup failed with HTTP ${response.status}`
+    );
+  const payload = (await response.json().catch(() => null)) as {
+    state?: unknown;
+    transferState?: unknown;
+    status?: unknown;
+  } | null;
+  const raw = String(
+    payload?.state ?? payload?.transferState ?? payload?.status ?? ""
+  ).toUpperCase();
+  if (["COMMITTED", "SETTLED", "SUCCESS", "COMPLETED"].includes(raw))
+    return "committed";
+  if (["ABORTED", "FAILED", "REJECTED", "CANCELLED"].includes(raw))
+    return "aborted";
+  if (
+    ["PENDING", "PROCESSING", "RESERVED", "ACCEPTED", "PREPARED"].includes(raw)
+  )
+    return "pending";
+  throw new Error(
+    `${adapter} reconciliation lookup returned an unrecognized transfer state`
+  );
+}
+
+/** Query the approved TigerBeetle adapter by immutable user-data reference. */
+export async function lookupTigerBeetleTransfer(
+  reference: string
+): Promise<FinancialProviderTransferState> {
+  return lookupTransferState("tigerbeetle", reference);
+}
+
+/** Query the approved Mojaloop adapter by immutable transfer reference. */
+export async function lookupMojaloopTransfer(
+  reference: string
+): Promise<FinancialProviderTransferState> {
+  return lookupTransferState("mojaloop", reference);
 }

@@ -1,13 +1,9 @@
 -- Migration: Add dpco_engagement_requests table
 -- Allows regulated organisations to request a DPCO audit via the Org Portal
 
-DO $$ BEGIN
-  CREATE TYPE "public"."dpco_engagement_request_status" AS ENUM(
-    'pending', 'accepted', 'declined', 'withdrawn', 'converted'
-  );
-EXCEPTION
-  WHEN duplicate_object THEN NULL;
-END $$;
+CREATE TYPE IF NOT EXISTS "public"."dpco_engagement_request_status" AS ENUM(
+  'pending', 'accepted', 'declined', 'withdrawn', 'converted'
+);
 
 CREATE TABLE IF NOT EXISTS "dpco_engagement_requests" (
   "id" serial PRIMARY KEY NOT NULL,

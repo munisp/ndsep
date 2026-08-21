@@ -1,0 +1,65 @@
+{
+  "base": "origin/production",
+  "mapping": [
+    {
+      "from": "drizzle/0013_dpco_engagement_requests.sql",
+      "to": "drizzle/0100_audit_reconciled_dpco_engagement_requests.sql"
+    },
+    {
+      "from": "drizzle/0014_dpco_accreditation_applications.sql",
+      "to": "drizzle/0101_audit_reconciled_dpco_accreditation_applications.sql"
+    },
+    {
+      "from": "drizzle/0017_phase27_missing_tables.sql",
+      "to": "drizzle/0102_audit_reconciled_phase27_missing_tables.sql"
+    },
+    {
+      "from": "drizzle/0018_phase29_30_fixes.sql",
+      "to": "drizzle/0103_audit_reconciled_phase29_30_fixes.sql"
+    },
+    {
+      "from": "drizzle/0021_performance_indexes.sql",
+      "to": "drizzle/0104_audit_reconciled_performance_indexes.sql"
+    },
+    {
+      "from": "drizzle/0024_canonical_schema_reconciliation.sql",
+      "to": "drizzle/0105_audit_reconciled_canonical_schema_reconciliation.sql"
+    },
+    {
+      "from": "drizzle/0025_phase13_runtime_contracts.sql",
+      "to": "drizzle/0106_audit_reconciled_phase13_runtime_contracts.sql"
+    },
+    {
+      "from": "drizzle/0026_foreign_key_indexes.sql",
+      "to": "drizzle/0107_audit_reconciled_foreign_key_indexes.sql"
+    },
+    {
+      "from": "drizzle/0027_mobile_push_devices.sql",
+      "to": "drizzle/0108_audit_reconciled_mobile_push_devices.sql"
+    },
+    {
+      "from": "drizzle/0028_api_usage_log_fk_index.sql",
+      "to": "drizzle/0109_audit_reconciled_api_usage_log_fk_index.sql"
+    },
+    {
+      "from": "drizzle/0029_bootstrap_tables_canonical.sql",
+      "to": "drizzle/0110_audit_reconciled_bootstrap_tables_canonical.sql"
+    },
+    {
+      "from": "drizzle/0030_dpco_audit_service_records.sql",
+      "to": "drizzle/0111_audit_reconciled_dpco_audit_service_records.sql"
+    },
+    {
+      "from": "drizzle/0031_dpco_registry_service_records.sql",
+      "to": "drizzle/0112_audit_reconciled_dpco_registry_service_records.sql"
+    },
+    {
+      "from": "drizzle/0032_dpco_verification_service_records.sql",
+      "to": "drizzle/0113_audit_reconciled_dpco_verification_service_records.sql"
+    },
+    {
+      "from": "drizzle/0033_dpco_lifecycle_reference_keys.sql",
+      "to": "drizzle/0114_audit_reconciled_dpco_lifecycle_reference_keys.sql"
+    }
+  ]
+}

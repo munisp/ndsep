@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ndsep-api-callback-ingress-only
+  namespace: ndsep
+spec:
+  podSelector:
+    matchLabels:
+      app: ndsep-api
+  policyTypes:
+    - Ingress
+  ingress:
+    # General API ingress must be explicitly maintained in the production overlay.
+    # This rule is the callback-path defense: only the NGINX ingress controller
+    # namespace may source HTTP traffic to the application service.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+      ports:
+        - protocol: TCP
+          port: 5000

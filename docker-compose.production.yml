@@ -922,7 +922,8 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
-      ARKIME_URL: ${ARKIME_URL:-http://arkime:8005}
+      ARKIME_URL: ${ARKIME_URL:?ARKIME_URL must be supplied}
+      ARKIME_AUTHORIZATION: ${ARKIME_AUTHORIZATION:?ARKIME_AUTHORIZATION must be supplied from the secret manager}
       PORT: "8142"
     depends_on:
       postgres:
@@ -945,7 +946,9 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
-      BGP_STREAM_URL: ${BGP_STREAM_URL:-https://ris-live.ripe.net/v1/stream/}
+      BGP_ROUTE_FEED_URL: ${BGP_ROUTE_FEED_URL:?BGP_ROUTE_FEED_URL must be supplied}
+      BGP_ROUTE_FEED_AUTHORIZATION: ${BGP_ROUTE_FEED_AUTHORIZATION:?BGP_ROUTE_FEED_AUTHORIZATION must be supplied from the secret manager}
+      BGP_ROUTE_POLL_SECONDS: ${BGP_ROUTE_POLL_SECONDS:-30}
       PORT: "8143"
     depends_on:
       postgres:
@@ -1081,7 +1084,11 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       KAFKA_BROKERS: kafka:9092
-      NMAP_PATH: /usr/bin/nmap
+      DISCOVERY_ASSET_PROVIDER_URL: ${DISCOVERY_ASSET_PROVIDER_URL:?DISCOVERY_ASSET_PROVIDER_URL must be supplied}
+      DISCOVERY_ASSET_PROVIDER_AUTHORIZATION: ${DISCOVERY_ASSET_PROVIDER_AUTHORIZATION:?DISCOVERY_ASSET_PROVIDER_AUTHORIZATION must be supplied from the secret manager}
+      VULNERABILITY_SOURCE_URL: ${VULNERABILITY_SOURCE_URL:?VULNERABILITY_SOURCE_URL must be supplied}
+      VULNERABILITY_SOURCE_AUTHORIZATION: ${VULNERABILITY_SOURCE_AUTHORIZATION:?VULNERABILITY_SOURCE_AUTHORIZATION must be supplied from the secret manager}
+      DISCOVERY_POLL_SECONDS: ${DISCOVERY_POLL_SECONDS:-60}
       PORT: "8149"
     depends_on:
       postgres:
@@ -1103,7 +1110,9 @@ services:
     container_name: ndsep-dpi-engine
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      KAFKA_BROKERS: kafka:9092
+      DPI_SENSOR_URL: ${DPI_SENSOR_URL:?DPI_SENSOR_URL must be supplied}
+      DPI_SENSOR_AUTHORIZATION: ${DPI_SENSOR_AUTHORIZATION:?DPI_SENSOR_AUTHORIZATION must be supplied from the secret manager}
+      DPI_SENSOR_POLL_SECONDS: ${DPI_SENSOR_POLL_SECONDS:-15}
       PORT: "8150"
     depends_on:
       postgres:
@@ -1192,8 +1201,10 @@ services:
         CMD: kafka_monitor
     container_name: ndsep-kafka-monitor
     environment:
-      KAFKA_BROKERS: kafka:9092
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      STREAM_METRICS_URL: ${STREAM_METRICS_URL:?STREAM_METRICS_URL must be supplied}
+      STREAM_METRICS_AUTHORIZATION: ${STREAM_METRICS_AUTHORIZATION:?STREAM_METRICS_AUTHORIZATION must be supplied from the secret manager}
+      STREAM_METRICS_POLL_SECONDS: ${STREAM_METRICS_POLL_SECONDS:-15}
       PORT: "8154"
     depends_on:
       kafka:

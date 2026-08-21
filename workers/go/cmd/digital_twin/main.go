@@ -3,11 +3,12 @@
 // analysis across Nigerian and international regulatory jurisdictions.
 //
 // Architecture:
-//   Go service (port 8175) — API gateway + simulation orchestration + DB persistence
-//   Rust Monte Carlo (port 8177) — high-perf stochastic simulations
-//   Rust Agent-Based Model (port 8178) — per-org agent simulation
-//   Rust System Dynamics (port 8179) — causal loop / stock-and-flow
-//   Python ML Prediction (port 8176) — XGBoost breach prediction + economic modeling
+//
+//	Go service (port 8175) — API gateway + simulation orchestration + DB persistence
+//	Rust Monte Carlo (port 8177) — high-perf stochastic simulations
+//	Rust Agent-Based Model (port 8178) — per-org agent simulation
+//	Rust System Dynamics (port 8179) — causal loop / stock-and-flow
+//	Python ML Prediction (port 8176) — XGBoost breach prediction + economic modeling
 //
 // Middleware integration: PostgreSQL, Kafka, Redis, Dapr, Temporal, OpenSearch,
 // Fluvio, TigerBeetle, Lakehouse, APISIX, OpenAppSec, Keycloak, Permify, Mojaloop
@@ -66,16 +67,16 @@ type SectorModel struct {
 }
 
 type Policy struct {
-	ID             int                    `json:"id"`
-	JurisdictionID int                    `json:"jurisdiction_id"`
-	Jurisdiction   string                 `json:"jurisdiction"`
-	Code           string                 `json:"code"`
-	Name           string                 `json:"name"`
-	Category       string                 `json:"category"`
-	Status         string                 `json:"status"`
-	EffectiveDate  string                 `json:"effective_date"`
+	ID             int                      `json:"id"`
+	JurisdictionID int                      `json:"jurisdiction_id"`
+	Jurisdiction   string                   `json:"jurisdiction"`
+	Code           string                   `json:"code"`
+	Name           string                   `json:"name"`
+	Category       string                   `json:"category"`
+	Status         string                   `json:"status"`
+	EffectiveDate  string                   `json:"effective_date"`
 	Rules          []map[string]interface{} `json:"rules"`
-	Parameters     map[string]float64     `json:"parameters"`
+	Parameters     map[string]float64       `json:"parameters"`
 }
 
 type DataFlow struct {
@@ -89,37 +90,37 @@ type DataFlow struct {
 }
 
 type SimulationRequest struct {
-	Scenario       string             `json:"scenario"`
-	Parameters     map[string]float64 `json:"parameters"`
-	Duration       int                `json:"duration_months"`
-	Jurisdictions  []string           `json:"jurisdictions"`
-	PolicyIDs      []int              `json:"policy_ids"`
-	Type           string             `json:"type"`
-	Iterations     int                `json:"iterations"`
-	SandboxID      string             `json:"sandbox_id"`
-	CounterfactualYear int            `json:"counterfactual_year"`
+	Scenario           string             `json:"scenario"`
+	Parameters         map[string]float64 `json:"parameters"`
+	Duration           int                `json:"duration_months"`
+	Jurisdictions      []string           `json:"jurisdictions"`
+	PolicyIDs          []int              `json:"policy_ids"`
+	Type               string             `json:"type"`
+	Iterations         int                `json:"iterations"`
+	SandboxID          string             `json:"sandbox_id"`
+	CounterfactualYear int                `json:"counterfactual_year"`
 }
 
 type SimulationResult struct {
-	SimulationID      string                       `json:"simulation_id"`
-	ScenarioID        string                       `json:"scenario_id"`
-	Scenario          string                       `json:"scenario"`
-	Type              string                       `json:"type"`
-	Duration          int                          `json:"duration_months"`
-	Jurisdictions     []string                     `json:"jurisdictions"`
-	Timeline          []TimelinePoint              `json:"timeline"`
+	SimulationID        string                        `json:"simulation_id"`
+	ScenarioID          string                        `json:"scenario_id"`
+	Scenario            string                        `json:"scenario"`
+	Type                string                        `json:"type"`
+	Duration            int                           `json:"duration_months"`
+	Jurisdictions       []string                      `json:"jurisdictions"`
+	Timeline            []TimelinePoint               `json:"timeline"`
 	JurisdictionResults map[string]JurisdictionResult `json:"jurisdiction_results"`
-	SectorImpacts     map[string]SectorImpact      `json:"sector_impacts"`
-	PolicyImpacts     []PolicyImpact               `json:"policy_impacts"`
-	MonteCarloStats   *MonteCarloStats             `json:"monte_carlo_stats,omitempty"`
-	EconomicImpact    *EconomicImpact              `json:"economic_impact,omitempty"`
-	OverallCompliance float64                      `json:"overall_compliance_change"`
-	PenaltyDelta      float64                      `json:"penalty_delta_ngn"`
-	BreachDelta       float64                      `json:"breach_delta_percent"`
-	Recommendations   []string                     `json:"recommendations"`
-	RustEngines       *RustEngineResults           `json:"rust_engines,omitempty"`
-	SimulatedAt       string                       `json:"simulated_at"`
-	DurationMs        int64                        `json:"duration_ms"`
+	SectorImpacts       map[string]SectorImpact       `json:"sector_impacts"`
+	PolicyImpacts       []PolicyImpact                `json:"policy_impacts"`
+	MonteCarloStats     *MonteCarloStats              `json:"monte_carlo_stats,omitempty"`
+	EconomicImpact      *EconomicImpact               `json:"economic_impact,omitempty"`
+	OverallCompliance   float64                       `json:"overall_compliance_change"`
+	PenaltyDelta        float64                       `json:"penalty_delta_ngn"`
+	BreachDelta         float64                       `json:"breach_delta_percent"`
+	Recommendations     []string                      `json:"recommendations"`
+	RustEngines         *RustEngineResults            `json:"rust_engines,omitempty"`
+	SimulatedAt         string                        `json:"simulated_at"`
+	DurationMs          int64                         `json:"duration_ms"`
 }
 
 type RustEngineResults struct {
@@ -133,13 +134,13 @@ type RustEngineResults struct {
 }
 
 type JurisdictionResult struct {
-	Code             string                  `json:"code"`
-	Name             string                  `json:"name"`
-	ComplianceDelta  float64                 `json:"compliance_delta"`
-	BreachDelta      float64                 `json:"breach_delta_percent"`
-	PenaltyDelta     float64                 `json:"penalty_delta_local"`
-	GdpImpactPct     float64                 `json:"gdp_impact_pct"`
-	SectorImpacts    map[string]SectorImpact `json:"sector_impacts"`
+	Code            string                  `json:"code"`
+	Name            string                  `json:"name"`
+	ComplianceDelta float64                 `json:"compliance_delta"`
+	BreachDelta     float64                 `json:"breach_delta_percent"`
+	PenaltyDelta    float64                 `json:"penalty_delta_local"`
+	GdpImpactPct    float64                 `json:"gdp_impact_pct"`
+	SectorImpacts   map[string]SectorImpact `json:"sector_impacts"`
 }
 
 type TimelinePoint struct {
@@ -154,28 +155,28 @@ type TimelinePoint struct {
 }
 
 type SectorImpact struct {
-	Sector          string  `json:"sector"`
-	Jurisdiction    string  `json:"jurisdiction,omitempty"`
-	ComplianceDelta float64 `json:"compliance_delta"`
-	PenaltyDelta    float64 `json:"penalty_delta_ngn"`
-	BreachDelta     float64 `json:"breach_delta_percent"`
+	Sector           string  `json:"sector"`
+	Jurisdiction     string  `json:"jurisdiction,omitempty"`
+	ComplianceDelta  float64 `json:"compliance_delta"`
+	PenaltyDelta     float64 `json:"penalty_delta_ngn"`
+	BreachDelta      float64 `json:"breach_delta_percent"`
 	CostBenefitRatio float64 `json:"cost_benefit_ratio"`
-	RiskLevel       string  `json:"risk_level"`
+	RiskLevel        string  `json:"risk_level"`
 }
 
 type PolicyImpact struct {
-	PolicyCode       string  `json:"policy_code"`
-	PolicyName       string  `json:"policy_name"`
-	Jurisdiction     string  `json:"jurisdiction"`
-	ComplianceDelta  float64 `json:"compliance_delta"`
-	BreachDelta      float64 `json:"breach_delta_percent"`
-	PenaltyDelta     float64 `json:"penalty_delta_local"`
+	PolicyCode         string  `json:"policy_code"`
+	PolicyName         string  `json:"policy_name"`
+	Jurisdiction       string  `json:"jurisdiction"`
+	ComplianceDelta    float64 `json:"compliance_delta"`
+	BreachDelta        float64 `json:"breach_delta_percent"`
+	PenaltyDelta       float64 `json:"penalty_delta_local"`
 	EffectivenessScore float64 `json:"effectiveness_score"`
-	SensitivityRank  int     `json:"sensitivity_rank"`
+	SensitivityRank    int     `json:"sensitivity_rank"`
 }
 
 type MonteCarloStats struct {
-	Iterations int                          `json:"iterations"`
+	Iterations int                           `json:"iterations"`
 	Metrics    map[string]ConfidenceInterval `json:"metrics"`
 }
 
@@ -190,24 +191,24 @@ type ConfidenceInterval struct {
 }
 
 type EconomicImpact struct {
-	GdpImpactPct             float64 `json:"gdp_impact_pct"`
-	FdiConfidenceChange      float64 `json:"fdi_confidence_change"`
-	InsuranceCostChangeIdx   float64 `json:"insurance_cost_change_idx"`
-	ComplianceCostMillions   float64 `json:"compliance_cost_millions_usd"`
+	GdpImpactPct              float64 `json:"gdp_impact_pct"`
+	FdiConfidenceChange       float64 `json:"fdi_confidence_change"`
+	InsuranceCostChangeIdx    float64 `json:"insurance_cost_change_idx"`
+	ComplianceCostMillions    float64 `json:"compliance_cost_millions_usd"`
 	BreachCostAvoidedMillions float64 `json:"breach_cost_avoided_millions_usd"`
-	NetEconomicBenefit       float64 `json:"net_economic_benefit_millions_usd"`
+	NetEconomicBenefit        float64 `json:"net_economic_benefit_millions_usd"`
 }
 
 type BreachPrediction struct {
-	OrgID            int      `json:"org_id"`
-	OrgName          string   `json:"org_name"`
-	Sector           string   `json:"sector"`
-	Jurisdiction     string   `json:"jurisdiction"`
-	Probability30d   float64  `json:"probability_30d"`
-	Probability90d   float64  `json:"probability_90d"`
-	TopRiskFactors   []string `json:"top_risk_factors"`
-	RecommendedAction string  `json:"recommended_action"`
-	ModelSource      string   `json:"model_source"`
+	OrgID             int      `json:"org_id"`
+	OrgName           string   `json:"org_name"`
+	Sector            string   `json:"sector"`
+	Jurisdiction      string   `json:"jurisdiction"`
+	Probability30d    float64  `json:"probability_30d"`
+	Probability90d    float64  `json:"probability_90d"`
+	TopRiskFactors    []string `json:"top_risk_factors"`
+	RecommendedAction string   `json:"recommended_action"`
+	ModelSource       string   `json:"model_source"`
 }
 
 type EcosystemState struct {
@@ -223,61 +224,61 @@ type EcosystemState struct {
 }
 
 type SandboxInfo struct {
-	SandboxID      string    `json:"sandbox_id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description"`
+	SandboxID       string   `json:"sandbox_id"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
 	PoliciesApplied []string `json:"policies_applied"`
-	Status         string    `json:"status"`
-	CreatedAt      string    `json:"created_at"`
+	Status          string   `json:"status"`
+	CreatedAt       string   `json:"created_at"`
 }
 
 type PolicyConflict struct {
-	PolicyA     string `json:"policy_a"`
-	PolicyB     string `json:"policy_b"`
+	PolicyA      string `json:"policy_a"`
+	PolicyB      string `json:"policy_b"`
 	ConflictType string `json:"conflict_type"`
-	Description string `json:"description"`
-	Resolution  string `json:"resolution"`
+	Description  string `json:"description"`
+	Resolution   string `json:"resolution"`
 }
 
 // ── Digital Twin Engine ─────────────────────────────────────────────────────
 
 type DigitalTwin struct {
-	mu           sync.RWMutex
-	db           *sql.DB
-	dataFlows    []DataFlow
-	history      []SimulationResult
+	mu        sync.RWMutex
+	db        *sql.DB
+	dataFlows []DataFlow
+	history   []SimulationResult
 
 	// Middleware endpoints
-	kafkaURL     string
-	redisURL     string
-	temporalURL  string
-	daprURL      string
-	fluvioURL    string
-	opensearchURL string
+	kafkaURL       string
+	redisURL       string
+	temporalURL    string
+	daprURL        string
+	fluvioURL      string
+	opensearchURL  string
 	tigerbeetleURL string
-	lakehouseURL string
-	monteCarloURL string
-	agentModelURL string
-	sysDynURL    string
-	mlPredURL    string
+	lakehouseURL   string
+	monteCarloURL  string
+	agentModelURL  string
+	sysDynURL      string
+	mlPredURL      string
 }
 
 func NewDigitalTwin(db *sql.DB) *DigitalTwin {
 	return &DigitalTwin{
-		db:           db,
-		dataFlows:    generateDataFlows(),
-		kafkaURL:     envOr("KAFKA_URL", "localhost:9092"),
-		redisURL:     envOr("REDIS_URL", "localhost:6379"),
-		temporalURL:  envOr("TEMPORAL_URL", "localhost:7233"),
-		daprURL:      envOr("DAPR_URL", "http://localhost:3500"),
-		fluvioURL:    envOr("FLUVIO_URL", "localhost:9003"),
-		opensearchURL: envOr("OPENSEARCH_URL", "http://localhost:9200"),
+		db:             db,
+		dataFlows:      generateDataFlows(),
+		kafkaURL:       envOr("KAFKA_URL", "localhost:9092"),
+		redisURL:       envOr("REDIS_URL", "localhost:6379"),
+		temporalURL:    envOr("TEMPORAL_URL", "localhost:7233"),
+		daprURL:        envOr("DAPR_URL", "http://localhost:3500"),
+		fluvioURL:      envOr("FLUVIO_URL", "localhost:9003"),
+		opensearchURL:  envOr("OPENSEARCH_URL", "http://localhost:9200"),
 		tigerbeetleURL: envOr("TIGERBEETLE_URL", "localhost:3000"),
-		lakehouseURL: envOr("LAKEHOUSE_URL", "http://localhost:8150"),
-		monteCarloURL: envOr("MONTE_CARLO_URL", "http://localhost:8177"),
-		agentModelURL: envOr("AGENT_MODEL_URL", "http://localhost:8178"),
-		sysDynURL:    envOr("SYSTEM_DYNAMICS_URL", "http://localhost:8179"),
-		mlPredURL:    envOr("ML_PREDICTION_URL", "http://localhost:8176"),
+		lakehouseURL:   envOr("LAKEHOUSE_URL", "http://localhost:8150"),
+		monteCarloURL:  envOr("MONTE_CARLO_URL", "http://localhost:8177"),
+		agentModelURL:  envOr("AGENT_MODEL_URL", "http://localhost:8178"),
+		sysDynURL:      envOr("SYSTEM_DYNAMICS_URL", "http://localhost:8179"),
+		mlPredURL:      envOr("ML_PREDICTION_URL", "http://localhost:8176"),
 	}
 }
 
@@ -293,10 +294,10 @@ func envOr(key, fallback string) string {
 var rustHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type rustServiceStatus struct {
-	available    bool
-	lastChecked  time.Time
-	failures     int
-	circuitOpen  bool
+	available   bool
+	lastChecked time.Time
+	failures    int
+	circuitOpen bool
 }
 
 var (
@@ -360,27 +361,27 @@ type RustMCRequest struct {
 }
 
 type RustSectorInput struct {
-	Sector         string  `json:"sector"`
-	Jurisdiction   string  `json:"jurisdiction"`
-	Organizations  int     `json:"organizations"`
-	AvgCompliance  float64 `json:"avg_compliance"`
-	BreachRate     float64 `json:"breach_rate"`
+	Sector          string  `json:"sector"`
+	Jurisdiction    string  `json:"jurisdiction"`
+	Organizations   int     `json:"organizations"`
+	AvgCompliance   float64 `json:"avg_compliance"`
+	BreachRate      float64 `json:"breach_rate"`
 	AvgPenaltyLocal float64 `json:"avg_penalty_local"`
-	AvgBudgetUSD   float64 `json:"avg_budget_usd"`
-	StaffCountAvg  int     `json:"staff_count_avg"`
-	TechMaturity   float64 `json:"tech_maturity"`
+	AvgBudgetUSD    float64 `json:"avg_budget_usd"`
+	StaffCountAvg   int     `json:"staff_count_avg"`
+	TechMaturity    float64 `json:"tech_maturity"`
 }
 
 type RustMCResponse struct {
-	Iterations    int                   `json:"iterations"`
+	Iterations     int                  `json:"iterations"`
 	DurationMonths int                  `json:"duration_months"`
-	Compliance    RustCI                `json:"compliance"`
-	BreachDelta   RustCI                `json:"breach_delta"`
-	PenaltyDelta  RustCI                `json:"penalty_delta"`
-	GdpImpact     RustCI                `json:"gdp_impact"`
-	PerSector     []RustSectorMCResult  `json:"per_sector"`
-	Timeline      []RustTimelineCI      `json:"timeline"`
-	DurationMs    int64                 `json:"duration_ms"`
+	Compliance     RustCI               `json:"compliance"`
+	BreachDelta    RustCI               `json:"breach_delta"`
+	PenaltyDelta   RustCI               `json:"penalty_delta"`
+	GdpImpact      RustCI               `json:"gdp_impact"`
+	PerSector      []RustSectorMCResult `json:"per_sector"`
+	Timeline       []RustTimelineCI     `json:"timeline"`
+	DurationMs     int64                `json:"duration_ms"`
 }
 
 type RustCI struct {
@@ -410,13 +411,13 @@ type RustTimelineCI struct {
 
 // RustABMRequest maps Go data to the Rust Agent-Based Model engine
 type RustABMRequest struct {
-	Agents             []RustAgent `json:"agents"`
-	DurationMonths     int         `json:"duration_months"`
-	BreachSLAHours     float64     `json:"breach_sla_hours"`
-	PenaltyMultiplier  float64     `json:"penalty_multiplier"`
-	ComplianceThreshold float64    `json:"compliance_threshold"`
-	PeerPressureWeight *float64    `json:"peer_pressure_weight,omitempty"`
-	NetworkEffects     *bool       `json:"network_effects,omitempty"`
+	Agents              []RustAgent `json:"agents"`
+	DurationMonths      int         `json:"duration_months"`
+	BreachSLAHours      float64     `json:"breach_sla_hours"`
+	PenaltyMultiplier   float64     `json:"penalty_multiplier"`
+	ComplianceThreshold float64     `json:"compliance_threshold"`
+	PeerPressureWeight  *float64    `json:"peer_pressure_weight,omitempty"`
+	NetworkEffects      *bool       `json:"network_effects,omitempty"`
 }
 
 type RustAgent struct {
@@ -443,10 +444,10 @@ type RustABMResponse struct {
 
 // RustSDRequest maps Go data to the Rust System Dynamics engine
 type RustSDRequest struct {
-	InitialStocks  RustStocks      `json:"initial_stocks"`
-	DurationMonths int             `json:"duration_months"`
+	InitialStocks  RustStocks       `json:"initial_stocks"`
+	DurationMonths int              `json:"duration_months"`
 	PolicyParams   RustPolicyParams `json:"policy_params"`
-	Jurisdiction   string          `json:"jurisdiction,omitempty"`
+	Jurisdiction   string           `json:"jurisdiction,omitempty"`
 }
 
 type RustStocks struct {
@@ -463,12 +464,12 @@ type RustStocks struct {
 }
 
 type RustPolicyParams struct {
-	BreachSLAHours           float64 `json:"breach_sla_hours"`
-	PenaltyMultiplier        float64 `json:"penalty_multiplier"`
+	BreachSLAHours            float64 `json:"breach_sla_hours"`
+	PenaltyMultiplier         float64 `json:"penalty_multiplier"`
 	EnforcementBudgetIncrease float64 `json:"enforcement_budget_increase"`
-	AwarenessCampaign        bool    `json:"awareness_campaign"`
-	MandatoryAudit           bool    `json:"mandatory_audit"`
-	CrossBorderRestriction   float64 `json:"cross_border_restriction"`
+	AwarenessCampaign         bool    `json:"awareness_campaign"`
+	MandatoryAudit            bool    `json:"mandatory_audit"`
+	CrossBorderRestriction    float64 `json:"cross_border_restriction"`
 }
 
 type RustSDResponse struct {
@@ -484,15 +485,15 @@ func sectorsToRustInputs(sectors []SectorModel) []RustSectorInput {
 	out := make([]RustSectorInput, len(sectors))
 	for i, s := range sectors {
 		out[i] = RustSectorInput{
-			Sector:         s.Sector,
-			Jurisdiction:   s.Jurisdiction,
-			Organizations:  s.Organizations,
-			AvgCompliance:  s.AvgCompliance,
-			BreachRate:     s.BreachRate,
+			Sector:          s.Sector,
+			Jurisdiction:    s.Jurisdiction,
+			Organizations:   s.Organizations,
+			AvgCompliance:   s.AvgCompliance,
+			BreachRate:      s.BreachRate,
 			AvgPenaltyLocal: s.AvgPenalty,
-			AvgBudgetUSD:   s.AvgBudgetUSD,
-			StaffCountAvg:  s.StaffCountAvg,
-			TechMaturity:   s.TechMaturity,
+			AvgBudgetUSD:    s.AvgBudgetUSD,
+			StaffCountAvg:   s.StaffCountAvg,
+			TechMaturity:    s.TechMaturity,
 		}
 	}
 	return out
@@ -967,8 +968,8 @@ func (dt *DigitalTwin) Simulate(ctx context.Context, req SimulationRequest) Simu
 		for _, pol := range policies {
 			if pol.ID == pid {
 				pi := PolicyImpact{
-					PolicyCode:  pol.Code,
-					PolicyName:  pol.Name,
+					PolicyCode:   pol.Code,
+					PolicyName:   pol.Name,
 					Jurisdiction: pol.Jurisdiction,
 				}
 				if jr, ok := result.JurisdictionResults[pol.Jurisdiction]; ok {
@@ -1182,7 +1183,7 @@ func (dt *DigitalTwin) runMonteCarlo(sectors []SectorModel, duration int, sla, p
 			if r.Float64() < 0.05 {
 				marketShock = r.NormFloat64() * 5
 			}
-			compDelta := improvement * (1 + budgetNoise + staffNoise + techNoise) + marketShock
+			compDelta := improvement*(1+budgetNoise+staffNoise+techNoise) + marketShock
 
 			slaFactor := 72.0 / sla
 			breachBase := -sector.BreachRate * 0.1 * float64(duration) * slaFactor
@@ -1269,6 +1270,10 @@ func (dt *DigitalTwin) generateRecommendations(result SimulationResult, threshol
 }
 
 func (dt *DigitalTwin) publishEvent(topic string, payload map[string]interface{}) {
+	// Digital-twin events are analytical what-if outputs only. Downstream services
+	// must not use them to trigger enforcement, ledger, or trust-provider actions.
+	payload["simulation_provenance"] = "digital_twin_what_if_model"
+	payload["enforcement_eligible"] = false
 	data, _ := json.Marshal(payload)
 	// Dapr pub/sub (best-effort)
 	resp, err := http.Post(dt.daprURL+"/v1.0/publish/ndsep-pubsub/"+topic, "application/json", strings.NewReader(string(data)))
@@ -1419,11 +1424,11 @@ func (dt *DigitalTwin) CreateSandbox(ctx context.Context, name, description stri
 	}
 
 	return &SandboxInfo{
-		SandboxID: sID,
-		Name:      name,
+		SandboxID:   sID,
+		Name:        name,
 		Description: description,
-		Status:    "active",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Status:      "active",
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
 
@@ -1515,15 +1520,15 @@ func (dt *DigitalTwin) GetHistory(ctx context.Context, limit int) []map[string]i
 		results := make([]map[string]interface{}, len(dt.history))
 		for i, h := range dt.history {
 			results[i] = map[string]interface{}{
-				"simulation_id":  h.SimulationID,
-				"scenario":       h.Scenario,
-				"type":           h.Type,
-				"jurisdictions":  h.Jurisdictions,
-				"duration_months": h.Duration,
+				"simulation_id":     h.SimulationID,
+				"scenario":          h.Scenario,
+				"type":              h.Type,
+				"jurisdictions":     h.Jurisdictions,
+				"duration_months":   h.Duration,
 				"compliance_change": h.OverallCompliance,
-				"breach_delta":   h.BreachDelta,
-				"penalty_delta":  h.PenaltyDelta,
-				"simulated_at":   h.SimulatedAt,
+				"breach_delta":      h.BreachDelta,
+				"penalty_delta":     h.PenaltyDelta,
+				"simulated_at":      h.SimulatedAt,
 			}
 		}
 		return results
@@ -1539,12 +1544,12 @@ func (dt *DigitalTwin) GetHistory(ctx context.Context, limit int) []map[string]i
 			continue
 		}
 		entry := map[string]interface{}{
-			"simulation_id":  simID,
-			"scenario":       name,
-			"type":           simType,
+			"simulation_id":   simID,
+			"scenario":        name,
+			"type":            simType,
 			"duration_months": durationMonths,
-			"iterations":     iterations,
-			"status":         status,
+			"iterations":      iterations,
+			"status":          status,
 		}
 		var jurisdictions []string
 		json.Unmarshal([]byte(jurisdictionsJSON), &jurisdictions)
@@ -1624,9 +1629,21 @@ func round3(v float64) float64 {
 
 // ── HTTP Handlers ───────────────────────────────────────────────────────────
 
+func simulationOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-NDSEP-Simulation", "true")
+		w.Header().Set("X-NDSEP-Model-Provenance", "digital-twin-what-if")
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
+		if os.Getenv("NODE_ENV") == "production" {
+			log.Fatal("DATABASE_URL is required in production for digital-twin scenario persistence")
+		}
 		dsn = "postgres://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db?sslmode=disable"
 	}
 	db, err := sql.Open("postgres", dsn)
@@ -1634,7 +1651,10 @@ func main() {
 		log.Fatalf("DB connect: %v", err)
 	}
 	if err := db.Ping(); err != nil {
-		log.Printf("WARN: DB ping failed (running without persistence): %v", err)
+		if os.Getenv("NODE_ENV") == "production" {
+			log.Fatalf("digital-twin persistence is unavailable: %v", err)
+		}
+		log.Printf("WARN: DB ping failed (non-production model-only mode): %v", err)
 		db = nil
 	}
 
@@ -1654,11 +1674,11 @@ func main() {
 		abmAvail := isRustServiceAvailable(dt.agentModelURL)
 		sdAvail := isRustServiceAvailable(dt.sysDynURL)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":         "healthy",
-			"service":        "digital-twin-v2",
-			"version":        "2.1.0",
-			"db_connected":   dbOK,
-			"features":       []string{"multi_jurisdiction", "policy_engine", "monte_carlo", "counterfactual", "sandbox", "economic_impact", "rust_monte_carlo", "rust_abm", "rust_system_dynamics"},
+			"status":       "healthy",
+			"service":      "digital-twin-v2",
+			"version":      "2.1.0",
+			"db_connected": dbOK,
+			"features":     []string{"multi_jurisdiction", "policy_engine", "monte_carlo", "counterfactual", "sandbox", "economic_impact", "rust_monte_carlo", "rust_abm", "rust_system_dynamics"},
 			"rust_engines": map[string]interface{}{
 				"monte_carlo":     map[string]interface{}{"url": dt.monteCarloURL, "available": mcAvail},
 				"agent_model":     map[string]interface{}{"url": dt.agentModelURL, "available": abmAvail},
@@ -1725,8 +1745,8 @@ func main() {
 		predictions := dt.PredictBreaches(ctx, jurisdictions, count)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"predictions": predictions,
-			"total":       len(predictions),
+			"predictions":   predictions,
+			"total":         len(predictions),
 			"jurisdictions": jurisdictions,
 			"model_source":  "heuristic_v2",
 		})
@@ -1949,5 +1969,5 @@ func main() {
 	}
 	addr := ":" + port
 	log.Printf("Digital Twin V2 service listening on %s (multi-jurisdiction, policy engine, Monte Carlo, sandbox)", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, simulationOnly(mux)))
 }

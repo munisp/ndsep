@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS "dpco_accreditation_applications" (
   "conflict_declaration" boolean DEFAULT false NOT NULL,
   "declaration_signed_at" timestamp,
   "application_type" varchar(20) DEFAULT 'new' NOT NULL,
-  "existing_dpco_org_id" integer, -- foreign key added after dpco_organisations is created by canonical reconciliation
+  "existing_dpco_org_id" integer REFERENCES "dpco_organisations"("id"),
   "application_fee" integer DEFAULT 0,
   "payment_intent_id" varchar(255),
   "payment_status" varchar(50) DEFAULT 'pending',

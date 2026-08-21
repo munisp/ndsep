@@ -1,0 +1,32 @@
+# Local-only callback mTLS test overlay. Requires a running NDSEP API on host port 3000.
+services:
+  envoy-mojaloop-mtls:
+    image: envoyproxy/envoy:v1.31-latest
+    command:
+      ["-c", "/etc/envoy/envoy.yaml", "--service-node", "ndsep-local-mojaloop"]
+    ports:
+      - "${ENVOY_TLS_PORT:-8443}:8443"
+      - "${ENVOY_ADMIN_PORT:-9901}:9901"
+    volumes:
+      - ./config/envoy/local-mojaloop.yaml:/etc/envoy/envoy.yaml:ro
+      - ${LOCAL_MTLS_CERT_DIR:?Set LOCAL_MTLS_CERT_DIR to a local-only certificate directory}:/etc/envoy/tls:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ndsep-local-mtls
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1:9901/server_info >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+networks:
+  ndsep-local-mtls:
+    driver: bridge

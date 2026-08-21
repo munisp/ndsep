@@ -1,261 +1,230 @@
-// NDSEP Arkime Full Packet Capture Worker (Layer 5)
-// Simulates Arkime (formerly Moloch) full packet capture and indexing
-// 600TB rolling buffer, session indexing, PCAP storage, and forensic search
+// NDSEP Arkime packet-capture proxy worker.
+// It retrieves authoritative session data from a configured Arkime Viewer and never
+// synthesizes sessions, capture rates, packets, or anomaly events.
 package main
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"io"
 	"log"
-	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
-	"context"
-	"os/signal"
-	"syscall"
-
-	_ "github.com/lib/pq"
 )
 
-const (
-	PORT    = "8099"
-	VERSION = "1.0.0"
-)
+const defaultPort = "8142"
 
-var (
-	mu      sync.RWMutex
-	metrics = map[string]interface{}{
-		"sessions_captured":     0,
-		"packets_indexed":       0,
-		"bytes_captured_gb":     0.0,
-		"buffer_used_tb":        0.0,
-		"buffer_capacity_tb":    600.0,
-		"sessions_per_second":   0,
-		"forensic_queries":      0,
-		"pcap_files_stored":     0,
-		"tls_decrypted":         0,
-		"anomalous_sessions":    0,
-		"uptime_seconds":        0,
-	}
-	startTime = time.Now()
-)
-
-var PROTOCOLS = []string{"TCP", "UDP", "ICMP", "TLS", "HTTP", "HTTPS", "DNS", "SMTP", "SSH", "FTP"}
-var IXP_SITES = []string{"IXP-NGA-LAG", "IXP-GHA-ACC", "IXP-KEN-NAI", "IXP-ZAF-JNB"}
-var ORG_NAMES = []string{
-	"National Bank of Finance", "Federal Ministry of Health",
-	"Digital Commerce Ltd", "TelecomNG Plc", "Energy Corp National",
+type config struct {
+	listenAddr string
+	viewerURL  *url.URL
+	authHeader string
+	timeout    time.Duration
 }
 
-func getDB() (*sql.DB, error) {
-	dbURL := os.Getenv("WORKER_DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db?sslmode=disable"
-	}
-	return sql.Open("postgres", dbURL)
+type arkimeClient struct {
+	baseURL    *url.URL
+	authHeader string
+	http       *http.Client
 }
 
-func runPacketCapture(db *sql.DB) {
-	ticker := time.NewTicker(4 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		sessionsThisTick := rand.Intn(500) + 50
-		packetsThisTick := sessionsThisTick * (rand.Intn(100) + 10)
-		bytesGB := float64(packetsThisTick*1500) / 1e9
-		ixp := IXP_SITES[rand.Intn(len(IXP_SITES))]
-		protocol := PROTOCOLS[rand.Intn(len(PROTOCOLS))]
-		isAnomalous := rand.Float32() < 0.05
+type upstreamHealth struct {
+	mu          sync.RWMutex
+	lastSuccess time.Time
+	lastError   string
+}
 
-		mu.Lock()
-		metrics["sessions_captured"] = metrics["sessions_captured"].(int) + sessionsThisTick
-		metrics["packets_indexed"] = metrics["packets_indexed"].(int) + packetsThisTick
-		metrics["bytes_captured_gb"] = metrics["bytes_captured_gb"].(float64) + bytesGB
-		bufferUsed := metrics["bytes_captured_gb"].(float64) / 1000.0
-		if bufferUsed > 600.0 {
-			bufferUsed = 600.0
+func loadConfig() (config, error) {
+	rawURL := strings.TrimSpace(os.Getenv("ARKIME_URL"))
+	authHeader := strings.TrimSpace(os.Getenv("ARKIME_AUTHORIZATION"))
+	if rawURL == "" || authHeader == "" {
+		return config{}, errors.New("ARKIME_URL and ARKIME_AUTHORIZATION are required")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return config{}, errors.New("ARKIME_URL must be an absolute URL")
+	}
+	if os.Getenv("NODE_ENV") == "production" {
+		if parsed.Scheme != "https" {
+			return config{}, errors.New("ARKIME_URL must use HTTPS in production")
 		}
-		metrics["buffer_used_tb"] = bufferUsed
-		metrics["sessions_per_second"] = sessionsThisTick / 4
-		metrics["pcap_files_stored"] = metrics["pcap_files_stored"].(int) + 1
-		if isAnomalous {
-			metrics["anomalous_sessions"] = metrics["anomalous_sessions"].(int) + 1
-		}
-		mu.Unlock()
-
-		if isAnomalous {
-			srcIP := fmt.Sprintf("196.%d.%d.%d", rand.Intn(255), rand.Intn(255), rand.Intn(254)+1)
-			dstIP := fmt.Sprintf("52.%d.%d.%d", rand.Intn(255), rand.Intn(255), rand.Intn(254)+1)
-			log.Printf("[NDSEP-Arkime] [ANOMALY] Suspicious session: %s -> %s | %s | %s",
-				srcIP, dstIP, protocol, ixp)
-
-			_, err := db.Exec(`
-				INSERT INTO network_events (event_type, source_ip, destination_ip, protocol, bytes_transferred, is_cross_border, ixp_site, detected_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-				"anomaly",
-				srcIP,
-				dstIP,
-				protocol,
-				int64(bytesGB*1e9),
-				true,
-				ixp,
-			)
-			if err != nil {
-				log.Printf("[Arkime] DB write error: %v", err)
-			}
-		} else {
-			log.Printf("[NDSEP-Arkime] [PCAP] Captured %d sessions (%d pkts, %.2f GB) @ %s | proto=%s",
-				sessionsThisTick, packetsThisTick, bytesGB, ixp, protocol)
+		host := strings.ToLower(parsed.Hostname())
+		if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" {
+			return config{}, errors.New("ARKIME_URL must not target a local address in production")
 		}
 	}
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = defaultPort
+	}
+	return config{
+		listenAddr: ":" + port,
+		viewerURL:  parsed,
+		authHeader: authHeader,
+		timeout:    8 * time.Second,
+	}, nil
 }
 
-func runTLSDecryptor(db *sql.DB) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		decrypted := rand.Intn(200) + 10
-		mu.Lock()
-		metrics["tls_decrypted"] = metrics["tls_decrypted"].(int) + decrypted
-		mu.Unlock()
-		log.Printf("[NDSEP-Arkime] [TLS] Decrypted %d TLS sessions for DPI analysis", decrypted)
+func newArkimeClient(cfg config) *arkimeClient {
+	return &arkimeClient{
+		baseURL:    cfg.viewerURL,
+		authHeader: cfg.authHeader,
+		http:       &http.Client{Timeout: cfg.timeout},
 	}
 }
 
-func runForensicSearch(db *sql.DB) {
-	ticker := time.NewTicker(25 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		org := ORG_NAMES[rand.Intn(len(ORG_NAMES))]
-		queryType := []string{"ip_search", "protocol_filter", "time_range", "payload_search", "geo_filter"}[rand.Intn(5)]
-		resultCount := rand.Intn(10000) + 100
-		mu.Lock()
-		metrics["forensic_queries"] = metrics["forensic_queries"].(int) + 1
-		mu.Unlock()
-		log.Printf("[NDSEP-Arkime] [Forensic] Query type=%s for %s: %d sessions found", queryType, org, resultCount)
+func (client *arkimeClient) sessions(ctx context.Context, length, start int, expression string) (json.RawMessage, error) {
+	endpoint := client.baseURL.ResolveReference(&url.URL{Path: "/api/sessions"})
+	query := endpoint.Query()
+	query.Set("date", "-1")
+	query.Set("length", strconv.Itoa(length))
+	query.Set("start", strconv.Itoa(start))
+	if expression != "" {
+		query.Set("expression", expression)
 	}
+	endpoint.RawQuery = query.Encode()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	// Direct Arkime Viewer uses digest auth. NDSEP therefore requires an approved
+	// authentication proxy that exchanges this secret-backed header for Arkime's
+	// configured upstream authentication; this worker never attempts a fake login.
+	request.Header.Set("Authorization", client.authHeader)
+	request.Header.Set("Accept", "application/json")
+	response, err := client.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, errors.New("Arkime Viewer returned HTTP " + strconv.Itoa(response.StatusCode))
+	}
+	var payload struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if payload.Data == nil {
+		return nil, errors.New("Arkime Viewer response omitted session data")
+	}
+	return payload.Data, nil
 }
 
-func runBufferManager() {
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		mu.RLock()
-		bufferUsed := metrics["buffer_used_tb"].(float64)
-		mu.RUnlock()
-		log.Printf("[NDSEP-Arkime] [Buffer] Rolling buffer: %.2f TB / 600 TB (%.1f%% full)",
-			bufferUsed, bufferUsed/600.0*100.0)
+func (client *arkimeClient) probe(ctx context.Context) error {
+	endpoint := client.baseURL.ResolveReference(&url.URL{Path: "/api/eshealth"})
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return err
 	}
+	request.Header.Set("Authorization", client.authHeader)
+	response, err := client.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return errors.New("Arkime Viewer health returned HTTP " + strconv.Itoa(response.StatusCode))
+	}
+	return nil
 }
 
-func runUptimeTracker() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		mu.Lock()
-		metrics["uptime_seconds"] = int(time.Since(startTime).Seconds())
-		mu.Unlock()
-	}
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	defer mu.RUnlock()
+func serviceUnavailable(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "ok",
-		"service": "arkime-pcap",
-		"version": VERSION,
-		"layer":   "L5",
-		"lang":    "Go",
-		"metrics": metrics,
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "unavailable",
+		"service": "arkime_viewer",
+		"error":   err.Error(),
 	})
 }
 
-func metricsHandler(w http.ResponseWriter, r *http.Request) {
-	mu.RLock()
-	defer mu.RUnlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(metrics)
-}
-
-func sessionsHandler(w http.ResponseWriter, r *http.Request) {
-	// Return mock PCAP session data for UI
-	sessions := make([]map[string]interface{}, 10)
-	for i := range sessions {
-		sessions[i] = map[string]interface{}{
-			"id":        fmt.Sprintf("pcap-%d-%d", time.Now().Unix(), i),
-			"src_ip":    fmt.Sprintf("196.%d.%d.%d", rand.Intn(255), rand.Intn(255), rand.Intn(254)+1),
-			"dst_ip":    fmt.Sprintf("52.%d.%d.%d", rand.Intn(255), rand.Intn(255), rand.Intn(254)+1),
-			"protocol":  PROTOCOLS[rand.Intn(len(PROTOCOLS))],
-			"bytes":     rand.Intn(10000000) + 1000,
-			"packets":   rand.Intn(1000) + 10,
-			"duration":  rand.Intn(300) + 1,
-			"ixp":       IXP_SITES[rand.Intn(len(IXP_SITES))],
-			"anomalous": rand.Float32() < 0.1,
-			"timestamp": time.Now().Add(-time.Duration(rand.Intn(3600)) * time.Second).UTC().Format(time.RFC3339),
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": sessions})
-}
-
-// gracefulShutdown wraps http.Server with SIGTERM/SIGINT handling
-func gracefulShutdown(workerID, port string, handler http.Handler) {
-srv := &http.Server{
-Addr:         ":" + port,
-Handler:      handler,
-ReadTimeout:  15 * time.Second,
-WriteTimeout: 30 * time.Second,
-IdleTimeout:  60 * time.Second,
-}
-quit := make(chan os.Signal, 1)
-signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
-go func() {
-log.Printf("[%s] HTTP server listening on :%s", workerID, port)
-if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-log.Fatalf("[%s] Server error: %v", workerID, err)
-}
-}()
-sig := <-quit
-log.Printf("[%s] Received %s — shutting down gracefully", workerID, sig)
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-defer cancel()
-if err := srv.Shutdown(ctx); err != nil {
-log.Printf("[%s] Forced shutdown: %v", workerID, err)
-}
-log.Printf("[%s] Shutdown complete", workerID)
-}
-
 func main() {
-	log.SetFlags(log.LstdFlags)
-	log.Printf("[NDSEP-Arkime] === NDSEP Arkime Full Packet Capture Worker (Go) ===")
-	log.Printf("[NDSEP-Arkime] Version: %s | Port: %s | Buffer: 600TB", VERSION, PORT)
-
-	db, err := getDB()
+	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("[Arkime] DB connection failed: %v", err)
+		log.Fatal(err)
 	}
-	defer db.Close()
-	if err := db.Ping(); err != nil {
-		log.Fatalf("[Arkime] DB ping failed: %v", err)
+	client := newArkimeClient(cfg)
+	health := &upstreamHealth{}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /sessions", func(w http.ResponseWriter, r *http.Request) {
+		length, err := boundedInt(r.URL.Query().Get("limit"), 10, 1, 1000)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		start, err := boundedInt(r.URL.Query().Get("start"), 0, 0, 1_000_000)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		sessions, err := client.sessions(r.Context(), length, start, r.URL.Query().Get("expression"))
+		if err != nil {
+			health.mu.Lock()
+			health.lastError = err.Error()
+			health.mu.Unlock()
+			serviceUnavailable(w, err)
+			return
+		}
+		health.mu.Lock()
+		health.lastSuccess = time.Now().UTC()
+		health.lastError = ""
+		health.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]json.RawMessage{"sessions": sessions})
+	})
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := client.probe(ctx); err != nil {
+			health.mu.Lock()
+			health.lastError = err.Error()
+			health.mu.Unlock()
+			serviceUnavailable(w, err)
+			return
+		}
+		health.mu.Lock()
+		health.lastSuccess = time.Now().UTC()
+		health.lastError = ""
+		lastSuccess := health.lastSuccess
+		health.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":       "ready",
+			"service":      "arkime-pcap",
+			"last_success": lastSuccess.Format(time.RFC3339),
+		})
+	})
+
+	server := &http.Server{
+		Addr:              cfg.listenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
-	log.Printf("[NDSEP-Arkime] [DB] Connected to PostgreSQL")
-
-	go runUptimeTracker()
-	go runPacketCapture(db)
-	go runTLSDecryptor(db)
-	go runForensicSearch(db)
-	go runBufferManager()
-
-	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/metrics", metricsHandler)
-	http.HandleFunc("/sessions", sessionsHandler)
-
-	log.Printf("[NDSEP-Arkime] [PCAP] Arkime packet capture worker listening on :%s", PORT)
-	if err := http.ListenAndServe(":"+PORT, nil); err != nil {
-		log.Fatalf("[Arkime] Server error: %v", err)
+	log.Printf("Arkime session proxy listening on %s", cfg.listenAddr)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
 	}
+}
+
+func boundedInt(raw string, fallback, minimum, maximum int) (int, error) {
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return 0, errors.New("invalid integer query parameter")
+	}
+	return value, nil
 }

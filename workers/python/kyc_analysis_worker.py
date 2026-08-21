@@ -10,8 +10,8 @@ Implements CBN KYC/CDD requirements per:
   - FATF Recommendation 10 (Customer Due Diligence)
 
 Features:
-  - BVN verification (NIBSS API simulation)
-  - NIN verification (NIMC API simulation)
+  - BVN verification through a configured NIBSS-compatible provider
+  - NIN verification through a configured NIMC-compatible provider
   - Document authenticity scoring
   - Liveness detection result processing
   - Risk-based CDD tier assignment

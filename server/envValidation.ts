@@ -23,7 +23,8 @@ const SECURITY_SENSITIVE_VARS: EnvRule[] = [
   {
     name: "FIELD_ENCRYPTION_KEY",
     insecureDefaults: [""],
-    description: "AES-256-GCM PII encryption key — data stored in plaintext if missing",
+    description:
+      "AES-256-GCM PII encryption key — data stored in plaintext if missing",
   },
   {
     name: "TERMII_API_KEY",
@@ -46,29 +47,92 @@ const SECURITY_SENSITIVE_VARS: EnvRule[] = [
     description: "Webhook signature key — signatures forgeable with default",
   },
   {
+    name: "MOJALOOP_CALLBACK_HMAC_SECRET",
+    insecureDefaults: [
+      "",
+      "CHANGE_ME",
+      "change_me",
+      "mojaloop_callback_secret",
+    ],
+    description:
+      "Mojaloop callback HMAC key — settlement status could be forged without a unique secret",
+  },
+  {
+    name: "MOJALOOP_CALLBACK_MTLS_SUBJECT_DN",
+    insecureDefaults: ["", "CHANGE_ME", "change_me"],
+    description:
+      "Mojaloop callback client certificate subject allowlist — callback mTLS identity cannot be verified",
+  },
+  {
+    name: "MOJALOOP_CALLBACK_GATEWAY_ATTESTATION",
+    insecureDefaults: ["", "CHANGE_ME", "change_me", "placeholder"],
+    description:
+      "Mojaloop callback gateway attestation — client-supplied mTLS headers cannot be distinguished from trusted ingress headers",
+  },
+  {
+    name: "FINANCIAL_OUTBOX_DISPATCHER_ENABLED",
+    insecureDefaults: ["", "false"],
+    description:
+      "Durable financial dispatcher — payment intents cannot be processed when disabled",
+  },
+  {
     name: "APISIX_ADMIN_KEY",
     insecureDefaults: ["CHANGE_ME_IN_PRODUCTION", ""],
-    description: "APISIX admin API key — gateway admin accessible with known key",
+    description:
+      "APISIX admin API key — gateway admin accessible with known key",
   },
   {
     name: "DATABASE_URL",
     insecureDefaults: [""],
-    description: "PostgreSQL connection string — server cannot function without DB",
+    description:
+      "PostgreSQL connection string — server cannot function without DB",
   },
 ];
 
 const SECTOR_API_KEYS: EnvRule[] = [
-  { name: "NCC_API_KEY", insecureDefaults: ["ncc-api-key-placeholder", ""], description: "NCC (telecom) regulator API key" },
-  { name: "NHIA_API_KEY", insecureDefaults: ["nhia-api-key-placeholder", ""], description: "NHIA (healthcare) regulator API key" },
-  { name: "NERC_API_KEY", insecureDefaults: ["nerc-api-key-placeholder", ""], description: "NERC (energy) regulator API key" },
-  { name: "DPR_API_KEY", insecureDefaults: ["dpr-api-key-placeholder", ""], description: "DPR (oil/gas) regulator API key" },
-  { name: "NAICOM_API_KEY", insecureDefaults: ["naicom-api-key-placeholder", ""], description: "NAICOM (insurance) regulator API key" },
-  { name: "CBN_FINTECH_API_KEY", insecureDefaults: ["cbn-fintech-api-key-placeholder", ""], description: "CBN (fintech) regulator API key" },
+  {
+    name: "NCC_API_KEY",
+    insecureDefaults: ["ncc-api-key-placeholder", ""],
+    description: "NCC (telecom) regulator API key",
+  },
+  {
+    name: "NHIA_API_KEY",
+    insecureDefaults: ["nhia-api-key-placeholder", ""],
+    description: "NHIA (healthcare) regulator API key",
+  },
+  {
+    name: "NERC_API_KEY",
+    insecureDefaults: ["nerc-api-key-placeholder", ""],
+    description: "NERC (energy) regulator API key",
+  },
+  {
+    name: "DPR_API_KEY",
+    insecureDefaults: ["dpr-api-key-placeholder", ""],
+    description: "DPR (oil/gas) regulator API key",
+  },
+  {
+    name: "NAICOM_API_KEY",
+    insecureDefaults: ["naicom-api-key-placeholder", ""],
+    description: "NAICOM (insurance) regulator API key",
+  },
+  {
+    name: "CBN_FINTECH_API_KEY",
+    insecureDefaults: ["cbn-fintech-api-key-placeholder", ""],
+    description: "CBN (fintech) regulator API key",
+  },
 ];
 
 const INFRASTRUCTURE_VARS: EnvRule[] = [
-  { name: "LAKEHOUSE_S3_ACCESS_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 access key — using MinIO dev default" },
-  { name: "LAKEHOUSE_S3_SECRET_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 secret key — using MinIO dev default" },
+  {
+    name: "LAKEHOUSE_S3_ACCESS_KEY",
+    insecureDefaults: ["minioadmin"],
+    description: "Lakehouse S3 access key — using MinIO dev default",
+  },
+  {
+    name: "LAKEHOUSE_S3_SECRET_KEY",
+    insecureDefaults: ["minioadmin"],
+    description: "Lakehouse S3 secret key — using MinIO dev default",
+  },
 ];
 
 /**
@@ -87,7 +151,9 @@ export function validateEnvironment(): void {
       if (isProduction) {
         errors.push(`  ${rule.name}: ${rule.description}`);
       } else {
-        warnings.push(`  ${rule.name}: ${rule.description} (using dev default)`);
+        warnings.push(
+          `  ${rule.name}: ${rule.description} (using dev default)`
+        );
       }
     }
   }
@@ -96,7 +162,9 @@ export function validateEnvironment(): void {
     const value = process.env[rule.name] ?? "";
     if (rule.insecureDefaults.includes(value)) {
       if (isProduction) {
-        warnings.push(`  ${rule.name}: ${rule.description} — sector monitor will fail API calls`);
+        warnings.push(
+          `  ${rule.name}: ${rule.description} — sector monitor will fail API calls`
+        );
       }
     }
   }

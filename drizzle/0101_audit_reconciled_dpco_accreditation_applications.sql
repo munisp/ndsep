@@ -1,0 +1,57 @@
+DO $$ BEGIN
+  CREATE TYPE "accreditation_app_status" AS ENUM (
+    'draft', 'submitted', 'info_requested', 'under_review', 'competency_scheduled',
+    'approved', 'conditionally_approved', 'rejected', 'renewal_pending', 'renewal_submitted',
+    'suspended', 'revoked'
+  );
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "dpco_accreditation_applications" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "org_name" varchar(255) NOT NULL,
+  "rc_number" varchar(100) NOT NULL,
+  "cac_number" varchar(100),
+  "tax_id" varchar(100),
+  "address" text NOT NULL,
+  "website" varchar(255),
+  "email" varchar(255) NOT NULL,
+  "phone" varchar(50),
+  "lead_auditors" jsonb NOT NULL,
+  "sectors" text[],
+  "incorporation_doc_url" varchar(500),
+  "financial_statements_url" varchar(500),
+  "indemnity_insurance_url" varchar(500),
+  "audit_methodology_url" varchar(500),
+  "conflict_declaration" boolean DEFAULT false NOT NULL,
+  "declaration_signed_at" timestamp,
+  "application_type" varchar(20) DEFAULT 'new' NOT NULL,
+  "existing_dpco_org_id" integer, -- foreign key added after dpco_organisations is created by canonical reconciliation
+  "application_fee" integer DEFAULT 0,
+  "payment_intent_id" varchar(255),
+  "payment_status" varchar(50) DEFAULT 'pending',
+  "status" "accreditation_app_status" DEFAULT 'draft' NOT NULL,
+  "reference_token" varchar(64) UNIQUE NOT NULL,
+  "reviewed_by" varchar(255),
+  "review_started_at" timestamp,
+  "review_checklist" jsonb,
+  "info_request_note" text,
+  "info_requested_at" timestamp,
+  "competency_scheduled_at" timestamp,
+  "decision" varchar(30),
+  "decision_at" timestamp,
+  "decision_by" varchar(255),
+  "decision_reason" text,
+  "conditions" text,
+  "issued_licence_number" varchar(100),
+  "licence_issued_at" timestamp,
+  "licence_expires_at" timestamp,
+  "licence_certificate_url" varchar(500),
+  "suspended_at" timestamp,
+  "suspension_reason" text,
+  "revoked_at" timestamp,
+  "revocation_reason" text,
+  "submitted_at" timestamp,
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);

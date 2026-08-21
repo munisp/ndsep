@@ -62,6 +62,22 @@ func getEnv(key, def string) string {
 	return def
 }
 
+// inMemoryGraphAllowed is deliberately opt-in and is never enabled in
+// production. An in-memory graph cannot be treated as a durable FalkorDB
+// substitute because it loses state on restart and can return stale topology.
+func inMemoryGraphAllowed() bool {
+	return os.Getenv("NODE_ENV") != "production" && os.Getenv("ALLOW_IN_MEMORY_FALKOR") == "true"
+}
+
+func requireAuthoritativeGraph(w http.ResponseWriter) bool {
+	if inMemoryGraphAllowed() {
+		return true
+	}
+	atomic.AddInt64(&errors, 1)
+	http.Error(w, "authoritative FalkorDB graph is unavailable", http.StatusServiceUnavailable)
+	return false
+}
+
 // ── Graph node types ───────────────────────────────────────────────────────────
 type GraphNode struct {
 	ID         string            `json:"id"`
@@ -354,6 +370,9 @@ func computeGNNEmbedding(nodeID string, depth int) []float64 {
 		fmt.Sscanf(s, "%f", &score)
 	}
 
+	// Only structural graph features are available in this local implementation.
+	// Temporal and text-embedding dimensions are deliberately omitted rather than
+	// represented as zeroes, which would make incomplete data look authoritative.
 	embedding := []float64{
 		degree / 10.0,
 		violationCount / 5.0,
@@ -361,8 +380,6 @@ func computeGNNEmbedding(nodeID string, depth int) []float64 {
 		sectorPeerCount / 10.0,
 		score / 100.0,
 		float64(len(node.Properties)) / 10.0,
-		0.0, // placeholder for temporal feature
-		0.0, // placeholder for text embedding
 	}
 
 	// Aggregate neighbor embeddings (1-hop)
