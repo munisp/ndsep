@@ -451,3 +451,6 @@
 - [x] Configure staging Keycloak defaults through secure settings and wire OIDC activation readiness into the login flow
 - [x] Implement a deterministic two-passkey KMS/replay-worker recovery drill test verifying the full dual-approval lifecycle
 - [x] Run full validation suite and update readiness evidence after WebAuthn enrollment, Keycloak staging, and drill work
+- [x] Build a recovery audit timeline view displaying hash-chained approval events with integrity verification
+- [x] Implement push-notification alerts when a recovery authorization is created or consumed
+- [ ] Push all code to GitHub, merge all branches to main, and verify the repository is functional

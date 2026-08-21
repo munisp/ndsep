@@ -69,7 +69,7 @@ import { acknowledgeHighRiskReconciliationAlert, getOfflinePaymentSummary, getPa
 import { getGatewayActivationStatus } from "./paymentGatewayConfig";
 import { attestDiagnosticExport, getDiagnosticAttestationStatus } from "./diagnosticExportAttestation";
 import { bulkRevokeDiagnosticAttestations, exportDiagnosticAttestations, getDiagnosticAttestationDetail, getDiagnosticAttestationStatusByReceiptId, listDiagnosticAttestations, listReceiptRevocationNotifications, markReceiptRevocationNotificationRead, revokeDiagnosticAttestation, setReceiptRevocationNotificationArchive } from "./diagnosticAttestationRepository";
-import { approveRecoveryAuthorization, completeEnrollment, createRecoveryAuthorization, generateEnrollmentChallenge, getRecoveryAuthorization, getRecoveryControllerStatus, listEnrolledCredentials, revokeCredential, type RecoveryApproverRole } from "./recoveryRepository";
+import { approveRecoveryAuthorization, completeEnrollment, createRecoveryAuthorization, generateEnrollmentChallenge, getRecoveryAuthorization, getRecoveryControllerStatus, listEnrolledCredentials, listRecoveryAuditEvents, revokeCredential, verifyRecoveryAuditChain, type RecoveryApproverRole } from "./recoveryRepository";
 
 import type { RegistrationResponseJSON as ServerRegistrationResponseJSON } from "@simplewebauthn/server";
 
@@ -335,6 +335,15 @@ export const appRouter = router({
     approve: enterpriseProcedure
       .input(z.object({ authorizationId: z.string().uuid(), approvalRole: z.enum(["security_engineer", "planning_supervisor"]), assertion: recoveryAssertionSchema }))
       .mutation(async ({ ctx, input }) => approveRecoveryAuthorization({ principal: ctx.enterprise, authorizationId: input.authorizationId, approvalRole: input.approvalRole as RecoveryApproverRole, assertion: input.assertion })),
+    auditTimeline: enterpriseProcedure
+      .input(z.object({ authorizationId: z.string().uuid(), limit: z.number().int().min(1).max(500).default(100) }))
+      .query(async ({ ctx, input }) => {
+        const isApprover = ctx.enterprise.agencyRoles.some((role) => role === "security_engineer" || role === "planning_supervisor");
+        if (!isApprover) throw new TRPCError({ code: "FORBIDDEN", message: "Recovery audit visibility is limited to designated recovery approvers." });
+        const events = await listRecoveryAuditEvents(input.authorizationId, input.limit);
+        const integrity = verifyRecoveryAuditChain(events);
+        return { events, integrity };
+      }),
   }),
   diagnosticExports: router({
     attestationStatus: publicProcedure.query(() => getDiagnosticAttestationStatus()),

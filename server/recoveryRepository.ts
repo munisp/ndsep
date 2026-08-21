@@ -8,6 +8,7 @@ import { Pool, type PoolClient } from "pg";
 import { type EnterprisePrincipal } from "./_core/enterpriseAuth";
 import { getConfiguredIntegrationValue, type IntegrationField } from "./integrationSettingsRepository";
 import { runRecoveryMigrations } from "./recoveryMigrations";
+import { sendRecoveryNotification } from "./recoveryNotifications";
 
 export const RECOVERY_APPROVER_ROLES = ["security_engineer", "planning_supervisor"] as const;
 export type RecoveryApproverRole = (typeof RECOVERY_APPROVER_ROLES)[number];
@@ -99,6 +100,60 @@ export async function revokeCredential(principal: EnterprisePrincipal, credentia
   const result = await pool.query("UPDATE webauthn_credentials SET revoked_at = now() WHERE id = $1::uuid AND subject = $2 AND revoked_at IS NULL RETURNING id", [credentialId, principal.subject]);
   if (!result.rowCount) throw new RecoveryAuthorizationError("Credential was not found or already revoked.");
   return { revoked: true, credentialId };
+}
+
+export type RecoveryAuditEvent = {
+  id: string;
+  authorizationId: string;
+  sequenceNumber: number;
+  eventType: string;
+  actorSubject: string | null;
+  payload: Record<string, unknown>;
+  occurredAt: string;
+  previousEventHash: string | null;
+  eventHash: string;
+};
+
+export async function listRecoveryAuditEvents(authorizationId: string, limit = 100): Promise<RecoveryAuditEvent[]> {
+  const pool = await readyPool();
+  const result = await pool.query<{
+    id: string;
+    authorization_id: string;
+    sequence_number: string;
+    event_type: string;
+    actor_subject: string | null;
+    payload: Record<string, unknown>;
+    occurred_at: Date;
+    previous_event_hash: string | null;
+    event_hash: string;
+  }>("SELECT id, authorization_id, sequence_number, event_type, actor_subject, payload, occurred_at, previous_event_hash, event_hash FROM recovery_audit_events WHERE authorization_id = $1::uuid ORDER BY sequence_number ASC LIMIT $2", [authorizationId, limit]);
+  return result.rows.map((row) => ({
+    id: row.id,
+    authorizationId: row.authorization_id,
+    sequenceNumber: Number(row.sequence_number),
+    eventType: row.event_type,
+    actorSubject: row.actor_subject,
+    payload: row.payload,
+    occurredAt: row.occurred_at.toISOString(),
+    previousEventHash: row.previous_event_hash,
+    eventHash: row.event_hash,
+  }));
+}
+
+export function verifyRecoveryAuditChain(events: RecoveryAuditEvent[]): { valid: boolean; totalEvents: number; firstInvalidSequence: number | null; reason: string } {
+  if (events.length === 0) return { valid: true, totalEvents: 0, firstInvalidSequence: null, reason: "No events to verify." };
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]!;
+    const expectedPrevious = i === 0 ? null : events[i - 1]!.eventHash;
+    if (event.previousEventHash !== expectedPrevious) {
+      return { valid: false, totalEvents: events.length, firstInvalidSequence: event.sequenceNumber, reason: `Event ${event.sequenceNumber} has an unexpected previous hash; the chain may have been tampered with.` };
+    }
+    const recomputed = sha256(JSON.stringify({ authorizationId: event.authorizationId, sequence: event.sequenceNumber, eventType: event.eventType, occurredAt: event.occurredAt, previousHash: event.previousEventHash, payload: event.payload }));
+    if (recomputed !== event.eventHash) {
+      return { valid: false, totalEvents: events.length, firstInvalidSequence: event.sequenceNumber, reason: `Event ${event.sequenceNumber} hash does not match its content; the event may have been modified.` };
+    }
+  }
+  return { valid: true, totalEvents: events.length, firstInvalidSequence: null, reason: `All ${events.length} event(s) verified successfully.` };
 }
 
 function configuredValue(field: IntegrationField) {
@@ -281,6 +336,7 @@ export async function createRecoveryAuthorization(input: { principal: Enterprise
     await client.query("INSERT INTO recovery_authorizations (id, queue_id, payload_hash, idempotency_key, owner_subject, target_device_fingerprint, challenge, kms_ciphertext, kms_encryption_context, status, expires_at, created_at, updated_at) VALUES ($1::uuid,$2,$3,$4::uuid,$5,$6,$7,$8,$9::jsonb,'pending',$10::timestamptz,now(),now())", [id, context.queueId, context.payloadHash, context.idempotencyKey, input.principal.subject, context.targetDeviceFingerprint, challenge, input.kmsCiphertext, JSON.stringify(context), expiresAt]);
     await appendEvent(client, { authorizationId: id, eventType: "recovery_requested", actorSubject: input.principal.subject, occurredAt: new Date().toISOString(), payload: { queueId: context.queueId, payloadHash: context.payloadHash, idempotencyKey: context.idempotencyKey, targetDeviceFingerprint: context.targetDeviceFingerprint, expiresAt } });
     const inserted = await client.query<RecoveryAuthorizationRow>("SELECT id, queue_id, payload_hash, idempotency_key, owner_subject, target_device_fingerprint, challenge, status, expires_at, consumed_at, created_at, updated_at FROM recovery_authorizations WHERE id = $1::uuid", [id]);
+    void sendRecoveryNotification({ type: "recovery_created", authorizationId: id, queueId: context.queueId, actorSubject: input.principal.subject }).catch(() => undefined);
     return { authorization: mapAuthorization(inserted.rows[0]!), challenge };
   });
 }
@@ -336,6 +392,7 @@ export async function approveRecoveryAuthorization(input: { principal: Enterpris
     if (approvedSubjects.size === 2 && RECOVERY_APPROVER_ROLES.every((role) => approvedRoles.has(role))) {
       await client.query("UPDATE recovery_authorizations SET status = 'authorized', updated_at = now() WHERE id = $1::uuid", [authorization.id]);
       await appendEvent(client, { authorizationId: authorization.id, eventType: "recovery_quorum_authorized", actorSubject: input.principal.subject, occurredAt: new Date().toISOString(), payload: { roles: RECOVERY_APPROVER_ROLES, approvalCount: approvals.rowCount } });
+      void sendRecoveryNotification({ type: "recovery_quorum_reached", authorizationId: authorization.id, queueId: authorization.queue_id }).catch(() => undefined);
     }
     return getRecoveryAuthorization(authorization.id);
   });
@@ -381,5 +438,7 @@ export async function executeAuthorizedRecovery(authorizationId: string) {
     await transaction(async (client) => { await client.query("UPDATE recovery_authorizations SET status = 'authorized', updated_at = now() WHERE id = $1::uuid AND status = 'replay_in_progress'", [claimed.id]); await client.query("UPDATE recovery_replays SET status = 'failed', last_error = $1 WHERE authorization_id = $2::uuid", [error instanceof Error ? error.message.slice(0, 500) : "Replay request failed", claimed.id]); await appendEvent(client, { authorizationId: claimed.id, eventType: "recovery_replay_failed", actorSubject: null, occurredAt: new Date().toISOString(), payload: { reason: error instanceof Error ? error.message.slice(0, 240) : "Replay request failed" } }); });
     throw error;
   }
-  return transaction(async (client) => { await client.query("UPDATE recovery_replays SET status = 'succeeded', completed_at = now(), last_error = NULL WHERE authorization_id = $1::uuid", [claimed.id]); await client.query("UPDATE recovery_authorizations SET status = 'consumed', consumed_at = now(), updated_at = now() WHERE id = $1::uuid AND status = 'replay_in_progress'", [claimed.id]); await appendEvent(client, { authorizationId: claimed.id, eventType: "recovery_replay_consumed", actorSubject: null, occurredAt: new Date().toISOString(), payload: { idempotencyKey: claimed.idempotency_key, payloadHash: claimed.payload_hash } }); return getRecoveryAuthorization(claimed.id); });
+  const result = await transaction(async (client) => { await client.query("UPDATE recovery_replays SET status = 'succeeded', completed_at = now(), last_error = NULL WHERE authorization_id = $1::uuid", [claimed.id]); await client.query("UPDATE recovery_authorizations SET status = 'consumed', consumed_at = now(), updated_at = now() WHERE id = $1::uuid AND status = 'replay_in_progress'", [claimed.id]); await appendEvent(client, { authorizationId: claimed.id, eventType: "recovery_replay_consumed", actorSubject: null, occurredAt: new Date().toISOString(), payload: { idempotencyKey: claimed.idempotency_key, payloadHash: claimed.payload_hash } }); return getRecoveryAuthorization(claimed.id); });
+  void sendRecoveryNotification({ type: "recovery_consumed", authorizationId: claimed.id, queueId: claimed.queue_id }).catch(() => undefined);
+  return result;
 }

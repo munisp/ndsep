@@ -60,6 +60,15 @@ export default function RecoveryApprovalScreen() {
             </View>
           </Pressable>
         </Link>
+        <Link href={"/recovery-audit-timeline" as never} asChild>
+          <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.82 : 1 }]}>
+            <View className="rounded-3xl border border-border bg-surface p-5">
+              <Text className="text-lg font-semibold text-foreground">Recovery audit timeline</Text>
+              <Text className="mt-2 text-sm leading-5 text-muted">View the hash-chained audit events for a recovery authorization. Verify chain integrity and inspect each approval, KMS rewrap, and replay event.</Text>
+            </View>
+          </Pressable>
+        </Link>
+
       </ScrollView>
     </ScreenContainer>
   );
