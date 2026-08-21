@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The base manifest is production-namespaced for direct server-side application.
+# This overlay rewrites every namespaced resource into the pre-production
+# namespace; it does not alter alert thresholds or dashboard queries.
+namespace: ndsep-staging
+resources:
+  - ../../base
+labels:
+  - pairs:
+      environment: preproduction

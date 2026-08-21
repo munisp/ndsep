@@ -1,0 +1,40 @@
+# Dedicated GitOps application for pre-production observability controls.
+# Apply this from the Argo CD control-plane namespace after the AppProject has
+# been allow-listed for https://github.com/munisp/ndsep.git.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ndsep-preproduction-monitoring
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: ndsep
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: ndsep-platform
+    environment: preproduction
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ndsep
+  source:
+    repoURL: https://github.com/munisp/ndsep.git
+    targetRevision: staging
+    path: infra/k8s/monitoring/overlays/preproduction
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ndsep-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

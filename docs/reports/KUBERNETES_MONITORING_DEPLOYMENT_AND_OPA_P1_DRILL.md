@@ -1,6 +1,6 @@
 # Kubernetes Monitoring Deployment and OPA P1 Drill
 
-**Scope:** Deploy the Grafana dashboard and Prometheus alert rules in [`edge-policy-observability.yaml`](../../infra/k8s/monitoring/edge-policy-observability.yaml), then execute a bounded **staging-only** exercise of the `OPAFailClosedDenialsSpike` incident response.
+**Scope:** Deploy the Grafana dashboard and Prometheus alert rules in [`edge-policy-observability.yaml`](../../infra/k8s/monitoring/base/edge-policy-observability.yaml), then execute a bounded **staging-only** exercise of the `OPAFailClosedDenialsSpike` incident response.
 
 > **Safety boundary:** The exercise uses a predeployed, isolated `ndsep-api-opa-outage-canary` deployment whose OPA dependency is intentionally unreachable. It must never pause, scale, restart, patch, delete, or reconfigure shared OPA, APISIX, Caddy, Prometheus, or the normal NDSEP API. The script is non-mutating in its default `plan` mode.
 
@@ -25,7 +25,7 @@ Set the namespace for the target environment. The current manifest is production
 ```bash
 export KUBE_CONTEXT='approved-ndsep-production-context'
 export MONITORING_NAMESPACE='ndsep'
-export MANIFEST='infra/k8s/monitoring/edge-policy-observability.yaml'
+export MANIFEST='infra/k8s/monitoring/base/edge-policy-observability.yaml'
 
 kubectl config use-context "${KUBE_CONTEXT}"
 kubectl config current-context
@@ -199,6 +199,6 @@ Then verify the `OPAFailClosedDenialsSpike` rule becomes **Pending** and, after 
 
 ## References
 
-[1] [Kubernetes edge-policy observability manifest](../../infra/k8s/monitoring/edge-policy-observability.yaml)
+[1] [Kubernetes edge-policy observability manifest](../../infra/k8s/monitoring/base/edge-policy-observability.yaml)
 [2] [Staging OPA and AMR verifier](../../scripts/security/verify-staging-opa-amr.ts)
 [3] [APISIX/OPA production incident response](./APISIX_OPA_PRODUCTION_ALERTING_AND_INCIDENT_RESPONSE.md)
