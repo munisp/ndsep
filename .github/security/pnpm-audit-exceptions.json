@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "maximum_exception_days": 30,
+    "approval_requirement": "Security Engineering and the service owner must approve every exception. Changes to this file require CODEOWNERS review and an issue/ticket reference."
+  },
+  "exceptions": []
+}
