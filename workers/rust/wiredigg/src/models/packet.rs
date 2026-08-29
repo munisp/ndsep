@@ -122,7 +122,7 @@ impl AppProtocol {
             (5353, false) => Self::Mdns,
             (1900, false) => Self::Ssdp,
             (5355, false) => Self::Llmnr,
-            (137 | 138 | 139, _) => Self::Netbios,
+            (137..=139, _) => Self::Netbios,
             (445, true) => Self::Smb,
             (3389, true) => Self::Rdp,
             (23, true) => Self::Telnet,
@@ -158,29 +158,6 @@ impl TcpFlags {
             urg: flags & 0x20 != 0,
         }
     }
-
-    pub fn label(&self) -> String {
-        let mut parts = Vec::new();
-        if self.syn {
-            parts.push("SYN");
-        }
-        if self.ack {
-            parts.push("ACK");
-        }
-        if self.fin {
-            parts.push("FIN");
-        }
-        if self.rst {
-            parts.push("RST");
-        }
-        if self.psh {
-            parts.push("PSH");
-        }
-        if self.urg {
-            parts.push("URG");
-        }
-        parts.join("|")
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -191,18 +168,6 @@ pub enum ThreatSeverity {
     Medium,
     Low,
     Info,
-}
-
-impl ThreatSeverity {
-    pub fn score(&self) -> u8 {
-        match self {
-            Self::Critical => 10,
-            Self::High => 8,
-            Self::Medium => 5,
-            Self::Low => 3,
-            Self::Info => 1,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

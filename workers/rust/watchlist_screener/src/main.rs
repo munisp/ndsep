@@ -29,12 +29,9 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use chrono::Utc;
 use log::{error, info, warn};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -42,19 +39,6 @@ use std::time::{Duration, Instant};
 use tokio::time;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WatchlistEntry {
-    id: i64,
-    full_name: String,
-    aliases: Option<Vec<String>>,
-    list_source: String,
-    entity_type: String,
-    status: String,
-    bvn: Option<String>,
-    nin: Option<String>,
-    passport_number: Option<String>,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ScreeningRequest {
@@ -105,7 +89,6 @@ struct AppState {
     db_url: String,
     screenings_total: Arc<AtomicU64>,
     hits_total: Arc<AtomicU64>,
-    false_positives: Arc<AtomicU64>,
     start_time: Instant,
 }
 
@@ -126,11 +109,11 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
 
-    for i in 0..=m {
-        dp[i][0] = i;
+    for (index, row) in dp.iter_mut().enumerate().take(m + 1) {
+        row[0] = index;
     }
-    for j in 0..=n {
-        dp[0][j] = j;
+    for (index, value) in dp[0].iter_mut().enumerate().take(n + 1) {
+        *value = index;
     }
 
     for i in 1..=m {
@@ -415,7 +398,6 @@ async fn main() {
         db_url: db_url.clone(),
         screenings_total: Arc::new(AtomicU64::new(0)),
         hits_total: Arc::new(AtomicU64::new(0)),
-        false_positives: Arc::new(AtomicU64::new(0)),
         start_time: Instant::now(),
     };
 

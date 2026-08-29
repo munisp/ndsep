@@ -1,6 +1,9 @@
-// NDSEP Keycloak Token Validator — Rust
-// Port 8162 | JWT validation, JWKS caching, role extraction for all NDSEP services
-// Validates Keycloak-issued tokens and extracts NDSEP-specific roles and claims
+//! NDSEP Keycloak validator.
+//!
+//! The validator delegates token validation to Keycloak's authenticated token
+//! introspection endpoint. It intentionally fails closed when Keycloak is
+//! unreachable or returns an inactive token; it never trusts unsigned JWT
+//! payloads as a production fallback.
 
 use axum::{
     extract::State,
@@ -9,16 +12,12 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use base64::{engine::general_purpose, Engine as _};
-use chrono::Utc;
 use lazy_static::lazy_static;
 use prometheus::{Counter, Encoder, Registry, TextEncoder};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
-    collections::HashMap,
     env,
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -32,29 +31,29 @@ lazy_static! {
         "ndsep_keycloak_validations_total",
         "Total token validations"
     )
-    .unwrap();
+    .expect("validation metric definition must be valid");
     static ref VALID_COUNTER: Counter =
-        Counter::new("ndsep_keycloak_valid_tokens_total", "Total valid tokens").unwrap();
+        Counter::new("ndsep_keycloak_valid_tokens_total", "Total valid tokens")
+            .expect("valid-token metric definition must be valid");
     static ref INVALID_COUNTER: Counter = Counter::new(
         "ndsep_keycloak_invalid_tokens_total",
         "Total invalid tokens"
     )
-    .unwrap();
+    .expect("invalid-token metric definition must be valid");
     static ref INTROSPECT_COUNTER: Counter = Counter::new(
         "ndsep_keycloak_introspections_total",
         "Total token introspections"
     )
-    .unwrap();
+    .expect("introspection metric definition must be valid");
 }
 
 fn init_metrics() {
-    REGISTRY.register(Box::new(VALIDATE_COUNTER.clone())).ok();
-    REGISTRY.register(Box::new(VALID_COUNTER.clone())).ok();
-    REGISTRY.register(Box::new(INVALID_COUNTER.clone())).ok();
-    REGISTRY.register(Box::new(INTROSPECT_COUNTER.clone())).ok();
+    let _ = REGISTRY.register(Box::new(VALIDATE_COUNTER.clone()));
+    let _ = REGISTRY.register(Box::new(VALID_COUNTER.clone()));
+    let _ = REGISTRY.register(Box::new(INVALID_COUNTER.clone()));
+    let _ = REGISTRY.register(Box::new(INTROSPECT_COUNTER.clone()));
 }
 
-// NDSEP Keycloak realm roles
 const NDSEP_ROLES: &[&str] = &[
     "ndsep-admin",
     "ndsep-compliance-officer",
@@ -84,27 +83,6 @@ pub struct IntrospectRequest {
     pub token: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TokenClaims {
-    pub sub: Option<String>,
-    pub preferred_username: Option<String>,
-    pub email: Option<String>,
-    pub realm_access: Option<serde_json::Value>,
-    pub resource_access: Option<serde_json::Value>,
-    pub scope: Option<String>,
-    pub exp: Option<i64>,
-    pub iat: Option<i64>,
-    pub iss: Option<String>,
-    pub ndsep_tenant_id: Option<String>,
-    pub ndsep_sector: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct JwksCache {
-    pub keys: serde_json::Value,
-    pub cached_at: Instant,
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pub client: Client,
@@ -112,78 +90,84 @@ pub struct AppState {
     pub realm: String,
     pub client_id: String,
     pub client_secret: String,
-    pub jwks_cache: Arc<Mutex<Option<JwksCache>>>,
     pub start_time: Instant,
 }
 
 impl AppState {
-    fn jwks_url(&self) -> String {
-        format!(
-            "{}/realms/{}/protocol/openid-connect/certs",
-            self.keycloak_url, self.realm
-        )
-    }
-
     fn introspect_url(&self) -> String {
         format!(
             "{}/realms/{}/protocol/openid-connect/token/introspect",
             self.keycloak_url, self.realm
         )
     }
+}
 
-    fn userinfo_url(&self) -> String {
-        format!(
-            "{}/realms/{}/protocol/openid-connect/userinfo",
-            self.keycloak_url, self.realm
+type ApiError = (StatusCode, Json<serde_json::Value>);
+
+fn error_response(status: StatusCode, message: &str) -> ApiError {
+    (
+        status,
+        Json(serde_json::json!({"success": false, "error": message})),
+    )
+}
+
+async fn active_token_claims(state: &AppState, token: &str) -> Result<serde_json::Value, ApiError> {
+    let response = state
+        .client
+        .post(state.introspect_url())
+        .basic_auth(&state.client_id, Some(&state.client_secret))
+        .form(&[("token", token), ("client_id", state.client_id.as_str())])
+        .send()
+        .await
+        .map_err(|_| {
+            error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Keycloak introspection is unavailable",
+            )
+        })?;
+
+    if !response.status().is_success() {
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Keycloak introspection returned an unsuccessful response",
+        ));
+    }
+
+    let claims: serde_json::Value = response.json().await.map_err(|_| {
+        error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Keycloak returned an invalid introspection response",
         )
+    })?;
+
+    if claims.get("active").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "token is inactive or invalid",
+        ));
     }
+
+    Ok(claims)
 }
 
-/// Decode JWT payload without signature verification (for degraded mode)
-fn decode_jwt_payload(token: &str) -> Option<TokenClaims> {
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let payload = parts[1];
-    // Add padding
-    let padded = match payload.len() % 4 {
-        2 => format!("{}==", payload),
-        3 => format!("{}=", payload),
-        _ => payload.to_string(),
-    };
-    let decoded = general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .or_else(|_| general_purpose::URL_SAFE.decode(&padded))
-        .ok()?;
-    serde_json::from_slice(&decoded).ok()
+fn roles_from_claims(claims: &serde_json::Value) -> Vec<String> {
+    claims
+        .pointer("/realm_access/roles")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|role| role.starts_with("ndsep-"))
+        .map(ToString::to_string)
+        .collect()
 }
 
-/// Check if token is expired
-fn is_token_expired(claims: &TokenClaims) -> bool {
-    if let Some(exp) = claims.exp {
-        return Utc::now().timestamp() > exp;
-    }
-    false
-}
-
-/// Extract NDSEP roles from token claims
-fn extract_ndsep_roles(claims: &TokenClaims) -> Vec<String> {
-    let mut roles = Vec::new();
-    if let Some(realm_access) = &claims.realm_access {
-        if let Some(realm_roles) = realm_access.get("roles") {
-            if let Some(role_array) = realm_roles.as_array() {
-                for role in role_array {
-                    if let Some(role_str) = role.as_str() {
-                        if role_str.starts_with("ndsep-") {
-                            roles.push(role_str.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    roles
+fn scopes_from_claims(claims: &serde_json::Value) -> Vec<&str> {
+    claims
+        .get("scope")
+        .and_then(serde_json::Value::as_str)
+        .map(|scope| scope.split_whitespace().collect())
+        .unwrap_or_default()
 }
 
 async fn validate_token(
@@ -191,53 +175,30 @@ async fn validate_token(
     Json(req): Json<ValidateRequest>,
 ) -> impl IntoResponse {
     VALIDATE_COUNTER.inc();
-
-    // Decode JWT payload (degraded mode — no signature verification)
-    let claims = match decode_jwt_payload(&req.token) {
-        Some(c) => c,
-        None => {
+    let claims = match active_token_claims(&state, &req.token).await {
+        Ok(claims) => claims,
+        Err(error) => {
             INVALID_COUNTER.inc();
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({
-                    "valid": false,
-                    "error": "invalid token format",
-                })),
-            )
-                .into_response();
+            return error.into_response();
         }
     };
 
-    // Check expiry
-    if is_token_expired(&claims) {
-        INVALID_COUNTER.inc();
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({
-                "valid": false,
-                "error": "token expired",
-            })),
-        )
+    let roles = roles_from_claims(&claims);
+    if let Some(required_roles) = &req.required_roles {
+        if !required_roles.iter().all(|role| roles.contains(role)) {
+            INVALID_COUNTER.inc();
+            return error_response(
+                StatusCode::FORBIDDEN,
+                "token is missing a required NDSEP role",
+            )
             .into_response();
+        }
     }
 
-    // Extract roles
-    let roles = extract_ndsep_roles(&claims);
-
-    // Check required roles
-    if let Some(required) = &req.required_roles {
-        let has_all = required.iter().all(|r| roles.contains(r));
-        if !has_all {
+    if let Some(required_scope) = req.required_scope.as_deref() {
+        if !scopes_from_claims(&claims).contains(&required_scope) {
             INVALID_COUNTER.inc();
-            return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "valid": false,
-                    "error": "insufficient roles",
-                    "required": required,
-                    "actual": roles,
-                })),
-            )
+            return error_response(StatusCode::FORBIDDEN, "token is missing a required scope")
                 .into_response();
         }
     }
@@ -245,14 +206,14 @@ async fn validate_token(
     VALID_COUNTER.inc();
     Json(serde_json::json!({
         "valid": true,
-        "sub": claims.sub,
-        "username": claims.preferred_username,
-        "email": claims.email,
+        "sub": claims.get("sub"),
+        "username": claims.get("preferred_username"),
+        "email": claims.get("email"),
         "roles": roles,
-        "scope": claims.scope,
-        "tenantId": claims.ndsep_tenant_id,
-        "sector": claims.ndsep_sector,
-        "exp": claims.exp,
+        "scope": claims.get("scope"),
+        "tenantId": claims.get("ndsep_tenant_id"),
+        "sector": claims.get("ndsep_sector"),
+        "exp": claims.get("exp"),
     }))
     .into_response()
 }
@@ -262,42 +223,11 @@ async fn introspect_token(
     Json(req): Json<IntrospectRequest>,
 ) -> impl IntoResponse {
     INTROSPECT_COUNTER.inc();
-
-    // Try Keycloak introspection endpoint
-    let auth = format!("{}:{}", state.client_id, state.client_secret);
-    let auth_header = format!("Basic {}", general_purpose::STANDARD.encode(&auth));
-
-    let mut params = HashMap::new();
-    params.insert("token", req.token.as_str());
-    params.insert("client_id", state.client_id.as_str());
-    params.insert("client_secret", state.client_secret.as_str());
-
-    match state
-        .client
-        .post(&state.introspect_url())
-        .header("Authorization", auth_header)
-        .form(&params)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let body: serde_json::Value = resp.json().await.unwrap_or_default();
-            Json(serde_json::json!({
-                "success": true,
-                "introspection": body,
-            }))
-            .into_response()
+    match active_token_claims(&state, &req.token).await {
+        Ok(claims) => {
+            Json(serde_json::json!({"success": true, "introspection": claims})).into_response()
         }
-        Err(_) => {
-            // Degraded mode — decode locally
-            let claims = decode_jwt_payload(&req.token);
-            Json(serde_json::json!({
-                "success": true,
-                "degraded": true,
-                "claims": claims,
-            }))
-            .into_response()
-        }
+        Err(error) => error.into_response(),
     }
 }
 
@@ -318,6 +248,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "keycloak_url": state.keycloak_url,
         "realm": state.realm,
         "roles_defined": NDSEP_ROLES.len(),
+        "validation_mode": "remote_introspection_fail_closed",
     }))
 }
 
@@ -325,7 +256,7 @@ async fn metrics() -> impl IntoResponse {
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
     let mut buffer = Vec::new();
-    encoder.encode(&metric_families, &mut buffer).unwrap();
+    let _ = encoder.encode(&metric_families, &mut buffer);
     (
         [(
             axum::http::header::CONTENT_TYPE,
@@ -353,12 +284,11 @@ async fn main() {
         client: Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
-            .unwrap(),
+            .expect("Keycloak HTTP client must initialize"),
         keycloak_url: keycloak_url.clone(),
         realm: realm.clone(),
         client_id,
         client_secret,
-        jwks_cache: Arc::new(Mutex::new(None)),
         start_time: Instant::now(),
     };
 
@@ -370,10 +300,12 @@ async fn main() {
         .route("/metrics", get(metrics))
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{}", port);
-    tracing::info!("NDSEP Keycloak Validator starting on {}", addr);
-    tracing::info!("Keycloak URL: {} | Realm: {}", keycloak_url, realm);
-
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let address = format!("0.0.0.0:{port}");
+    tracing::info!("NDSEP Keycloak validator starting on {address}");
+    let listener = tokio::net::TcpListener::bind(&address)
+        .await
+        .expect("Keycloak validator socket must bind");
+    axum::serve(listener, app)
+        .await
+        .expect("Keycloak validator server must remain available");
 }

@@ -95,30 +95,32 @@ export default function PermitDetailScreen() {
   const agencyUsers = platformQuery.data?.agencyUsers ?? [];
   const activeAgencyUser = activeAgencyUserQuery.data;
 
-  const [summary, setSummary] = useState("");
-  const [draftSections, setDraftSections] = useState<Record<string, string>>({});
+  const [permitDraft, setPermitDraft] = useState<{ caseId: string; summary: string; sections: Record<string, string>; assigneeId: string } | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [documentName, setDocumentName] = useState("permit-supporting-document.txt");
   const [documentText, setDocumentText] = useState("");
   const [pickedFile, setPickedFile] = useState<{ name: string; mimeType: string; base64Data: string } | null>(null);
-  const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
   const [overrideReason, setOverrideReason] = useState("Manual supervisor override");
   const [handoffNote, setHandoffNote] = useState("Accepted for current review stage.");
   const [exportPreview, setExportPreview] = useState<ExportPreview | null>(null);
   const [cacheManifest, setCacheManifest] = useState<CachedAuditManifest | null>(null);
 
-  useEffect(() => {
-    if (!record) return;
-    setSummary(record.summary);
-    setSelectedAssigneeId(record.activeAssignment?.assignedUserId ?? "");
-    const nextDrafts: Record<string, string> = {};
-    record.formSections.forEach((section) => {
-      section.fields.forEach((field) => {
-        nextDrafts[field.key] = field.value;
-      });
-    });
-    setDraftSections(nextDrafts);
-  }, [record]);
+  const recordSections = Object.fromEntries(
+    (record?.formSections ?? []).flatMap((section) => section.fields.map((field) => [field.key, field.value])),
+  );
+  const defaultPermitDraft = {
+    caseId: record?.id ?? caseId,
+    summary: record?.summary ?? "",
+    sections: recordSections,
+    assigneeId: record?.activeAssignment?.assignedUserId ?? "",
+  };
+  const activePermitDraft = permitDraft?.caseId === defaultPermitDraft.caseId ? permitDraft : defaultPermitDraft;
+  const summary = activePermitDraft.summary;
+  const draftSections = activePermitDraft.sections;
+  const selectedAssigneeId = activePermitDraft.assigneeId;
+  function updatePermitDraft(next: Partial<Omit<typeof activePermitDraft, "caseId">>) {
+    setPermitDraft({ ...activePermitDraft, ...next });
+  }
 
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -415,7 +417,7 @@ export default function PermitDetailScreen() {
               <Text className="text-sm font-semibold text-foreground">Supervisor override</Text>
               <View className="mt-3 flex-row flex-wrap gap-2">
                 {assignableUsers.map((user) => (
-                  <Pressable key={user.id} onPress={() => setSelectedAssigneeId(user.id)} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}> 
+                  <Pressable key={user.id} onPress={() => updatePermitDraft({ assigneeId: user.id })} style={({ pressed }) => [{ opacity: pressed ? 0.8 : 1 }]}>
                     <View className={`rounded-full border px-3 py-2 ${selectedAssigneeId === user.id ? "border-primary bg-primary/10" : "border-border bg-surface"}`}>
                       <Text className={`text-xs font-semibold ${selectedAssigneeId === user.id ? "text-primary" : "text-foreground"}`}>{user.displayName}</Text>
                       <Text className="text-[11px] text-muted">{user.role.replace(/_/g, " ")}</Text>
@@ -467,7 +469,7 @@ export default function PermitDetailScreen() {
           <SectionCard title="Editable intake and review form">
             <View className="rounded-2xl border border-border bg-background p-4">
               <Text className="text-sm font-semibold text-foreground">Permit summary</Text>
-              <TextInput editable={isApplicant || canReview} value={summary} onChangeText={setSummary} multiline className="mt-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground" style={{ minHeight: 88, textAlignVertical: "top" }} />
+              <TextInput editable={isApplicant || canReview} value={summary} onChangeText={(summary) => updatePermitDraft({ summary })} multiline className="mt-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground" style={{ minHeight: 88, textAlignVertical: "top" }} />
             </View>
             {record.formSections.map((section) => (
               <View key={section.id} className="rounded-2xl border border-border bg-background p-4">
@@ -479,7 +481,7 @@ export default function PermitDetailScreen() {
                     return (
                       <View key={field.key}>
                         <Text className="text-sm font-semibold text-foreground">{field.label}</Text>
-                        <TextInput editable={editable} value={draftSections[field.key] ?? ""} onChangeText={(value) => setDraftSections((current) => ({ ...current, [field.key]: value }))} multiline={field.fieldType === "textarea"} keyboardType={field.fieldType === "number" ? "numeric" : "default"} className="mt-2 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground" style={{ minHeight: field.fieldType === "textarea" ? 92 : 52, textAlignVertical: "top" }} />
+                        <TextInput editable={editable} value={draftSections[field.key] ?? ""} onChangeText={(value) => updatePermitDraft({ sections: { ...draftSections, [field.key]: value } })} multiline={field.fieldType === "textarea"} keyboardType={field.fieldType === "number" ? "numeric" : "default"} className="mt-2 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-foreground" style={{ minHeight: field.fieldType === "textarea" ? 92 : 52, textAlignVertical: "top" }} />
                         <Text className="mt-1 text-xs text-muted">{field.required ? "Required" : "Optional"} · Source: {field.source} · Editable by: {(field.editableBy ?? [viewerRole]).join(", ").replace(/_/g, " ")}</Text>
                       </View>
                     );

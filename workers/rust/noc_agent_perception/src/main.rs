@@ -120,10 +120,13 @@ struct PerceptionMetrics {
     uptime_seconds: u64,
 }
 
+type TimedMetric = (f64, DateTime<Utc>);
+type RecentMetrics = HashMap<String, Vec<TimedMetric>>;
+
 struct AppState {
     db_url: String,
     baselines: RwLock<HashMap<String, ServiceBaseline>>,
-    recent_metrics: RwLock<HashMap<String, Vec<(f64, DateTime<Utc>)>>>,
+    recent_metrics: RwLock<RecentMetrics>,
     anomalies: RwLock<Vec<AnomalyDetection>>,
     predictions: RwLock<Vec<Prediction>>,
     forest: RwLock<IsolationForest>,
@@ -227,11 +230,7 @@ fn isolation_score(forest: &IsolationForest, features: &[f64]) -> f64 {
 
 // ── Feature Extraction ───────────────────────────────────────────────────────
 
-fn extract_features(
-    value: f64,
-    baseline: &ServiceBaseline,
-    recent: &[(f64, DateTime<Utc>)],
-) -> Vec<f64> {
+fn extract_features(value: f64, baseline: &ServiceBaseline, recent: &[TimedMetric]) -> Vec<f64> {
     let z_score = if baseline.std_dev > 0.0 {
         (value - baseline.mean) / baseline.std_dev
     } else {
@@ -337,7 +336,7 @@ fn classify_anomaly(z_score: f64, iso_score: f64) -> (String, String, String, f6
 fn predict_trend(
     service_name: &str,
     metric_name: &str,
-    recent: &[(f64, DateTime<Utc>)],
+    recent: &[TimedMetric],
     baseline: &ServiceBaseline,
 ) -> Option<Prediction> {
     if recent.len() < 10 {
@@ -377,9 +376,11 @@ fn predict_trend(
         let predicted_time = Utc::now() + chrono::Duration::minutes(PREDICTION_HORIZON_MINUTES);
         let prediction_type = if metric_name.contains("cpu") || metric_name.contains("memory") {
             "capacity_exhaustion"
-        } else if metric_name.contains("latency") || metric_name.contains("response") {
-            "service_degradation"
-        } else if metric_name.contains("error") || metric_name.contains("fail") {
+        } else if metric_name.contains("latency")
+            || metric_name.contains("response")
+            || metric_name.contains("error")
+            || metric_name.contains("fail")
+        {
             "service_degradation"
         } else {
             "performance_regression"
@@ -685,7 +686,7 @@ async fn dashboard_handler(State(state): State<Arc<AppState>>) -> Json<serde_jso
             *service_counts.entry(a.service_name.clone()).or_default() += 1;
         }
         let mut sorted: Vec<_> = service_counts.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         sorted
             .into_iter()
             .take(10)
@@ -799,7 +800,7 @@ async fn poll_noc_metrics(state: Arc<AppState>) {
             for metric in &all_metrics {
                 let key = format!("{}:{}", metric.service_name, metric.metric_name);
                 let mut recent = state.recent_metrics.write().unwrap();
-                let buffer = recent.entry(key).or_insert_with(Vec::new);
+                let buffer = recent.entry(key).or_default();
                 buffer.push((metric.value, metric.timestamp));
                 if buffer.len() > 500 {
                     buffer.drain(0..250);

@@ -93,7 +93,7 @@ async fn generate_package(Json(req): Json<EvidenceRequest>) -> Json<EvidenceResp
     let package_id = format!(
         "EVP-{}-{}",
         now.format("%Y%m%d"),
-        &content_hash[..8].to_uppercase()
+        content_hash[..8].to_uppercase()
     );
 
     PACKAGES_GENERATED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

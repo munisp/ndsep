@@ -41,8 +41,8 @@ impl AnomalyDetector {
         }
 
         let mean = self.window.iter().sum::<f64>() / self.window.len() as f64;
-        let variance = self.window.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
-            / self.window.len() as f64;
+        let variance =
+            self.window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / self.window.len() as f64;
         let std_dev = variance.sqrt();
 
         if std_dev < f64::EPSILON {
@@ -58,10 +58,14 @@ impl AnomalyDetector {
             return "{}".to_string();
         }
         let mean = self.window.iter().sum::<f64>() / self.window.len() as f64;
-        let variance = self.window.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
-            / self.window.len() as f64;
+        let variance =
+            self.window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / self.window.len() as f64;
         let min = self.window.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = self.window.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let max = self
+            .window
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
 
         serde_json::json!({
             "samples": self.window.len(),
@@ -89,16 +93,22 @@ pub struct ThreatScorer {
     suspicious_patterns: Vec<String>,
 }
 
+impl Default for ThreatScorer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl ThreatScorer {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self {
             malicious_ports: vec![
-                4444, 5555, 6666, 31337, 12345, 27374, 1337, 9001,
-                4443, 8443, 6667, 6668, 6669, // IRC
+                4444, 5555, 6666, 31337, 12345, 27374, 1337, 9001, 4443, 8443, 6667, 6668,
+                6669, // IRC
                 445, 139, // SMB
-                23, // Telnet
+                23,  // Telnet
             ],
             suspicious_patterns: vec![
                 "cmd.exe".to_string(),
@@ -115,7 +125,12 @@ impl ThreatScorer {
         }
     }
 
-    pub fn score_connection(&self, dst_port: u16, payload_preview: &str, packet_size: u32) -> String {
+    pub fn score_connection(
+        &self,
+        dst_port: u16,
+        payload_preview: &str,
+        packet_size: u32,
+    ) -> String {
         let mut score: f64 = 0.0;
         let mut indicators = Vec::new();
 
@@ -190,6 +205,12 @@ struct PiiDetection {
     location: String,
 }
 
+impl Default for PiiDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl PiiDetector {
     #[wasm_bindgen(constructor)]
@@ -238,8 +259,12 @@ impl PiiDetector {
 
         // Phone number detection (Nigerian +234)
         let text_lower = text.to_lowercase();
-        if text_lower.contains("+234") || text_lower.contains("0803") || text_lower.contains("0805")
-            || text_lower.contains("0807") || text_lower.contains("0810") || text_lower.contains("0901")
+        if text_lower.contains("+234")
+            || text_lower.contains("0803")
+            || text_lower.contains("0805")
+            || text_lower.contains("0807")
+            || text_lower.contains("0810")
+            || text_lower.contains("0901")
         {
             detections.push(PiiDetection {
                 pii_type: "PhoneNumber".to_string(),
@@ -260,7 +285,10 @@ impl PiiDetector {
         }
 
         let has_pii = !detections.is_empty();
-        let risk_level = if detections.iter().any(|d| d.pii_type == "BVN" || d.pii_type == "NIN") {
+        let risk_level = if detections
+            .iter()
+            .any(|d| d.pii_type == "BVN" || d.pii_type == "NIN")
+        {
             "critical"
         } else if detections.iter().any(|d| d.pii_type == "CreditCard") {
             "high"
@@ -353,6 +381,12 @@ pub struct BatchAnalyzer {
     pii_found: u64,
 }
 
+impl Default for BatchAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl BatchAnalyzer {
     #[wasm_bindgen(constructor)]
@@ -382,7 +416,11 @@ impl BatchAnalyzer {
             }
         }
         if let Ok(pii) = serde_json::from_str::<serde_json::Value>(&pii_json) {
-            if pii.get("has_pii").and_then(|p| p.as_bool()).unwrap_or(false) {
+            if pii
+                .get("has_pii")
+                .and_then(|p| p.as_bool())
+                .unwrap_or(false)
+            {
                 self.pii_found += 1;
             }
         }

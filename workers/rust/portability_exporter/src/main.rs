@@ -127,7 +127,6 @@ fn generate_export_data(format: &str, email: &str, categories: &[String]) -> (St
         }
     };
 
-    let size = content.len() as u64;
     (content, record_count)
 }
 

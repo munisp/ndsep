@@ -2,8 +2,9 @@
 ///
 /// Each organization is an autonomous agent with:
 ///   - budget, staff_count, tech_maturity, risk_appetite, sector, jurisdiction
-/// Agents interact: compete for compliance budget, share threat intel,
-/// respond to peer pressure, react to policy changes.
+///
+/// Agents interact: compete for compliance budget, share threat intel, and
+/// respond to peer pressure and policy changes.
 ///
 /// Port: 8178
 use axum::{
@@ -111,7 +112,7 @@ fn simulate_agents(req: &ABMRequest) -> ABMResponse {
             let mut current = agent.compliance_score;
             let mut budget_spent = 0.0;
 
-            for month in 1..=req.duration_months {
+            for _month in 1..=req.duration_months {
                 // Base improvement from budget + staff investment
                 let budget_effect = (agent.security_budget / 100000.0).min(1.0) * 0.5;
                 let staff_effect = (agent.infosec_staff as f64 * 0.1).min(0.5);

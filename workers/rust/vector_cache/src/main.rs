@@ -19,7 +19,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -93,14 +92,6 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         return 0.0;
     }
     (dot / (norm_a * norm_b)).clamp(-1.0, 1.0)
-}
-
-fn hash_embedding(embedding: &[f32]) -> String {
-    let mut hasher = Sha256::new();
-    for &v in embedding {
-        hasher.update(v.to_le_bytes());
-    }
-    hex::encode(hasher.finalize())
 }
 
 fn hash_query(query: &str) -> String {

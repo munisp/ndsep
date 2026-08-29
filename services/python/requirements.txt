@@ -1,8 +1,7 @@
-chromadb==0.5.23
 fastapi==0.115.6
 feedparser==6.0.11
 httpx==0.28.1
-langchain==0.3.13
+langchain==0.3.30
 numpy==2.2.1
 opentelemetry-api==1.29.0
 opentelemetry-instrumentation-fastapi==0.50b0
