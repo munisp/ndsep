@@ -40,12 +40,14 @@ async function trpcPost(page: Page, path: string, body: unknown) {
 
 test.describe("Flow 1: Login → Dashboard", () => {
   test("Homepage loads without runtime errors", async ({ page }) => {
+    const pageErrors: Error[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error));
     await page.goto(BASE);
     await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(500);
     expect(content).not.toContain("Unhandled Runtime Error");
-    expect(content).not.toContain("TypeError");
+    expect(pageErrors).toEqual([]);
   });
 
   test("Homepage has a sign-in link or dashboard content", async ({ page }) => {
