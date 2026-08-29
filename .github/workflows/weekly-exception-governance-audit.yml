@@ -1,0 +1,139 @@
+name: Weekly Exception Governance Audit
+
+on:
+  schedule:
+    # Monday 08:00 UTC. GitHub scheduled workflows execute from the default branch.
+    - cron: '0 0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: weekly-exception-governance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  exception-governance-audit:
+    name: exception-governance-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out protected branch history
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run weekly exception and expiry audit
+        id: audit
+        shell: bash
+        run: |
+          set +e
+          node scripts/ci/weekly-pnpm-exception-audit.mjs \
+            --registry .github/security/pnpm-audit-exceptions.json \
+            --lockfile pnpm-lock.yaml \
+            --warning-days 14 \
+            --history-days 8 \
+            --output-markdown weekly-exception-governance-report.md \
+            --output-json weekly-exception-governance-report.json
+          audit_exit=$?
+          set -e
+          echo "exit_code=$audit_exit" >> "$GITHUB_OUTPUT"
+
+      - name: Upload governance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-exception-governance-${{ github.run_id }}
+          path: |
+            weekly-exception-governance-report.md
+            weekly-exception-governance-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish concise workflow summary
+        if: always()
+        shell: bash
+        run: |
+          cat weekly-exception-governance-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update governance review issue
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          AUDIT_EXIT_CODE: ${{ steps.audit.outputs.exit_code }}
+          AUDIT_JSON_PATH: weekly-exception-governance-report.json
+          AUDIT_MARKDOWN_PATH: weekly-exception-governance-report.md
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync(process.env.AUDIT_JSON_PATH, 'utf8'));
+            const errors = report.governance_errors || [];
+            const warnings = report.review_warnings || [];
+            const changes = report.recent_registry_changes || [];
+            const changedCount = changes.reduce((count, change) => count + (change.added?.length || 0) + (change.removed?.length || 0), 0);
+            const requiresReview = errors.length > 0 || warnings.length > 0 || changedCount > 0;
+            if (!requiresReview) {
+              core.info('No exception warnings, errors, or registry changes require a governance issue.');
+              return;
+            }
+
+            const title = '[Security] Weekly pnpm exception governance review';
+            const marker = '<!-- ndsep-weekly-pnpm-exception-governance -->';
+            const reportUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const summary = [
+              marker,
+              '## Weekly pnpm exception governance audit',
+              '',
+              `- Workflow run: ${reportUrl}`,
+              `- Blocking governance errors: **${errors.length}**`,
+              `- Warnings requiring review: **${warnings.length}**`,
+              `- New/changed exception records in the last ${report.history_days} days: **${changedCount}**`,
+              `- Active exception records: **${(report.active_exceptions || []).length}**`,
+              '',
+              '### Required action',
+              'Security Engineering must review the attached workflow report, confirm remediation progress, revoke stale exceptions, and close this issue only after all errors and warnings are resolved or explicitly reapproved.',
+              '',
+              '### Blocking errors',
+              ...(errors.length ? errors.map((item) => `- ${item}`) : ['- None']),
+              '',
+              '### Warnings',
+              ...(warnings.length ? warnings.map((item) => `- ${item}`) : ['- None']),
+            ].join('\n');
+
+            const openIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = openIssues.data.find((issue) => issue.title === title && !issue.pull_request);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: summary,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body: summary,
+              });
+            }
+
+      - name: Enforce risk-tolerance validity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.audit.outputs.exit_code }}" = "0"

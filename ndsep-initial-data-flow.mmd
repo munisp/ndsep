@@ -1,0 +1,116 @@
+flowchart LR
+    %% NDSEP initial data-flow diagram — based on production Compose, Caddy,
+    %% APISIX, Express/tRPC, OPA policy, and worker configuration review.
+
+    subgraph Z0[Zone 0 — Untrusted external parties]
+        U1[Public users / DPCOs / citizens]
+        U2[Privileged regulators / administrators]
+        X1[External data & payment providers]
+        R1[Security researchers]
+    end
+
+    subgraph Z1[Zone 1 — Internet-facing edge]
+        CADDY[Caddy TLS edge\nHTTPS, headers, body limits]
+        KC_PUBLIC[Keycloak OIDC realm endpoints]
+    end
+
+    subgraph Z2[Zone 2 — Application ingress & identity]
+        APISIX[APISIX gateway\nOIDC bearer validation\nrate limits]
+        KC[Keycloak identity provider\nJWT + MFA claims]
+        API[NDSEP Node / Express / tRPC API\nCORS, CSRF, request controls\nrole and session enforcement]
+        WS[WebSocket / SSE / event-polling]
+        WEBHOOK[Inbound webhooks\nStripe / Mojaloop]
+    end
+
+    subgraph Z3[Zone 3 — Authorization & application services]
+        OPA[OPA policy decision point\ndefault deny for privileged actions]
+        PERMIFY[Permify authorization engine]
+        RT[Realtime broadcast & worker relay]
+        REPORT[Report / PDF / export generation]
+        ML_API[ML, GNN, Ray & lakehouse\nAPI proxy routes]
+    end
+
+    subgraph Z4[Zone 4 — Data, event, and state stores]
+        PG[(PostgreSQL\nregulated records, users, audit data)]
+        REDIS[(Redis\nsessions/cache/rate limits)]
+        KAFKA[(Kafka\nevents and worker messages)]
+        TEMPORAL[Temporal\nworkflow state]
+        S3[(Object storage\nreports/backups)]
+        BACKUP[Backup service + WAL archive]
+    end
+
+    subgraph Z5[Zone 5 — Internal workers & processing]
+        GO[Go workers\ncompliance, reporting, gateways]
+        PY[Python workers\nKYC, AML, sector monitoring]
+        RUST[Rust workers\nwatchlist and analysis]
+    end
+
+    subgraph Z6[Zone 6 — Observability & operations]
+        PROM[Prometheus]
+        ALERT[Alertmanager\nSlack / PagerDuty / email]
+        GRAF[Grafana]
+        OPS[Deployment / CI administrators]
+    end
+
+    U1 -->|HTTPS requests| CADDY
+    U2 -->|HTTPS requests| CADDY
+    CADDY -->|API/tRPC only| APISIX
+    U1 -->|OIDC authentication| KC_PUBLIC
+    U2 -->|OIDC + MFA authentication| KC_PUBLIC
+    KC_PUBLIC --> KC
+    APISIX -->|validated bearer / proxied request| API
+    API -->|session/token subject & MFA assertion| OPA
+    API -->|resource relationship check| PERMIFY
+    OPA -->|allow/deny decision| API
+    PERMIFY -->|allow/deny decision| API
+    API -->|read/write encrypted & regulated data| PG
+    API -->|sessions, cache, distributed limits| REDIS
+    API -->|commands/events| KAFKA
+    API -->|workflow requests| TEMPORAL
+    API -->|generated reports / exports| REPORT
+    REPORT -->|documents| S3
+    API -->|service requests| ML_API
+    API -->|notifications/events| WS
+    WS -->|live updates| U1
+    WS -->|live updates| U2
+    WEBHOOK -->|signed event payload| API
+    X1 -->|API responses & callbacks| WEBHOOK
+    X1 <-->|regulated integration data| GO
+    X1 <-->|KYC/AML/sector data| PY
+    GO -->|worker event relay| RT
+    PY -->|worker event relay| RT
+    RUST -->|worker event relay| RT
+    RT -->|broadcast & notifications| WS
+    GO --> PG
+    PY --> PG
+    RUST --> PG
+    GO --> KAFKA
+    PY --> KAFKA
+    RUST --> KAFKA
+    KAFKA --> GO
+    KAFKA --> PY
+    KAFKA --> RUST
+    PG --> BACKUP
+    BACKUP --> S3
+    PROM <-->|internal metrics scrape| API
+    PROM <-->|internal metrics scrape| APISIX
+    PROM --> ALERT
+    PROM --> GRAF
+    ALERT -->|operational alerts| OPS
+    OPS -->|deploy/configure privileged services| APISIX
+    OPS -->|deploy/configure secrets and images| API
+    R1 -.->|confidential disclosure| OPS
+
+    classDef external fill:#fff4e5,stroke:#ad5f00,stroke-width:2px,color:#222;
+    classDef edge fill:#edf5ff,stroke:#0b5394,stroke-width:2px,color:#222;
+    classDef service fill:#eaf4ea,stroke:#38761d,stroke-width:2px,color:#222;
+    classDef policy fill:#f4eafa,stroke:#674ea7,stroke-width:2px,color:#222;
+    classDef data fill:#fff2cc,stroke:#7f6000,stroke-width:2px,color:#222;
+    classDef ops fill:#fce4ec,stroke:#a61c46,stroke-width:2px,color:#222;
+
+    class U1,U2,X1,R1 external;
+    class CADDY,KC_PUBLIC,APISIX edge;
+    class API,WS,WEBHOOK,RT,REPORT,ML_API,GO,PY,RUST service;
+    class KC,OPA,PERMIFY policy;
+    class PG,REDIS,KAFKA,TEMPORAL,S3,BACKUP data;
+    class PROM,ALERT,GRAF,OPS ops;
