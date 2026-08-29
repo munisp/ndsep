@@ -30,8 +30,13 @@ interface K8sManifest {
 }
 
 interface ReadinessReport {
+  /** Static manifest quality score; this is not a cluster health or rollout result. */
   score: number;
+  /** Static checks cannot establish production deployment readiness. */
   level: "ready" | "almost" | "not_ready";
+  verificationScope: "static_manifest_review";
+  releaseEligible: false;
+  limitations: string[];
   manifests: K8sManifest[];
   dockerfiles: Array<{ service: string; exists: boolean; path: string }>;
   portMap: Array<{ service: string; port: number; conflict: boolean }>;
@@ -116,6 +121,9 @@ function scanYamlFiles(dir: string): K8sManifest[] {
 }
 
 export function checkK8sReadiness(): ReadinessReport {
+  // This function intentionally performs a static repository review only. It
+  // cannot query a cluster, verify admission controls, inspect deployed image
+  // digests, or prove a rollout. Keep its release signal fail-closed.
   // Scan all K8s manifest directories
   const manifests: K8sManifest[] = [];
   for (const dir of K8S_DIRS) {
@@ -168,7 +176,14 @@ export function checkK8sReadiness(): ReadinessReport {
 
   return {
     score,
-    level: score >= 80 ? "ready" : score >= 50 ? "almost" : "not_ready",
+    level: "not_ready",
+    verificationScope: "static_manifest_review",
+    releaseEligible: false,
+    limitations: [
+      "Static manifest inspection does not validate Kubernetes API acceptance or admission controls.",
+      "Static manifest inspection does not prove image availability, rollout health, service reachability, or rollback.",
+      "A successful isolated cluster deployment and rollback exercise is required before release approval.",
+    ],
     manifests,
     dockerfiles,
     portMap,

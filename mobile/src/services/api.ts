@@ -16,6 +16,32 @@ interface RequestOptions {
   offlineAllowed?: boolean;
 }
 
+export interface PlatformMetrics {
+  totalOrgs: number;
+  activeCases: number;
+  breaches30d: number;
+  avgCompliance: number;
+}
+
+export interface NocStatus {
+  status: "operational" | "degraded";
+  services: Array<{
+    serviceName: string;
+    status: "healthy" | "recovering" | "degraded";
+    failures: number;
+    lastOpenedAt: number | null;
+  }>;
+}
+
+export interface EnforcementCaseSummary {
+  id: number;
+  case_number: string | null;
+  org_id: number | null;
+  status: string;
+  created_at: string | null;
+  sector: string | null;
+}
+
 class NDSEPApiClient {
   private token: string | null = null;
   private offlineQueue: Array<{ url: string; options: RequestOptions; timestamp: number }> = [];
@@ -143,18 +169,13 @@ class NDSEPApiClient {
   // ── Platform Metrics ────────────────────────────────────────────────────────
 
   async getPlatformMetrics() {
-    return this.request<{
-      totalOrgs: number;
-      activeCases: number;
-      breaches30d: number;
-      avgCompliance: number;
-    }>("/api/v2/metrics/platform");
+    return this.request<PlatformMetrics>("/api/v2/metrics/platform");
   }
 
   // ── NOC ─────────────────────────────────────────────────────────────────────
 
   async getNOCStatus() {
-    return this.request("/api/v2/noc/status");
+    return this.request<NocStatus>("/api/v2/noc/status");
   }
 
   async acknowledgeAlert(alertId: string) {
@@ -168,7 +189,7 @@ class NDSEPApiClient {
 
   async getEnforcementCases(filters?: { status?: string; sector?: string }) {
     const params = new URLSearchParams(filters as Record<string, string>);
-    return this.request(`/api/v2/enforcement/cases?${params}`);
+    return this.request<EnforcementCaseSummary[]>(`/api/v2/enforcement/cases?${params}`);
   }
 
   // ── Data Transfers ─────────────────────────────────────────────────────────

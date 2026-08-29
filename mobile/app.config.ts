@@ -13,7 +13,7 @@ const bundleId =
     .replace(/^\.+|\.+$/g, "") // Trim leading/trailing dots
     .toLowerCase()
     .split(".")
-    .map((segment) => {
+    .map((segment: string) => {
       // Android requires each segment to start with a letter
       // Prefix with 'x' if segment starts with a digit
       return /^[a-zA-Z]/.test(segment) ? segment : "x" + segment;
@@ -82,6 +82,7 @@ const config: ExpoConfig = {
   },
   plugins: [
     "expo-router",
+    "expo-sqlite",
     "expo-background-task",
     "expo-notifications",
     "expo-asset",

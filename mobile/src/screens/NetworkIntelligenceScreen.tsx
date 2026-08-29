@@ -15,26 +15,24 @@ export function NetworkIntelligenceScreen() {
   });
   const onRefresh = async () => { setRefreshing(true); await refetch(); setRefreshing(false); };
 
-  const netMetrics = [
-    { label: "Ingress Traffic", value: metrics?.ingress_mbps ?? "—", unit: "Mbps" },
-    { label: "Active Connections", value: metrics?.active_connections ?? "—", unit: "" },
-    { label: "Blocked IPs (24h)", value: metrics?.blocked_ips_24h ?? "—", unit: "" },
-    { label: "WAF Events (24h)", value: metrics?.waf_events_24h ?? "—", unit: "" },
-    { label: "DNS Queries/s", value: metrics?.dns_qps ?? "—", unit: "/s" },
-    { label: "SSL Certificate Expiry", value: metrics?.ssl_days_remaining ?? "—", unit: "days" },
+  const platformMetrics = [
+    { label: "Registered Organizations", value: metrics?.totalOrgs ?? "—", unit: "" },
+    { label: "Active Enforcement Cases", value: metrics?.activeCases ?? "—", unit: "" },
+    { label: "Reported Breaches (30 days)", value: metrics?.breaches30d ?? "—", unit: "" },
+    { label: "Average Compliance", value: metrics?.avgCompliance ?? "—", unit: "%" },
   ];
 
   return (
     <ScrollView style={s.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}>
-      <MobilePageHeader title="Network Intelligence" subtitle="Real-time network & threat monitoring" />
-      {netMetrics.map((m, idx) => (
+      <MobilePageHeader title="Platform Intelligence" subtitle="Current regulatory and compliance summary" />
+      {platformMetrics.map((m, idx) => (
         <MobileCard key={idx}>
           <Text style={s.metricLabel}>{m.label}</Text>
           <Text style={s.metricValue}>{m.value}{m.unit ? ` ${m.unit}` : ""}</Text>
         </MobileCard>
       ))}
-      <MobileCard title="Threat Map">
-        <Text style={s.placeholder}>Geographic threat visualization requires full-screen mode</Text>
+      <MobileCard title="Data provenance">
+        <Text style={s.placeholder}>Metrics are supplied by the authenticated NDSEP platform API and reflect the current server response.</Text>
       </MobileCard>
     </ScrollView>
   );

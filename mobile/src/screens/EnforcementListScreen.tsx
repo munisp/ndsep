@@ -17,19 +17,19 @@ export function EnforcementListScreen() {
   });
 
   const onRefresh = async () => { setRefreshing(true); await refetch(); setRefreshing(false); };
-  const cases = data?.cases ?? [];
+  const cases = data ?? [];
 
   return (
     <ScrollView style={s.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.success} />}>
-      <MobilePageHeader title="Enforcement Cases" subtitle={`${cases.length} active cases`} />
-      {cases.map((c: { id: string; org_name: string; case_type: string; status: string; severity: string; created_at: string }, idx: number) => (
-        <MobileCard key={idx} style={s.cardOuter}>
+      <MobilePageHeader title="Enforcement Cases" subtitle={`${cases.length} cases returned by the platform`} />
+      {cases.map((enforcementCase) => (
+        <MobileCard key={enforcementCase.id} style={s.cardOuter}>
           <View style={s.cardHeader}>
-            <Text style={s.caseName}>{c.org_name}</Text>
-            <MobileBadge variant={getBadgeVariant(c.status)}>{c.status}</MobileBadge>
+            <Text style={s.caseName}>{enforcementCase.case_number ?? `Case ${enforcementCase.id}`}</Text>
+            <MobileBadge variant={getBadgeVariant(enforcementCase.status)}>{enforcementCase.status}</MobileBadge>
           </View>
-          <Text style={s.caseType}>{c.case_type} — Severity: {c.severity}</Text>
-          <Text style={s.caseDate}>{new Date(c.created_at).toLocaleDateString()}</Text>
+          <Text style={s.caseType}>Sector: {enforcementCase.sector ?? "not reported"}</Text>
+          <Text style={s.caseDate}>{enforcementCase.created_at ? new Date(enforcementCase.created_at).toLocaleDateString() : "Creation date not reported"}</Text>
         </MobileCard>
       ))}
       {cases.length === 0 && <MobileEmptyState title="No enforcement cases" description="Cases will appear here when created." />}

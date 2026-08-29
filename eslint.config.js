@@ -37,6 +37,7 @@ export default tseslint.config(
       "*.config.js",
       "*.config.ts",
       "workers/**",
+      "mobile/**",
       "infra/**",
       "scripts/**",
       "*.test.ts",

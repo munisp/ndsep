@@ -16,21 +16,25 @@ export function OrganizationDetailScreen() {
   });
 
   const onRefresh = async () => { setRefreshing(true); await refetch(); setRefreshing(false); };
-  const orgs = data?.organizations ?? [];
+  const dimensions = Object.entries(data?.dimensions ?? {});
 
   return (
     <ScrollView style={s.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.success} />}>
-      <MobilePageHeader title="Organizations" subtitle={`${orgs.length} registered data controllers`} />
-      {orgs.length === 0 ? (
-        <MobileEmptyState title="No organizations loaded" description="Registered organizations will appear here." />
+      <MobilePageHeader title="Compliance Overview" subtitle="Authenticated platform compliance summary" />
+      <MobileCard>
+        <Text style={s.orgName}>Overall compliance score</Text>
+        <Text style={[s.orgScore, { color: (data?.overallScore ?? 0) >= 80 ? colors.success : colors.warning }]}>
+          {data?.overallScore ?? "—"}%
+        </Text>
+        <Text style={s.orgSector}>Trend: {data?.trend ?? "not reported"}</Text>
+      </MobileCard>
+      {dimensions.length === 0 ? (
+        <MobileEmptyState title="No compliance dimensions reported" description="The platform did not return a current breakdown." />
       ) : (
-        orgs.map((org: { id: number; name: string; sector: string; compliance_score?: number }, idx: number) => (
-          <MobileCard key={idx}>
-            <Text style={s.orgName}>{org.name}</Text>
-            <Text style={s.orgSector}>{org.sector}</Text>
-            <Text style={[s.orgScore, { color: (org.compliance_score ?? 0) >= 80 ? colors.success : colors.warning }]}>
-              Score: {org.compliance_score ?? "N/A"}%
-            </Text>
+        dimensions.map(([dimension, score]) => (
+          <MobileCard key={dimension}>
+            <Text style={s.orgName}>{dimension}</Text>
+            <Text style={[s.orgScore, { color: score >= 80 ? colors.success : colors.warning }]}>Score: {Math.round(score)}%</Text>
           </MobileCard>
         ))
       )}

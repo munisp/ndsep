@@ -2,15 +2,15 @@ name: NDSEP CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop, staging, 'devin/**']
+    branches: [main, develop, staging, production, "devin/**"]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, staging, production]
 
 env:
-  NODE_VERSION: '22'
-  GO_VERSION: '1.21'
-  PYTHON_VERSION: '3.11'
-  RUST_VERSION: 'stable'
+  NODE_VERSION: "22"
+  GO_VERSION: "1.21"
+  PYTHON_VERSION: "3.11"
+  RUST_VERSION: "stable"
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ jobs:
           POSTGRES_USER: ndsep_user
           POSTGRES_PASSWORD: ndsep_test_pass
           POSTGRES_DB: ndsep_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
-        with: { version: '10.4.1' }
+        with: { version: "10.4.1" }
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -50,6 +50,8 @@ jobs:
         name: Apply database migrations
       - run: pnpm exec tsc --noEmit
         name: TypeScript check
+      - run: pnpm lint
+        name: Lint the root web and API project
       - run: pnpm test --reporter=verbose
         name: Unit tests
       - run: pnpm run build
@@ -59,6 +61,34 @@ jobs:
         with:
           name: test-results
           path: test-results/
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Mobile app — independent dependency graph and quality gates
+  # ─────────────────────────────────────────────────────────────────────────────
+  mobile-ci:
+    name: Mobile CI (TypeScript + Lint + Tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm check
+        name: Mobile TypeScript check
+      - run: pnpm lint
+        name: Mobile lint
+      - run: pnpm test
+        name: Mobile unit tests
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Go workers — build + vet + test all 15 workers
@@ -118,14 +148,12 @@ jobs:
           find orchestration -name requirements.txt -exec pip install -r {} \;
       - name: Lint with flake8
         run: flake8 orchestration/ workers/python/ --max-line-length=120 --ignore=E501,W503
-        continue-on-error: true
       - name: Run Python tests
         run: pytest orchestration/ -v --tb=short
-        continue-on-error: true
       - name: Python security scan (bandit)
         run: |
           pip install bandit
-          bandit -r workers/python/ orchestration/ -ll -ii --format json -o bandit-results.json || true
+          bandit -r workers/python/ orchestration/ -ll -ii --format json -o bandit-results.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -177,14 +205,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
-          scan-ref: '.'
+          scan-ref: "."
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
-        continue-on-error: true
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -199,7 +226,6 @@ jobs:
           cache: pnpm
       - name: Audit npm packages (fail on high/critical)
         run: pnpm audit --audit-level=high
-        continue-on-error: true
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Integration tests (E2E with Playwright)
@@ -208,7 +234,7 @@ jobs:
     name: Integration Tests (E2E)
     runs-on: ubuntu-latest
     needs: [node-ci]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/production'
     services:
       postgres:
         image: postgres:16-alpine
@@ -216,7 +242,7 @@ jobs:
           POSTGRES_USER: ndsep_user
           POSTGRES_PASSWORD: ndsep_test_pass
           POSTGRES_DB: ndsep_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -229,7 +255,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
-        with: { version: '10.4.1' }
+        with: { version: "10.4.1" }
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -240,7 +266,6 @@ jobs:
         name: Start server
       - run: sleep 5 && pnpm exec playwright test
         name: Run E2E tests
-        continue-on-error: true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -254,7 +279,7 @@ jobs:
     name: Docker Build & Push
     runs-on: ubuntu-latest
     needs: [node-ci, go-ci, python-ci, security]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/production'
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
