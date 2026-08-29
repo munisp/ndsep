@@ -27,35 +27,26 @@ async function trpcGet(page: Page, path: string, input?: object): Promise<{ stat
   const url = wrapped
     ? `${BASE}/api/trpc/${path}?input=${encodeURIComponent(JSON.stringify(wrapped))}`
     : `${BASE}/api/trpc/${path}`;
-  return page.evaluate(async (fetchUrl: string) => {
-    const res = await fetch(fetchUrl, { credentials: "include" });
-    const json = await res.json().catch(() => null);
-    const data = json?.result?.data?.json ?? json?.result?.data ?? null;
-    return { status: res.status, data };
-  }, url);
+  const res = await page.request.get(url);
+  const json = await res.json().catch(() => null);
+  const data = json?.result?.data?.json ?? json?.result?.data ?? null;
+  return { status: res.status(), data };
 }
 
 /** tRPC v11 POST mutation via browser fetch (sends cookies) */
 async function trpcPost(page: Page, path: string, body: object): Promise<{ status: number; data: any }> {
-  return page.evaluate(
-    async ([fetchUrl, payload]: [string, string]) => {
-      const res = await fetch(fetchUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: payload,
-      });
-      const json = await res.json().catch(() => null);
-      const data = json?.result?.data?.json ?? json?.result?.data ?? null;
-      return { status: res.status, data };
-    },
-    [`${BASE}/api/trpc/${path}`, JSON.stringify({ json: body })] as [string, string]
-  );
+  const res = await page.request.post(`${BASE}/api/trpc/${path}`, {
+    headers: { "Content-Type": "application/json" },
+    data: JSON.stringify({ json: body }),
+  });
+  const json = await res.json().catch(() => null);
+  const data = json?.result?.data?.json ?? json?.result?.data ?? null;
+  return { status: res.status(), data };
 }
 
 /** Navigate to demo-login so the browser context receives the session cookie */
 async function demoLogin(page: Page, role: "admin" | "dpco") {
-  await page.goto(`${BASE}/api/demo-login?role=${role}`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE}/api/demo-login?role=${role}`, { waitUntil: "domcontentloaded" });
 }
 
 // ─── Suite 1: Public Accreditation Application ───────────────────────────────
