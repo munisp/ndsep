@@ -278,6 +278,7 @@ jobs:
   integration:
     name: Integration Tests (E2E)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [node-ci]
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/production'
     services:
@@ -296,6 +297,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
       JWT_SECRET: test-jwt-secret-for-ci-only
+      FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -307,9 +309,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm run build && pnpm start &
-        name: Start server
-      - run: sleep 5 && pnpm exec playwright test
+      - name: Start server and verify readiness
+        run: |
+          pnpm run build
+          pnpm start > /tmp/ndsep-server.log 2>&1 &
+          echo $! > /tmp/ndsep-server.pid
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/ndsep-server.log
+          exit 1
+      - run: pnpm exec playwright test --timeout=30000 --global-timeout=600000
         name: Run E2E tests
       - uses: actions/upload-artifact@v4
         if: always()
