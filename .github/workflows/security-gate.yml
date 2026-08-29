@@ -149,25 +149,29 @@ jobs:
           persist-credentials: false
 
       - name: Run filesystem scan and fail on high or critical issues
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy-results.sarif
-          severity: HIGH,CRITICAL
-          ignore-unfixed: false
-          exit-code: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$PWD:/src:ro" \
+            --volume "$PWD:/out" \
+            aquasec/trivy:0.65.0 \
+            fs /src \
+            --format sarif \
+            --output /out/trivy-results.sarif \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed=false \
+            --exit-code 1
 
       - name: Upload scan results to code scanning
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
           category: trivy-filesystem
 
       - name: Upload Trivy evidence
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         uses: actions/upload-artifact@v4
         with:
           name: trivy-${{ github.sha }}
