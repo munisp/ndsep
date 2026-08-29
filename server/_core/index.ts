@@ -117,21 +117,28 @@ const safeIpKey = (req: import("express").Request) => ipKeyGenerator(req.ip ?? r
 // Each limiter receives an independent store and prefix; express-rate-limit rejects
 // reuse of one store instance across multiple limiter configurations.
 let createRateLimitStore: ((prefix: string) => RedisStore) | undefined;
-try {
-  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-  const redisClient = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false });
-  redisClient.connect().then(() => {
-    logger.info("[RateLimit] Redis-backed stores active");
-  }).catch(() => {
-    logger.warn("[RateLimit] Redis unavailable — rate limit stores may fall back to their configured error policy");
-  });
-  createRateLimitStore = (prefix: string) => new RedisStore({
-    prefix,
-    sendCommand: (command: string, ...args: string[]) =>
-      redisClient.call(command, ...args) as Promise<RedisReply>,
-  });
-} catch {
-  logger.warn("[RateLimit] rate-limit-redis not available — using in-memory stores");
+if (process.env.NODE_ENV === "test") {
+  logger.info("[RateLimit] Test environment uses isolated in-memory stores");
+} else {
+  try {
+    const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+    const redisClient = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false });
+    redisClient.on("error", (err) => {
+      logger.warn({ err }, "[RateLimit] Redis client error");
+    });
+    redisClient.connect().then(() => {
+      logger.info("[RateLimit] Redis-backed stores active");
+    }).catch(() => {
+      logger.warn("[RateLimit] Redis unavailable — rate limit stores may fall back to their configured error policy");
+    });
+    createRateLimitStore = (prefix: string) => new RedisStore({
+      prefix,
+      sendCommand: (command: string, ...args: string[]) =>
+        redisClient.call(command, ...args) as Promise<RedisReply>,
+    });
+  } catch {
+    logger.warn("[RateLimit] rate-limit-redis not available — using in-memory stores");
+  }
 }
 
 /** General API rate limit: configurable per IP */
