@@ -54,7 +54,7 @@ REPORT_TYPES = ['CTR', 'STR_SUMMARY', 'FX_POSITION', 'CAPITAL_ADEQUACY', 'FRAUD_
 
 def generate_report_reference(report_type: str) -> str:
     ts = datetime.now().strftime('%Y%m%d%H%M%S')
-    suffix = hashlib.md5(str(random.random()).encode()).hexdigest()[:6].upper()
+    suffix = hashlib.md5(str(random.random()).encode(), usedforsecurity=False).hexdigest()[:6].upper()
     return f"CBN-{report_type}-{ts}-{suffix}"
 
 

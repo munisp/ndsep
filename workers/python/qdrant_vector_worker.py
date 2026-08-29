@@ -264,7 +264,7 @@ def index_knowledge_base():
         return 0
     points = []
     for i, (doc, vec) in enumerate(zip(NDPA_KNOWLEDGE_BASE, vectors)):
-        doc_id = int(hashlib.md5(doc["id"].encode()).hexdigest()[:8], 16) % (2**31)
+        doc_id = int(hashlib.md5(doc["id"].encode(), usedforsecurity=False).hexdigest()[:8], 16) % (2**31)
         points.append({
             "id": doc_id,
             "vector": vec,
@@ -303,7 +303,7 @@ def index_policies(conn):
         return 0
     points = []
     for policy, vec in zip(policies, vectors):
-        pid = int(hashlib.md5(f"policy-{policy['id']}".encode()).hexdigest()[:8], 16) % (2**31)
+        pid = int(hashlib.md5(f"policy-{policy['id']}".encode(), usedforsecurity=False).hexdigest()[:8], 16) % (2**31)
         points.append({
             "id": pid,
             "vector": vec,
@@ -346,7 +346,7 @@ def index_violations(conn):
         return 0
     points = []
     for violation, vec in zip(violations, vectors):
-        vid = int(hashlib.md5(f"violation-{violation['id']}".encode()).hexdigest()[:8], 16) % (2**31)
+        vid = int(hashlib.md5(f"violation-{violation['id']}".encode(), usedforsecurity=False).hexdigest()[:8], 16) % (2**31)
         points.append({
             "id": vid,
             "vector": vec,
@@ -391,7 +391,7 @@ def index_organizations(conn):
         return 0
     points = []
     for org, vec in zip(orgs, vectors):
-        oid = int(hashlib.md5(f"org-{org['id']}".encode()).hexdigest()[:8], 16) % (2**31)
+        oid = int(hashlib.md5(f"org-{org['id']}".encode(), usedforsecurity=False).hexdigest()[:8], 16) % (2**31)
         points.append({
             "id": oid,
             "vector": vec,

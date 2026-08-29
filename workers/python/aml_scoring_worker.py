@@ -147,7 +147,7 @@ def ml_score(features: Dict[str, float]) -> float:
 def generate_str_reference() -> str:
     """Generate a NFIU-compliant STR reference number."""
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    suffix = hashlib.md5(str(random.random()).encode()).hexdigest()[:6].upper()
+    suffix = hashlib.md5(str(random.random()).encode(), usedforsecurity=False).hexdigest()[:6].upper()
     return f"STR-{timestamp}-{suffix}"
 
 
