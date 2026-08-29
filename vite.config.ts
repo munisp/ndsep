@@ -156,6 +156,9 @@ const pwaPlugin = VitePWA({
   includeAssets: ["favicon.ico", "icons/*.png"],
   devOptions: { enabled: true },
   workbox: {
+    // The verified vendor bundle is approximately 2.39 MB. Keep an explicit
+    // bounded precache budget rather than relying on Workbox's 2 MB default.
+    maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
     globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
     runtimeCaching: [
       {
