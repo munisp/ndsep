@@ -312,7 +312,7 @@ jobs:
       - name: Start server and verify readiness
         run: |
           pnpm run build
-          pnpm start > /tmp/ndsep-server.log 2>&1 &
+          NODE_ENV=test node dist/index.js > /tmp/ndsep-server.log 2>&1 &
           echo $! > /tmp/ndsep-server.pid
           for attempt in {1..30}; do
             if curl --fail --silent --show-error http://127.0.0.1:3000/api/health; then
