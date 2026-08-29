@@ -41,10 +41,13 @@ stats = {
 user_action_counts: Dict[str, List[float]] = defaultdict(list)  # user_id -> [timestamps]
 
 # ─── Kafka consumer (REST Proxy) ─────────────────────────────────────────────
+
+
 def kafka_consume_once() -> List[Dict[str, Any]]:
     """Poll Kafka REST Proxy for new audit log messages."""
     try:
-        import urllib.request, urllib.error
+        import urllib.request
+        import urllib.error
         # Create consumer if needed
         consumer_url = f"{KAFKA_REST_URL}/consumers/{KAFKA_GROUP}/instances/{KAFKA_GROUP}-1"
         # Try to read messages
@@ -60,6 +63,8 @@ def kafka_consume_once() -> List[Dict[str, Any]]:
         return []
 
 # ─── Anomaly detection ────────────────────────────────────────────────────────
+
+
 def detect_anomaly(event: Dict[str, Any]) -> bool:
     """Sliding window: flag if user performs >ANOMALY_THRESHOLD actions/min."""
     user_id = str(event.get("user_id", "unknown"))
@@ -77,6 +82,8 @@ def detect_anomaly(event: Dict[str, Any]) -> bool:
     return False
 
 # ─── PostgreSQL writer ────────────────────────────────────────────────────────
+
+
 def write_to_pg(event: Dict[str, Any]) -> None:
     """Write aggregated audit event to PostgreSQL."""
     try:
@@ -107,11 +114,13 @@ def write_to_pg(event: Dict[str, Any]) -> None:
         log.debug(f"PG write error (non-fatal): {e}")
         stats["errors"] += 1
 
+
 # ─── Critical event forwarder ─────────────────────────────────────────────────
 CRITICAL_ACTIONS = {
     "aml.createCase", "breach.create", "banking.createInstitution",
     "kyc.createRecord", "enforcement.issue", "penalty.issue",
 }
+
 
 def forward_critical(event: Dict[str, Any]) -> None:
     """Forward critical audit events to NDPC notification endpoint."""
@@ -123,8 +132,8 @@ def forward_critical(event: Dict[str, Any]) -> None:
         payload = json.dumps({
             "title": f"[NDSEP Critical] {action}",
             "content": f"Resource: {event.get('resource_type')}/{event.get('resource_id')}\n"
-                       f"User: {event.get('user_id')}\n"
-                       f"Details: {json.dumps(event.get('details', {}))}",
+            f"User: {event.get('user_id')}\n"
+            f"Details: {json.dumps(event.get('details', {}))}",
         }).encode()
         req = urllib.request.Request(
             os.environ.get("NDPC_NOTIFY_URL", "http://localhost:3000/api/internal/notify"),
@@ -139,6 +148,8 @@ def forward_critical(event: Dict[str, Any]) -> None:
         log.debug(f"Critical forward error (non-fatal): {e}")
 
 # ─── Main consumer loop ───────────────────────────────────────────────────────
+
+
 def consumer_loop() -> None:
     log.info(f"[AuditAggregator] Starting consumer for topic {KAFKA_TOPIC}")
     while True:
@@ -155,6 +166,8 @@ def consumer_loop() -> None:
         time.sleep(2)
 
 # ─── HTTP server ─────────────────────────────────────────────────────────────
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass  # suppress default logging
@@ -189,6 +202,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def main():
     # Start consumer in background thread
     t = threading.Thread(target=consumer_loop, daemon=True)
@@ -198,6 +212,7 @@ def main():
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     log.info(f"[AuditAggregator] HTTP server on port {PORT}")
     server.serve_forever()
+
 
 if __name__ == "__main__":
     main()

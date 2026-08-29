@@ -8,9 +8,7 @@ import os
 import json
 import logging
 import time
-import hashlib
 from datetime import datetime, timezone
-from typing import Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -25,17 +23,17 @@ DB_URL = os.environ.get(
 # ─── Risk Scoring Rubric ──────────────────────────────────────────────────────
 # Each dimension scored 0-100. Composite = weighted average.
 DIMENSION_WEIGHTS = {
-    "transparency":     0.25,   # Is the model explainable? Are decisions communicated?
-    "fairness":         0.25,   # Bias testing, demographic parity checks
-    "accountability":   0.20,   # Audit trails, human oversight, DPO involvement
-    "data_minimisation":0.15,   # Minimum data used, retention limits enforced
-    "security":         0.15,   # Encryption, access controls, adversarial robustness
+    "transparency": 0.25,   # Is the model explainable? Are decisions communicated?
+    "fairness": 0.25,   # Bias testing, demographic parity checks
+    "accountability": 0.20,   # Audit trails, human oversight, DPO involvement
+    "data_minimisation": 0.15,   # Minimum data used, retention limits enforced
+    "security": 0.15,   # Encryption, access controls, adversarial robustness
 }
 
 RISK_THRESHOLDS = {
-    "low":      80,   # score >= 80 → low risk
-    "medium":   60,   # score >= 60 → medium risk
-    "high":     40,   # score >= 40 → high risk
+    "low": 80,   # score >= 80 → low risk
+    "medium": 60,   # score >= 60 → medium risk
+    "high": 40,   # score >= 40 → high risk
     "critical": 0,    # score < 40  → critical risk
 }
 

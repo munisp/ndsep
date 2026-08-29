@@ -7,7 +7,7 @@ Uses the CPU face_recognition (dlib) embedding model. No heuristic image-similar
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np

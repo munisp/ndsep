@@ -13,9 +13,6 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import urlopen, Request
 from urllib.error import URLError
-from urllib.parse import urlparse
-import urllib.request
-from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [permify-rbac-sync] %(message)s')
 logger = logging.getLogger(__name__)
@@ -105,6 +102,7 @@ metrics = {
 
 # ─── Permify Client ────────────────────────────────────────────────────────
 
+
 def permify_request(method: str, path: str, body: dict = None) -> dict:
     url = f"{PERMIFY_URL}{path}"
     data = json.dumps(body).encode() if body else None
@@ -122,6 +120,7 @@ def permify_request(method: str, path: str, body: dict = None) -> dict:
         logger.error(f"Permify request error: {e}")
         return {"error": str(e)}
 
+
 def push_schema():
     """Push NDSEP RBAC schema to Permify"""
     result = permify_request("POST", f"/v1/tenants/{PERMIFY_TENANT}/schemas/write", {
@@ -131,6 +130,7 @@ def push_schema():
         metrics["schema_pushes"] += 1
         logger.info(f"Schema pushed to Permify: {result.get('schema_version', 'unknown')}")
     return result
+
 
 def write_relationship(entity_type: str, entity_id: str, relation: str, subject_type: str, subject_id: str):
     """Write a relationship tuple to Permify"""
@@ -146,6 +146,7 @@ def write_relationship(entity_type: str, entity_id: str, relation: str, subject_
         metrics["relationship_writes"] += 1
     return result
 
+
 def check_permission(entity_type: str, entity_id: str, permission: str, subject_id: str) -> bool:
     """Check if a subject has a permission on an entity"""
     result = permify_request("POST", f"/v1/tenants/{PERMIFY_TENANT}/permissions/check", {
@@ -158,6 +159,7 @@ def check_permission(entity_type: str, entity_id: str, permission: str, subject_
     if result.get("degraded"):
         return True  # Fail open in degraded mode
     return result.get("can") == "CHECK_RESULT_ALLOWED"
+
 
 def seed_default_relationships():
     """Seed default NDSEP relationships"""
@@ -176,6 +178,7 @@ def seed_default_relationships():
         write_relationship(entity_type, entity_id, relation, subject_type, subject_id)
     logger.info(f"Seeded {len(default_relationships)} default relationships")
 
+
 def sync_cycle():
     """Periodic sync cycle"""
     metrics["sync_cycles"] += 1
@@ -183,6 +186,7 @@ def sync_cycle():
     push_schema()
     if metrics["sync_cycles"] == 1:
         seed_default_relationships()
+
 
 def start_sync_thread():
     def run():
@@ -197,6 +201,7 @@ def start_sync_thread():
     t.start()
 
 # ─── HTTP Handler ──────────────────────────────────────────────────────────
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -277,6 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "not found"}, 404)
 
 # ─── Main ──────────────────────────────────────────────────────────────────
+
 
 if __name__ == "__main__":
     logger.info(f"NDSEP Permify RBAC Sync starting on port {PORT}")

@@ -3,9 +3,9 @@ import { Pool } from "pg";
 
 import { resetPaymentAuditForTests, reviewOfflinePayment, submitOfflinePayment, updatePaymentStateApprovalPolicy } from "../server/offlinePaymentRepository";
 
-const testUrl = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
-process.env.PAYMENT_AUDIT_POSTGRES_URL = testUrl;
-const pool = new Pool({ connectionString: testUrl });
+const localTestUrl = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
+process.env.PAYMENT_AUDIT_POSTGRES_URL ??= localTestUrl;
+const pool = new Pool({ connectionString: process.env.PAYMENT_AUDIT_POSTGRES_URL });
 
 beforeEach(async () => { await resetPaymentAuditForTests(); await updatePaymentStateApprovalPolicy({ jurisdiction: "fct", highValueThresholdKobo: 5000000, firstApproverRole: "planning_supervisor", secondApproverRole: "environment_reviewer", updatedBy: "policy-admin" }); });
 afterEach(async () => resetPaymentAuditForTests());

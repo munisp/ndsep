@@ -7,8 +7,6 @@ import os
 import json
 import logging
 import time
-from datetime import datetime, timezone
-from typing import Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -21,16 +19,16 @@ DB_URL = os.environ.get(
 )
 
 SECTOR_LABELS = {
-    "fintech":       "Financial Technology",
-    "healthcare":    "Healthcare & Pharma",
-    "telco":         "Telecommunications",
-    "government":    "Government & Public Sector",
-    "ecommerce":     "E-Commerce & Retail",
-    "education":     "Education",
-    "energy":        "Energy & Utilities",
-    "media":         "Media & Entertainment",
-    "logistics":     "Logistics & Transport",
-    "agriculture":   "Agriculture",
+    "fintech": "Financial Technology",
+    "healthcare": "Healthcare & Pharma",
+    "telco": "Telecommunications",
+    "government": "Government & Public Sector",
+    "ecommerce": "E-Commerce & Retail",
+    "education": "Education",
+    "energy": "Energy & Utilities",
+    "media": "Media & Entertainment",
+    "logistics": "Logistics & Transport",
+    "agriculture": "Agriculture",
 }
 
 
@@ -167,7 +165,10 @@ def compute_sector_benchmarks():
                     snapshot["avg_penalty_ngn"],
                 ))
             conn.commit()
-            log.info(f"Benchmarked sector {sector}: {snapshot['org_count']} orgs, avg score {snapshot['avg_compliance_score']}")
+            log.info(
+                f"Benchmarked sector {sector}: {
+                    snapshot['org_count']} orgs, avg score {
+                    snapshot['avg_compliance_score']}")
             results.append(snapshot)
 
         return results

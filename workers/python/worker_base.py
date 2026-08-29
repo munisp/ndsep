@@ -28,6 +28,7 @@ import requests
 
 # ─── Structured JSON Logger ───────────────────────────────────────────────────
 
+
 class JSONFormatter(logging.Formatter):
     """Formats log records as single-line JSON for production log aggregation."""
 
@@ -65,6 +66,7 @@ def get_logger(worker_id: str) -> logging.Logger:
 
 _pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 _pool_lock = threading.Lock()
+
 
 def get_db_url() -> str:
     return os.environ.get(
@@ -120,6 +122,7 @@ def get_conn(pool: psycopg2.pool.ThreadedConnectionPool):
         def __enter__(self):
             self.conn = pool.getconn()
             return self.conn
+
         def __exit__(self, exc_type, exc_val, exc_tb):
             if exc_type:
                 self.conn.rollback()

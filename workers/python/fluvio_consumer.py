@@ -110,8 +110,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/health":
-            healthy = metrics["connected"] and FLUVIO_IMPORT_ERROR is None and bool(OPENSEARCH_URL) and bool(EVENT_RELAY_URL)
-            self.send_json({"status": "healthy" if healthy else "unhealthy", "service": "ndsep-fluvio-consumer", "topics": NDSEP_TOPICS, "metrics": {key: value for key, value in metrics.items() if key not in {"by_topic", "start_time"}}}, 200 if healthy else 503)
+            healthy = metrics["connected"] and FLUVIO_IMPORT_ERROR is None and bool(
+                OPENSEARCH_URL) and bool(EVENT_RELAY_URL)
+            self.send_json({"status": "healthy" if healthy else "unhealthy",
+                            "service": "ndsep-fluvio-consumer",
+                            "topics": NDSEP_TOPICS,
+                            "metrics": {key: value for key,
+                                        value in metrics.items() if key not in {"by_topic",
+                                                                                "start_time"}}},
+                           200 if healthy else 503)
         elif self.path == "/topics":
             self.send_json({"topics": NDSEP_TOPICS, "count": len(NDSEP_TOPICS)})
         elif self.path == "/metrics":
@@ -130,7 +137,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:
-        self.send_json({"error": "This endpoint is a broker-backed consumer and does not accept synthetic publish or DLQ replay requests"}, 405)
+        self.send_json(
+            {"error": "This endpoint is a broker-backed consumer and does not accept synthetic publish or DLQ replay requests"}, 405)
 
 
 if __name__ == "__main__":

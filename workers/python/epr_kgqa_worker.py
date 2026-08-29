@@ -20,15 +20,22 @@ KGQA pipeline:
 Technology: Python · sentence-transformers · qdrant-client · psycopg2 · ollama
 Port: 8202
 """
-import os, time, json, logging, threading, http.server, socketserver, re
+import os
+import time
+import json
+import logging
+import http.server
+import socketserver
+import re
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Any
 import psycopg2
 import psycopg2.extras
 import requests
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
+    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
@@ -37,8 +44,8 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
 LLM_MODEL = os.environ.get("OLLAMA_MODEL", "mistral")
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-KGQA] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-KGQA] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── State ──────────────────────────────────────────────────────────────────────
@@ -133,6 +140,8 @@ KG_QUERIES = {
 }
 
 # ── Entity extraction ──────────────────────────────────────────────────────────
+
+
 def extract_entities(question: str) -> Dict[str, List[str]]:
     """Extract named entities from a question using regex patterns."""
     entities: Dict[str, List[str]] = {}
@@ -146,6 +155,8 @@ def extract_entities(question: str) -> Dict[str, List[str]]:
     return entities
 
 # ── Semantic entity linking ────────────────────────────────────────────────────
+
+
 def link_entities_to_graph(entities: Dict[str, List[str]]) -> Dict[str, List[Dict]]:
     """Link extracted entities to graph nodes via Qdrant semantic search."""
     linked = {}
@@ -189,6 +200,8 @@ def link_entities_to_graph(entities: Dict[str, List[str]]) -> Dict[str, List[Dic
     return linked
 
 # ── Graph traversal ────────────────────────────────────────────────────────────
+
+
 def traverse_graph(question: str, entities: Dict[str, List[str]]) -> List[Dict]:
     """Execute graph traversal queries based on extracted entities."""
     results = []
@@ -250,6 +263,8 @@ def traverse_graph(question: str, entities: Dict[str, List[str]]) -> List[Dict]:
     return results
 
 # ── Qdrant semantic retrieval ──────────────────────────────────────────────────
+
+
 def semantic_retrieve(question: str, limit: int = 5) -> List[Dict]:
     """Retrieve semantically relevant context from Qdrant."""
     try:
@@ -282,6 +297,8 @@ def semantic_retrieve(question: str, limit: int = 5) -> List[Dict]:
         return []
 
 # ── LLM answer generation ──────────────────────────────────────────────────────
+
+
 def generate_answer_with_llm(question: str, context: List[Dict], graph_data: List[Dict]) -> str:
     """Generate a natural language answer using Ollama LLM with retrieved context."""
     # Build context string
@@ -323,11 +340,13 @@ Answer:"""
 
     # Fallback: rule-based answer from context
     if context_parts:
-        return f"Based on the available compliance data:\n\n" + "\n".join(context_parts[:3])
+        return "Based on the available compliance data:\n\n" + "\n".join(context_parts[:3])
 
     return "I could not find specific information to answer this question. Please consult the NDPA 2023 directly or contact the NDPC."
 
 # ── Main KGQA pipeline ─────────────────────────────────────────────────────────
+
+
 def answer_question(question: str) -> Dict[str, Any]:
     """Full KGQA pipeline: question → entities → graph → context → answer."""
     global _questions_answered, _errors
@@ -377,8 +396,11 @@ def answer_question(question: str) -> Dict[str, Any]:
         }
 
 # ── HTTP Server ────────────────────────────────────────────────────────────────
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args): pass
+    def log_message(self, *args):
+        pass
 
     def do_GET(self):
         if self.path == "/health":
@@ -419,6 +441,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
 
 if __name__ == "__main__":
     log.info("Starting NDSEP EPR-KGQA Worker...")

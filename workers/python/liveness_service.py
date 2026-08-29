@@ -18,8 +18,10 @@ Endpoints:
 Port: 8150 (configurable via LIVENESS_SERVICE_PORT)
 """
 
+from liveness.liveness_scorer import LivenessScorer
+from liveness.face_matcher import FaceMatcher
+from liveness.face_detector import compute_landmark_features
 import base64
-import io
 import logging
 import os
 import time
@@ -29,7 +31,7 @@ from typing import List, Optional
 import cv2
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -41,10 +43,6 @@ logging.basicConfig(
 logger = logging.getLogger("liveness_service")
 
 # Import liveness modules
-from liveness.anti_spoof import SpoofType
-from liveness.face_detector import FaceDetector, compute_landmark_features
-from liveness.face_matcher import FaceMatcher
-from liveness.liveness_scorer import LivenessScorer
 
 # ─── Global State ────────────────────────────────────────────────────────────
 

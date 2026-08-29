@@ -26,10 +26,9 @@ import os
 import sys
 import json
 import time
-import random
 import logging
-from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from datetime import datetime
+from typing import Dict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -37,11 +36,13 @@ try:
     from db_helper import get_db_connection, publish_event
 except ImportError:
     import psycopg2
+
     def get_db_connection():
         return psycopg2.connect(
             os.environ.get('LOCAL_DATABASE_URL',
-                'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
+                           'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
         )
+
     def publish_event(event_type: str, payload: dict):
         logging.info(f"[EVENT] {event_type}: {json.dumps(payload)}")
 
@@ -78,6 +79,7 @@ FINTECH_COMPLIANCE_CHECKS = [
 
 # ─── Compliance Check Functions ───────────────────────────────────────────────
 
+
 def check_kyc_tier_compliance(conn) -> Dict:
     """Verify fintech wallets are enforcing CBN KYC tier limits."""
     violations = []
@@ -110,6 +112,7 @@ def check_kyc_tier_compliance(conn) -> Dict:
         'violations': violations,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_transaction_velocity(conn) -> Dict:
     """Monitor for suspicious transaction velocity patterns."""
@@ -147,6 +150,7 @@ def check_transaction_velocity(conn) -> Dict:
         'timestamp': datetime.now().isoformat(),
     }
 
+
 def check_data_localisation(conn) -> Dict:
     """Verify fintech data is stored within Nigeria (NDPA Section 41)."""
     issues = []
@@ -179,6 +183,7 @@ def check_data_localisation(conn) -> Dict:
         'issues': issues,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_aml_screening(conn) -> Dict:
     """Monitor AML case generation rate for fintech sector."""
@@ -216,6 +221,7 @@ def check_aml_screening(conn) -> Dict:
         'timestamp': datetime.now().isoformat(),
     }
 
+
 def run_compliance_checks(conn) -> Dict:
     """Run all fintech compliance checks and aggregate results."""
     results = {
@@ -250,6 +256,7 @@ def run_compliance_checks(conn) -> Dict:
 
     return results
 
+
 def persist_monitoring_result(conn, results: Dict) -> None:
     """Store monitoring results in compliance_monitoring_results table."""
     try:
@@ -272,6 +279,7 @@ def persist_monitoring_result(conn, results: Dict) -> None:
             conn.rollback()
         except Exception:
             pass
+
 
 def main():
     logger.info("Fintech Compliance Monitor starting...")
@@ -309,6 +317,7 @@ def main():
 
         # Run every 60 seconds
         time.sleep(60)
+
 
 if __name__ == '__main__':
     main()

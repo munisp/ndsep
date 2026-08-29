@@ -31,7 +31,8 @@ TOPIC = os.getenv("FLUVIO_TELEMETRY_TOPIC", "fluvio.edge.telemetry")
 CONSUMER_ID = os.getenv("FLUVIO_TELEMETRY_CONSUMER_ID", "ndsep-edge-telemetry")
 PORT = int(os.getenv("FLUVIO_PORT", "8087"))
 
-metrics: Dict[str, Any] = {"records_persisted": 0, "cross_border_detected": 0, "errors": 0, "connected": False, "start_time": time.time()}
+metrics: Dict[str, Any] = {"records_persisted": 0, "cross_border_detected": 0,
+                           "errors": 0, "connected": False, "start_time": time.time()}
 
 
 def database_connection():
@@ -48,16 +49,20 @@ def validate_record(record: Dict[str, Any]) -> Dict[str, Any]:
     destination_country = str(record.get("destination_country", "NG"))
     source_country = str(record.get("source_country", "NG"))
     return {
-        "organization_id": int(record["organization_id"]),
-        "source_ip": str(record["source_ip"]),
-        "destination_ip": str(record["destination_ip"]),
-        "protocol": str(record["protocol"]),
-        "bytes_transferred": int(record["bytes_transferred"]),
-        "ixp_site": str(record["ixp_site"]),
-        "is_cross_border": bool(record.get("is_cross_border", destination_country != source_country)),
-        "is_blocked": bool(record.get("is_blocked", False)),
-        "metadata": {**record.get("metadata", {}), "source_country": source_country, "destination_country": destination_country, "received_at": datetime.now(timezone.utc).isoformat()},
-    }
+        "organization_id": int(
+            record["organization_id"]), "source_ip": str(
+            record["source_ip"]), "destination_ip": str(
+                record["destination_ip"]), "protocol": str(
+                    record["protocol"]), "bytes_transferred": int(
+                        record["bytes_transferred"]), "ixp_site": str(
+                            record["ixp_site"]), "is_cross_border": bool(
+                                record.get(
+                                    "is_cross_border", destination_country != source_country)), "is_blocked": bool(
+                                        record.get(
+                                            "is_blocked", False)), "metadata": {
+                                                **record.get(
+                                                    "metadata", {}), "source_country": source_country, "destination_country": destination_country, "received_at": datetime.now(
+                                                        timezone.utc).isoformat()}, }
 
 
 def persist_record(record: Dict[str, Any]) -> None:
@@ -67,14 +72,28 @@ def persist_record(record: Dict[str, Any]) -> None:
             cursor.execute(
                 """INSERT INTO network_events (organization_id, source_ip, destination_ip, protocol, bytes_transferred, is_cross_border, is_blocked, ixp_site, metadata, detected_at)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())""",
-                (values["organization_id"], values["source_ip"], values["destination_ip"], values["protocol"], values["bytes_transferred"], values["is_cross_border"], values["is_blocked"], values["ixp_site"], json.dumps(values["metadata"])),
+                (values["organization_id"],
+                 values["source_ip"],
+                    values["destination_ip"],
+                    values["protocol"],
+                    values["bytes_transferred"],
+                    values["is_cross_border"],
+                    values["is_blocked"],
+                    values["ixp_site"],
+                    json.dumps(
+                    values["metadata"])),
             )
 
 
 def relay_required(event: Dict[str, Any]) -> None:
     if not RELAY_URL:
         return
-    response = requests.post(f"{RELAY_URL}/api/workers/event", json={"event": "fluvio_packet_ingested", "data": event}, timeout=5)
+    response = requests.post(
+        f"{RELAY_URL}/api/workers/event",
+        json={
+            "event": "fluvio_packet_ingested",
+            "data": event},
+        timeout=5)
     if not response.ok:
         raise RuntimeError(f"Realtime relay returned HTTP {response.status_code}")
 
@@ -119,7 +138,11 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         healthy = metrics["connected"] and FLUVIO_IMPORT_ERROR is None and bool(DB_URL)
-        body = json.dumps({"status": "healthy" if healthy else "unhealthy", "service": "ndsep-fluvio-edge-telemetry", "topic": TOPIC, "metrics": metrics}, default=str).encode()
+        body = json.dumps({"status": "healthy" if healthy else "unhealthy",
+                           "service": "ndsep-fluvio-edge-telemetry",
+                           "topic": TOPIC,
+                           "metrics": metrics},
+                          default=str).encode()
         self.send_response(200 if healthy else 503)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))

@@ -78,7 +78,15 @@ def calculate_risk_score(trigger_categories, processing_description, cross_borde
 
     # Text-based heuristics on processing description
     desc_lower = (processing_description or "").lower()
-    high_risk_keywords = ["profiling", "automated", "scoring", "surveillance", "biometric", "genetic", "children", "minor"]
+    high_risk_keywords = [
+        "profiling",
+        "automated",
+        "scoring",
+        "surveillance",
+        "biometric",
+        "genetic",
+        "children",
+        "minor"]
     for kw in high_risk_keywords:
         if kw in desc_lower:
             score += 5

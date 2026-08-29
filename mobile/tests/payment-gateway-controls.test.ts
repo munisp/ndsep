@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GatewayWebhookUnavailableError, listPaymentAuditEvents, reconcileGatewayWebhook, recordPaymentAuditExport, resetPaymentAuditForTests, reviewOfflinePayment, submitOfflinePayment, updatePaymentStateApprovalPolicy } from "../server/offlinePaymentRepository";
 import { getGatewayActivationStatus } from "../server/paymentGatewayConfig";
 
-process.env.PAYMENT_AUDIT_POSTGRES_URL = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
+process.env.PAYMENT_AUDIT_POSTGRES_URL ??= "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
 const webhookSecret = "test-paystack-webhook-secret";
 
 function signedPaystackWebhook(payload: Record<string, unknown>) {

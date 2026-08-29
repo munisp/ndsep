@@ -13,7 +13,6 @@ import random
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import psycopg2
@@ -94,7 +93,7 @@ def run_openlineage_tracker():
                 input_ds = random.choice(DATASETS)
                 output_ds = random.choice(DATASETS)
                 run_id = str(uuid.uuid4())
-                duration_ms = random.randint(500, 30000)
+                random.randint(500, 30000)
                 rows_processed = random.randint(100, 1000000)
                 has_pii = random.random() < 0.4
                 schema_change = random.random() < 0.08
@@ -150,7 +149,7 @@ def run_egeria_metadata_exchange():
     while True:
         try:
             conn = get_db()
-            cur = conn.cursor()
+            conn.cursor()
             while True:
                 server = random.choice(EGERIA_SERVERS)
                 exchange_type = random.choice([

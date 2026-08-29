@@ -15,14 +15,13 @@ Features:
 
 import os
 import json
-import time
 import hashlib
 import logging
-from datetime import datetime, timedelta
 from worker_base import WorkerBase
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("offline-sync")
+
 
 class OfflineSyncWorker(WorkerBase):
     """Process offline mutation queue and sync to database."""

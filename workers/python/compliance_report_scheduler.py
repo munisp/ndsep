@@ -13,13 +13,12 @@ Generates:
   - ROPA Auto-Generation (on-demand)
 """
 
-import os
 import json
 import logging
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from db_helper import get_connection
 from worker_base import WorkerBase
 

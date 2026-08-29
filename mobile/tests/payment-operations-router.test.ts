@@ -10,7 +10,7 @@ import { resetPaymentAuditForTests, updatePaymentStateApprovalPolicy } from "../
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "idlr-payment-router-"));
 const storePath = path.join(temporaryDirectory, "offline-payments.json");
 process.env.PAYMENT_OPERATIONS_STORE_PATH = storePath;
-process.env.PAYMENT_AUDIT_POSTGRES_URL = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
+process.env.PAYMENT_AUDIT_POSTGRES_URL ??= "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
 
 function contextFor(openId: string, role: "user" | "admin", enterprise = false): TrpcContext {
   return {

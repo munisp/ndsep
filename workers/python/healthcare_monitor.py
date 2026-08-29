@@ -27,15 +27,15 @@ import sys
 import json
 import time
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict
 
 # ─── NHIA / FMOH Compliance Rules ────────────────────────────────────────────
 HEALTHCARE_MONITOR_PORT = 8123
 NHIA_RULES = [
     "NHIA_DATA_LOCALISATION",       # Patient data must reside in Nigeria
     "NHIA_CONSENT_MANAGEMENT",      # Explicit consent for health data processing
-    "NHIA_BREACH_NOTIFICATION_72H", # 72-hour breach notification to NHIA
+    "NHIA_BREACH_NOTIFICATION_72H",  # 72-hour breach notification to NHIA
     "NHIA_RETENTION_10YR",          # 10-year retention per NMC guidelines
     "NHIA_RESEARCH_ANONYMISATION",  # Research data must be anonymised
     "FMOH_CLINICAL_TRIAL_GOV",      # Clinical trial data governance
@@ -49,11 +49,13 @@ try:
     from db_helper import get_db_connection, publish_event
 except ImportError:
     import psycopg2
+
     def get_db_connection():
         return psycopg2.connect(
             os.environ.get('LOCAL_DATABASE_URL',
-                'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
+                           'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
         )
+
     def publish_event(event_type: str, payload: dict):
         logging.info(f"[EVENT] {event_type}: {json.dumps(payload)}")
 
@@ -78,6 +80,7 @@ HEALTHCARE_RULES = {
 }
 
 # ─── Compliance Check Functions ───────────────────────────────────────────────
+
 
 def check_health_data_consent(conn) -> Dict:
     """Verify health data processing has valid consent records."""
@@ -106,6 +109,7 @@ def check_health_data_consent(conn) -> Dict:
         'violations': violations,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_dpia_compliance(conn) -> Dict:
     """Verify DPIAs exist for health data processing activities."""
@@ -140,6 +144,7 @@ def check_dpia_compliance(conn) -> Dict:
         'timestamp': datetime.now().isoformat(),
     }
 
+
 def check_health_breach_notifications(conn) -> Dict:
     """Monitor health data breach notification timeliness (72-hour rule)."""
     overdue = []
@@ -173,6 +178,7 @@ def check_health_breach_notifications(conn) -> Dict:
         'overdue': overdue,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_cross_border_health_transfers(conn) -> Dict:
     """Verify health data cross-border transfers comply with NDPA Section 41."""
@@ -209,6 +215,7 @@ def check_cross_border_health_transfers(conn) -> Dict:
         'timestamp': datetime.now().isoformat(),
     }
 
+
 def run_compliance_checks(conn) -> Dict:
     """Run all healthcare compliance checks and aggregate results."""
     results = {
@@ -243,6 +250,7 @@ def run_compliance_checks(conn) -> Dict:
 
     return results
 
+
 def main():
     logger.info("Healthcare Compliance Monitor starting...")
     iteration = 0
@@ -273,6 +281,7 @@ def main():
             logger.error(f"Main loop error: {e}")
 
         time.sleep(90)  # Run every 90 seconds
+
 
 if __name__ == '__main__':
     main()

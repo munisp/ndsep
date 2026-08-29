@@ -6,9 +6,8 @@ using statistical methods (Z-score, rolling averages, threshold breaches).
 
 import os
 import time
-import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [NOC-Anomaly] %(message)s")

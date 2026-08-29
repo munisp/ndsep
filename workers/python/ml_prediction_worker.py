@@ -87,7 +87,8 @@ def extract_features(connection, org_id: int) -> Optional[np.ndarray]:
              WHERE organization_id = %s AND created_at > NOW() - INTERVAL '30 days'
         """, (org_id,))
         alerts = (cursor.fetchone() or (0,))[0]
-    return np.array([compliance_score, critical, high, medium, low, total_network, cross_border, blocked, alerts, critical * 25 + high * 10 + medium * 5 + low * 2], dtype=np.float64)
+    return np.array([compliance_score, critical, high, medium, low, total_network, cross_border,
+                    blocked, alerts, critical * 25 + high * 10 + medium * 5 + low * 2], dtype=np.float64)
 
 
 def train_models(connection) -> bool:
@@ -109,18 +110,27 @@ def train_models(connection) -> bool:
             log.error("Feature extraction failed for organization %s: %s", org_id, error)
     if len(observations) < 10 or len(set(labels)) < 2:
         model_trained = False
-        last_training_error = f"Insufficient labelled persisted data: samples={len(observations)}, classes={len(set(labels))}"
+        last_training_error = f"Insufficient labelled persisted data: samples={
+            len(observations)}, classes={
+            len(
+                set(labels))}"
         log.warning(last_training_error)
         return False
     features_array = np.asarray(observations)
     labels_array = np.asarray(labels)
-    rf_pipeline = Pipeline([("scaler", StandardScaler()), ("classifier", RandomForestClassifier(n_estimators=200, random_state=42, max_depth=8, class_weight="balanced"))])
+    rf_pipeline = Pipeline([("scaler", StandardScaler()), ("classifier", RandomForestClassifier(
+        n_estimators=200, random_state=42, max_depth=8, class_weight="balanced"))])
     rf_pipeline.fit(features_array, labels_array)
     isolation_forest = IsolationForest(contamination=0.1, n_estimators=200, random_state=42)
     isolation_forest.fit(features_array)
     model_trained = True
     last_training_error = None
-    broadcast("ml_model_trained", {"type": "ml_model_trained", "model": "RandomForest+IsolationForest", "training_samples": len(observations), "features": FEATURE_COUNT, "timestamp": datetime.now(timezone.utc).isoformat()})
+    broadcast("ml_model_trained",
+              {"type": "ml_model_trained",
+               "model": "RandomForest+IsolationForest",
+               "training_samples": len(observations),
+               "features": FEATURE_COUNT,
+               "timestamp": datetime.now(timezone.utc).isoformat()})
     return True
 
 
@@ -162,7 +172,22 @@ def run_prediction_cycle() -> int:
             predictions_made += 1
             if anomaly:
                 anomalies_detected += 1
-            event = {"type": "ml_prediction_update", "organizationId": org_id, "organizationName": org_name, "riskScore": risk_score, "confidence": round(confidence, 4), "isAnomaly": anomaly, "anomalyScore": round(anomaly_score, 4), "recommendation": recommendation, "model": "RandomForest CPU v2", "timestamp": datetime.now(timezone.utc).isoformat()}
+            event = {
+                "type": "ml_prediction_update",
+                "organizationId": org_id,
+                "organizationName": org_name,
+                "riskScore": risk_score,
+                "confidence": round(
+                    confidence,
+                    4),
+                "isAnomaly": anomaly,
+                "anomalyScore": round(
+                    anomaly_score,
+                    4),
+                "recommendation": recommendation,
+                "model": "RandomForest CPU v2",
+                "timestamp": datetime.now(
+                    timezone.utc).isoformat()}
             broadcast("ml_prediction_update", event)
             if anomaly:
                 broadcast("ml_anomaly_detected", event)
@@ -188,13 +213,30 @@ class StatusHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         ready = bool(DB_URL) and model_trained and rf_pipeline is not None and isolation_forest is not None
         if self.path == "/health":
-            payload = {"status": "healthy" if ready else "unhealthy", "worker": "ml_prediction", "model_trained": model_trained, "last_training_error": last_training_error}
+            payload = {
+                "status": "healthy" if ready else "unhealthy",
+                "worker": "ml_prediction",
+                "model_trained": model_trained,
+                "last_training_error": last_training_error}
             status = 200 if ready else 503
         elif self.path == "/status":
-            payload = {"id": "ml-prediction", "name": "CPU ML Prediction Worker", "status": "running" if ready else "blocked", "lastRun": last_run, "eventsProcessed": events_processed, "description": "Random Forest risk classification and Isolation Forest anomaly detection using persisted PostgreSQL features only."}
+            payload = {
+                "id": "ml-prediction",
+                "name": "CPU ML Prediction Worker",
+                "status": "running" if ready else "blocked",
+                "lastRun": last_run,
+                "eventsProcessed": events_processed,
+                "description": "Random Forest risk classification and Isolation Forest anomaly detection using persisted PostgreSQL features only."}
             status = 200 if ready else 503
         elif self.path == "/metrics":
-            payload = {"eventsProcessed": events_processed, "predictionsMade": predictions_made, "anomaliesDetected": anomalies_detected, "modelTrained": model_trained, "uptimeSeconds": round(time.time() - worker_start, 1)}
+            payload = {
+                "eventsProcessed": events_processed,
+                "predictionsMade": predictions_made,
+                "anomaliesDetected": anomalies_detected,
+                "modelTrained": model_trained,
+                "uptimeSeconds": round(
+                    time.time() - worker_start,
+                    1)}
             status = 200
         else:
             self.send_response(404)

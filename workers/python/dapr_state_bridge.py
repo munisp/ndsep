@@ -9,11 +9,9 @@ import os
 import json
 import time
 import logging
-import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import urlopen, Request
 from urllib.error import URLError
-from datetime import datetime, timezone
 from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [dapr-state-bridge] %(message)s')
@@ -51,6 +49,7 @@ metrics = {
     "by_topic": defaultdict(int),
 }
 
+
 def dapr_request(method: str, path: str, body: dict = None) -> dict:
     url = f"{DAPR_URL}{path}"
     data = json.dumps(body).encode() if body else None
@@ -65,12 +64,14 @@ def dapr_request(method: str, path: str, body: dict = None) -> dict:
         metrics["errors"] += 1
         return {"error": f"Dapr sidecar unavailable: {e}"}
 
+
 def state_get(key: str) -> dict:
     result = dapr_request("GET", f"/v1.0/state/{STATE_STORE}/{key}")
     metrics["state_gets"] += 1
     if result.get("error"):
         raise RuntimeError(result["error"])
     return {"value": result, "source": "dapr"}
+
 
 def state_set(key: str, value, etag: str = None) -> bool:
     payload = [{"key": key, "value": value}]
@@ -82,12 +83,14 @@ def state_set(key: str, value, etag: str = None) -> bool:
         raise RuntimeError(result["error"])
     return True
 
+
 def state_delete(key: str) -> bool:
     result = dapr_request("DELETE", f"/v1.0/state/{STATE_STORE}/{key}")
     metrics["state_deletes"] += 1
     if result.get("error"):
         raise RuntimeError(result["error"])
     return True
+
 
 def publish_event(topic: str, data: dict) -> bool:
     result = dapr_request("POST", f"/v1.0/publish/{PUBSUB_NAME}/{topic}", data)
@@ -96,6 +99,7 @@ def publish_event(topic: str, data: dict) -> bool:
     if result.get("error"):
         raise RuntimeError(result["error"])
     return True
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -209,6 +213,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "results": results})
         else:
             self.send_json({"error": "not found"}, 404)
+
 
 if __name__ == "__main__":
     logger.info(f"NDSEP Dapr State Bridge starting on port {PORT}")

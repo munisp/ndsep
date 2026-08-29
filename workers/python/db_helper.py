@@ -11,6 +11,7 @@ import psycopg2.extras
 log = logging.getLogger(__name__)
 _DEFAULT_DSN = "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"
 
+
 def _build_dsn():
     """
     Priority: WORKER_DATABASE_URL > LOCAL_DATABASE_URL > DATABASE_URL > _DEFAULT_DSN
@@ -23,6 +24,7 @@ def _build_dsn():
     )
     return dsn
 
+
 def get_connection(autocommit=False):
     dsn = _build_dsn()
     try:
@@ -33,6 +35,7 @@ def get_connection(autocommit=False):
         log.error("[DB] Connection failed: %s", e)
         raise
 
+
 def execute_query(sql, params=None, fetch=True):
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -42,12 +45,13 @@ def execute_query(sql, params=None, fetch=True):
             conn.commit()
             return cur.rowcount
 
+
 def health_check():
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1 AS ok")
-                row = cur.fetchone()
+                cur.fetchone()
                 return {"status": "healthy", "db": "postgresql"}
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}

@@ -21,8 +21,16 @@ Model Registry:
 Technology: Python · scikit-learn · joblib · psycopg2 · numpy · pandas
 Port: 8205
 """
-import os, time, json, logging, threading, http.server, socketserver, joblib, hashlib
-from datetime import datetime, timezone, timedelta
+import os
+import time
+import json
+import logging
+import threading
+import http.server
+import socketserver
+import joblib
+import hashlib
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any, Tuple
 from pathlib import Path
 import numpy as np
@@ -30,7 +38,8 @@ import psycopg2
 import psycopg2.extras
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
+    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 PORT = int(os.environ.get("FEATURE_STORE_PORT", "8205"))
 MODEL_DIR = Path(os.environ.get("ML_MODEL_PATH", "./workers/python/models"))
@@ -38,8 +47,8 @@ FEATURE_DIR = Path(os.environ.get("ML_FEATURE_PATH", "./workers/python/features"
 RETRAIN_INTERVAL = 3600  # 1 hour
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-FeatureStore] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-FeatureStore] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── Ensure directories exist ───────────────────────────────────────────────────
@@ -54,6 +63,8 @@ _last_retrain: Optional[str] = None
 _errors = 0
 
 # ── Feature extraction ─────────────────────────────────────────────────────────
+
+
 def extract_compliance_features(conn) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """Extract compliance features from PostgreSQL for model training."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -101,6 +112,7 @@ def extract_compliance_features(conn) -> Tuple[np.ndarray, np.ndarray, List[str]
     y = np.array([int(r["label"]) for r in rows])
     return X, y, org_ids
 
+
 def compute_feature_stats(X: np.ndarray, feature_names: List[str]) -> Dict:
     """Compute feature statistics for the feature store."""
     stats = {}
@@ -119,9 +131,11 @@ def compute_feature_stats(X: np.ndarray, feature_names: List[str]) -> Dict:
     return stats
 
 # ── Model training ─────────────────────────────────────────────────────────────
+
+
 def train_compliance_classifier(X: np.ndarray, y: np.ndarray) -> Dict:
     """Train and register compliance classifier."""
-    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    from sklearn.ensemble import RandomForestClassifier
     from sklearn.model_selection import cross_val_score, train_test_split
     from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
     from sklearn.preprocessing import StandardScaler
@@ -143,7 +157,7 @@ def train_compliance_classifier(X: np.ndarray, y: np.ndarray) -> Dict:
         "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
         "f1_score": round(float(f1_score(y_test, y_pred, zero_division=0)), 4),
         "roc_auc": round(float(roc_auc_score(y_test, y_prob)), 4) if len(np.unique(y_test)) > 1 else 0.0,
-        "cv_accuracy": round(float(np.mean(cross_val_score(rf, X_scaled, y, cv=min(5, len(X)//2)))), 4),
+        "cv_accuracy": round(float(np.mean(cross_val_score(rf, X_scaled, y, cv=min(5, len(X) // 2)))), 4),
         "training_samples": len(X_train),
         "test_samples": len(X_test)
     }
@@ -168,8 +182,12 @@ def train_compliance_classifier(X: np.ndarray, y: np.ndarray) -> Dict:
         "status": "active"
     }
 
-    log.info(f"Compliance classifier trained: accuracy={metrics['accuracy']}, AUC={metrics['roc_auc']}, version={version}")
+    log.info(
+        f"Compliance classifier trained: accuracy={
+            metrics['accuracy']}, AUC={
+            metrics['roc_auc']}, version={version}")
     return {"model": "compliance_classifier", "version": version, "metrics": metrics}
+
 
 def train_anomaly_detector(X: np.ndarray) -> Dict:
     """Train Isolation Forest for anomaly detection."""
@@ -212,6 +230,8 @@ def train_anomaly_detector(X: np.ndarray) -> Dict:
     return {"model": "anomaly_detector", "version": version, "anomaly_rate": anomaly_rate}
 
 # ── Inference ──────────────────────────────────────────────────────────────────
+
+
 def predict_compliance(features: List[float]) -> Dict:
     """Predict compliance status for a new organization."""
     reg = _model_registry.get("compliance_classifier")
@@ -233,6 +253,7 @@ def predict_compliance(features: List[float]) -> Dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
 
 def detect_anomaly(features: List[float]) -> Dict:
     """Detect if an organization is anomalous."""
@@ -256,6 +277,8 @@ def detect_anomaly(features: List[float]) -> Dict:
         return {"error": str(e)}
 
 # ── Full retrain pipeline ──────────────────────────────────────────────────────
+
+
 def run_retrain():
     global _last_retrain, _errors
     log.info("Starting ML model retrain pipeline...")
@@ -306,8 +329,11 @@ def run_retrain():
         log.error(f"Retrain failed: {e}")
 
 # ── HTTP Server ────────────────────────────────────────────────────────────────
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args): pass
+    def log_message(self, *args):
+        pass
 
     def send_json(self, data: Any, status: int = 200):
         body = json.dumps(data, default=str).encode()
@@ -322,15 +348,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.send_json({
-                "status": "healthy",
-                "worker": "ml_feature_store",
-                "models": {k: {"version": v.get("version"), "trained_at": v.get("trained_at"), "status": v.get("status")} for k, v in _model_registry.items()},
-                "feature_groups": list(_feature_stats.keys()),
-                "last_retrain": _last_retrain,
-                "errors": _errors,
-                "uptime_seconds": round(time.time() - _worker_start, 1)
-            })
+            self.send_json({"status": "healthy",
+                            "worker": "ml_feature_store",
+                            "models": {k: {"version": v.get("version"),
+                                           "trained_at": v.get("trained_at"),
+                                           "status": v.get("status")} for k,
+                                       v in _model_registry.items()},
+                            "feature_groups": list(_feature_stats.keys()),
+                            "last_retrain": _last_retrain,
+                            "errors": _errors,
+                            "uptime_seconds": round(time.time() - _worker_start,
+                                                    1)})
         elif self.path == "/registry":
             self.send_json({"registry": _model_registry})
         elif self.path == "/features":
@@ -355,15 +383,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def startup():
     time.sleep(10)
     run_retrain()
+
 
 def retrain_loop():
     time.sleep(RETRAIN_INTERVAL)
     while True:
         run_retrain()
         time.sleep(RETRAIN_INTERVAL)
+
 
 if __name__ == "__main__":
     log.info("Starting NDSEP ML Feature Store & Model Registry...")

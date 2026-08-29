@@ -19,26 +19,34 @@ Sources:
 Technology: Python · cocoindex · sentence-transformers · qdrant-client · psycopg2
 Port: 8201
 """
-import os, time, json, logging, threading, http.server, socketserver, hashlib
+import os
+import time
+import json
+import logging
+import threading
+import http.server
+import socketserver
+import hashlib
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 import psycopg2
 import psycopg2.extras
 import requests
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
+    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 PORT = int(os.environ.get("COCOINDEX_PORT", "8201"))
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
 CHUNK_SIZE = 512   # characters per chunk
-CHUNK_OVERLAP = 64 # overlap between chunks
-ETL_INTERVAL = 180 # 3 minutes
+CHUNK_OVERLAP = 64  # overlap between chunks
+ETL_INTERVAL = 180  # 3 minutes
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-CocoIndex] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-CocoIndex] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── State ──────────────────────────────────────────────────────────────────────
@@ -51,6 +59,8 @@ _errors = 0
 _watermarks: Dict[str, str] = {}  # table → last_processed_at
 
 # ── CocoIndex integration ──────────────────────────────────────────────────────
+
+
 def init_cocoindex():
     """Initialize CocoIndex flow for incremental ETL."""
     global _cocoindex_available
@@ -65,6 +75,8 @@ def init_cocoindex():
         return None
 
 # ── Text chunking ──────────────────────────────────────────────────────────────
+
+
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> List[str]:
     """Split text into overlapping chunks for embedding."""
     if not text or len(text) <= chunk_size:
@@ -84,13 +96,17 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
         start = end - overlap
     return [c for c in chunks if c]
 
+
 def make_chunk_id(source_id: str, chunk_idx: int) -> int:
     """Generate deterministic integer ID for a chunk."""
     key = f"{source_id}:chunk:{chunk_idx}"
     return int(hashlib.md5(key.encode()).hexdigest()[:8], 16) % (2**31)
 
+
 # ── Embedding ──────────────────────────────────────────────────────────────────
 _model = None
+
+
 def get_model():
     global _model
     if _model is None:
@@ -101,6 +117,7 @@ def get_model():
         except Exception as e:
             log.error(f"Model load failed: {e}")
     return _model
+
 
 def embed(texts: List[str]) -> Optional[List[List[float]]]:
     model = get_model()
@@ -113,6 +130,8 @@ def embed(texts: List[str]) -> Optional[List[List[float]]]:
         return None
 
 # ── Qdrant upsert ──────────────────────────────────────────────────────────────
+
+
 def upsert_to_qdrant(collection: str, points: List[Dict]) -> int:
     if not points:
         return 0
@@ -138,6 +157,8 @@ def upsert_to_qdrant(collection: str, points: List[Dict]) -> int:
         return 0
 
 # ── ETL Sources ────────────────────────────────────────────────────────────────
+
+
 def etl_policies(conn) -> int:
     """ETL compliance policies with incremental watermark."""
     watermark = _watermarks.get("policies", "1970-01-01")
@@ -155,7 +176,16 @@ def etl_policies(conn) -> int:
 
     all_points = []
     for row in rows:
-        full_text = f"Policy Name: {row['name']}\nType: {row['policy_type']}\nSector: {row.get('sector','')}\nStatus: {row['status']}\nDescription: {row.get('description','')}"
+        full_text = f"Policy Name: {
+            row['name']}\nType: {
+            row['policy_type']}\nSector: {
+            row.get(
+                'sector',
+                '')}\nStatus: {
+                    row['status']}\nDescription: {
+                        row.get(
+                            'description',
+                            '')}"
         chunks = chunk_text(full_text)
         texts_to_embed = chunks
         vectors = embed(texts_to_embed)
@@ -182,6 +212,7 @@ def etl_policies(conn) -> int:
     log.info(f"CocoIndex ETL: {count} policy chunks indexed")
     return count
 
+
 def etl_violations(conn) -> int:
     """ETL violations with incremental watermark."""
     watermark = _watermarks.get("violations", "1970-01-01")
@@ -201,7 +232,19 @@ def etl_violations(conn) -> int:
 
     all_points = []
     for row in rows:
-        full_text = f"Violation Type: {row['violation_type']}\nSeverity: {row['severity']}\nOrganization: {row.get('org_name','')}\nSector: {row.get('sector','')}\nStatus: {row['status']}\nDescription: {row.get('description','')}"
+        full_text = f"Violation Type: {
+            row['violation_type']}\nSeverity: {
+            row['severity']}\nOrganization: {
+            row.get(
+                'org_name',
+                '')}\nSector: {
+                    row.get(
+                        'sector',
+                        '')}\nStatus: {
+                            row['status']}\nDescription: {
+                                row.get(
+                                    'description',
+                                    '')}"
         chunks = chunk_text(full_text)
         vectors = embed(chunks)
         if not vectors:
@@ -228,6 +271,7 @@ def etl_violations(conn) -> int:
     log.info(f"CocoIndex ETL: {count} violation chunks indexed")
     return count
 
+
 def etl_enforcement_actions(conn) -> int:
     """ETL enforcement actions."""
     watermark = _watermarks.get("enforcement", "1970-01-01")
@@ -248,7 +292,21 @@ def etl_enforcement_actions(conn) -> int:
 
     all_points = []
     for row in rows:
-        full_text = f"Enforcement Action: {row['action_type']}\nSeverity: {row.get('severity','')}\nOrganization: {row.get('org_name','')}\nSector: {row.get('sector','')}\nStatus: {row['status']}\nDescription: {row.get('description','')}"
+        full_text = f"Enforcement Action: {
+            row['action_type']}\nSeverity: {
+            row.get(
+                'severity',
+                '')}\nOrganization: {
+                row.get(
+                    'org_name',
+                    '')}\nSector: {
+                        row.get(
+                            'sector',
+                            '')}\nStatus: {
+                                row['status']}\nDescription: {
+                                    row.get(
+                                        'description',
+                                        '')}"
         chunks = chunk_text(full_text)
         vectors = embed(chunks)
         if not vectors:
@@ -273,6 +331,7 @@ def etl_enforcement_actions(conn) -> int:
     count = upsert_to_qdrant("ndsep_audit_logs", all_points)
     log.info(f"CocoIndex ETL: {count} enforcement action chunks indexed")
     return count
+
 
 def run_etl():
     global _last_etl_time, _etl_runs, _errors, _total_chunks_indexed
@@ -306,8 +365,11 @@ def run_etl():
         log.error(f"ETL run failed: {e}")
 
 # ── HTTP Server ────────────────────────────────────────────────────────────────
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args): pass
+    def log_message(self, *args):
+        pass
 
     def do_GET(self):
         if self.path == "/health":
@@ -341,6 +403,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def etl_loop():
     time.sleep(15)
     init_cocoindex()
@@ -348,6 +411,7 @@ def etl_loop():
     while True:
         time.sleep(ETL_INTERVAL)
         run_etl()
+
 
 if __name__ == "__main__":
     log.info("Starting NDSEP CocoIndex ETL Worker...")

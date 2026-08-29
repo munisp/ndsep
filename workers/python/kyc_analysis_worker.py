@@ -21,23 +21,23 @@ Features:
 """
 
 import os
-import sys
 import json
 import time
 import logging
-import hashlib
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Tuple
+import random
+from typing import Dict, Tuple
 
 try:
     from db_helper import get_db_connection, publish_event
 except ImportError:
     import psycopg2
+
     def get_db_connection():
         return psycopg2.connect(
             os.environ.get('LOCAL_DATABASE_URL',
-                'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
+                           'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
         )
+
     def publish_event(event_type: str, payload: dict):
         logging.info(f"[EVENT] {event_type}: {json.dumps(payload)}")
 
@@ -84,7 +84,8 @@ NIMC_NIN_API_URL = os.getenv("NIMC_NIN_API_URL", "").rstrip("/")
 NIMC_NIN_API_KEY = os.getenv("NIMC_NIN_API_KEY", "")
 
 
-def _verify_identity(endpoint: str, api_key: str, payload: Dict[str, str], identity_type: str) -> Tuple[bool, float, str]:
+def _verify_identity(endpoint: str, api_key: str,
+                     payload: Dict[str, str], identity_type: str) -> Tuple[bool, float, str]:
     if not endpoint or not api_key:
         logger.error("%s verification is not configured", identity_type)
         return False, 0.0, f"{identity_type}_VERIFICATION_UNAVAILABLE"
@@ -102,7 +103,8 @@ def _verify_identity(endpoint: str, api_key: str, payload: Dict[str, str], ident
             result = json.loads(response.read())
         verified = result.get("verified") is True or result.get("status") in {"verified", "VERIFIED", "match"}
         confidence = float(result.get("confidence", result.get("match_score", 0.0)) or 0.0)
-        return verified, confidence if verified else 0.0, f"{identity_type}_{'VERIFIED' if verified else 'NOT_VERIFIED'}"
+        return verified, confidence if verified else 0.0, f"{identity_type}_{
+            'VERIFIED' if verified else 'NOT_VERIFIED'}"
     except Exception as error:
         logger.error("%s verification failed: %s", identity_type, error)
         return False, 0.0, f"{identity_type}_VERIFICATION_UNAVAILABLE"
@@ -111,7 +113,9 @@ def _verify_identity(endpoint: str, api_key: str, payload: Dict[str, str], ident
 def verify_bvn(bvn: str, name: str, dob: str) -> Tuple[bool, float, str]:
     if not bvn or len(bvn) != 11 or not bvn.isdigit():
         return False, 0.0, "INVALID_BVN: must be 11 digits"
-    return _verify_identity(NIBSS_BVN_API_URL, NIBSS_BVN_API_KEY, {"bvn": bvn, "name": name, "date_of_birth": dob}, "BVN")
+    return _verify_identity(
+        NIBSS_BVN_API_URL, NIBSS_BVN_API_KEY, {
+            "bvn": bvn, "name": name, "date_of_birth": dob}, "BVN")
 
 
 def verify_nin(nin: str, name: str) -> Tuple[bool, float, str]:
@@ -121,6 +125,7 @@ def verify_nin(nin: str, name: str) -> Tuple[bool, float, str]:
 
 # ─── Document Analysis ────────────────────────────────────────────────────────
 
+
 def analyze_document(doc_type: str, doc_url: str, selfie_url: str = "") -> Dict:
     """
     ML-based document authenticity analysis with liveness service integration.
@@ -128,7 +133,6 @@ def analyze_document(doc_type: str, doc_url: str, selfie_url: str = "") -> Dict:
     """
     import os
     import urllib.request
-    import base64
 
     liveness_url = os.environ.get("LIVENESS_SERVICE_URL", "").rstrip("/")
     document_analysis_url = os.environ.get("DOCUMENT_ANALYSIS_SERVICE_URL", "").rstrip("/")
@@ -140,7 +144,8 @@ def analyze_document(doc_type: str, doc_url: str, selfie_url: str = "") -> Dict:
     # Authoritative face matching, liveness, and document analysis are required.
     try:
         if not liveness_url or not document_analysis_url or not selfie_url or not doc_url:
-            raise RuntimeError("LIVENESS_SERVICE_URL, DOCUMENT_ANALYSIS_SERVICE_URL, doc_url, and selfie_url are required")
+            raise RuntimeError(
+                "LIVENESS_SERVICE_URL, DOCUMENT_ANALYSIS_SERVICE_URL, doc_url, and selfie_url are required")
         if selfie_url and doc_url:
             # Load images and encode as base64
             doc_b64 = _url_to_base64(doc_url)
@@ -176,7 +181,7 @@ def analyze_document(doc_type: str, doc_url: str, selfie_url: str = "") -> Dict:
                     anti_spoof_real = anti_spoof.get("is_real", False) is True
 
                 logger.info(f"Liveness service: face_match={face_match_score:.1f}, "
-                           f"liveness={liveness_score:.1f}, real={anti_spoof_real}")
+                            f"liveness={liveness_score:.1f}, real={anti_spoof_real}")
                 analysis_payload = json.dumps({"document": doc_b64, "document_type": doc_type}).encode()
                 analysis_request = urllib.request.Request(
                     f"{document_analysis_url}/api/document/analyze", data=analysis_payload,
@@ -233,16 +238,18 @@ def _url_to_base64(url: str) -> str:
     except Exception:
         return ""
 
+
 def check_pep_status(name: str, occupation: str) -> Tuple[bool, str]:
     """Check if customer is a Politically Exposed Person."""
     name_lower = name.lower()
     occ_lower = (occupation or '').lower()
-    
+
     for title in PEP_TITLES:
         if title in name_lower or title in occ_lower:
             return True, f"PEP_DETECTED: title '{title}' found in profile"
-    
+
     return False, ""
+
 
 def determine_kyc_tier(record: dict) -> str:
     """Determine KYC tier based on available documentation."""
@@ -251,7 +258,7 @@ def determine_kyc_tier(record: dict) -> str:
     has_address = bool(record.get('address'))
     has_utility = record.get('utility_bill_verified', False)
     has_id = record.get('id_document_verified', False)
-    
+
     if has_bvn and has_nin and has_address and (has_utility or has_id):
         return 'tier3'
     elif has_bvn and has_address:
@@ -261,13 +268,14 @@ def determine_kyc_tier(record: dict) -> str:
 
 # ─── KYC Processing ───────────────────────────────────────────────────────────
 
+
 def process_kyc_record(record: dict, conn) -> None:
     """Process a single KYC record with full verification workflow."""
     rec_id = record['id']
     customer_ref = record.get('customer_ref', 'UNKNOWN')
-    
+
     updates = {}
-    
+
     # BVN verification
     bvn_verified = False
     bvn_score = 0.0
@@ -278,7 +286,7 @@ def process_kyc_record(record: dict, conn) -> None:
         updates['bvn_verified'] = bvn_verified
         if not bvn_verified:
             logger.warning(f"BVN verification failed for {customer_ref}: {bvn_msg}")
-    
+
     # NIN verification
     nin_verified = False
     if record.get('nin'):
@@ -288,7 +296,7 @@ def process_kyc_record(record: dict, conn) -> None:
         updates['nin_verified'] = nin_verified
         if not nin_verified:
             logger.warning(f"NIN verification failed for {customer_ref}: {nin_msg}")
-    
+
     # PEP check
     is_pep, pep_reason = check_pep_status(
         record.get('full_name', ''), record.get('occupation', '')
@@ -302,11 +310,11 @@ def process_kyc_record(record: dict, conn) -> None:
             'name': record.get('full_name'),
             'reason': pep_reason,
         })
-    
+
     # Determine KYC tier
     kyc_tier = determine_kyc_tier(record)
     updates['tier'] = kyc_tier
-    
+
     # Calculate overall risk score
     risk_score = 20.0  # Base score
     if is_pep:
@@ -325,7 +333,7 @@ def process_kyc_record(record: dict, conn) -> None:
         updates['risk_rating'] = 'medium'
     else:
         updates['risk_rating'] = 'low'
-    
+
     # Determine KYC status
     if bvn_verified and (kyc_tier in ['tier2', 'tier3']):
         updates['kyc_status'] = 'verified'
@@ -333,11 +341,11 @@ def process_kyc_record(record: dict, conn) -> None:
         updates['kyc_status'] = 'in_review'  # EDD required — hold for manual review
     else:
         updates['kyc_status'] = 'in_review'
-    
+
     # Build update query
     set_clauses = ', '.join([f"{k} = %s" for k in updates.keys()])
     values = list(updates.values()) + [rec_id]
-    
+
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -349,13 +357,13 @@ def process_kyc_record(record: dict, conn) -> None:
         logger.error(f"Failed to update KYC record {customer_ref}: {e}")
         conn.rollback()
         return
-    
+
     logger.info(
         f"KYC processed: {customer_ref} | tier={kyc_tier} | "
         f"bvn={bvn_verified} | nin={nin_verified} | pep={is_pep} | "
         f"risk={risk_score:.1f} | status={updates.get('kyc_status')}"
     )
-    
+
     publish_event('kyc.record.processed', {
         'customer_ref': customer_ref,
         'kyc_tier': kyc_tier,
@@ -365,6 +373,7 @@ def process_kyc_record(record: dict, conn) -> None:
         'risk_score': risk_score,
         'status': updates.get('kyc_status'),
     })
+
 
 def check_kyc_expiry(conn) -> None:
     """Check for expiring KYC records and trigger renewal notifications."""
@@ -377,7 +386,7 @@ def check_kyc_expiry(conn) -> None:
                 LIMIT 5
             """)
             expiring = cur.fetchall()
-        
+
         for rec_id, ref, name in expiring:
             logger.info(f"KYC expiry check: {ref} ({name}) is verified")
             publish_event('kyc.expiry.check', {
@@ -385,6 +394,7 @@ def check_kyc_expiry(conn) -> None:
             })
     except Exception as e:
         logger.error(f"KYC expiry check error: {e}")
+
 
 def process_pending_kyc(conn) -> int:
     """Fetch and process all pending KYC records."""
@@ -403,39 +413,41 @@ def process_pending_kyc(conn) -> int:
     except Exception as e:
         logger.error(f"Failed to fetch KYC records: {e}")
         return 0
-    
+
     for record in records:
         try:
             process_kyc_record(record, conn)
         except Exception as e:
             logger.error(f"Error processing KYC {record.get('customer_ref')}: {e}")
-    
+
     return len(records)
+
 
 def main():
     logger.info("KYC Analysis Worker starting...")
     iteration = 0
-    
+
     while True:
         iteration += 1
         try:
             conn = get_db_connection()
             conn.autocommit = False
-            
+
             count = process_pending_kyc(conn)
-            
+
             # Check expiry every 10 iterations
             if iteration % 10 == 0:
                 check_kyc_expiry(conn)
-            
+
             if count > 0:
                 logger.info(f"Processed {count} KYC records")
-            
+
             conn.close()
         except Exception as e:
             logger.error(f"Main loop error: {e}")
-        
+
         time.sleep(20)
+
 
 if __name__ == '__main__':
     main()

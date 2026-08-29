@@ -4,9 +4,9 @@ import { Pool } from "pg";
 
 import { acknowledgeHighRiskReconciliationAlert, getPaymentGatewayOperationalHealth, listHighRiskReconciliationAlerts, listPaymentAuditEvents, listPaymentReconciliationExceptions, processDueGatewayVerificationRetries, resetPaymentAuditForTests, resolvePaymentReconciliationException } from "../server/offlinePaymentRepository";
 
-const testUrl = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
-process.env.PAYMENT_AUDIT_POSTGRES_URL = testUrl;
-const pool = new Pool({ connectionString: testUrl });
+const localTestUrl = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
+process.env.PAYMENT_AUDIT_POSTGRES_URL ??= localTestUrl;
+const pool = new Pool({ connectionString: process.env.PAYMENT_AUDIT_POSTGRES_URL });
 
 beforeEach(async () => resetPaymentAuditForTests());
 afterEach(async () => resetPaymentAuditForTests());

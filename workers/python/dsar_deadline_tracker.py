@@ -9,7 +9,6 @@ import os
 import json
 import logging
 import time
-import requests
 from datetime import datetime, timezone, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -107,8 +106,8 @@ def check_deadlines():
                     conn.commit()
 
                     log.warning(
-                        f"DSAR #{req['id']} ({req.get('request_type','unknown')}) "
-                        f"from {req.get('requester_name','?')} — "
+                        f"DSAR #{req['id']} ({req.get('request_type', 'unknown')}) "
+                        f"from {req.get('requester_name', '?')} — "
                         f"{escalation_type}: {days_overdue}d overdue / {days_until_deadline}d remaining"
                     )
                     escalated.append({

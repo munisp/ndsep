@@ -22,40 +22,35 @@ Technology: Python · scikit-learn · XGBoost · numpy · SHAP · psycopg2 · Fa
 Port: 8085
 """
 import os
-import sys
-import json
 import time
 import hashlib
 import logging
 import threading
-import pickle
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-from collections import defaultdict
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-ML] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-ML] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # Conditional ML imports
 try:
     from sklearn.ensemble import (
         RandomForestClassifier, GradientBoostingClassifier,
-        IsolationForest, AdaBoostClassifier
+        IsolationForest
     )
-    from sklearn.model_selection import cross_val_score, train_test_split, StratifiedKFold
-    from sklearn.preprocessing import StandardScaler, LabelEncoder
+    from sklearn.model_selection import cross_val_score, train_test_split
+    from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import (
         accuracy_score, f1_score, roc_auc_score, precision_score,
-        recall_score, classification_report
+        recall_score
     )
-    from sklearn.tree import DecisionTreeClassifier
     import joblib
     HAS_SKLEARN = True
 except ImportError:
@@ -111,6 +106,7 @@ FEATURE_COLUMNS = [
     "enforcement_count", "total_fines", "days_active", "breach_count", "sector_encoded"
 ]
 
+
 def _try_lakehouse_features() -> Optional[tuple]:
     """Reserved for a versioned lakehouse feature contract.
 
@@ -120,6 +116,7 @@ def _try_lakehouse_features() -> Optional[tuple]:
     PostgreSQL until that contract is implemented and versioned.
     """
     return None
+
 
 def extract_features() -> tuple:
     """Extract ML features from Lakehouse (preferred) or PostgreSQL (fallback)."""
@@ -202,6 +199,8 @@ def extract_features() -> tuple:
         return np.array([]), np.array([]), [], FEATURE_COLUMNS
 
 # ── LSTM Time-Series Feature Extraction ────────────────────────────────────────
+
+
 def extract_violation_timeseries() -> tuple:
     """Extract monthly violation counts for LSTM training."""
     if not HAS_PG:
@@ -239,6 +238,8 @@ def extract_violation_timeseries() -> tuple:
         return np.array([]), np.array([])
 
 # ── Model Training ─────────────────────────────────────────────────────────────
+
+
 def train_xgboost_breach_predictor() -> dict:
     """Train XGBoost model for breach prediction."""
     X, y, org_ids, feature_names = extract_features()
@@ -313,7 +314,8 @@ def train_xgboost_breach_predictor() -> dict:
             _explainers["xgboost_breach"] = explainer
             metrics["shap_available"] = True
             if isinstance(shap_values, list):
-                mean_abs = np.mean(np.abs(shap_values[1]), axis=0) if len(shap_values) > 1 else np.mean(np.abs(shap_values[0]), axis=0)
+                mean_abs = np.mean(np.abs(shap_values[1]), axis=0) if len(
+                    shap_values) > 1 else np.mean(np.abs(shap_values[0]), axis=0)
             else:
                 mean_abs = np.mean(np.abs(shap_values), axis=0)
             metrics["shap_importance"] = dict(zip(feature_names, [round(float(x), 4) for x in mean_abs]))
@@ -330,10 +332,15 @@ def train_xgboost_breach_predictor() -> dict:
 
     _models["xgboost_breach"] = model
     _scalers["xgboost_breach"] = scaler
-    _model_metrics["xgboost_breach"] = {**metrics, "version": version, "trained_at": datetime.now(timezone.utc).isoformat()}
+    _model_metrics["xgboost_breach"] = {
+        **metrics,
+        "version": version,
+        "trained_at": datetime.now(
+            timezone.utc).isoformat()}
 
     log.info(f"XGBoost breach predictor trained: accuracy={metrics['accuracy']}, version={version}")
     return {"model": "xgboost_breach", "status": "trained", "version": version, "metrics": metrics}
+
 
 def train_lstm_violation_forecaster() -> dict:
     """Train LSTM-style model for violation time-series forecasting.
@@ -410,10 +417,15 @@ def train_lstm_violation_forecaster() -> dict:
 
     _models["lstm_violation"] = model
     _scalers["lstm_violation"] = scaler
-    _model_metrics["lstm_violation"] = {**metrics, "version": version, "trained_at": datetime.now(timezone.utc).isoformat()}
+    _model_metrics["lstm_violation"] = {
+        **metrics,
+        "version": version,
+        "trained_at": datetime.now(
+            timezone.utc).isoformat()}
 
     log.info(f"LSTM violation forecaster trained: version={version}")
     return {"model": "lstm_violation", "status": "trained", "version": version, "metrics": metrics}
+
 
 def train_isolation_forest() -> dict:
     """Train Isolation Forest for anomaly detection."""
@@ -461,7 +473,9 @@ def train_isolation_forest() -> dict:
     _model_metrics["isolation_forest"] = metrics
 
     log.info(f"IsolationForest trained: anomaly_rate={anomaly_rate:.2%}, version={version}")
-    return {"model": "isolation_forest", "status": "trained", "version": version, "metrics": metrics, "anomalies": anomalies[:20]}
+    return {"model": "isolation_forest", "status": "trained",
+            "version": version, "metrics": metrics, "anomalies": anomalies[:20]}
+
 
 def train_risk_scorer() -> dict:
     """Train RandomForest for multi-class risk scoring."""
@@ -526,6 +540,7 @@ def train_risk_scorer() -> dict:
     log.info(f"Risk scorer trained: accuracy={metrics['accuracy']}, version={version}")
     return {"model": "risk_scorer", "status": "trained", "version": version, "metrics": _model_metrics["risk_scorer"]}
 
+
 def load_persisted_models() -> None:
     """Load the latest complete model/scaler pair for each CPU model after restart."""
     if not HAS_SKLEARN:
@@ -545,7 +560,10 @@ def load_persisted_models() -> None:
                 _models[model_name] = joblib.load(model_path)
                 _scalers[model_name] = joblib.load(scaler_path)
                 _feature_names[model_name] = FEATURE_COLUMNS
-                _model_metrics.setdefault(model_name, {"version": version, "loaded_at": datetime.now(timezone.utc).isoformat(), "artifact": str(model_path)})
+                _model_metrics.setdefault(
+                    model_name, {
+                        "version": version, "loaded_at": datetime.now(
+                            timezone.utc).isoformat(), "artifact": str(model_path)})
                 log.info("Loaded persisted CPU model %s version %s", model_name, version)
                 break
             except Exception as error:
@@ -565,6 +583,8 @@ def train_all_models() -> dict:
     return {"models_trained": len(results), "results": results, "training_run": _training_runs}
 
 # ── Prediction ─────────────────────────────────────────────────────────────────
+
+
 def predict_breach(org_features: dict) -> dict:
     """Predict breach probability using trained XGBoost model."""
     global _predictions_total
@@ -614,6 +634,7 @@ def predict_breach(org_features: dict) -> dict:
 
     return result
 
+
 def predict_violations() -> dict:
     """Forecast future violations using LSTM-style model."""
     model = _models.get("lstm_violation")
@@ -628,6 +649,7 @@ def predict_violations() -> dict:
         "mse": metrics.get("mse"),
         "mae": metrics.get("mae"),
     }
+
 
 def detect_anomalies(org_features: dict) -> dict:
     """Detect anomalies using IsolationForest."""
@@ -650,6 +672,7 @@ def detect_anomalies(org_features: dict) -> dict:
         "threshold": -0.5,
         "model": "isolation_forest",
     }
+
 
 def score_risk(org_features: dict) -> dict:
     """Score risk tier using RandomForest."""
@@ -675,12 +698,15 @@ def score_risk(org_features: dict) -> dict:
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
+
 class PredictRequest(BaseModel):
     org_features: dict = {}
     org_id: str = ""
 
+
 class TrainRequest(BaseModel):
     models: list[str] = ["all"]
+
 
 @app.get("/health")
 def health():
@@ -700,6 +726,7 @@ def health():
         "uptime_seconds": round(time.time() - _start_time),
     }
 
+
 @app.post("/train")
 def trigger_training(req: TrainRequest):
     """Train all or specific models."""
@@ -716,6 +743,7 @@ def trigger_training(req: TrainRequest):
         results.append(train_risk_scorer())
     return {"results": results}
 
+
 @app.get("/models")
 def list_models():
     """List all registered models with metrics."""
@@ -724,6 +752,7 @@ def list_models():
         "total": len(_model_metrics),
     }
 
+
 @app.get("/models/{model_name}")
 def get_model(model_name: str):
     metrics = _model_metrics.get(model_name)
@@ -731,26 +760,32 @@ def get_model(model_name: str):
         raise HTTPException(status_code=404, detail=f"Model not found: {model_name}")
     return metrics
 
+
 def _require_prediction(result: dict) -> dict:
     if "error" in result:
         raise HTTPException(status_code=503, detail=result["error"])
     return result
 
+
 @app.post("/predict/breach")
 def api_predict_breach(req: PredictRequest):
     return _require_prediction(predict_breach(req.org_features))
+
 
 @app.post("/predict/violations")
 def api_predict_violations():
     return _require_prediction(predict_violations())
 
+
 @app.post("/predict/anomaly")
 def api_detect_anomaly(req: PredictRequest):
     return _require_prediction(detect_anomalies(req.org_features))
 
+
 @app.post("/predict/risk")
 def api_score_risk(req: PredictRequest):
     return _require_prediction(score_risk(req.org_features))
+
 
 @app.get("/shap/{model_name}")
 def get_shap(model_name: str):
@@ -762,6 +797,7 @@ def get_shap(model_name: str):
         "shap_importance": metrics.get("shap_importance", {}),
         "feature_importance": metrics.get("feature_importance", {}),
     }
+
 
 @app.get("/pipeline/status")
 def pipeline_status():
@@ -779,6 +815,8 @@ def pipeline_status():
     }
 
 # ── Background retraining ─────────────────────────────────────────────────────
+
+
 def retrain_scheduler():
     time.sleep(30)
     while True:
@@ -787,6 +825,7 @@ def retrain_scheduler():
         except Exception as e:
             log.error(f"Retrain failed: {e}")
         time.sleep(RETRAIN_INTERVAL)
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

@@ -242,7 +242,7 @@ class AntiSpoofClassifier:
         hsv = cv2.cvtColor(face, cv2.COLOR_BGR2HSV)
         sat = hsv[:, :, 1].astype(np.float64)
         sat_mean = sat.mean()
-        sat_std = sat.std()
+        sat.std()
 
         # Real faces: moderate saturation with good variation
         # Printed photos: often over-saturated or under-saturated

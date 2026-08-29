@@ -125,14 +125,14 @@ class DeepfakeDetector:
         # Real images have smooth radial falloff; GANs have bumps
 
         # Radial profile
-        radii = np.sqrt((np.arange(w) - cx) ** 2)
+        np.sqrt((np.arange(w) - cx) ** 2)
         radial_profile = np.zeros(w // 2)
         counts = np.zeros(w // 2)
         for r in range(w // 2):
             mask = (np.sqrt((np.arange(h)[:, None] - cy) ** 2 +
-                           (np.arange(w)[None, :] - cx) ** 2) >= r) & \
+                            (np.arange(w)[None, :] - cx) ** 2) >= r) & \
                    (np.sqrt((np.arange(h)[:, None] - cy) ** 2 +
-                           (np.arange(w)[None, :] - cx) ** 2) < r + 1)
+                            (np.arange(w)[None, :] - cx) ** 2) < r + 1)
             vals = mag[mask]
             if vals.size > 0:
                 radial_profile[r] = vals.mean()
@@ -156,7 +156,7 @@ class DeepfakeDetector:
         # Also check for grid-pattern peaks (at multiples of stride)
         # Corners of the FFT (diagonal high-frequency)
         corner_energy = (mag[0:10, 0:10].mean() + mag[0:10, -10:].mean() +
-                        mag[-10:, 0:10].mean() + mag[-10:, -10:].mean()) / 4
+                         mag[-10:, 0:10].mean() + mag[-10:, -10:].mean()) / 4
         center_energy = mag[cy - 5:cy + 5, cx - 5:cx + 5].mean()
 
         corner_ratio = corner_energy / max(center_energy, 1e-6)
@@ -255,7 +255,7 @@ class DeepfakeDetector:
 
         # Internal lighting consistency
         lr_ratio = abs(left_mean - right_mean) / max(left_mean + right_mean, 1)
-        tb_ratio = abs(top_mean - bottom_mean) / max(top_mean + bottom_mean, 1)
+        abs(top_mean - bottom_mean) / max(top_mean + bottom_mean, 1)
 
         # Moderate asymmetry is natural; extreme is suspicious
         # But very symmetric is also suspicious (GAN-generated faces tend to be symmetric)
