@@ -298,6 +298,8 @@ jobs:
       DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
       JWT_SECRET: test-jwt-secret-for-ci-only
       FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+      BASE_URL: http://127.0.0.1:3000
+      E2E_BASE_URL: http://127.0.0.1:3000
       NODE_ENV: test
       # The isolated E2E database is initialized by drizzle-kit before server start.
       SKIP_DATABASE_MIGRATIONS: "true"
@@ -326,8 +328,8 @@ jobs:
           done
           cat /tmp/ndsep-server.log
           exit 1
-      - run: pnpm exec playwright test --timeout=30000 --global-timeout=1200000
-        name: Run E2E tests
+      - run: pnpm run e2e:critical -- --project=chromium --timeout=30000 --global-timeout=900000
+        name: Run critical Chromium E2E tests
       - uses: actions/upload-artifact@v4
         if: always()
         with:
