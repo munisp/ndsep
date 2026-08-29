@@ -12,8 +12,10 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  retries: process.env.CI ? 1 : 0,
+  // The CI suite exercises both desktop and mobile projects. Four workers keep
+  // the complete isolated-browser matrix within its bounded release window.
+  workers: process.env.CI ? 4 : undefined,
   reporter: process.env.CI ? "github" : "html",
   use: {
     baseURL: process.env.BASE_URL ?? "http://localhost:3000",
@@ -31,12 +33,14 @@ export default defineConfig({
       use: { ...devices["iPhone 14"] },
     },
   ],
-  webServer: process.env.CI ? {
-    command: "pnpm run dev",
-    url: "http://localhost:3000/api/health",
-    // CI starts and health-checks the production bundle in the workflow.
-    // Reuse it here rather than racing a second dev server for port 3000.
-    reuseExistingServer: true,
-    timeout: 120_000,
-  } : undefined,
+  webServer: process.env.CI
+    ? {
+        command: "pnpm run dev",
+        url: "http://localhost:3000/api/health",
+        // CI starts and health-checks the production bundle in the workflow.
+        // Reuse it here rather than racing a second dev server for port 3000.
+        reuseExistingServer: true,
+        timeout: 120_000,
+      }
+    : undefined,
 });

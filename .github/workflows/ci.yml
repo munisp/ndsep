@@ -278,7 +278,7 @@ jobs:
   integration:
     name: Integration Tests (E2E)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: [node-ci]
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/production'
     services:
@@ -326,7 +326,7 @@ jobs:
           done
           cat /tmp/ndsep-server.log
           exit 1
-      - run: pnpm exec playwright test --timeout=30000 --global-timeout=600000
+      - run: pnpm exec playwright test --timeout=30000 --global-timeout=1200000
         name: Run E2E tests
       - uses: actions/upload-artifact@v4
         if: always()
