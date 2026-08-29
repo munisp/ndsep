@@ -33,7 +33,7 @@ export default defineConfig({
       use: { ...devices["iPhone 14"] },
     },
   ],
-  webServer: process.env.CI
+  webServer: process.env.CI && !process.env.E2E_BASE_URL
     ? {
         command: "pnpm run dev",
         url: "http://localhost:3000/api/health",
