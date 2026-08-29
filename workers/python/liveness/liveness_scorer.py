@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 import cv2
 import numpy as np
 
-from .anti_spoof import AntiSpoofClassifier, AntiSpoofResult, SpoofType
+from .anti_spoof import AntiSpoofClassifier, AntiSpoofResult
 from .deepfake_detector import DeepfakeDetector, DeepfakeResult
 from .face_detector import DetectionResult, FaceDetector, compute_landmark_features
 
@@ -72,8 +72,8 @@ class LivenessScorer:
     # Thresholds
     PASSIVE_THRESHOLD = 60.0   # minimum score for passive liveness
     ACTIVE_THRESHOLD = 65.0    # minimum score for active liveness
-    BLINK_EAR_THRESHOLD = 0.21 # EAR below this = blink
-    HEAD_TURN_THRESHOLD = 0.15 # nose offset change for head turn
+    BLINK_EAR_THRESHOLD = 0.21  # EAR below this = blink
+    HEAD_TURN_THRESHOLD = 0.15  # nose offset change for head turn
 
     def __init__(self):
         self.detector = FaceDetector(min_confidence=0.5, max_faces=1)

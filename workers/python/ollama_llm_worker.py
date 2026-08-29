@@ -24,9 +24,15 @@ Endpoints:
 Technology: Python · ollama · requests
 Port: 8203
 """
-import os, time, json, logging, threading, http.server, socketserver
+import os
+import time
+import json
+import logging
+import threading
+import http.server
+import socketserver
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Generator
+from typing import List, Dict, Optional, Any
 import requests
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -38,8 +44,8 @@ MAX_TOKENS = int(os.environ.get("OLLAMA_MAX_TOKENS", "2048"))
 TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.3"))
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-Ollama] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-Ollama] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── State ──────────────────────────────────────────────────────────────────────
@@ -51,7 +57,7 @@ _errors = 0
 
 # ── System prompts ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPTS = {
-    "compliance_advisor": """You are an expert NDPA (Nigeria Data Protection Act 2023) compliance advisor for the National Data Sovereignty Enforcement Platform (NDSEP). 
+    "compliance_advisor": """You are an expert NDPA (Nigeria Data Protection Act 2023) compliance advisor for the National Data Sovereignty Enforcement Platform (NDSEP).
 
 Your role:
 - Provide precise, actionable compliance guidance based on NDPA 2023
@@ -80,6 +86,8 @@ Respond with structured assessment.""",
 }
 
 # ── Ollama client ──────────────────────────────────────────────────────────────
+
+
 def check_ollama() -> bool:
     global _ollama_available, _available_models
     try:
@@ -95,6 +103,7 @@ def check_ollama() -> bool:
     _ollama_available = False
     return False
 
+
 def get_best_model() -> str:
     """Select the best available model."""
     preferred = ["qwen2.5", "qwen", "mistral", "llama3", "phi3", "gemma", "llama2"]
@@ -104,7 +113,9 @@ def get_best_model() -> str:
                 return available
     return _available_models[0] if _available_models else DEFAULT_MODEL
 
+
 LLAMACPP_URL = os.environ.get("LLAMACPP_URL", "http://localhost:8204")
+
 
 def _try_llamacpp_fallback(prompt: str, system: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Attempt to use llama.cpp native inference as fallback when Ollama is unavailable."""
@@ -120,6 +131,7 @@ def _try_llamacpp_fallback(prompt: str, system: Optional[str] = None) -> Optiona
     except Exception:
         pass
     return None
+
 
 def generate(
     prompt: str,
@@ -175,6 +187,7 @@ def generate(
             return llamacpp_result
         return {"error": str(e), "response": f"LLM unavailable. Error: {e}"}
 
+
 def chat(
     messages: List[Dict[str, str]],
     model: Optional[str] = None,
@@ -211,10 +224,13 @@ def chat(
         return {"error": str(e), "response": f"LLM unavailable: {e}"}
 
 # ── Specialized endpoints ──────────────────────────────────────────────────────
+
+
 def compliance_qa(question: str, context: str = "") -> Dict:
     """Answer compliance questions with NDPA context."""
     prompt = f"Context:\n{context}\n\nQuestion: {question}" if context else question
     return generate(prompt, system=SYSTEM_PROMPTS["compliance_advisor"])
+
 
 def classify_violation(description: str, violation_type: str = "") -> Dict:
     """Classify a violation's severity and category."""
@@ -223,17 +239,19 @@ def classify_violation(description: str, violation_type: str = "") -> Dict:
     # Try to parse JSON from response
     try:
         response_text = result.get("response", "")
-        json_match = response_text[response_text.find("{"):response_text.rfind("}")+1]
+        json_match = response_text[response_text.find("{"):response_text.rfind("}") + 1]
         if json_match:
             result["classification"] = json.loads(json_match)
     except Exception:
         pass
     return result
 
+
 def summarize_document(text: str, doc_type: str = "compliance_report") -> Dict:
     """Summarize a compliance document."""
     prompt = f"Document type: {doc_type}\n\nDocument text:\n{text[:3000]}\n\nSummary:"
     return generate(prompt, system=SYSTEM_PROMPTS["document_summarizer"])
+
 
 def assess_breach(description: str, data_categories: List[str], subject_count: int) -> Dict:
     """Assess a data breach."""
@@ -245,8 +263,11 @@ Provide breach impact assessment:"""
     return generate(prompt, system=SYSTEM_PROMPTS["breach_assessor"])
 
 # ── HTTP Server ────────────────────────────────────────────────────────────────
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args): pass
+    def log_message(self, *args):
+        pass
 
     def read_body(self) -> Dict:
         length = int(self.headers.get("Content-Length", 0))
@@ -326,12 +347,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def health_check_loop():
     time.sleep(5)
     check_ollama()
     while True:
         time.sleep(60)
         check_ollama()
+
 
 if __name__ == "__main__":
     log.info("Starting NDSEP Ollama LLM Worker...")

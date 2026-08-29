@@ -68,6 +68,21 @@ jobs:
   mobile-ci:
     name: Mobile CI (TypeScript + Lint + Tests)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ndsep_payment_test
+          POSTGRES_PASSWORD: ndsep_payment_test_pass
+          POSTGRES_DB: idlr_payment_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PAYMENT_AUDIT_POSTGRES_URL: postgresql://ndsep_payment_test:ndsep_payment_test_pass@localhost:5432/idlr_payment_test
     defaults:
       run:
         working-directory: mobile
@@ -169,7 +184,7 @@ jobs:
           pip install flake8 pytest pytest-asyncio
           find orchestration services/python -name requirements.txt -exec pip install -r {} \;
       - name: Lint with flake8
-        run: flake8 orchestration/ workers/python/ --max-line-length=120 --ignore=E501,W503
+        run: flake8 orchestration/ workers/python/ --max-line-length=120 --ignore=E501,W503,W504
       - name: Compile Python services
         run: python -m compileall -q orchestration/ services/python/ workers/python/
       - name: Run Python tests
@@ -227,22 +242,29 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          scan-type: fs
-          scan-ref: "."
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
+      - name: Run Trivy filesystem scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume "$PWD:/src:ro" \
+            --volume "$PWD:/out" \
+            aquasec/trivy:0.65.0 \
+            fs /src \
+            --format sarif \
+            --output /out/trivy-results.sarif \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed=false \
+            --exit-code 1
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: trivy-results.sarif
-        continue-on-error: true
-      - uses: pnpm/action-setup@v3
+          category: trivy-filesystem-main-ci
+      - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: "10.34.4"
+          run_install: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}

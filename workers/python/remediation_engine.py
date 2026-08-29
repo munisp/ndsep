@@ -73,6 +73,7 @@ REMEDIATION_RULES = {
     },
 }
 
+
 def get_db():
     if not HAS_DB:
         return None
@@ -83,27 +84,28 @@ def get_db():
         log.warning(f"DB connection failed: {e}")
         return None
 
+
 def process_violations():
     conn = get_db()
     if not conn:
         return
-    
+
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        
+
         # Get unresolved violations without remediation workflows
         cur.execute("""
             SELECT cv.id, cv.organization_id, cv.title as violation_type, cv.severity, cv.description
             FROM compliance_violations cv
             WHERE cv.status IN ('non_compliant', 'under_review')
             AND NOT EXISTS (
-                SELECT 1 FROM remediation_workflows rw 
+                SELECT 1 FROM remediation_workflows rw
                 WHERE rw.violation_id = cv.id
             )
             LIMIT 20
         """)
         violations = cur.fetchall()
-        
+
         for v in violations:
             vtype = v.get('violation_type', 'unknown')
             rule = REMEDIATION_RULES.get(vtype, {
@@ -112,12 +114,12 @@ def process_violations():
                 "description": f"Manual review required for violation type: {vtype}",
                 "deadline_days": 30
             })
-            
+
             from datetime import timedelta
             deadline = datetime.now(timezone.utc) + timedelta(days=rule["deadline_days"])
-            
+
             cur.execute("""
-                INSERT INTO remediation_workflows 
+                INSERT INTO remediation_workflows
                 (violation_id, org_id, action_type, priority, description, status, deadline, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, 'pending', %s, NOW(), NOW())
                 ON CONFLICT DO NOTHING
@@ -125,33 +127,34 @@ def process_violations():
                 v['id'], v['organization_id'], rule['action'], rule['priority'],
                 rule['description'], deadline
             ))
-            
+
             stats["remediations_created"] += 1
-        
+
         # Auto-close old resolved violations
         cur.execute("""
-            UPDATE compliance_violations 
+            UPDATE compliance_violations
             SET status = 'resolved'
-            WHERE status = 'non_compliant' 
+            WHERE status = 'non_compliant'
             AND created_at < NOW() - INTERVAL '30 days'
             AND id IN (
-                SELECT violation_id FROM remediation_workflows 
+                SELECT violation_id FROM remediation_workflows
                 WHERE status = 'completed'
             )
         """)
-        
+
         conn.commit()
         stats["violations_processed"] += len(violations)
         stats["last_run"] = datetime.now(timezone.utc).isoformat()
-        
+
         if violations:
             log.info(f"Processed {len(violations)} violations, created {len(violations)} remediation workflows")
-    
+
     except Exception as e:
         log.error(f"Error processing violations: {e}")
         conn.rollback()
     finally:
         conn.close()
+
 
 def run_scanner():
     while True:
@@ -160,6 +163,7 @@ def run_scanner():
         except Exception as e:
             log.error(f"Scanner error: {e}")
         time.sleep(SCAN_INTERVAL)
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -180,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
+
 
 if __name__ == "__main__":
     log.info(f"Starting on port {PORT}")

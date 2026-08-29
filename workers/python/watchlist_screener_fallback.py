@@ -80,6 +80,7 @@ def similarity(s1: str, s2: str) -> float:
     """Alias for name_similarity — used by tests."""
     return name_similarity(s1, s2)
 
+
 def name_similarity(s1: str, s2: str) -> float:
     s1, s2 = s1.lower().strip(), s2.lower().strip()
     if not s1 or not s2:

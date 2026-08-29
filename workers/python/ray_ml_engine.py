@@ -21,8 +21,15 @@ Integrations:
 Technology: Python · PyTorch · Ray · DuckDB · XGBoost · SHAP · FastAPI
 Port: 8250
 """
+import atexit
+import signal as _signal
+from scipy import stats as scipy_stats
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import Adam
+import torch.nn.functional as F
+import torch.nn as nn
+import torch
 import os
-import sys
 import json
 import math
 import time
@@ -31,7 +38,7 @@ import hashlib
 import logging
 import threading
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from collections import defaultdict
@@ -41,16 +48,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-RayML] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-RayML] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── PyTorch ────────────────────────────────────────────────────────────────────
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.optim import Adam, SGD
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # ── Ray ────────────────────────────────────────────────────────────────────────
 try:
@@ -61,7 +63,6 @@ except ImportError:
 
 # ── sklearn / XGBoost / SHAP ──────────────────────────────────────────────────
 try:
-    from sklearn.ensemble import RandomForestClassifier, IsolationForest
     from sklearn.model_selection import cross_val_score, train_test_split
     from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, precision_score, recall_score
@@ -97,8 +98,8 @@ except ImportError:
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 _raw_db_url = os.environ.get("DATABASE_URL",
-    os.environ.get("WORKER_DATABASE_URL",
-    "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+                             os.environ.get("WORKER_DATABASE_URL",
+                                            "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 DB_URL = re.sub(r'(\?sslmode=[^&?]*)+', '?sslmode=disable', _raw_db_url)
 
 PORT = int(os.environ.get("RAY_ML_PORT", "8250"))
@@ -119,8 +120,11 @@ AUTOENCODER_LATENT = 16
 app = FastAPI(title="NDSEP Ray ML/DL/GNN Engine", version="4.0.0")
 
 # ── Experiment Tracker ─────────────────────────────────────────────────────────
+
+
 class ExperimentTracker:
     """Lightweight MLOps experiment tracker."""
+
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir / "experiments"
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -151,11 +155,15 @@ class ExperimentTracker:
     def list_experiments(self) -> list[dict]:
         return self.experiments
 
+
 tracker = ExperimentTracker(MODEL_DIR)
 
 # ── Model Registry ─────────────────────────────────────────────────────────────
+
+
 class ModelRegistry:
     """Production model registry with versioning."""
+
     def __init__(self):
         self.models: dict[str, dict] = {}
 
@@ -178,14 +186,17 @@ class ModelRegistry:
         return {k: {kk: vv for kk, vv in v.items() if kk != "model"}
                 for k, v in self.models.items()}
 
+
 registry = ModelRegistry()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LAYER 1: REAL PyTorch GraphSAGE GNN
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class GraphSAGELayer(nn.Module):
     """Single GraphSAGE convolution layer with learnable aggregation."""
+
     def __init__(self, self_dim: int, neigh_dim: int, out_dim: int):
         super().__init__()
         self.W_self = nn.Linear(self_dim, out_dim, bias=False)
@@ -201,6 +212,7 @@ class GraphSAGELayer(nn.Module):
 
 class GraphSAGENet(nn.Module):
     """Multi-layer GraphSAGE network with learned weights."""
+
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int = 3):
         super().__init__()
         self.layers = nn.ModuleList()
@@ -223,6 +235,7 @@ class GraphSAGENet(nn.Module):
 
 class LinkPredictor(nn.Module):
     """MLP for link prediction on GNN embeddings."""
+
     def __init__(self, embed_dim: int):
         super().__init__()
         self.fc1 = nn.Linear(embed_dim * 2, 64)
@@ -241,6 +254,7 @@ class LinkPredictor(nn.Module):
 
 class ComplianceGraphData:
     """In-memory compliance graph with PyTorch tensor support."""
+
     def __init__(self):
         self.nodes: dict[str, dict] = {}
         self.edges: list[tuple[str, str, str]] = []
@@ -304,6 +318,7 @@ _gnn_model: Optional[GraphSAGENet] = None
 _link_predictor_model: Optional[LinkPredictor] = None
 _gnn_metrics: dict = {}
 
+
 def build_graph_from_db():
     """Build compliance graph from PostgreSQL."""
     global _graph
@@ -337,7 +352,8 @@ def build_graph_from_db():
                 if sid in _graph.nodes:
                     _graph.add_edge(nid, sid, "BELONGS_TO")
 
-        cur.execute("SELECT id::text, organization_id::text, title as violation_type, severity, status FROM compliance_violations LIMIT 500")
+        cur.execute(
+            "SELECT id::text, organization_id::text, title as violation_type, severity, status FROM compliance_violations LIMIT 500")
         for row in cur.fetchall():
             vid = f"violation:{row['id']}"
             _graph.add_node(vid, "Violation", {
@@ -396,13 +412,14 @@ def build_synthetic_graph():
         ("Shell Nigeria", "Energy", 80.5), ("Dangote", "Energy", 73.2),
     ]
     for i, (name, sector, score) in enumerate(orgs):
-        oid = f"org:{i+1}"
+        oid = f"org:{i + 1}"
         _graph.add_node(oid, "Organization", {"name": name, "sector": sector, "compliance_score": score})
         _graph.add_edge(oid, f"sector:{sector}", "BELONGS_TO")
         num_v = max(0, int((100 - score) / 15))
         for v in range(num_v):
-            vid = f"violation:{i*10+v}"
-            _graph.add_node(vid, "Violation", {"severity": random.choice(["critical", "high", "medium"]), "status": "open"})
+            vid = f"violation:{i * 10 + v}"
+            _graph.add_node(vid, "Violation", {"severity": random.choice(
+                ["critical", "high", "medium"]), "status": "open"})
             _graph.add_edge(oid, vid, "HAS_VIOLATION")
     _graph.built_at = datetime.now(timezone.utc).isoformat()
 
@@ -587,7 +604,7 @@ def train_gnn() -> dict:
         "graph_nodes": len(_graph.nodes),
         "graph_edges": len(_graph.edges),
         "embeddings_computed": len(_graph.embeddings),
-        "loss_history_sample": [round(l, 4) for l in losses[::max(1, len(losses)//10)]],
+        "loss_history_sample": [round(loss_value, 4) for loss_value in losses[::max(1, len(losses) // 10)]],
         "version": version,
         "gnn_weights_path": str(gnn_path),
         "link_predictor_path": str(lp_path),
@@ -617,11 +634,12 @@ def train_gnn() -> dict:
 
 class ViolationLSTM(nn.Module):
     """LSTM network for violation count time-series forecasting."""
+
     def __init__(self, input_dim: int, hidden_dim: int = 64, num_layers: int = 2, dropout: float = 0.2):
         super().__init__()
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=num_layers,
-                           dropout=dropout if num_layers > 1 else 0,
-                           batch_first=True)
+                            dropout=dropout if num_layers > 1 else 0,
+                            batch_first=True)
         self.fc1 = nn.Linear(hidden_dim, 32)
         self.fc2 = nn.Linear(32, 1)
         self.dropout = nn.Dropout(dropout)
@@ -637,6 +655,7 @@ class ViolationLSTM(nn.Module):
 _lstm_model: Optional[ViolationLSTM] = None
 _lstm_scaler: Optional[StandardScaler] = None
 _lstm_metrics: dict = {}
+
 
 def extract_violation_timeseries() -> tuple:
     """Extract monthly violation counts from PostgreSQL."""
@@ -797,7 +816,7 @@ def train_lstm() -> dict:
         "test_mae": round(test_mae, 4),
         "test_rmse": round(math.sqrt(max(0, test_loss)), 4),
         "forecasts": forecasts,
-        "loss_history_sample": [round(l, 4) for l in losses[::max(1, len(losses)//10)]],
+        "loss_history_sample": [round(loss_value, 4) for loss_value in losses[::max(1, len(losses) // 10)]],
         "version": version,
         "weights_path": str(lstm_path),
         "trained_at": datetime.now(timezone.utc).isoformat(),
@@ -823,6 +842,7 @@ def train_lstm() -> dict:
 
 class ComplianceAutoencoder(nn.Module):
     """Autoencoder for unsupervised anomaly detection."""
+
     def __init__(self, input_dim: int, latent_dim: int = 16):
         super().__init__()
         self.encoder = nn.Sequential(
@@ -849,6 +869,7 @@ _autoencoder: Optional[ComplianceAutoencoder] = None
 _ae_scaler: Optional[StandardScaler] = None
 _ae_threshold: float = 0.0
 _ae_metrics: dict = {}
+
 
 def train_autoencoder() -> dict:
     """Train autoencoder for anomaly detection with real backpropagation."""
@@ -974,6 +995,7 @@ FEATURE_COLUMNS = [
     "sector_encoded", "staff_proxy", "has_dpo"
 ]
 
+
 def extract_features_from_db() -> tuple:
     """Extract ML features from PostgreSQL."""
     if not HAS_PG:
@@ -1057,7 +1079,7 @@ def train_xgboost() -> dict:
     else:
         from sklearn.ensemble import GradientBoostingClassifier
         _xgb_model = GradientBoostingClassifier(n_estimators=200, max_depth=5,
-                                                 learning_rate=0.05, random_state=42)
+                                                learning_rate=0.05, random_state=42)
 
     _xgb_model.fit(X_train, y_train)
     y_pred = _xgb_model.predict(X_test)
@@ -1076,7 +1098,7 @@ def train_xgboost() -> dict:
     if len(set(y_test)) > 1 and y_prob.shape[1] > 1:
         metrics["roc_auc"] = round(float(roc_auc_score(y_test, y_prob[:, 1])), 4)
 
-    cv_scores = cross_val_score(_xgb_model, X_scaled, y, cv=min(5, max(2, len(X)//5)))
+    cv_scores = cross_val_score(_xgb_model, X_scaled, y, cv=min(5, max(2, len(X) // 5)))
     metrics["cv_accuracy"] = round(float(np.mean(cv_scores)), 4)
     metrics["cv_std"] = round(float(np.std(cv_scores)), 4)
 
@@ -1141,7 +1163,7 @@ def lakehouse_etl() -> dict:
         "audit_logs": "SELECT id, action, resource_type, created_at FROM audit_logs LIMIT 1000",
     }
 
-    pg_dsn = re.sub(r'\?.*$', '', DB_URL)
+    re.sub(r'\?.*$', '', DB_URL)
     total_rows = 0
 
     for table, query in tables.items():
@@ -1234,6 +1256,7 @@ def lakehouse_materialized_views() -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 _ray_initialized = False
+
 
 def init_ray():
     """Initialize Ray runtime."""
@@ -1346,7 +1369,6 @@ def train_all_local() -> dict:
 # - Retraining event log with before/after metrics
 # ══════════════════════════════════════════════════════════════════════════════
 
-from scipy import stats as scipy_stats
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 RETRAIN_INTERVAL_SECONDS = int(os.environ.get("RETRAIN_INTERVAL", "21600"))  # 6 hours
@@ -1356,6 +1378,7 @@ DRIFT_THRESHOLD_PSI = float(os.environ.get("DRIFT_THRESHOLD_PSI", "0.2"))  # PSI
 CHAMPION_IMPROVEMENT_THRESHOLD = float(os.environ.get("CHAMPION_THRESHOLD", "0.01"))  # 1%
 
 # ── Data Drift Monitor ────────────────────────────────────────────────────────
+
 
 class DataDriftMonitor:
     """Monitors feature distribution drift using KS-test and PSI."""
@@ -1588,7 +1611,7 @@ class ChampionChallenger:
         }
 
     def evaluate_challenger(self, model_name: str, challenger_version: str,
-                           challenger_metrics: dict, primary_metric: str = "accuracy") -> dict:
+                            challenger_metrics: dict, primary_metric: str = "accuracy") -> dict:
         """Compare challenger against champion. Promote if better."""
         champion = self.champions.get(model_name)
         if champion is None:
@@ -1868,7 +1891,7 @@ class ContinuousTrainingOrchestrator:
                         drift_result = drift_monitor.check_drift(X, feature_names)
                         self.last_drift_check = now
                         if drift_result.get("drifted"):
-                            log.warning(f"Drift detected — triggering retraining")
+                            log.warning("Drift detected — triggering retraining")
                             self._run_retrain_cycle("drift_detected", drift_info=drift_result)
                             continue
 
@@ -1915,9 +1938,9 @@ class ContinuousTrainingOrchestrator:
             "running": self.running,
             "config": self.config,
             "last_train_time": datetime.fromtimestamp(self.last_train_time, tz=timezone.utc).isoformat()
-                if self.last_train_time else None,
+            if self.last_train_time else None,
             "last_drift_check": datetime.fromtimestamp(self.last_drift_check, tz=timezone.utc).isoformat()
-                if self.last_drift_check else None,
+            if self.last_drift_check else None,
             "retrain_count": self.retrain_count,
             "drift_monitor": {
                 "has_baseline": drift_monitor._baseline_data is not None,
@@ -1949,12 +1972,15 @@ class TrainRequest(BaseModel):
     models: list[str] = ["all"]
     use_ray: bool = True
 
+
 class PredictRequest(BaseModel):
     org_features: dict = {}
+
 
 class LinkPredictRequest(BaseModel):
     source: str
     target: str
+
 
 class BuildGraphRequest(BaseModel):
     source: str = "database"
@@ -2053,7 +2079,10 @@ def api_predict_breach(req: PredictRequest):
     if _xgb_explainer:
         try:
             sv = _xgb_explainer.shap_values(features_scaled)
-            shap_vals = sv[1][0] if isinstance(sv, list) and len(sv) > 1 else (sv[0][0] if isinstance(sv, list) else sv[0])
+            shap_vals = sv[1][0] if isinstance(
+                sv, list) and len(sv) > 1 else (
+                sv[0][0] if isinstance(
+                    sv, list) else sv[0])
             result["shap_values"] = dict(zip(FEATURE_COLUMNS, [round(float(x), 4) for x in shap_vals]))
         except Exception:
             pass
@@ -2222,6 +2251,7 @@ class FeedbackRequest(BaseModel):
     prediction_id: str
     actual_outcome: dict
 
+
 class ContinuousTrainConfigRequest(BaseModel):
     retrain_interval: Optional[int] = None
     drift_check_interval: Optional[int] = None
@@ -2338,7 +2368,7 @@ def api_retrain_status():
     return {
         "continuous_running": continuous_trainer.running,
         "last_train_time": datetime.fromtimestamp(continuous_trainer.last_train_time, tz=timezone.utc).isoformat()
-            if continuous_trainer.last_train_time else None,
+        if continuous_trainer.last_train_time else None,
         "retrain_count": continuous_trainer.retrain_count,
         "next_scheduled": datetime.fromtimestamp(
             continuous_trainer.last_train_time + continuous_trainer.config["retrain_interval"],
@@ -2350,10 +2380,9 @@ def api_retrain_status():
 
 
 # ── Graceful Shutdown ─────────────────────────────────────────────────────────
-import signal as _signal
-import atexit
 
 _shutdown_requested = False
+
 
 def _graceful_shutdown(signum, frame):
     global _shutdown_requested
@@ -2366,7 +2395,7 @@ def _graceful_shutdown(signum, frame):
         log.info("[Shutdown] Continuous training stopped")
     # Save all model weights before exit
     try:
-        for name, model in [("gnn", gnn_model), ("lstm", lstm_model), ("autoencoder", ae_model)]:
+        for name, model in [("gnn", _gnn_model), ("lstm", _lstm_model), ("autoencoder", _autoencoder)]:
             if model is not None and hasattr(model, "state_dict"):
                 path = MODEL_DIR / f"{name}_final.pt"
                 torch.save(model.state_dict(), path)
@@ -2375,13 +2404,16 @@ def _graceful_shutdown(signum, frame):
         log.warning(f"[Shutdown] Error saving models: {e}")
     log.info("[Shutdown] Graceful shutdown complete")
 
+
 _signal.signal(_signal.SIGTERM, _graceful_shutdown)
 _signal.signal(_signal.SIGINT, _graceful_shutdown)
+
 
 @atexit.register
 def _cleanup():
     if continuous_trainer.running:
         continuous_trainer.stop()
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

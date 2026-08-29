@@ -12,13 +12,11 @@ Technology: Python · llama-cpp-python · Flask
 Port: 8204
 """
 import os
-import sys
 import json
 import time
 import logging
-import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 PORT = int(os.environ.get("LLAMACPP_PORT", "8204"))
 MODEL_PATH = os.environ.get("LLAMACPP_MODEL_PATH", "")
@@ -97,7 +95,8 @@ def load_model():
         return False
 
 
-def generate(prompt: str, system: str = "", max_tokens: int = MAX_TOKENS, temperature: float = TEMPERATURE) -> Dict[str, Any]:
+def generate(prompt: str, system: str = "", max_tokens: int = MAX_TOKENS,
+             temperature: float = TEMPERATURE) -> Dict[str, Any]:
     """Run inference using the loaded llama.cpp model."""
     global _total_requests, _total_tokens
 
@@ -226,7 +225,9 @@ Respond ONLY with JSON: {{"severity": "...", "category": "...", "ndpa_section": 
 
         elif self.path == "/summarize":
             document = body.get("document", body.get("text", ""))
-            prompt = f"Summarize the following compliance document into key obligations, risks, and recommended actions:\n\n{document[:3000]}"
+            prompt = f"Summarize the following compliance document into key obligations, risks, and recommended actions:\n\n{
+                document[
+                    :3000]}"
             result = generate(prompt, "You are a compliance document summarizer. Be concise, use bullet points.")
             self._send_inference_result(result)
 

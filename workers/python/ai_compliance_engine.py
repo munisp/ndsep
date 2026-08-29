@@ -140,7 +140,9 @@ async def llm_generate(prompt: str, system: str = "", temperature: float = 0.3) 
         "prompt": prompt,
         "system": system or "You are an expert on the Nigeria Data Protection Act 2023 (NDPA). Answer accurately based on the Act.",
         "stream": False,
-        "options": {"temperature": temperature, "num_predict": 2048},
+        "options": {
+            "temperature": temperature,
+            "num_predict": 2048},
     }
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -267,7 +269,11 @@ Include: necessity assessment, risk assessment, mitigation measures, and recomme
         if rf["risk"] == "critical":
             mitigations.append(f"MANDATORY: Prior consultation with NDPC required (Article 56) for {rf['factor']}")
         elif rf["risk"] == "high":
-            mitigations.append(f"Implement additional safeguards for {rf['factor']} per Articles {', '.join(rf['articles'])}")
+            mitigations.append(
+                f"Implement additional safeguards for {
+                    rf['factor']} per Articles {
+                    ', '.join(
+                        rf['articles'])}")
         else:
             mitigations.append(f"Document controls for {rf['factor']}")
 

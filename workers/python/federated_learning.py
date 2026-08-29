@@ -8,7 +8,6 @@ Uses: Federated Averaging (FedAvg) with differential privacy noise injection.
 """
 
 import os
-import json
 import logging
 import hashlib
 import math
@@ -115,7 +114,8 @@ def clip_gradients(gradients: list[list[float]], clip_norm: float) -> list[list[
     return clipped
 
 
-def add_dp_noise(gradients: list[list[float]], epsilon: float, delta: float, clip_norm: float, n_samples: int) -> list[list[float]]:
+def add_dp_noise(gradients: list[list[float]], epsilon: float, delta: float,
+                 clip_norm: float, n_samples: int) -> list[list[float]]:
     """Add calibrated Gaussian noise for (epsilon, delta)-differential privacy."""
     sigma = clip_norm * math.sqrt(2 * math.log(1.25 / delta)) / epsilon
     noisy = []

@@ -22,12 +22,8 @@ Technology: Python · numpy · scipy · psycopg2 · FastAPI
 Port: 8216
 """
 import os
-import sys
-import json
-import math
 import time
 import random
-import hashlib
 import logging
 import threading
 from datetime import datetime, timezone
@@ -39,8 +35,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-GNN] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-GNN] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 try:
@@ -51,9 +47,8 @@ except ImportError:
     HAS_PG = False
 
 try:
-    from scipy.sparse import csr_matrix
-    from scipy.sparse.linalg import svds
-    HAS_SCIPY = True
+    import scipy
+    HAS_SCIPY = scipy is not None
 except ImportError:
     HAS_SCIPY = False
 
@@ -67,8 +62,8 @@ except ImportError:
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_URL = os.environ.get("DATABASE_URL",
-    os.environ.get("WORKER_DATABASE_URL",
-    "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+                        os.environ.get("WORKER_DATABASE_URL",
+                                       "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 PORT = int(os.environ.get("GNN_PORT", "8216"))
 FALKORDB_URL = os.environ.get("FALKORDB_URL", "redis://localhost:6379")
 LAKEHOUSE_URL = os.environ.get("LAKEHOUSE_URL", "http://localhost:8140")
@@ -78,6 +73,8 @@ GNN_LAYERS = int(os.environ.get("GNN_LAYERS", "3"))
 app = FastAPI(title="NDSEP GNN Compliance Engine", version="2.0.0")
 
 # ── Graph Data Structures ──────────────────────────────────────────────────────
+
+
 class ComplianceGraph:
     def __init__(self):
         self.nodes: dict[str, dict] = {}  # node_id -> {type, features, ...}
@@ -119,6 +116,7 @@ class ComplianceGraph:
             "built_at": self.built_at,
         }
 
+
 graph = ComplianceGraph()
 _start_time = time.time()
 _gnn_weights: dict[str, np.ndarray] = {}
@@ -126,6 +124,7 @@ _link_predictor: Any = None
 _training_metrics: dict = {}
 
 # ── Build Graph from Lakehouse or PostgreSQL ───────────────────────────────────
+
 
 def _fetch_lakehouse_features() -> Optional[dict]:
     """Try to fetch ML features from Lakehouse Analytics Engine."""
@@ -140,6 +139,7 @@ def _fetch_lakehouse_features() -> Optional[dict]:
     except Exception as e:
         log.debug(f"[GNN] Lakehouse features unavailable: {e}")
     return None
+
 
 def _publish_embeddings_to_lakehouse():
     """Publish computed GNN embeddings to Lakehouse for downstream ML consumption."""
@@ -169,6 +169,7 @@ def _publish_embeddings_to_lakehouse():
             log.debug(f"[GNN] Lakehouse embedding publish: HTTP {resp.status_code}")
     except Exception as e:
         log.debug(f"[GNN] Lakehouse embedding publish unavailable: {e}")
+
 
 def build_graph_from_db():
     """Build compliance knowledge graph from Lakehouse (preferred) or PostgreSQL (fallback)."""
@@ -214,7 +215,8 @@ def build_graph_from_db():
                     graph.add_edge(nid, sector_id, "BELONGS_TO")
 
         # Violations as nodes
-        cur.execute("SELECT id::text, organization_id::text, title as violation_type, severity, status FROM compliance_violations LIMIT 500")
+        cur.execute(
+            "SELECT id::text, organization_id::text, title as violation_type, severity, status FROM compliance_violations LIMIT 500")
         for row in cur.fetchall():
             vid = f"violation:{row['id']}"
             graph.add_node(vid, "Violation", {
@@ -263,9 +265,9 @@ def build_graph_from_db():
         log.error(f"Graph build failed: {e}")
         build_synthetic_graph()
 
+
 def _build_graph_from_lakehouse(rows: list[dict]):
     """Build graph from Lakehouse compliance features (enriched with breach/violation/penalty counts)."""
-    global graph
     log.info(f"[GNN] Building graph from {len(rows)} Lakehouse compliance feature rows")
 
     sectors_seen: set[str] = set()
@@ -332,6 +334,7 @@ def _build_graph_from_lakehouse(rows: list[dict]):
         except Exception as e:
             log.debug(f"[GNN] PostgreSQL enrichment skipped: {e}")
 
+
 def build_synthetic_graph():
     """Build synthetic compliance graph for demo."""
     sectors = ["Banking", "Telecom", "Healthcare", "Insurance", "Education", "Energy"]
@@ -347,14 +350,14 @@ def build_synthetic_graph():
         ("Shell Nigeria", "Energy", 80.5), ("Dangote Energy", "Energy", 73.2),
     ]
     for i, (name, sector, score) in enumerate(orgs):
-        oid = f"org:{i+1}"
+        oid = f"org:{i + 1}"
         graph.add_node(oid, "Organization", {"name": name, "sector": sector, "compliance_score": score})
         graph.add_edge(oid, f"sector:{sector}", "BELONGS_TO")
 
         # Add violations
         num_violations = max(0, int((100 - score) / 15))
         for v in range(num_violations):
-            vid = f"violation:{i*10+v}"
+            vid = f"violation:{i * 10 + v}"
             sev = random.choice(["critical", "high", "medium", "low"])
             graph.add_node(vid, "Violation", {"severity": sev, "status": random.choice(["open", "resolved"])})
             graph.add_edge(oid, vid, "HAS_VIOLATION")
@@ -370,6 +373,8 @@ def build_synthetic_graph():
     graph.built_at = datetime.now(timezone.utc).isoformat()
 
 # ── GNN: Message Passing with Learned Weights ─────────────────────────────────
+
+
 def node_feature_vector(node_id: str) -> np.ndarray:
     """Convert node features to numeric vector."""
     node = graph.nodes.get(node_id)
@@ -385,26 +390,38 @@ def node_feature_vector(node_id: str) -> np.ndarray:
     vec[2] = 1.0 if features.get("severity") == "critical" else 0.5 if features.get("severity") == "high" else 0.2
     vec[3] = 1.0 if features.get("status") in ["active", "open"] else 0.0
     vec[4] = float(features.get("affected_records", 0)) / 10000.0
-    vec[5] = {"Organization": 1.0, "Violation": 0.6, "EnforcementAction": 0.8, "BreachIncident": 0.9, "Sector": 0.3}.get(ntype, 0.5)
+    vec[5] = {
+        "Organization": 1.0,
+        "Violation": 0.6,
+        "EnforcementAction": 0.8,
+        "BreachIncident": 0.9,
+        "Sector": 0.3}.get(
+        ntype,
+        0.5)
     vec[6] = float(len(features)) / 10.0
     vec[7] = hash(node_id) % 100 / 100.0  # positional encoding
     return vec
 
+
 def initialize_gnn_weights():
     """Initialize learnable GNN weight matrices."""
-    global _gnn_weights
     rng = np.random.default_rng(42)
     for layer in range(GNN_LAYERS):
-        _gnn_weights[f"W_self_{layer}"] = rng.standard_normal((EMBEDDING_DIM, 8 if layer == 0 else EMBEDDING_DIM)).astype(np.float32) * 0.1
-        _gnn_weights[f"W_neigh_{layer}"] = rng.standard_normal((EMBEDDING_DIM, 8 if layer == 0 else EMBEDDING_DIM)).astype(np.float32) * 0.1
+        _gnn_weights[f"W_self_{layer}"] = rng.standard_normal(
+            (EMBEDDING_DIM, 8 if layer == 0 else EMBEDDING_DIM)).astype(np.float32) * 0.1
+        _gnn_weights[f"W_neigh_{layer}"] = rng.standard_normal(
+            (EMBEDDING_DIM, 8 if layer == 0 else EMBEDDING_DIM)).astype(np.float32) * 0.1
         _gnn_weights[f"b_{layer}"] = np.zeros(EMBEDDING_DIM, dtype=np.float32)
+
 
 def relu(x: np.ndarray) -> np.ndarray:
     return np.maximum(0, x)
 
+
 def l2_normalize(x: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(x)
     return x / max(norm, 1e-8)
+
 
 def gnn_forward(node_id: str, depth: int = GNN_LAYERS) -> np.ndarray:
     """GraphSAGE-style forward pass with learned aggregation."""
@@ -433,6 +450,7 @@ def gnn_forward(node_id: str, depth: int = GNN_LAYERS) -> np.ndarray:
     h = relu(W_self @ h_self + W_neigh @ h_neigh + b)
     return l2_normalize(h)
 
+
 def compute_all_embeddings():
     """Compute GNN embeddings for all nodes."""
     for node_id in graph.nodes:
@@ -440,6 +458,8 @@ def compute_all_embeddings():
     log.info(f"Computed {len(graph.embeddings)} GNN embeddings (dim={EMBEDDING_DIM})")
 
 # ── Link Prediction ────────────────────────────────────────────────────────────
+
+
 def train_link_predictor():
     """Train link prediction model: predict future violations/enforcement."""
     global _link_predictor, _training_metrics
@@ -489,6 +509,7 @@ def train_link_predictor():
     }
     log.info(f"Link predictor trained: accuracy={_training_metrics['accuracy']}, f1={_training_metrics['f1']}")
 
+
 def predict_link(src_id: str, dst_id: str) -> dict:
     """Predict whether a link (edge) should exist between two nodes."""
     if _link_predictor is None:
@@ -507,6 +528,7 @@ def predict_link(src_id: str, dst_id: str) -> dict:
         "probability": round(prob, 4),
         "model": "logistic_regression_on_gnn_embeddings",
     }
+
 
 def predict_future_violations(org_id: str) -> list[dict]:
     """Predict which violation types an org is likely to face next."""
@@ -530,19 +552,24 @@ def predict_future_violations(org_id: str) -> list[dict]:
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
+
 class BuildRequest(BaseModel):
     source: str = "database"
+
 
 class EmbeddingRequest(BaseModel):
     node_id: str
     depth: int = 2
 
+
 class LinkPredRequest(BaseModel):
     source: str
     target: str
 
+
 class OrgPredRequest(BaseModel):
     org_id: str
+
 
 @app.get("/health")
 def health():
@@ -561,6 +588,7 @@ def health():
         "uptime_seconds": round(time.time() - _start_time),
     }
 
+
 @app.post("/graph/build")
 def api_build_graph(req: BuildRequest):
     build_graph_from_db()
@@ -571,9 +599,11 @@ def api_build_graph(req: BuildRequest):
     _publish_embeddings_to_lakehouse()
     return {"status": "built", "graph": graph.stats(), "training_metrics": _training_metrics}
 
+
 @app.get("/graph/stats")
 def api_graph_stats():
     return graph.stats()
+
 
 @app.post("/embedding")
 def api_get_embedding(req: EmbeddingRequest):
@@ -591,6 +621,7 @@ def api_get_embedding(req: EmbeddingRequest):
         "node_type": graph.nodes[req.node_id]["type"],
     }
 
+
 @app.get("/embeddings/all")
 def api_all_embeddings():
     """Export all GNN embeddings (for lakehouse/feature store)."""
@@ -602,19 +633,23 @@ def api_all_embeddings():
         }
     return {"embeddings": result, "count": len(result), "dimension": EMBEDDING_DIM}
 
+
 @app.post("/predict/link")
 def api_predict_link(req: LinkPredRequest):
     return predict_link(req.source, req.target)
+
 
 @app.post("/predict/violations")
 def api_predict_violations(req: OrgPredRequest):
     predictions = predict_future_violations(req.org_id)
     return {"org_id": req.org_id, "predictions": predictions, "count": len(predictions)}
 
+
 @app.get("/graph/neighbors/{node_id}")
 def api_neighbors(node_id: str, relation: str = ""):
     neighbors = graph.get_neighbors(node_id, relation)
     return {"node_id": node_id, "neighbors": neighbors, "count": len(neighbors)}
+
 
 @app.get("/graph/path")
 def api_find_path(src: str, dst: str, max_depth: int = 4):
@@ -636,6 +671,7 @@ def api_find_path(src: str, dst: str, max_depth: int = 4):
                 queue.append((nid, path + [nid]))
     return {"path": [], "length": -1, "found": False}
 
+
 @app.get("/graph/similarity/{node_a}/{node_b}")
 def api_node_similarity(node_a: str, node_b: str):
     """Cosine similarity between two node embeddings."""
@@ -647,12 +683,15 @@ def api_node_similarity(node_a: str, node_b: str):
     return {"node_a": node_a, "node_b": node_b, "cosine_similarity": round(similarity, 4)}
 
 # ── Startup ────────────────────────────────────────────────────────────────────
+
+
 def init_graph():
     time.sleep(5)
     build_graph_from_db()
     initialize_gnn_weights()
     compute_all_embeddings()
     train_link_predictor()
+
 
 if __name__ == "__main__":
     import uvicorn

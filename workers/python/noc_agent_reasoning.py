@@ -23,9 +23,9 @@ import time
 import uuid
 import logging
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 import psycopg2
 import psycopg2.extras
@@ -50,6 +50,7 @@ app = FastAPI(title="NOC AI Agent — Reasoning Engine", version="1.0.0")
 
 # ── Knowledge Base (in-memory + DB-backed) ────────────────────────────────────
 
+
 @dataclass
 class IncidentPattern:
     pattern_id: str
@@ -63,6 +64,7 @@ class IncidentPattern:
     success_rate: float = 0.0
     occurrence_count: int = 0
     avg_resolution_seconds: int = 0
+
 
 KNOWLEDGE_BASE: list[IncidentPattern] = [
     IncidentPattern(
@@ -189,6 +191,7 @@ KNOWLEDGE_BASE: list[IncidentPattern] = [
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
 
+
 class AnomalyInput(BaseModel):
     anomaly_id: str
     service_name: str
@@ -201,6 +204,7 @@ class AnomalyInput(BaseModel):
     severity: str
     detection_method: str
     context: dict = {}
+
 
 class DiagnosisResult(BaseModel):
     diagnosis_id: str
@@ -219,6 +223,7 @@ class DiagnosisResult(BaseModel):
     affected_services: list[str]
     prevention_recommendations: list[str]
 
+
 class LearnInput(BaseModel):
     remediation_id: str
     outcome: str  # success, partial_success, failure
@@ -227,6 +232,7 @@ class LearnInput(BaseModel):
     notes: Optional[str] = None
 
 # ── State ─────────────────────────────────────────────────────────────────────
+
 
 class ReasoningState:
     def __init__(self):
@@ -245,9 +251,11 @@ class ReasoningState:
         self.start_time = datetime.now(timezone.utc)
         self.lock = threading.Lock()
 
+
 state = ReasoningState()
 
 # ── Knowledge Graph Matching ──────────────────────────────────────────────────
+
 
 def match_pattern(anomaly: AnomalyInput) -> Optional[IncidentPattern]:
     """Find the best matching incident pattern from knowledge base."""
@@ -309,7 +317,10 @@ def build_causal_chain(anomaly: AnomalyInput, pattern: Optional[IncidentPattern]
     if pattern:
         chain.append(f"Pattern match: {pattern.incident_type} (historical success rate: {pattern.success_rate:.0%})")
         chain.append(f"Root cause category: {pattern.root_cause_category}")
-        chain.append(f"Observed {pattern.occurrence_count} times before, avg resolution: {pattern.avg_resolution_seconds}s")
+        chain.append(
+            f"Observed {
+                pattern.occurrence_count} times before, avg resolution: {
+                pattern.avg_resolution_seconds}s")
 
     return chain
 
@@ -411,7 +422,9 @@ def diagnose_anomaly(anomaly: AnomalyInput) -> DiagnosisResult:
         affected = pattern.affected_services
         prevention = pattern.prevention_measures
     else:
-        root_cause = f"Unknown anomaly on {anomaly.service_name}.{anomaly.metric_name} — no matching pattern in knowledge base"
+        root_cause = f"Unknown anomaly on {
+            anomaly.service_name}.{
+            anomaly.metric_name} — no matching pattern in knowledge base"
         root_cause_category = "unknown"
         confidence = 0.3
         remediation_plan = [
@@ -435,14 +448,16 @@ def diagnose_anomaly(anomaly: AnomalyInput) -> DiagnosisResult:
             human_reason = f"Severity {anomaly.severity} does not warrant autonomous action"
 
     evidence = [
-        f"Z-score: {anomaly.z_score:.2f} (threshold: 3.0)",
-        f"Isolation score: {anomaly.isolation_score:.2f} (threshold: 0.65)",
-        f"Current value {anomaly.current_value:.2f} vs baseline {anomaly.baseline_mean:.2f} ± {anomaly.baseline_std:.2f}",
-    ]
+        f"Z-score: {
+            anomaly.z_score:.2f} (threshold: 3.0)", f"Isolation score: {
+            anomaly.isolation_score:.2f} (threshold: 0.65)", f"Current value {
+                anomaly.current_value:.2f} vs baseline {
+                    anomaly.baseline_mean:.2f} ± {
+                        anomaly.baseline_std:.2f}", ]
     if pattern:
         evidence.append(f"Matched pattern: {pattern.incident_type} ({pattern.occurrence_count} past occurrences)")
     if llm_reasoning:
-        evidence.append(f"LLM analysis available")
+        evidence.append("LLM analysis available")
 
     diagnosis_time_ms = (time.time() - start) * 1000
 

@@ -30,8 +30,8 @@ import sys
 import json
 import time
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -39,11 +39,13 @@ try:
     from db_helper import get_db_connection, publish_event
 except ImportError:
     import psycopg2
+
     def get_db_connection():
         return psycopg2.connect(
             os.environ.get('LOCAL_DATABASE_URL',
-                'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
+                           'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
         )
+
     def publish_event(event_type: str, payload: dict):
         logging.info(f"[EVENT] {event_type}: {json.dumps(payload)}")
 
@@ -68,6 +70,7 @@ TELECOM_RULES = {
 }
 
 # ─── Compliance Check Functions ───────────────────────────────────────────────
+
 
 def check_location_data_consent(conn) -> Dict:
     """Verify telecom operators have consent for location data processing."""
@@ -95,6 +98,7 @@ def check_location_data_consent(conn) -> Dict:
         'violations': violations,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_nin_sim_compliance(conn) -> Dict:
     """Verify NIN-SIM linkage compliance (CBN/NCC directive)."""
@@ -129,6 +133,7 @@ def check_nin_sim_compliance(conn) -> Dict:
         'issues': issues,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_roaming_data_transfers(conn) -> Dict:
     """Verify roaming data transfers comply with NDPA cross-border rules."""
@@ -165,6 +170,7 @@ def check_roaming_data_transfers(conn) -> Dict:
         'timestamp': datetime.now().isoformat(),
     }
 
+
 def check_ncc_reporting(conn) -> Dict:
     """Verify NCC regulatory reports are submitted on time."""
     overdue = []
@@ -197,6 +203,7 @@ def check_ncc_reporting(conn) -> Dict:
         'overdue': overdue,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_subscriber_breach_monitoring(conn) -> Dict:
     """Monitor subscriber data breach notification compliance."""
@@ -233,6 +240,7 @@ def check_subscriber_breach_monitoring(conn) -> Dict:
         'timestamp': datetime.now().isoformat(),
     }
 
+
 def run_compliance_checks(conn) -> Dict:
     """Run all telecom compliance checks and aggregate results."""
     results = {
@@ -268,6 +276,7 @@ def run_compliance_checks(conn) -> Dict:
 
     return results
 
+
 def main():
     logger.info("Telecom Compliance Monitor starting...")
     iteration = 0
@@ -298,6 +307,7 @@ def main():
             logger.error(f"Main loop error: {e}")
 
         time.sleep(60)  # Run every 60 seconds
+
 
 if __name__ == '__main__':
     main()

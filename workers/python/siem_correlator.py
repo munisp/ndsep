@@ -103,32 +103,31 @@ WAZUH_RULES = [
 
 # Kill chain correlation patterns: if these categories appear in sequence for same org,
 # create a correlated incident
-KILL_CHAIN_PATTERNS = [
-    {
-        "name": "APT Intrusion Chain",
-        "severity": "critical",
-        "pattern": ["authentication", "privilege_escalation", "lateral_movement", "data_exfiltration"],
-        "description": "Full APT kill chain detected: initial access -> privilege escalation -> lateral movement -> exfiltration"
-    },
-    {
-        "name": "Ransomware Attack Chain",
-        "severity": "critical",
-        "pattern": ["authentication", "credential_access", "ransomware"],
-        "description": "Ransomware attack chain: credential access -> ransomware deployment"
-    },
-    {
-        "name": "C2 Beaconing Chain",
-        "severity": "high",
-        "pattern": ["dns", "c2", "data_exfiltration"],
-        "description": "C2 beaconing chain: suspicious DNS -> C2 beacon -> data exfiltration"
-    },
-    {
-        "name": "Insider Threat Pattern",
-        "severity": "high",
-        "pattern": ["ueba", "data_exfiltration"],
-        "description": "Insider threat pattern: anomalous user behavior followed by data exfiltration"
-    },
-]
+KILL_CHAIN_PATTERNS = [{"name": "APT Intrusion Chain",
+                        "severity": "critical",
+                        "pattern": ["authentication",
+                                    "privilege_escalation",
+                                    "lateral_movement",
+                                    "data_exfiltration"],
+                        "description": "Full APT kill chain detected: initial access -> privilege escalation -> lateral movement -> exfiltration"},
+                       {"name": "Ransomware Attack Chain",
+                        "severity": "critical",
+                        "pattern": ["authentication",
+                                    "credential_access",
+                                    "ransomware"],
+                        "description": "Ransomware attack chain: credential access -> ransomware deployment"},
+                       {"name": "C2 Beaconing Chain",
+                        "severity": "high",
+                        "pattern": ["dns",
+                                    "c2",
+                                    "data_exfiltration"],
+                        "description": "C2 beaconing chain: suspicious DNS -> C2 beacon -> data exfiltration"},
+                       {"name": "Insider Threat Pattern",
+                        "severity": "high",
+                        "pattern": ["ueba",
+                                    "data_exfiltration"],
+                        "description": "Insider threat pattern: anomalous user behavior followed by data exfiltration"},
+                       ]
 
 OPENCTI_IOCS = [
     {"type": "ip", "value": "185.220.101.45", "threat": "TOR Exit Node", "confidence": 0.95},
@@ -160,8 +159,10 @@ AUDIT_ACTIONS = [
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def get_db():
     return psycopg2.connect(DB_URL)
+
 
 def broadcast(event: str, data: dict):
     try:
@@ -169,13 +170,16 @@ def broadcast(event: str, data: dict):
     except Exception:
         pass
 
+
 def random_ip():
-    return f"{random.randint(1,254)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+    return f"{random.randint(1, 254)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
+
 
 def get_org_ids(conn):
     with conn.cursor() as cur:
         cur.execute("SELECT id, name FROM organizations LIMIT 20")
         return cur.fetchall()
+
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -183,6 +187,7 @@ def now_iso():
 # ─────────────────────────────────────────────────────────────────────────────
 # Wazuh Alert Generator with MITRE ATT&CK mapping
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def run_wazuh_alert_generator():
     """Generates Wazuh-style security alerts with MITRE ATT&CK mapping."""
@@ -232,7 +237,7 @@ def run_wazuh_alert_generator():
 
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO security_alerts 
+                    INSERT INTO security_alerts
                         (organization_id, title, description, severity, source, alert_type, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, NOW())
                     RETURNING id
@@ -283,6 +288,7 @@ def run_wazuh_alert_generator():
 # ─────────────────────────────────────────────────────────────────────────────
 # Alert Correlation Engine — links related alerts into incidents
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def run_alert_correlator():
     """Correlates recent alerts into incidents using kill chain pattern matching."""
@@ -364,6 +370,7 @@ def run_alert_correlator():
 # UEBA — User and Entity Behavior Analytics
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def run_ueba_analyzer():
     """Analyzes user behavior patterns and generates anomaly scores."""
     log.info("Starting UEBA analyzer (User and Entity Behavior Analytics)...")
@@ -431,6 +438,7 @@ def run_ueba_analyzer():
 # Audit Log Writer (7-year retention)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def run_audit_log_writer():
     """Continuously writes audit log entries (simulating OpenSearch 7-year retention)."""
     global audit_logs_written
@@ -468,7 +476,7 @@ def run_audit_log_writer():
 
                 with conn.cursor() as cur:
                     cur.execute("""
-                        INSERT INTO audit_logs 
+                        INSERT INTO audit_logs
                             (organization_id, action, details, ip_address, created_at)
                         VALUES (%s, %s, %s, %s, NOW())
                     """, (org_id, action, json.dumps(details), details["ipAddress"]))
@@ -494,6 +502,7 @@ def run_audit_log_writer():
 # Threat Intelligence Enrichment (OpenCTI)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def run_threat_intel_enrichment():
     """Enriches threat intelligence from OpenCTI feeds."""
     global ioc_matches
@@ -509,7 +518,7 @@ def run_threat_intel_enrichment():
 
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO threat_intelligence 
+                    INSERT INTO threat_intelligence
                         (indicator_type, indicator_value, threat_actor, confidence,
                          source, metadata, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, NOW())
@@ -548,6 +557,7 @@ def run_threat_intel_enrichment():
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP Status Server
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class StatusHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -593,6 +603,7 @@ class StatusHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+
 def start_status_server():
     with socketserver.TCPServer(("", PORT), StatusHandler) as httpd:
         log.info(f"Status server listening on :{PORT}")
@@ -601,6 +612,7 @@ def start_status_server():
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 if __name__ == "__main__":
     log.info("=== NDSEP Layer 4 SIEM Alert Correlator (Python) ===")

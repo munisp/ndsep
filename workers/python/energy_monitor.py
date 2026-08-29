@@ -27,8 +27,8 @@ import sys
 import json
 import time
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -36,11 +36,13 @@ try:
     from db_helper import get_db_connection, publish_event
 except ImportError:
     import psycopg2
+
     def get_db_connection():
         return psycopg2.connect(
             os.environ.get('LOCAL_DATABASE_URL',
-                'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
+                           'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
         )
+
     def publish_event(event_type: str, payload: dict):
         logging.info(f"[EVENT] {event_type}: {json.dumps(payload)}")
 
@@ -64,6 +66,7 @@ ENERGY_RULES = {
 }
 
 # ─── Compliance Check Functions ───────────────────────────────────────────────
+
 
 def check_data_residency_compliance(conn) -> Dict:
     """Verify energy sector data is stored within Nigeria."""
@@ -98,6 +101,7 @@ def check_data_residency_compliance(conn) -> Dict:
         'violations': violations,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_critical_infrastructure_access(conn) -> Dict:
     """Monitor access control compliance for critical energy infrastructure data."""
@@ -134,6 +138,7 @@ def check_critical_infrastructure_access(conn) -> Dict:
         'timestamp': datetime.now().isoformat(),
     }
 
+
 def check_energy_dpia_status(conn) -> Dict:
     """Verify DPIAs exist for energy sector data processing (smart meters, SCADA)."""
     issues = []
@@ -165,6 +170,7 @@ def check_energy_dpia_status(conn) -> Dict:
         'issues': issues,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def check_nerc_reporting_compliance(conn) -> Dict:
     """Verify NERC regulatory reports are submitted on time."""
@@ -198,6 +204,7 @@ def check_nerc_reporting_compliance(conn) -> Dict:
         'overdue': overdue,
         'timestamp': datetime.now().isoformat(),
     }
+
 
 def run_compliance_checks(conn) -> Dict:
     """Run all energy sector compliance checks and aggregate results."""
@@ -233,6 +240,7 @@ def run_compliance_checks(conn) -> Dict:
 
     return results
 
+
 def main():
     logger.info("Energy Sector Compliance Monitor starting...")
     iteration = 0
@@ -263,6 +271,7 @@ def main():
             logger.error(f"Main loop error: {e}")
 
         time.sleep(120)  # Run every 2 minutes
+
 
 if __name__ == '__main__':
     main()

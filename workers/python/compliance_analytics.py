@@ -22,6 +22,7 @@ Environment variables:
   COMPLIANCE_ANALYTICS_PORT
 """
 
+import db_helper
 import os
 import sys
 import json
@@ -33,7 +34,6 @@ from datetime import datetime, timedelta
 
 # Add parent dir for shared db_helper
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import db_helper
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 log = logging.getLogger("ComplianceAnalytics")
@@ -126,10 +126,8 @@ def fluvio_produce(topic, key, value):
 
 def fluvio_produce_batch(topic, records):
     """Produce batch records to a Fluvio topic."""
-    payload = [
-        {"key": r.get("key", ""), "value": json.dumps(r.get("value", {})) if isinstance(r.get("value"), dict) else str(r.get("value", ""))}
-        for r in records
-    ]
+    payload = [{"key": r.get("key", ""), "value": json.dumps(r.get("value", {})) if isinstance(
+        r.get("value"), dict) else str(r.get("value", ""))} for r in records]
     status, _ = _post(f"{FLUVIO_URL}/produce/{topic}/batch", payload)
     return status and 200 <= status < 300
 

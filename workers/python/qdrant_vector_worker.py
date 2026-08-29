@@ -16,9 +16,16 @@ Collections:
 Technology: Python · sentence-transformers · qdrant-client · psycopg2
 Port: 8200
 """
-import os, time, json, logging, threading, http.server, socketserver, hashlib
+import os
+import time
+import json
+import logging
+import threading
+import http.server
+import socketserver
+import hashlib
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 import psycopg2
 import psycopg2.extras
 import requests
@@ -26,7 +33,8 @@ import requests
 # ── Configuration ──────────────────────────────────────────────────────────────
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
-DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
+    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 PORT = int(os.environ.get("QDRANT_WORKER_PORT", "8200"))
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
@@ -35,8 +43,8 @@ BATCH_SIZE = 32
 REINDEX_INTERVAL = 300  # 5 minutes
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-Qdrant] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-Qdrant] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── State ──────────────────────────────────────────────────────────────────────
@@ -57,62 +65,64 @@ COLLECTIONS = [
 ]
 
 # ── NDPA 2023 Knowledge Base ───────────────────────────────────────────────────
-NDPA_KNOWLEDGE_BASE = [
-    {
-        "id": "ndpa-s1", "title": "NDPA 2023 Section 1 — Objectives",
-        "text": "The Nigeria Data Protection Act 2023 establishes a comprehensive framework for the protection of personal data in Nigeria. It creates the Nigeria Data Protection Commission (NDPC) as the supervisory authority and sets out the rights of data subjects and obligations of data controllers and processors.",
-        "source": "NDPA 2023", "category": "legislation"
-    },
-    {
-        "id": "ndpa-s24", "title": "NDPA 2023 Section 24 — Lawful Basis",
-        "text": "Processing of personal data is lawful only if at least one of the following applies: (a) the data subject has given consent; (b) processing is necessary for performance of a contract; (c) processing is necessary for compliance with a legal obligation; (d) processing is necessary to protect vital interests; (e) processing is necessary for a task in the public interest; (f) processing is necessary for legitimate interests.",
-        "source": "NDPA 2023", "category": "lawful_basis"
-    },
-    {
-        "id": "ndpa-s40", "title": "NDPA 2023 Section 40 — Data Breach Notification",
-        "text": "A data controller shall notify the Commission of a personal data breach without undue delay and, where feasible, not later than 72 hours after becoming aware of it. The notification shall describe the nature of the breach, categories of data subjects affected, likely consequences, and measures taken.",
-        "source": "NDPA 2023", "category": "breach_notification"
-    },
-    {
-        "id": "ndpa-s43", "title": "NDPA 2023 Section 43 — Data Protection Impact Assessment",
-        "text": "Where processing is likely to result in a high risk to the rights and freedoms of natural persons, the data controller shall carry out a Data Protection Impact Assessment (DPIA). The DPIA shall include a systematic description of the processing operations, assessment of necessity and proportionality, and measures to address the risks.",
-        "source": "NDPA 2023", "category": "dpia"
-    },
-    {
-        "id": "ndpa-s58", "title": "NDPA 2023 Section 58 — Cross-Border Transfers",
-        "text": "A data controller shall not transfer personal data to a foreign country unless the Commission has determined that the country ensures an adequate level of protection, or appropriate safeguards are in place such as standard contractual clauses, binding corporate rules, or explicit consent of the data subject.",
-        "source": "NDPA 2023", "category": "cross_border"
-    },
-    {
-        "id": "ndpa-s65", "title": "NDPA 2023 Section 65 — Administrative Fines",
-        "text": "The Commission may impose administrative fines for violations. For serious infringements, fines up to 2% of annual global turnover or 10 million Naira (whichever is higher). For less serious infringements, fines up to 1% of annual global turnover or 2 million Naira (whichever is higher).",
-        "source": "NDPA 2023", "category": "penalties"
-    },
-    {
-        "id": "cbn-data-2022", "title": "CBN Data Governance Framework 2022",
-        "text": "The Central Bank of Nigeria requires all financial institutions to maintain data governance frameworks that include data classification, data quality management, data lineage tracking, and regular data audits. Financial data must be stored within Nigeria except where cross-border transfer approval has been obtained.",
-        "source": "CBN", "category": "financial_regulation"
-    },
-    {
-        "id": "nitda-audit-2021", "title": "NITDA Data Protection Audit Framework",
-        "text": "NITDA requires organizations processing personal data of more than 1000 data subjects annually to conduct annual data protection audits through licensed Data Protection Compliance Organizations (DPCOs). Audit reports must be filed with NITDA within 60 days of completion.",
-        "source": "NITDA", "category": "audit_requirement"
-    },
-    {
-        "id": "ndpc-guidance-dpo", "title": "NDPC Guidance on Data Protection Officers",
-        "text": "Organizations that process personal data on a large scale, or process special categories of data, must designate a Data Protection Officer (DPO). The DPO must be registered with the NDPC and must have expert knowledge of data protection law. The DPO cannot be dismissed or penalized for performing their tasks.",
-        "source": "NDPC", "category": "dpo"
-    },
-    {
-        "id": "ndpc-guidance-consent", "title": "NDPC Guidance on Consent",
-        "text": "Consent must be freely given, specific, informed, and unambiguous. Pre-ticked boxes or silence do not constitute consent. Data subjects must be able to withdraw consent at any time, and withdrawal must be as easy as giving consent. Consent obtained before NDPA 2023 must be refreshed if it does not meet these standards.",
-        "source": "NDPC", "category": "consent"
-    },
-]
+NDPA_KNOWLEDGE_BASE = [{"id": "ndpa-s1",
+                        "title": "NDPA 2023 Section 1 — Objectives",
+                        "text": "The Nigeria Data Protection Act 2023 establishes a comprehensive framework for the protection of personal data in Nigeria. It creates the Nigeria Data Protection Commission (NDPC) as the supervisory authority and sets out the rights of data subjects and obligations of data controllers and processors.",
+                        "source": "NDPA 2023",
+                        "category": "legislation"},
+                       {"id": "ndpa-s24",
+                        "title": "NDPA 2023 Section 24 — Lawful Basis",
+                        "text": "Processing of personal data is lawful only if at least one of the following applies: (a) the data subject has given consent; (b) processing is necessary for performance of a contract; (c) processing is necessary for compliance with a legal obligation; (d) processing is necessary to protect vital interests; (e) processing is necessary for a task in the public interest; (f) processing is necessary for legitimate interests.",
+                        "source": "NDPA 2023",
+                        "category": "lawful_basis"},
+                       {"id": "ndpa-s40",
+                        "title": "NDPA 2023 Section 40 — Data Breach Notification",
+                        "text": "A data controller shall notify the Commission of a personal data breach without undue delay and, where feasible, not later than 72 hours after becoming aware of it. The notification shall describe the nature of the breach, categories of data subjects affected, likely consequences, and measures taken.",
+                        "source": "NDPA 2023",
+                        "category": "breach_notification"},
+                       {"id": "ndpa-s43",
+                        "title": "NDPA 2023 Section 43 — Data Protection Impact Assessment",
+                        "text": "Where processing is likely to result in a high risk to the rights and freedoms of natural persons, the data controller shall carry out a Data Protection Impact Assessment (DPIA). The DPIA shall include a systematic description of the processing operations, assessment of necessity and proportionality, and measures to address the risks.",
+                        "source": "NDPA 2023",
+                        "category": "dpia"},
+                       {"id": "ndpa-s58",
+                        "title": "NDPA 2023 Section 58 — Cross-Border Transfers",
+                        "text": "A data controller shall not transfer personal data to a foreign country unless the Commission has determined that the country ensures an adequate level of protection, or appropriate safeguards are in place such as standard contractual clauses, binding corporate rules, or explicit consent of the data subject.",
+                        "source": "NDPA 2023",
+                        "category": "cross_border"},
+                       {"id": "ndpa-s65",
+                        "title": "NDPA 2023 Section 65 — Administrative Fines",
+                        "text": "The Commission may impose administrative fines for violations. For serious infringements, fines up to 2% of annual global turnover or 10 million Naira (whichever is higher). For less serious infringements, fines up to 1% of annual global turnover or 2 million Naira (whichever is higher).",
+                        "source": "NDPA 2023",
+                        "category": "penalties"},
+                       {"id": "cbn-data-2022",
+                        "title": "CBN Data Governance Framework 2022",
+                        "text": "The Central Bank of Nigeria requires all financial institutions to maintain data governance frameworks that include data classification, data quality management, data lineage tracking, and regular data audits. Financial data must be stored within Nigeria except where cross-border transfer approval has been obtained.",
+                        "source": "CBN",
+                        "category": "financial_regulation"},
+                       {"id": "nitda-audit-2021",
+                        "title": "NITDA Data Protection Audit Framework",
+                        "text": "NITDA requires organizations processing personal data of more than 1000 data subjects annually to conduct annual data protection audits through licensed Data Protection Compliance Organizations (DPCOs). Audit reports must be filed with NITDA within 60 days of completion.",
+                        "source": "NITDA",
+                        "category": "audit_requirement"},
+                       {"id": "ndpc-guidance-dpo",
+                        "title": "NDPC Guidance on Data Protection Officers",
+                        "text": "Organizations that process personal data on a large scale, or process special categories of data, must designate a Data Protection Officer (DPO). The DPO must be registered with the NDPC and must have expert knowledge of data protection law. The DPO cannot be dismissed or penalized for performing their tasks.",
+                        "source": "NDPC",
+                        "category": "dpo"},
+                       {"id": "ndpc-guidance-consent",
+                        "title": "NDPC Guidance on Consent",
+                        "text": "Consent must be freely given, specific, informed, and unambiguous. Pre-ticked boxes or silence do not constitute consent. Data subjects must be able to withdraw consent at any time, and withdrawal must be as easy as giving consent. Consent obtained before NDPA 2023 must be refreshed if it does not meet these standards.",
+                        "source": "NDPC",
+                        "category": "consent"},
+                       ]
 
 # ── Database helpers ───────────────────────────────────────────────────────────
+
+
 def get_db():
     return psycopg2.connect(DB_URL)
+
 
 def fetch_policies(conn) -> List[Dict]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -124,6 +134,7 @@ def fetch_policies(conn) -> List[Dict]:
             LIMIT 500
         """)
         return [dict(r) for r in cur.fetchall()]
+
 
 def fetch_violations(conn) -> List[Dict]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -137,6 +148,7 @@ def fetch_violations(conn) -> List[Dict]:
         """)
         return [dict(r) for r in cur.fetchall()]
 
+
 def fetch_organizations(conn) -> List[Dict]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
@@ -148,6 +160,8 @@ def fetch_organizations(conn) -> List[Dict]:
         return [dict(r) for r in cur.fetchall()]
 
 # ── Embedding ──────────────────────────────────────────────────────────────────
+
+
 def load_model():
     global _model
     if _model is None:
@@ -161,6 +175,7 @@ def load_model():
             _model = None
     return _model
 
+
 def embed_texts(texts: List[str]) -> Optional[List[List[float]]]:
     model = load_model()
     if model is None:
@@ -173,6 +188,8 @@ def embed_texts(texts: List[str]) -> Optional[List[List[float]]]:
         return None
 
 # ── Qdrant helpers ─────────────────────────────────────────────────────────────
+
+
 def get_qdrant():
     global _qdrant_client, _qdrant_connected
     if _qdrant_client is not None:
@@ -199,6 +216,7 @@ def get_qdrant():
         _qdrant_connected = False
         return None
 
+
 def upsert_vectors(collection: str, points: List[Dict]) -> int:
     client = get_qdrant()
     if client is None or not points:
@@ -214,6 +232,7 @@ def upsert_vectors(collection: str, points: List[Dict]) -> int:
     except Exception as e:
         log.error(f"Qdrant upsert failed for {collection}: {e}")
         return 0
+
 
 def semantic_search(collection: str, query: str, limit: int = 5) -> List[Dict]:
     client = get_qdrant()
@@ -235,6 +254,8 @@ def semantic_search(collection: str, query: str, limit: int = 5) -> List[Dict]:
         return []
 
 # ── Indexing pipeline ──────────────────────────────────────────────────────────
+
+
 def index_knowledge_base():
     global _total_vectors
     texts = [f"{d['title']}\n{d['text']}" for d in NDPA_KNOWLEDGE_BASE]
@@ -261,12 +282,22 @@ def index_knowledge_base():
     log.info(f"Indexed {count} knowledge base documents")
     return count
 
+
 def index_policies(conn):
     global _total_vectors
     policies = fetch_policies(conn)
     if not policies:
         return 0
-    texts = [f"Policy: {p['name']}\nType: {p['policy_type']}\nSector: {p.get('sector','')}\n{p.get('description','')}" for p in policies]
+    texts = [
+        f"Policy: {
+            p['name']}\nType: {
+            p['policy_type']}\nSector: {
+                p.get(
+                    'sector',
+                    '')}\n{
+                        p.get(
+                            'description',
+                            '')}" for p in policies]
     vectors = embed_texts(texts)
     if not vectors:
         return 0
@@ -291,15 +322,25 @@ def index_policies(conn):
     log.info(f"Indexed {count} policies")
     return count
 
+
 def index_violations(conn):
     global _total_vectors
     violations = fetch_violations(conn)
     if not violations:
         return 0
     texts = [
-        f"Violation: {v['violation_type']}\nSeverity: {v['severity']}\nOrg: {v.get('org_name','')}\nSector: {v.get('sector','')}\n{v.get('description','')}"
-        for v in violations
-    ]
+        f"Violation: {
+            v['violation_type']}\nSeverity: {
+            v['severity']}\nOrg: {
+                v.get(
+                    'org_name',
+                    '')}\nSector: {
+                        v.get(
+                            'sector',
+                            '')}\n{
+                                v.get(
+                                    'description',
+                                    '')}" for v in violations]
     vectors = embed_texts(texts)
     if not vectors:
         return 0
@@ -325,15 +366,26 @@ def index_violations(conn):
     log.info(f"Indexed {count} violations")
     return count
 
+
 def index_organizations(conn):
     global _total_vectors
     orgs = fetch_organizations(conn)
     if not orgs:
         return 0
     texts = [
-        f"Organization: {o['name']}\nSector: {o['sector']}\nRegistration: {o.get('registration_number','')}\nCompliance Score: {o.get('compliance_score', 0)}\nStatus: {o['status']}\nState: {o.get('state','')}"
-        for o in orgs
-    ]
+        f"Organization: {
+            o['name']}\nSector: {
+            o['sector']}\nRegistration: {
+                o.get(
+                    'registration_number',
+                    '')}\nCompliance Score: {
+                        o.get(
+                            'compliance_score',
+                            0)}\nStatus: {
+                                o['status']}\nState: {
+                                    o.get(
+                                        'state',
+                                        '')}" for o in orgs]
     vectors = embed_texts(texts)
     if not vectors:
         return 0
@@ -358,6 +410,7 @@ def index_organizations(conn):
     _total_vectors += count
     log.info(f"Indexed {count} organizations")
     return count
+
 
 def run_full_index():
     global _last_index_time, _errors
@@ -390,6 +443,8 @@ def run_full_index():
         log.error(f"Index run failed: {e}")
 
 # ── RAG Pipeline ───────────────────────────────────────────────────────────────
+
+
 def rag_retrieve(query: str, collections: Optional[List[str]] = None, limit: int = 5) -> List[Dict]:
     """Retrieve relevant context from Qdrant for RAG."""
     if collections is None:
@@ -405,8 +460,11 @@ def rag_retrieve(query: str, collections: Optional[List[str]] = None, limit: int
     return results[:limit * 2]
 
 # ── HTTP Health Server ─────────────────────────────────────────────────────────
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args): pass
+    def log_message(self, *args):
+        pass
 
     def do_GET(self):
         if self.path == "/health":
@@ -469,6 +527,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def start_http_server():
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         httpd.allow_reuse_address = True
@@ -476,12 +535,15 @@ def start_http_server():
         httpd.serve_forever()
 
 # ── Background indexing loop ───────────────────────────────────────────────────
+
+
 def indexing_loop():
     time.sleep(10)  # Wait for DB to be ready
     run_full_index()
     while True:
         time.sleep(REINDEX_INTERVAL)
         run_full_index()
+
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

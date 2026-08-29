@@ -20,15 +20,15 @@ Tables synced:
 Technology: Python · DuckDB · PyArrow · Parquet · psycopg2 · FastAPI
 Port: 8140
 """
+import signal as _signal
 import os
 import re
-import sys
 import json
 import time
 import logging
 import hashlib
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -52,14 +52,14 @@ except ImportError:
     HAS_ARROW = False
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-Lakehouse] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-Lakehouse] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 _raw_db_url = os.environ.get("DATABASE_URL",
-    os.environ.get("WORKER_DATABASE_URL",
-    "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+                             os.environ.get("WORKER_DATABASE_URL",
+                                            "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 DB_URL = re.sub(r'(\?sslmode=[^&?]*)+', '?sslmode=disable', _raw_db_url)
 PORT = int(os.environ.get("LAKEHOUSE_PORT", "8140"))
 WAREHOUSE_PATH = Path(os.environ.get("LAKEHOUSE_WAREHOUSE_PATH", "/tmp/ndsep-lakehouse/warehouse"))
@@ -190,6 +190,8 @@ MATERIALIZED_VIEWS = {
 }
 
 # ── DuckDB initialization ──────────────────────────────────────────────────────
+
+
 def get_duck() -> Any:
     global _duck_conn
     if not HAS_DUCKDB:
@@ -203,10 +205,14 @@ def get_duck() -> Any:
     return _duck_conn
 
 # ── PostgreSQL connection ──────────────────────────────────────────────────────
+
+
 def get_pg():
     return psycopg2.connect(DB_URL)
 
 # ── ETL: PostgreSQL → Parquet ──────────────────────────────────────────────────
+
+
 def run_etl_for_table(table_name: str, table_def: dict, incremental: bool = True) -> dict:
     """Extract from PostgreSQL and write to Parquet with incremental support."""
     table_dir = PARQUET_PATH / table_name
@@ -296,6 +302,7 @@ def run_etl_for_table(table_name: str, table_def: dict, incremental: bool = True
         log.error(f"ETL failed for {table_name}: {e}")
         return {"table": table_name, "rows": 0, "status": "error", "error": str(e)}
 
+
 def run_full_etl() -> dict:
     """Run ETL for all configured tables."""
     global _etl_runs, _etl_errors, _total_rows_synced, _last_etl
@@ -346,7 +353,13 @@ def run_full_etl() -> dict:
     refresh_materialized_views()
 
     log.info(f"ETL complete: {total_rows} rows across {len(results)} tables in {elapsed:.1f}s")
-    return {"snapshot_id": snapshot_id, "tables": results, "total_rows": total_rows, "elapsed_ms": round(elapsed * 1000)}
+    return {
+        "snapshot_id": snapshot_id,
+        "tables": results,
+        "total_rows": total_rows,
+        "elapsed_ms": round(
+            elapsed * 1000)}
+
 
 def refresh_materialized_views():
     """Refresh materialized views in DuckDB."""
@@ -362,6 +375,8 @@ def refresh_materialized_views():
             log.warning(f"Materialized view {view_name} failed: {e}")
 
 # ── Feature Serving ────────────────────────────────────────────────────────────
+
+
 def serve_ml_features(feature_group: str) -> dict:
     """Serve pre-computed ML features from lakehouse for model training."""
     duck = get_duck()
@@ -422,14 +437,17 @@ def serve_ml_features(feature_group: str) -> dict:
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
+
 class QueryRequest(BaseModel):
     sql: str
     params: list = []
+
 
 class IngestRequest(BaseModel):
     namespace: str = "ndsep"
     table: str
     records: list[dict]
+
 
 @app.get("/health")
 def health():
@@ -453,11 +471,13 @@ def health():
         "uptime_seconds": round(time.time() - _start_time),
     }
 
+
 @app.post("/etl/run")
 def trigger_etl():
     """Trigger a full ETL run."""
     result = run_full_etl()
     return result
+
 
 @app.get("/etl/status")
 def etl_status():
@@ -469,6 +489,7 @@ def etl_status():
         "tables": list(ETL_TABLES.keys()),
         "next_etl_seconds": ETL_INTERVAL,
     }
+
 
 @app.post("/query")
 def execute_query(req: QueryRequest):
@@ -497,6 +518,7 @@ def execute_query(req: QueryRequest):
         elapsed = round((time.time() - start) * 1000)
         return {"rows": [], "rowCount": 0, "executionMs": elapsed, "error": str(e)}
 
+
 @app.post("/ingest")
 def ingest_records(req: IngestRequest):
     """Ingest records into lakehouse Parquet files."""
@@ -524,6 +546,7 @@ def ingest_records(req: IngestRequest):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 @app.get("/views/{view_name}")
 def get_materialized_view(view_name: str):
     """Query a materialized view."""
@@ -540,25 +563,30 @@ def get_materialized_view(view_name: str):
     except Exception as e:
         return {"view": view_name, "error": str(e)}
 
+
 @app.get("/features/{feature_group}")
 def get_features(feature_group: str):
     """Serve ML features from lakehouse."""
     return serve_ml_features(feature_group)
+
 
 @app.get("/snapshots")
 def list_snapshots():
     """List ETL snapshots (time-travel)."""
     return {"snapshots": _snapshots[-50:], "total": len(_snapshots)}
 
+
 @app.get("/lineage")
 def get_lineage():
     """Get data lineage records."""
     return {"lineage": _lineage_records[-50:], "total": len(_lineage_records)}
 
+
 @app.get("/incremental/status")
 def incremental_status():
     """Get incremental ETL sync timestamps per table."""
     return {"sync_timestamps": _last_sync_timestamps, "tables": list(ETL_TABLES.keys())}
+
 
 @app.post("/etl/reset")
 def reset_incremental():
@@ -566,6 +594,7 @@ def reset_incremental():
     global _last_sync_timestamps
     _last_sync_timestamps = {}
     return {"status": "reset", "message": "All incremental timestamps cleared — next ETL will be a full extract"}
+
 
 @app.get("/tables")
 def list_tables():
@@ -585,6 +614,7 @@ def list_tables():
         else:
             tables.append({"name": table_name, "files": 0, "total_size_bytes": 0})
     return {"tables": tables, "total": len(tables)}
+
 
 @app.post("/compact")
 def compact_table(body: dict):
@@ -627,6 +657,8 @@ def compact_table(body: dict):
         return {"success": False, "error": str(e)}
 
 # ── Background ETL scheduler ──────────────────────────────────────────────────
+
+
 def etl_scheduler():
     """Run ETL on a timer."""
     time.sleep(10)  # Initial delay
@@ -637,8 +669,9 @@ def etl_scheduler():
             log.error(f"ETL scheduler error: {e}")
         time.sleep(ETL_INTERVAL)
 
+
 # ── Graceful Shutdown ─────────────────────────────────────────────────────────
-import signal as _signal
+
 
 def _graceful_shutdown(signum, _frame):
     sig_name = _signal.Signals(signum).name
@@ -649,6 +682,7 @@ def _graceful_shutdown(signum, _frame):
         except Exception:
             pass
     log.info("[Shutdown] Lakehouse shutdown complete")
+
 
 _signal.signal(_signal.SIGTERM, _graceful_shutdown)
 _signal.signal(_signal.SIGINT, _graceful_shutdown)

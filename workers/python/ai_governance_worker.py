@@ -49,6 +49,7 @@ RISK_FACTORS = {
     "analytics": 5,
 }
 
+
 def compute_ai_risk_score(system_name: str, purpose: str, data_types: list) -> int:
     score = 20  # base score
     combined = (system_name + " " + purpose).lower()
@@ -61,13 +62,14 @@ def compute_ai_risk_score(system_name: str, purpose: str, data_types: list) -> i
         score += 20
     return min(score, 100)
 
+
 def assess_ai_systems():
     if not HAS_DB:
         return
     try:
         conn = psycopg2.connect(DB_URL)
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        
+
         cur.execute("""
             SELECT id, organization_id, name as system_name, purpose, training_data_description as data_types, risk_level
             FROM ai_systems
@@ -76,7 +78,7 @@ def assess_ai_systems():
             LIMIT 20
         """)
         systems = cur.fetchall()
-        
+
         for s in systems:
             data_types = s.get('data_types') or []
             risk_score = compute_ai_risk_score(
@@ -84,7 +86,7 @@ def assess_ai_systems():
                 s.get('purpose', ''),
                 data_types
             )
-            
+
             # Map score to ai_risk_level enum: minimal | limited | high | unacceptable
             risk_level = 'minimal'
             if risk_score >= 80:
@@ -97,39 +99,39 @@ def assess_ai_systems():
                 risk_level = 'limited'
             # Map to security_alerts severity (different scale)
             alert_severity = 'critical' if risk_score >= 80 else 'high' if risk_score >= 60 else 'medium'
-            
+
             cur.execute("""
-                UPDATE ai_systems 
+                UPDATE ai_systems
                 SET risk_level = %s, risk_score = %s, last_assessed_at = NOW(), updated_at = NOW()
                 WHERE id = %s
             """, (risk_level, risk_score, s['id']))
-            
+
             # Create security alert for high-risk unregistered AI systems
             if risk_level in ('high', 'unacceptable') and not s.get('is_registered'):
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO security_alerts (organization_id, alert_type, severity, title, description, is_resolved, detected_at)
                     VALUES (%s, 'ai_governance', %s, %s, %s, false, NOW())
-                """, (
-                    s['organization_id'], alert_severity,
-                    f"High-Risk AI System Detected: {s['system_name']}",
-                    f"AI system '{s['system_name']}' has risk score {risk_score}/100 and is not properly registered with NDSEP"
-                ))
-            
+                """, (s['organization_id'], alert_severity, f"High-Risk AI System Detected: {
+                        s['system_name']}", f"AI system '{
+                        s['system_name']}' has risk score {risk_score}/100 and is not properly registered with NDSEP"))
+
             stats["systems_assessed"] += 1
-        
+
         conn.commit()
         stats["last_run"] = datetime.now(timezone.utc).isoformat()
-        
+
         if systems:
             log.info(f"Assessed {len(systems)} AI systems")
-    
+
     except Exception as e:
         log.error(f"Error assessing AI systems: {e}")
     finally:
         try:
             conn.close()
-        except:
+        except BaseException:
             pass
+
 
 def run_scanner():
     while True:
@@ -138,6 +140,7 @@ def run_scanner():
         except Exception as e:
             log.error(f"Scanner error: {e}")
         time.sleep(SCAN_INTERVAL)
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -158,6 +161,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
+
 
 if __name__ == "__main__":
     log.info(f"Starting on port {PORT}")

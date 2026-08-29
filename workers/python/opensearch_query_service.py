@@ -12,7 +12,6 @@ import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import urlopen, Request
 from urllib.error import URLError
-from datetime import datetime, timezone
 from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [opensearch-query] %(message)s')
@@ -47,6 +46,7 @@ metrics = {
     "by_index": defaultdict(int),
 }
 
+
 def opensearch_request(method: str, path: str, body: dict = None) -> dict:
     import base64
     url = f"{OPENSEARCH_URL}{path}"
@@ -64,6 +64,7 @@ def opensearch_request(method: str, path: str, body: dict = None) -> dict:
     except Exception as e:
         metrics["errors"] += 1
         return {"error": str(e), "hits": {"hits": [], "total": {"value": 0}}}
+
 
 def build_query(params: dict) -> dict:
     """Build OpenSearch query from search parameters"""
@@ -101,6 +102,7 @@ def build_query(params: dict) -> dict:
         "highlight": {"fields": {"*": {}}} if params.get("q") else {},
     }
 
+
 def search(index_key: str, params: dict) -> dict:
     index = NDSEP_INDICES.get(index_key, index_key)
     query = build_query(params)
@@ -108,6 +110,7 @@ def search(index_key: str, params: dict) -> dict:
     metrics["searches"] += 1
     metrics["by_index"][index_key] += 1
     return result
+
 
 def aggregate(index_key: str, params: dict) -> dict:
     index = NDSEP_INDICES.get(index_key, index_key)
@@ -129,6 +132,7 @@ def aggregate(index_key: str, params: dict) -> dict:
     metrics["aggregations"] += 1
     return result
 
+
 def global_search(q: str, sectors: list = None, limit: int = 20) -> dict:
     """Search across all NDSEP indices"""
     indices = ",".join(NDSEP_INDICES.values())
@@ -145,6 +149,7 @@ def global_search(q: str, sectors: list = None, limit: int = 20) -> dict:
     result = opensearch_request("POST", f"/{indices}/_search", query)
     metrics["searches"] += 1
     return result
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -211,6 +216,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "index": index, "result": result})
         else:
             self.send_json({"error": "not found"}, 404)
+
 
 if __name__ == "__main__":
     logger.info(f"NDSEP OpenSearch Query Service starting on port {PORT}")

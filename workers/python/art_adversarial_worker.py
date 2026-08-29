@@ -23,20 +23,28 @@ Reports:
 Technology: Python · adversarial-robustness-toolbox · scikit-learn · numpy
 Port: 8204
 """
-import os, time, json, logging, threading, http.server, socketserver, traceback
+import os
+import time
+import json
+import logging
+import threading
+import http.server
+import socketserver
+import traceback
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Any, Tuple
 import numpy as np
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
+    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 PORT = int(os.environ.get("ART_PORT", "8204"))
 MODEL_PATH = os.environ.get("ML_MODEL_PATH", "./workers/python/models/")
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-ART] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-ART] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 # ── State ──────────────────────────────────────────────────────────────────────
@@ -48,13 +56,12 @@ _errors = 0
 _test_results: List[Dict] = []
 
 # ── ART initialization ─────────────────────────────────────────────────────────
+
+
 def init_art():
     global _art_available
     try:
         import art
-        from art.attacks.evasion import FastGradientMethod, ProjectedGradientDescent
-        from art.attacks.inference.membership_inference import MembershipInferenceBlackBox
-        from art.estimators.classification import SklearnClassifier
         _art_available = True
         log.info(f"ART version {art.__version__} initialized")
         return True
@@ -64,6 +71,8 @@ def init_art():
         return False
 
 # ── Synthetic compliance dataset ───────────────────────────────────────────────
+
+
 def generate_compliance_dataset(n_samples: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
     """
     Generate synthetic compliance classification dataset.
@@ -86,14 +95,15 @@ def generate_compliance_dataset(n_samples: int = 1000) -> Tuple[np.ndarray, np.n
         np.random.normal(45, 15, n_noncompliant),  # compliance_score
         np.random.poisson(5, n_noncompliant),       # violation_count
         np.random.normal(180, 60, n_noncompliant),  # days_since_audit
-        np.random.uniform(0.5, 1.0, n_noncompliant),# sector_risk
-        np.random.normal(200, 100, n_noncompliant), # org_size
+        np.random.uniform(0.5, 1.0, n_noncompliant),  # sector_risk
+        np.random.normal(200, 100, n_noncompliant),  # org_size
     ])
     X = np.vstack([compliant, noncompliant])
     y = np.array([0] * n_compliant + [1] * n_noncompliant)
     # Shuffle
     idx = np.random.permutation(n_samples)
     return X[idx].astype(np.float32), y[idx]
+
 
 def normalize_features(X: np.ndarray) -> np.ndarray:
     """Min-max normalize features to [0, 1]."""
@@ -104,6 +114,8 @@ def normalize_features(X: np.ndarray) -> np.ndarray:
     return (X - mins) / ranges
 
 # ── ART test suite ─────────────────────────────────────────────────────────────
+
+
 def run_art_tests(model_type: str = "random_forest") -> Dict[str, Any]:
     """Run full ART adversarial robustness test suite."""
     global _total_tests_run, _last_test_time, _errors
@@ -119,7 +131,6 @@ def run_art_tests(model_type: str = "random_forest") -> Dict[str, Any]:
 
     try:
         from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-        from sklearn.svm import SVC
         from sklearn.model_selection import train_test_split
         from sklearn.metrics import accuracy_score
         from art.estimators.classification import SklearnClassifier
@@ -213,7 +224,6 @@ def run_art_tests(model_type: str = "random_forest") -> Dict[str, Any]:
 
         # ── Test 4: Poisoning Detection ───────────────────────────────────────
         try:
-            from art.defences.detector.poison import ActivationDefence
             # Simulate poisoned data (5% label flips)
             X_poison = X_train.copy()
             y_poison = y_train.copy()
@@ -296,8 +306,11 @@ def run_art_tests(model_type: str = "random_forest") -> Dict[str, Any]:
     return results
 
 # ── HTTP Server ────────────────────────────────────────────────────────────────
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *args): pass
+    def log_message(self, *args):
+        pass
 
     def send_json(self, data: Any, status: int = 200):
         body = json.dumps(data, default=str).encode()
@@ -349,11 +362,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def startup():
     time.sleep(5)
     init_art()
     # Run initial test
     threading.Thread(target=run_art_tests, daemon=True).start()
+
 
 if __name__ == "__main__":
     log.info("Starting NDSEP ART Adversarial Robustness Worker...")

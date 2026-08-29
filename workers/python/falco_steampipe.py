@@ -12,8 +12,6 @@ import os
 import random
 import threading
 import time
-import uuid
-from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import psycopg2
@@ -134,13 +132,12 @@ def run_falco_detector():
                         cur.execute(
                             """INSERT INTO security_alerts (title, description, severity, source, alert_type, mitre_technique, detected_at)
                                VALUES (%s, %s, %s, 'falco', %s, %s, NOW())""",
-                            (
-                                f"Falco: {rule}",
-                                f"Runtime threat detected in container {container}: {rule} (proc={proc}, pid={pid})",
-                                severity.lower(),
+                            (f"Falco: {rule}",
+                             f"Runtime threat detected in container {container}: {rule} (proc={proc}, pid={pid})",
+                             severity.lower(),
                                 "runtime_threat",
                                 "T1059" if "shell" in rule.lower() else "T1068" if "privilege" in rule.lower() else "T1041",
-                            ),
+                             ),
                         )
                         conn.commit()
                     except Exception as e:

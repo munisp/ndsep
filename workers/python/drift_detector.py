@@ -12,7 +12,7 @@ import time
 import random
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from collections import defaultdict, deque
 
@@ -83,22 +83,22 @@ def detect_anomaly_isolation_forest(score_series: list[float]) -> tuple[float, b
     """Use Isolation Forest to detect anomalous score patterns."""
     if len(score_series) < 8:
         return 0.0, False
-    
+
     # Build feature matrix: [score, delta, delta2, rolling_mean_diff]
     features = []
     for i in range(2, len(score_series)):
-        delta = score_series[i] - score_series[i-1]
-        delta2 = score_series[i] - score_series[i-2]
-        rolling_mean = np.mean(score_series[max(0, i-5):i])
+        delta = score_series[i] - score_series[i - 1]
+        delta2 = score_series[i] - score_series[i - 2]
+        rolling_mean = np.mean(score_series[max(0, i - 5):i])
         features.append([score_series[i], delta, delta2, score_series[i] - rolling_mean])
-    
+
     if len(features) < 4:
         return 0.0, False
-    
+
     X = np.array(features)
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
-    
+
     clf = IsolationForest(contamination=0.1, random_state=42, n_estimators=50)
     clf.fit(X_scaled)
     scores_pred = clf.decision_function(X_scaled)

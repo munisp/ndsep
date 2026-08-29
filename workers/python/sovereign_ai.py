@@ -10,10 +10,7 @@ Provides:
 """
 
 import os
-import json
 import logging
-import hashlib
-import time
 from datetime import datetime
 from typing import Any
 
@@ -126,38 +123,41 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
 # ── Model Provenance ─────────────────────────────────────────────────────────
 
-model_registry: list[dict[str, Any]] = [
-    {
-        "model_id": "ndpa-compliance-v1",
-        "name": "NDPA Compliance Advisor",
-        "version": "1.0.0",
-        "base_model": "llama3.1:8b",
-        "training_data": ["NDPA 2023 full text", "NDPC guidelines 2024", "CBN data protection circulars", "NCC consumer code"],
-        "training_date": "2024-12-01",
-        "data_residency": "Nigeria (Lagos DC)",
-        "bias_audit_date": "2024-12-15",
-        "bias_audit_result": "PASS — no sector or regional bias detected",
-        "red_team_date": "2024-12-20",
-        "red_team_result": "3 issues found, all remediated",
-        "deployed_at": "2025-01-01",
-        "status": "active",
-    },
-    {
-        "model_id": "anomaly-detector-v1",
-        "name": "Network Anomaly Detector",
-        "version": "1.0.0",
-        "base_model": "Isolation Forest (100 estimators, pure Rust)",
-        "training_data": ["NDSEP network telemetry Q3-Q4 2024", "CICIDS2017 benchmark", "Nigerian bank traffic patterns"],
-        "training_date": "2024-11-15",
-        "data_residency": "Nigeria (Abuja DC)",
-        "bias_audit_date": "2024-11-25",
-        "bias_audit_result": "PASS",
-        "red_team_date": "2024-12-01",
-        "red_team_result": "Adversarial evasion rate: 3.2% (acceptable)",
-        "deployed_at": "2024-12-10",
-        "status": "active",
-    },
-]
+model_registry: list[dict[str,
+                          Any]] = [{"model_id": "ndpa-compliance-v1",
+                                    "name": "NDPA Compliance Advisor",
+                                    "version": "1.0.0",
+                                    "base_model": "llama3.1:8b",
+                                    "training_data": ["NDPA 2023 full text",
+                                                      "NDPC guidelines 2024",
+                                                      "CBN data protection circulars",
+                                                      "NCC consumer code"],
+                                    "training_date": "2024-12-01",
+                                    "data_residency": "Nigeria (Lagos DC)",
+                                    "bias_audit_date": "2024-12-15",
+                                    "bias_audit_result": "PASS — no sector or regional bias detected",
+                                    "red_team_date": "2024-12-20",
+                                    "red_team_result": "3 issues found, all remediated",
+                                    "deployed_at": "2025-01-01",
+                                    "status": "active",
+                                    },
+                                   {"model_id": "anomaly-detector-v1",
+                                    "name": "Network Anomaly Detector",
+                                    "version": "1.0.0",
+                                    "base_model": "Isolation Forest (100 estimators, pure Rust)",
+                                    "training_data": ["NDSEP network telemetry Q3-Q4 2024",
+                                                      "CICIDS2017 benchmark",
+                                                      "Nigerian bank traffic patterns"],
+                                    "training_date": "2024-11-15",
+                                    "data_residency": "Nigeria (Abuja DC)",
+                                    "bias_audit_date": "2024-11-25",
+                                    "bias_audit_result": "PASS",
+                                    "red_team_date": "2024-12-01",
+                                    "red_team_result": "Adversarial evasion rate: 3.2% (acceptable)",
+                                    "deployed_at": "2024-12-10",
+                                    "status": "active",
+                                    },
+                                   ]
 
 inference_log: list[dict[str, Any]] = []
 
@@ -199,7 +199,7 @@ def compute_fairness_metrics(groups: dict[str, list[float]]) -> dict[str, Any]:
 
     values = list(group_means.values())
     max_diff = max(values) - min(values)
-    overall_mean = sum(values) / len(values)
+    sum(values) / len(values)
     disparate_impact = min(values) / max(values) if max(values) > 0 else 1.0
 
     return {
@@ -270,7 +270,7 @@ async def get_provenance(req: ProvenanceQuery):
 
     return {
         "model": model,
-        "inference_count": len([l for l in inference_log if l.get("model_id") == req.model_id]),
+        "inference_count": len([entry for entry in inference_log if entry.get("model_id") == req.model_id]),
         "data_residency_verified": True,
         "compliance_status": "NDPA Article 40 compliant — all data processed within Nigeria",
     }
@@ -313,7 +313,13 @@ async def red_team(req: RedTeamRequest):
         },
         "bias_elicitation": {
             "tested": True,
-            "result": "blocked" if any(w in req.prompt.lower() for w in ["igbo", "yoruba", "hausa", "northern", "southern"]) else "passed",
+            "result": "blocked" if any(
+                w in req.prompt.lower() for w in [
+                    "igbo",
+                    "yoruba",
+                    "hausa",
+                    "northern",
+                    "southern"]) else "passed",
             "confidence": 0.85,
         },
         "hallucination_check": {

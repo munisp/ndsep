@@ -7,7 +7,13 @@ Manages the NDSEP data lakehouse via the Apache Iceberg REST Catalog API.
 Tables: compliance_events, audit_trail, network_telemetry, violations,
         penalties, cross_border_flows, ml_predictions
 """
-import os, time, json, logging, threading, http.server, socketserver
+import os
+import time
+import json
+import logging
+import threading
+import http.server
+import socketserver
 from datetime import datetime, timezone
 import requests
 
@@ -19,8 +25,8 @@ ICEBERG_NAMESPACE = "ndsep"
 ICEBERG_WAREHOUSE = os.environ.get("ICEBERG_WAREHOUSE", "s3://ndsep-lakehouse/warehouse")
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [NDSEP-Lakehouse] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S")
+                    format="%(asctime)s [NDSEP-Lakehouse] %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S")
 log = logging.getLogger(__name__)
 
 worker_start = time.time()
@@ -30,106 +36,116 @@ _errors = 0
 
 ICEBERG_TABLES = {
     "compliance_events": {"fields": [
-        {"id":1,"name":"event_id","required":True,"type":"string"},
-        {"id":2,"name":"organization_id","required":True,"type":"string"},
-        {"id":3,"name":"event_type","required":True,"type":"string"},
-        {"id":4,"name":"score","required":False,"type":"float"},
-        {"id":5,"name":"passed","required":True,"type":"boolean"},
-        {"id":6,"name":"assessed_at","required":True,"type":"timestamptz"},
+        {"id": 1, "name": "event_id", "required": True, "type": "string"},
+        {"id": 2, "name": "organization_id", "required": True, "type": "string"},
+        {"id": 3, "name": "event_type", "required": True, "type": "string"},
+        {"id": 4, "name": "score", "required": False, "type": "float"},
+        {"id": 5, "name": "passed", "required": True, "type": "boolean"},
+        {"id": 6, "name": "assessed_at", "required": True, "type": "timestamptz"},
     ]},
     "audit_trail": {"fields": [
-        {"id":1,"name":"audit_id","required":True,"type":"string"},
-        {"id":2,"name":"actor_id","required":True,"type":"string"},
-        {"id":3,"name":"action","required":True,"type":"string"},
-        {"id":4,"name":"resource_type","required":True,"type":"string"},
-        {"id":5,"name":"resource_id","required":True,"type":"string"},
-        {"id":6,"name":"metadata","required":False,"type":"string"},
-        {"id":7,"name":"created_at","required":True,"type":"timestamptz"},
+        {"id": 1, "name": "audit_id", "required": True, "type": "string"},
+        {"id": 2, "name": "actor_id", "required": True, "type": "string"},
+        {"id": 3, "name": "action", "required": True, "type": "string"},
+        {"id": 4, "name": "resource_type", "required": True, "type": "string"},
+        {"id": 5, "name": "resource_id", "required": True, "type": "string"},
+        {"id": 6, "name": "metadata", "required": False, "type": "string"},
+        {"id": 7, "name": "created_at", "required": True, "type": "timestamptz"},
     ]},
     "network_telemetry": {"fields": [
-        {"id":1,"name":"event_id","required":True,"type":"string"},
-        {"id":2,"name":"ixp_site","required":True,"type":"string"},
-        {"id":3,"name":"src_ip","required":True,"type":"string"},
-        {"id":4,"name":"dst_ip","required":True,"type":"string"},
-        {"id":5,"name":"protocol","required":True,"type":"string"},
-        {"id":6,"name":"bytes_transferred","required":True,"type":"long"},
-        {"id":7,"name":"is_cross_border","required":True,"type":"boolean"},
-        {"id":8,"name":"latency_ms","required":False,"type":"int"},
-        {"id":9,"name":"detected_at","required":True,"type":"timestamptz"},
+        {"id": 1, "name": "event_id", "required": True, "type": "string"},
+        {"id": 2, "name": "ixp_site", "required": True, "type": "string"},
+        {"id": 3, "name": "src_ip", "required": True, "type": "string"},
+        {"id": 4, "name": "dst_ip", "required": True, "type": "string"},
+        {"id": 5, "name": "protocol", "required": True, "type": "string"},
+        {"id": 6, "name": "bytes_transferred", "required": True, "type": "long"},
+        {"id": 7, "name": "is_cross_border", "required": True, "type": "boolean"},
+        {"id": 8, "name": "latency_ms", "required": False, "type": "int"},
+        {"id": 9, "name": "detected_at", "required": True, "type": "timestamptz"},
     ]},
     "violations": {"fields": [
-        {"id":1,"name":"violation_id","required":True,"type":"string"},
-        {"id":2,"name":"organization_id","required":True,"type":"string"},
-        {"id":3,"name":"violation_type","required":True,"type":"string"},
-        {"id":4,"name":"severity","required":True,"type":"string"},
-        {"id":5,"name":"status","required":True,"type":"string"},
-        {"id":6,"name":"detected_at","required":True,"type":"timestamptz"},
+        {"id": 1, "name": "violation_id", "required": True, "type": "string"},
+        {"id": 2, "name": "organization_id", "required": True, "type": "string"},
+        {"id": 3, "name": "violation_type", "required": True, "type": "string"},
+        {"id": 4, "name": "severity", "required": True, "type": "string"},
+        {"id": 5, "name": "status", "required": True, "type": "string"},
+        {"id": 6, "name": "detected_at", "required": True, "type": "timestamptz"},
     ]},
     "penalties": {"fields": [
-        {"id":1,"name":"penalty_id","required":True,"type":"string"},
-        {"id":2,"name":"organization_id","required":True,"type":"string"},
-        {"id":3,"name":"amount_ngn","required":True,"type":"decimal(18,2)"},
-        {"id":4,"name":"status","required":True,"type":"string"},
-        {"id":5,"name":"issued_at","required":True,"type":"timestamptz"},
-        {"id":6,"name":"paid_at","required":False,"type":"timestamptz"},
+        {"id": 1, "name": "penalty_id", "required": True, "type": "string"},
+        {"id": 2, "name": "organization_id", "required": True, "type": "string"},
+        {"id": 3, "name": "amount_ngn", "required": True, "type": "decimal(18,2)"},
+        {"id": 4, "name": "status", "required": True, "type": "string"},
+        {"id": 5, "name": "issued_at", "required": True, "type": "timestamptz"},
+        {"id": 6, "name": "paid_at", "required": False, "type": "timestamptz"},
     ]},
     "cross_border_flows": {"fields": [
-        {"id":1,"name":"flow_id","required":True,"type":"string"},
-        {"id":2,"name":"organization_id","required":True,"type":"string"},
-        {"id":3,"name":"src_country","required":True,"type":"string"},
-        {"id":4,"name":"dst_country","required":True,"type":"string"},
-        {"id":5,"name":"bytes_transferred","required":True,"type":"long"},
-        {"id":6,"name":"approved","required":True,"type":"boolean"},
-        {"id":7,"name":"detected_at","required":True,"type":"timestamptz"},
+        {"id": 1, "name": "flow_id", "required": True, "type": "string"},
+        {"id": 2, "name": "organization_id", "required": True, "type": "string"},
+        {"id": 3, "name": "src_country", "required": True, "type": "string"},
+        {"id": 4, "name": "dst_country", "required": True, "type": "string"},
+        {"id": 5, "name": "bytes_transferred", "required": True, "type": "long"},
+        {"id": 6, "name": "approved", "required": True, "type": "boolean"},
+        {"id": 7, "name": "detected_at", "required": True, "type": "timestamptz"},
     ]},
     "ml_predictions": {"fields": [
-        {"id":1,"name":"prediction_id","required":True,"type":"string"},
-        {"id":2,"name":"organization_id","required":True,"type":"string"},
-        {"id":3,"name":"model_name","required":True,"type":"string"},
-        {"id":4,"name":"risk_score","required":True,"type":"float"},
-        {"id":5,"name":"prediction_label","required":True,"type":"string"},
-        {"id":6,"name":"confidence","required":False,"type":"float"},
-        {"id":7,"name":"predicted_at","required":True,"type":"timestamptz"},
+        {"id": 1, "name": "prediction_id", "required": True, "type": "string"},
+        {"id": 2, "name": "organization_id", "required": True, "type": "string"},
+        {"id": 3, "name": "model_name", "required": True, "type": "string"},
+        {"id": 4, "name": "risk_score", "required": True, "type": "float"},
+        {"id": 5, "name": "prediction_label", "required": True, "type": "string"},
+        {"id": 6, "name": "confidence", "required": False, "type": "float"},
+        {"id": 7, "name": "predicted_at", "required": True, "type": "timestamptz"},
     ]},
 }
+
 
 def _iceberg_request(method, path, body=None):
     try:
         url = f"{ICEBERG_CATALOG_URL}/v1{path}"
         r = requests.request(method, url,
-            headers={"Content-Type": "application/json"},
-            json=body, timeout=8)
+                             headers={"Content-Type": "application/json"},
+                             json=body, timeout=8)
         if r.status_code < 300:
-            try: return True, r.json()
-            except: return True, {}
+            try:
+                return True, r.json()
+            except BaseException:
+                return True, {}
         return False, {"error": r.text}
     except Exception as e:
         return False, {"error": str(e)}
 
+
 def iceberg_health_check():
     global _iceberg_connected
-    if not ICEBERG_ENABLED: return False
+    if not ICEBERG_ENABLED:
+        return False
     ok, _ = _iceberg_request("GET", "/config")
     if ok and not _iceberg_connected:
         log.info(f"[Iceberg] Connected to REST Catalog at {ICEBERG_CATALOG_URL}")
     _iceberg_connected = ok
     return ok
 
+
 def ensure_namespace():
     ok, _ = _iceberg_request("GET", f"/namespaces/{ICEBERG_NAMESPACE}")
-    if ok: return True
+    if ok:
+        return True
     ok, _ = _iceberg_request("POST", "/namespaces", {
         "namespace": [ICEBERG_NAMESPACE],
         "properties": {"location": f"{ICEBERG_WAREHOUSE}/{ICEBERG_NAMESPACE}",
                        "description": "NDSEP Data Sovereignty Enforcement Platform"}
     })
-    if ok: log.info(f"[Iceberg] Created namespace: {ICEBERG_NAMESPACE}")
+    if ok:
+        log.info(f"[Iceberg] Created namespace: {ICEBERG_NAMESPACE}")
     return ok
+
 
 def ensure_table(table_name, schema_def):
     global _tables_created
     ok, _ = _iceberg_request("GET", f"/namespaces/{ICEBERG_NAMESPACE}/tables/{table_name}")
-    if ok: return True
+    if ok:
+        return True
     ok, _ = _iceberg_request("POST", f"/namespaces/{ICEBERG_NAMESPACE}/tables", {
         "name": table_name,
         "location": f"{ICEBERG_WAREHOUSE}/{ICEBERG_NAMESPACE}/{table_name}",
@@ -144,9 +160,11 @@ def ensure_table(table_name, schema_def):
         log.info(f"[Iceberg] Created table: {ICEBERG_NAMESPACE}.{table_name}")
     return ok
 
+
 def list_tables():
     ok, data = _iceberg_request("GET", f"/namespaces/{ICEBERG_NAMESPACE}/tables")
     return data.get("identifiers", []) if ok else []
+
 
 def bootstrap_lakehouse():
     if not _iceberg_connected:
@@ -159,6 +177,7 @@ def bootstrap_lakehouse():
         ensure_table(table_name, schema_def)
     log.info(f"[Iceberg] Bootstrap complete — {len(ICEBERG_TABLES)} tables ensured")
 
+
 def run_periodic_health():
     while True:
         time.sleep(60)
@@ -167,8 +186,11 @@ def run_periodic_health():
         if not was_connected and _iceberg_connected:
             bootstrap_lakehouse()
 
+
 class StatusHandler(http.server.BaseHTTPRequestHandler):
-    def log_message(self, format, *args): pass
+    def log_message(self, format, *args):
+        pass
+
     def do_GET(self):
         if self.path in ("/health", "/"):
             tables = list_tables() if _iceberg_connected else []
@@ -199,9 +221,13 @@ class StatusHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+
 def broadcast(event, data):
-    try: requests.post(RELAY_URL, json={"event": event, "data": data}, timeout=2)
-    except: pass
+    try:
+        requests.post(RELAY_URL, json={"event": event, "data": data}, timeout=2)
+    except BaseException:
+        pass
+
 
 if __name__ == "__main__":
     log.info("=== NDSEP Lakehouse Worker (Apache Iceberg REST Catalog) ===")

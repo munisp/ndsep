@@ -34,6 +34,7 @@ log = logging.getLogger("ndsep.grpc")
 
 # ─── gRPC Status Codes ──────────────────────────────────────────────────────
 
+
 class GrpcCode(IntEnum):
     OK = 0
     CANCELLED = 1

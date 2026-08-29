@@ -16,7 +16,7 @@ import {
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "idlr-payment-"));
 const storePath = path.join(temporaryDirectory, "offline-payments.json");
 process.env.PAYMENT_OPERATIONS_STORE_PATH = storePath;
-process.env.PAYMENT_AUDIT_POSTGRES_URL = "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
+process.env.PAYMENT_AUDIT_POSTGRES_URL ??= "postgresql://ubuntu@/idlr_payment_test?host=/var/run/postgresql";
 
 beforeEach(async () => {
   const { resetPaymentAuditForTests } = await import("../server/offlinePaymentRepository");

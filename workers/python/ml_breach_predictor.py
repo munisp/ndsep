@@ -30,21 +30,25 @@ CPU_ML_URL = os.getenv("CPU_ML_URL", "http://localhost:8085")
 
 # ── Models ───────────────────────────────────────────────────────────────────
 
+
 class PredictionRequest(BaseModel):
     jurisdictions: list[str] = ["NG"]
     sectors: list[str] | None = None
     count: int = 30
+
 
 class EconomicRequest(BaseModel):
     jurisdiction: str = "NG"
     policy_changes: dict[str, float] = {}
     duration_months: int = 12
 
+
 class NetworkRequest(BaseModel):
     jurisdiction: str = "NG"
     trigger_org: str = ""
     trigger_event: str = "breach"
     propagation_steps: int = 3
+
 
 class TrainRequest(BaseModel):
     retrain: bool = True
@@ -86,13 +90,24 @@ def load_organizations(sectors: list[str] | None = None, limit: int = 50) -> lis
 
 def predict_via_cpu_model(org: dict) -> dict:
     """Call the CPU ML engine with observed PostgreSQL features only."""
-    fields = ("compliance_score", "violation_count", "critical_violations", "high_violations", "enforcement_count", "total_fines", "days_active", "breach_count")
+    fields = (
+        "compliance_score",
+        "violation_count",
+        "critical_violations",
+        "high_violations",
+        "enforcement_count",
+        "total_fines",
+        "days_active",
+        "breach_count")
     if any(org.get(field) is None for field in fields):
-        raise HTTPException(status_code=422, detail="Organization lacks the observed feature data required for model inference")
+        raise HTTPException(
+            status_code=422,
+            detail="Organization lacks the observed feature data required for model inference")
     payload = {field: float(org[field]) for field in fields}
     payload["sector_encoded"] = 0.0  # Sector encoding is model-owned and unavailable to this API contract.
     try:
-        response = httpx.post(f"{CPU_ML_URL.rstrip('/')}/predict/breach", json={"org_features": payload, "org_id": str(org["id"])}, timeout=15.0)
+        response = httpx.post(f"{CPU_ML_URL.rstrip('/')}/predict/breach",
+                              json={"org_features": payload, "org_id": str(org["id"])}, timeout=15.0)
     except httpx.HTTPError as error:
         raise HTTPException(status_code=503, detail=f"CPU ML inference service unavailable: {error}") from error
     if response.status_code != 200:
@@ -104,7 +119,14 @@ def predict_breach_for_org(org: dict) -> dict:
     """Return only the trained CPU model's observed-feature risk estimate."""
     ml_result = predict_via_cpu_model(org)
     probability = float(ml_result["probability"])
-    feature_importance = {item["feature"]: abs(float(item["impact"])) for item in ml_result.get("top_factors", []) if isinstance(item, dict) and "feature" in item}
+    feature_importance = {
+        item["feature"]: abs(
+            float(
+                item["impact"])) for item in ml_result.get(
+            "top_factors",
+            []) if isinstance(
+                    item,
+            dict) and "feature" in item}
     compliance_score = float(org["compliance_score"])
     breach_count = int(org["breach_count"])
 
@@ -149,6 +171,7 @@ JURISDICTION_ECONOMICS = {
     "ZA": {"gdp_b": 399.02, "digital_pct": 15.7, "fdi_b": 8.4, "breach_cost_avg": 4500000, "insurance_base": 100},
     "EU": {"gdp_b": 16800.0, "digital_pct": 35.2, "fdi_b": 500.0, "breach_cost_avg": 4350000, "insurance_base": 100},
 }
+
 
 def calc_economic_impact(jurisdiction: str, policy_changes: dict, duration_months: int) -> dict:
     econ = JURISDICTION_ECONOMICS.get(jurisdiction, JURISDICTION_ECONOMICS["NG"])
@@ -324,12 +347,16 @@ async def predict_breaches(req: PredictionRequest | None = None):
 
 @app.post("/api/v1/economic-impact")
 async def economic_impact(req: EconomicRequest):
-    raise HTTPException(status_code=501, detail="Economic impact modelling is disabled until it is connected to sourced macroeconomic data and a validated methodology")
+    raise HTTPException(
+        status_code=501,
+        detail="Economic impact modelling is disabled until it is connected to sourced macroeconomic data and a validated methodology")
 
 
 @app.post("/api/v1/network-effects")
 async def network_effects(req: NetworkRequest):
-    raise HTTPException(status_code=501, detail="Network propagation is disabled until a verified organization-relationship dataset is integrated")
+    raise HTTPException(
+        status_code=501,
+        detail="Network propagation is disabled until a verified organization-relationship dataset is integrated")
 
 
 @app.post("/api/v1/train")
