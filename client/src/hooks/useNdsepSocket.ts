@@ -183,7 +183,7 @@ export function useNdsepSocket({
       socket.disconnect();
       socketRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   // Re-subscribe if rooms change

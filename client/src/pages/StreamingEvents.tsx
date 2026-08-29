@@ -150,7 +150,7 @@ export default function StreamingEvents() {
       const delta = Math.round(Math.sin(last.t * 0.3) * last.kafka * 0.03);
       return [...prev.slice(1), { t: last.t + 1, kafka: Math.max(100, last.kafka + delta), fluvio: Math.max(50, Math.round(last.kafka * 0.18)) }];
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [streamingTicks]);
 
   // Fallback interval when WebSocket not yet connected

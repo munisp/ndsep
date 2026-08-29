@@ -1,3 +1,4 @@
+/* global __ENV */
 /**
  * NDSEP k6 Smoke Test — verifies the platform handles baseline load
  * Run: k6 run load-tests/k6-smoke.js
@@ -37,31 +38,39 @@ function trpcQuery(procedure, input = {}) {
 export default function () {
   group('Health Check', () => {
     const res = http.get(`${BASE_URL}/api/health`);
-    check(res, {
+    if (!check(res, {
       'health status 200': (r) => r.status === 200,
-    }) || errorRate.add(1);
+    })) {
+      errorRate.add(1);
+    }
   });
 
   group('Dashboard Stats', () => {
     const res = trpcQuery('dashboard.getStats');
-    check(res, {
+    if (!check(res, {
       'dashboard stats 200': (r) => r.status === 200,
       'has data': (r) => r.body && r.body.length > 0,
-    }) || errorRate.add(1);
+    })) {
+      errorRate.add(1);
+    }
   });
 
   group('Organizations List', () => {
     const res = trpcQuery('organizations.list', { page: 1, pageSize: 20 });
-    check(res, {
+    if (!check(res, {
       'organizations 200': (r) => r.status === 200,
-    }) || errorRate.add(1);
+    })) {
+      errorRate.add(1);
+    }
   });
 
   group('Compliance Scores', () => {
     const res = trpcQuery('compliance.listScores', { page: 1, pageSize: 10 });
-    check(res, {
+    if (!check(res, {
       'compliance 200': (r) => r.status === 200,
-    }) || errorRate.add(1);
+    })) {
+      errorRate.add(1);
+    }
   });
 
   sleep(1);

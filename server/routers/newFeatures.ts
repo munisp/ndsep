@@ -238,7 +238,7 @@ export const penaltyCalculatorRouter = router({
     .input(z.object({ violationType: z.string(), sector: z.string(), severity: z.enum(['low','medium','high','critical']), organizationRevenue: z.number().optional(), affectedIndividuals: z.number().int().default(0), isRepeatOffender: z.boolean().default(false), hasCooperated: z.boolean().default(true), mitigatingFactors: z.array(z.string()).default([]), aggravatingFactors: z.array(z.string()).default([]) }))
     .mutation(async ({ input }) => {
       const basePenalties: Record<string, number> = { low: 2000000, medium: 10000000, high: 50000000, critical: 100000000 };
-      let basePenalty = basePenalties[input.severity];
+      const basePenalty = basePenalties[input.severity];
       let multiplier = 1.0;
       const revenueCap = input.organizationRevenue ? input.organizationRevenue * 0.02 : null;
       if (input.isRepeatOffender) multiplier += 0.5;

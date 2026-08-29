@@ -44,19 +44,20 @@ def require_persisted_model() -> Path:
         raise HTTPException(status_code=503, detail="ML inference unavailable: configured model artifact is absent")
     return artifact
 
+
 # ── In-memory model state ──────────────────────────────────────────────────
 _model_state: Dict[str, Any] = {
     "version": "v2.2.0",
     "last_trained": None,
     "training_samples": 0,
     "feature_weights": {
-        "violation_count":       5.5,
+        "violation_count": 5.5,
         "avg_compliance_score": -0.8,
         "days_since_last_audit": 0.1,
         "cross_border_transfers": 2.0,
-        "data_volume_gb":        0.05,
-        "penalty_count":         3.0,
-        "security_alert_count":  2.5,
+        "data_volume_gb": 0.05,
+        "penalty_count": 3.0,
+        "security_alert_count": 2.5,
     },
     "sector_multipliers": {
         "finance": 1.3, "healthcare": 1.25, "government": 1.1,
@@ -73,6 +74,8 @@ _model_state: Dict[str, Any] = {
 }
 
 # ── DB helpers ─────────────────────────────────────────────────────────────
+
+
 def get_db_conn():
     if not DB_AVAILABLE or not DATABASE_URL:
         return None
@@ -82,6 +85,7 @@ def get_db_conn():
     except Exception as e:
         logger.warning(f"DB connection failed: {e}")
         return None
+
 
 def fetch_org_training_data(org_id: Optional[str] = None) -> List[Dict]:
     """Pull real org metrics from PostgreSQL for risk scoring."""
@@ -150,6 +154,7 @@ def fetch_org_training_data(org_id: Optional[str] = None) -> List[Dict]:
     finally:
         conn.close()
 
+
 def retrain_model_from_db():
     """Update model accuracy using real DB data (gradient-free calibration)."""
     rows = fetch_org_training_data()
@@ -180,6 +185,7 @@ def retrain_model_from_db():
     _model_state["training_samples"] = len(rows)
     _model_state["accuracy"] = max(0.70, min(0.99, 1.0 - (mae / 100)))
 
+
 def _compute_raw_score(
     violation_count: float,
     avg_compliance_score: float,
@@ -207,6 +213,8 @@ def _compute_raw_score(
     return min(100.0, max(0.0, score * sector_mult * country_mult))
 
 # ── Request / Response Models ──────────────────────────────────────────────
+
+
 class RiskScoreRequest(BaseModel):
     org_id: str
     violation_count: int = 0
@@ -220,12 +228,14 @@ class RiskScoreRequest(BaseModel):
     country_code: str = "NG"
     use_live_db: bool = True
 
+
 class CompliancePredictionRequest(BaseModel):
     org_id: str
     current_score: float
     violation_trend: str = "stable"
     days_to_deadline: int = 90
     remediation_actions: int = 0
+
 
 class SLABreachRequest(BaseModel):
     workflow_id: str
@@ -234,11 +244,14 @@ class SLABreachRequest(BaseModel):
     sla_hours: float
     complexity_score: float = 0.5
 
+
 class NightlyRetrainRequest(BaseModel):
     triggered_by: str = "temporal-cron"
     force: bool = False
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
+
+
 @app.get("/health")
 def health():
     return {
@@ -255,6 +268,7 @@ def health():
         "models": ["risk_scorer_v2.2", "compliance_predictor_v1.3", "sla_breach_v1.0"],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
 
 @app.post("/ml/risk-score")
 def risk_score(req: RiskScoreRequest):
@@ -294,11 +308,16 @@ def risk_score(req: RiskScoreRequest):
     noise = (hash(req.org_id) % 100) / 1000.0
     score = min(100.0, round(raw + noise, 2))
 
-    if score >= 80:   level = "critical"
-    elif score >= 60: level = "high"
-    elif score >= 40: level = "medium"
-    elif score >= 20: level = "low"
-    else:             level = "minimal"
+    if score >= 80:
+        level = "critical"
+    elif score >= 60:
+        level = "high"
+    elif score >= 40:
+        level = "medium"
+    elif score >= 20:
+        level = "low"
+    else:
+        level = "minimal"
 
     confidence = 0.95 if violation_count > 0 else 0.75
     if data_source == "live_db":
@@ -325,6 +344,7 @@ def risk_score(req: RiskScoreRequest):
         "data_source": data_source,
     }
 
+
 @app.post("/ml/compliance-predict")
 def compliance_predict(req: CompliancePredictionRequest):
     require_persisted_model()
@@ -344,6 +364,7 @@ def compliance_predict(req: CompliancePredictionRequest):
         "predicted_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
 @app.post("/ml/sla-breach-predict")
 def sla_breach_predict(req: SLABreachRequest):
     require_persisted_model()
@@ -360,6 +381,7 @@ def sla_breach_predict(req: SLABreachRequest):
         "time_remaining_hours": max(0.0, req.sla_hours - req.elapsed_hours),
         "predicted_at": datetime.now(timezone.utc).isoformat(),
     }
+
 
 @app.post("/ml/retrain")
 def trigger_retrain(req: NightlyRetrainRequest, background_tasks: BackgroundTasks):
@@ -379,6 +401,7 @@ def trigger_retrain(req: NightlyRetrainRequest, background_tasks: BackgroundTask
         "triggered_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
 @app.get("/ml/models")
 def list_models():
     return {
@@ -397,6 +420,7 @@ def list_models():
         ]
     }
 
+
 @app.get("/ml/training-data/sample")
 def training_data_sample():
     rows = fetch_org_training_data()
@@ -407,9 +431,12 @@ def training_data_sample():
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
 if __name__ == "__main__":
     port = int(os.getenv("ML_PIPELINE_PORT", os.getenv("PORT", "8125")))
     logger.info(f"NDSEP ML Pipeline v2.2.0 starting on port {port}")
-    logger.info(f"DB integration: {'enabled' if DB_AVAILABLE and DATABASE_URL else 'disabled'}; persisted model artifact required for inference")
+    logger.info(
+        f"DB integration: {
+            'enabled' if DB_AVAILABLE and DATABASE_URL else 'disabled'}; persisted model artifact required for inference")
     retrain_model_from_db()
     uvicorn.run(app, host="0.0.0.0", port=port)

@@ -17,7 +17,7 @@ const TB_TIMEOUT_MS = 5_000;
 
 let tbTransactions = 0;
 let tbErrors = 0;
-let tbDegraded = 0;
+const tbDegraded = 0;
 
 export type TbTransactionType = "penalty" | "fine" | "settlement" | "refund" | "escrow";
 

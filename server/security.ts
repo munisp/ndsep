@@ -16,11 +16,13 @@ const logger = pino({ name: "ndsep-security" });
  */
 export function sanitizeString(value: unknown, maxLength = 10000): string {
   if (typeof value !== "string") return "";
-  return value
-    .trim()
-    .replace(/\0/g, "") // Remove null bytes (SQL injection vector)
-    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "") // Remove control chars
-    .slice(0, maxLength);
+  const sanitized = Array.from(value.trim())
+    .filter(character => {
+      const code = character.charCodeAt(0);
+      return code !== 0 && !(code >= 1 && code <= 8) && code !== 11 && code !== 12 && !(code >= 14 && code <= 31) && code !== 127;
+    })
+    .join("");
+  return sanitized.slice(0, maxLength);
 }
 
 /**
@@ -184,7 +186,7 @@ export function demoLoginGuard(req: Request, res: Response, next: NextFunction):
  * Validate API key format: must be alphanumeric with dashes, 32-128 chars.
  */
 export function isValidApiKeyFormat(key: string): boolean {
-  return /^[a-zA-Z0-9\-_]{32,128}$/.test(key);
+  return /^[a-zA-Z0-9_-]{32,128}$/.test(key);
 }
 
 // ─── Request Size Guard ──────────────────────────────────────────────────────
@@ -258,7 +260,7 @@ import { randomUUID } from "crypto";
 
 export function requestIdMiddleware(req: Request, res: Response, next: NextFunction): void {
   const existingId = req.headers["x-request-id"] as string | undefined;
-  const requestId = existingId?.match(/^[a-zA-Z0-9\-]{8,64}$/) ? existingId : randomUUID();
+  const requestId = existingId?.match(/^[a-zA-Z0-9-]{8,64}$/) ? existingId : randomUUID();
   (req as any).requestId = requestId;
   res.setHeader("X-Request-ID", requestId);
   next();

@@ -520,7 +520,7 @@ export const p13PenaltyCalculatorRouter = router({
       if (input.status) { conditions.push(`status = $${idx++}`); params.push(input.status); }
       if (input.orgName) { conditions.push(`org_name ILIKE $${idx++}`); params.push(`%${input.orgName}%`); }
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-      const rows = await exec(`SELECT * FROM penalty_calculations ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`, [...params, input.limit, offset]);
+      const rows = await exec(`SELECT * FROM penalty_calculations ${where} ORDER BY created_at DESC LIMIT ${idx++} OFFSET ${idx}`, [...params, input.limit, offset]);
       const [cnt] = await exec(`SELECT COUNT(*) as total FROM penalty_calculations ${where}`, params);
       return { items: rows, total: parseInt(cnt?.total ?? '0'), page: input.page, limit: input.limit };
     }),

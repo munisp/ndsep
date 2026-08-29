@@ -412,7 +412,7 @@ describe("Phase 13 — Bulk DSAR", () => {
 // ─── Whistleblower Cases ─────────────────────────────────────────────────────
 describe("Phase 13 — Whistleblower Cases", () => {
   let adminCookie: string | null = null;
-  let createdId: number | null = null;
+  const createdId: number | null = null;
 
   beforeAll(async () => { adminCookie = await getAdminCookie(); });
 

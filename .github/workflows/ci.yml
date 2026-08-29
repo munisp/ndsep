@@ -9,7 +9,7 @@ on:
 env:
   NODE_VERSION: "22"
   GO_VERSION: "1.25.0"
-  PYTHON_VERSION: "3.11"
+  PYTHON_VERSION: "3.12"
   RUST_VERSION: "stable"
 
 jobs:

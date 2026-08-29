@@ -278,7 +278,15 @@ export default function SIEMAudit() {
                     <td className="px-3 py-2.5">
                       {!alert.isResolved && (
                         <input type="checkbox" className="h-3 w-3 accent-yellow-500" checked={selectedAlertIds.has(alert.id)} onChange={(e) => {
-                          setSelectedAlertIds(prev => { const next = new Set(prev); e.target.checked ? next.add(alert.id) : next.delete(alert.id); return next; });
+                          setSelectedAlertIds(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) {
+                              next.add(alert.id);
+                            } else {
+                              next.delete(alert.id);
+                            }
+                            return next;
+                          });
                         }} />
                       )}
                     </td>

@@ -33,7 +33,7 @@ async function postJSON(url: string, body: object): Promise<void> {
       signal: AbortSignal.timeout(3000),
     });
   } catch (err) {
-    throw new Error(`Required integration POST ${url} is unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Required integration POST ${url} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -64,7 +64,7 @@ export async function daprStateGet(key: string): Promise<unknown> {
       signal: AbortSignal.timeout(2000),
     });
   } catch (err) {
-    throw new Error(`Dapr state lookup for ${key} is unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Dapr state lookup for ${key} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (!resp.ok) throw new Error(`Dapr state lookup for ${key} failed with HTTP ${resp.status}`);
   const data = await resp.json() as { value: unknown };

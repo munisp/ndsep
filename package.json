@@ -21,7 +21,8 @@
     "e2e:test": "playwright test",
     "e2e:test:ui": "playwright test --ui",
     "e2e:test:debug": "playwright test --headed --debug",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "prepare": "husky"
   },

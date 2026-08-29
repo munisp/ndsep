@@ -178,7 +178,6 @@ export async function generateCaseReportPdf(caseId: number): Promise<Buffer> {
       doc.fillColor(done ? "#ffffff" : midGray).fontSize(7).font("Helvetica-Bold")
          .text(statusOrder[i].replace(/_/g, " ").toUpperCase(), sx + 2, y + 7, { width: stepW - 8, align: "center" });
     }
-    y += 35;
 
     // ── Footer ────────────────────────────────────────────────────────────────
     const footerY = doc.page.height - 60;

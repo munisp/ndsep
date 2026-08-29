@@ -25,7 +25,13 @@ export default function WebhookDelivery() {
     onError: (e) => toast.error((e instanceof Error ? e.message : String(e))),
   });
   const deliverMut = trpc.webhookDelivery.deliver.useMutation({
-    onSuccess: (d) => { d.success ? toast.success("Test delivery successful") : toast.error(`Delivery failed: ${d.error ?? d.statusCode}`); },
+    onSuccess: (d) => {
+      if (d.success) {
+        toast.success("Test delivery successful");
+      } else {
+        toast.error(`Delivery failed: ${d.error ?? d.statusCode}`);
+      }
+    },
     onError: (e) => toast.error((e instanceof Error ? e.message : String(e))),
   });
 

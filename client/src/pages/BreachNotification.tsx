@@ -53,7 +53,7 @@ function BreachSlaHeatmap() {
     dayMap.set(key, d);
   });
   const weeks: Array<Array<{ date: Date; key: string; data: typeof heatmapData[0] | null }>> = [];
-  let current = new Date(startDate);
+  const current = new Date(startDate);
   while (current <= today) {
     const week: Array<{ date: Date; key: string; data: typeof heatmapData[0] | null }> = [];
     for (let d = 0; d < 7; d++) {

@@ -44,7 +44,9 @@ async function exec(rawSql: string, params?: unknown[]): Promise<Record<string, 
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`);
     }
-  } catch {}
+  } catch {
+    // The bootstrap is retried on the next process start; route handlers surface database failures to callers.
+  }
 })();
 
 // ─── Changelog Router ──────────────────────────────────────────────────────────

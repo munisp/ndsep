@@ -187,7 +187,7 @@ export default function SectorComplianceDashboard() {
       workersQuery.refetch().catch(() => {});
       setLastRefresh(new Date());
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [recentSectorUpdates]);
 
   // Get worker statuses from the workers endpoint

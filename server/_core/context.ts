@@ -53,7 +53,7 @@ async function tryKeycloakAuth(authHeader: string | undefined): Promise<Keycloak
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
-  let user: User | null = null;
+  let user: User | null;
   let authAssurance: TrpcContext["authAssurance"];
 
   // 1. Try Keycloak SSO (Authorization: Bearer <jwt>)

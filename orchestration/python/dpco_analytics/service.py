@@ -39,7 +39,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 import uvicorn
 
@@ -100,6 +100,7 @@ _middleware_status = {
 
 # ─── Kafka Consumer ───────────────────────────────────────────────────────────
 
+
 def _kafka_consumer_thread():
     if not KAFKA_ENABLED:
         log.info("[Kafka] Consumer disabled")
@@ -133,6 +134,7 @@ def _kafka_consumer_thread():
     except ImportError:
         log.warning("[Kafka] kafka-python not installed, consumer disabled")
 
+
 def _kafka_produce(topic: str, event: Dict):
     try:
         from kafka import KafkaProducer
@@ -147,6 +149,7 @@ def _kafka_produce(topic: str, event: Dict):
         log.warning("[Kafka] Produce error: %s", e)
 
 # ─── Fluvio Publisher ─────────────────────────────────────────────────────────
+
 
 def _fluvio_publish(topic: str, data: Dict):
     if not FLUVIO_ENABLED:
@@ -167,6 +170,7 @@ def _fluvio_publish(topic: str, data: Dict):
         log.debug("[Fluvio] Publish error: %s", e)
 
 # ─── Lakehouse Ingestion ──────────────────────────────────────────────────────
+
 
 def _lakehouse_ingest(table: str, records: List[Dict]):
     """Write records to Lakehouse via MinIO S3 as Parquet (snappy compressed)."""
@@ -217,6 +221,7 @@ def _lakehouse_ingest(table: str, records: List[Dict]):
 
 # ─── Redis Cache ──────────────────────────────────────────────────────────────
 
+
 def _redis_set(key: str, value: Dict, ttl: int = 300):
     try:
         import redis
@@ -227,6 +232,7 @@ def _redis_set(key: str, value: Dict, ttl: int = 300):
     except Exception as e:
         _middleware_status["redis"] = False
         log.debug("[Redis] Set error: %s", e)
+
 
 def _redis_get(key: str) -> Optional[Dict]:
     try:
@@ -242,6 +248,7 @@ def _redis_get(key: str) -> Optional[Dict]:
     return None
 
 # ─── Dapr Integration ─────────────────────────────────────────────────────────
+
 
 def _dapr_publish(topic: str, data: Dict):
     if not DAPR_ENABLED:
@@ -260,6 +267,7 @@ def _dapr_publish(topic: str, data: Dict):
         log.debug("[Dapr] Publish error: %s", e)
 
 # ─── Event Processing ─────────────────────────────────────────────────────────
+
 
 def _ingest_event(event: Dict, source: str = "api"):
     """Process an incoming DPCO event and update aggregated stats."""
@@ -318,6 +326,7 @@ def _ingest_event(event: Dict, source: str = "api"):
 
 # ─── Analytics Queries ────────────────────────────────────────────────────────
 
+
 def _compute_trends() -> Dict:
     """Compute 6-month weekly compliance trend from in-memory events."""
     global _trend_cache, _trend_cache_ts
@@ -359,9 +368,11 @@ def _compute_trends() -> Dict:
     _trend_cache_ts = now
     return _trend_cache
 
+
 def _compute_portfolio() -> List[Dict]:
     with _lock:
         return list(_dpco_stats.values())
+
 
 def _compute_sla() -> List[Dict]:
     """Compute SLA breach rates per DPCO (72h NDPC notification window)."""
@@ -383,6 +394,7 @@ def _compute_sla() -> List[Dict]:
         result.append(d)
     return result
 
+
 def _compute_heatmap() -> List[Dict]:
     """Compute audit frequency heatmap (last 365 days, daily buckets)."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=365)
@@ -402,7 +414,9 @@ def _compute_heatmap() -> List[Dict]:
 
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
 
+
 app = FastAPI(title="NDSEP DPCO Analytics Service", version="1.0.0")
+
 
 @app.get("/health")
 def health():
@@ -424,6 +438,7 @@ def health():
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
+
 @app.get("/metrics")
 def get_metrics():
     return {
@@ -431,6 +446,7 @@ def get_metrics():
         "middleware_status": _middleware_status,
         "uptime_s": round(time.time() - _start_time, 1),
     }
+
 
 @app.get("/api/dpco/analytics/trends")
 def get_trends():
@@ -441,6 +457,7 @@ def get_trends():
     _redis_set("dpco:analytics:trends", result, ttl=300)
     return {**result, "cache": "miss"}
 
+
 @app.get("/api/dpco/analytics/portfolio")
 def get_portfolio():
     cached = _redis_get("dpco:analytics:portfolio")
@@ -450,18 +467,22 @@ def get_portfolio():
     _redis_set("dpco:analytics:portfolio", data, ttl=120)
     return {"dpcos": data, "total": len(data), "cache": "miss"}
 
+
 @app.get("/api/dpco/analytics/sla")
 def get_sla():
     data = _compute_sla()
     return {"sla_data": data, "total": len(data)}
+
 
 @app.get("/api/dpco/analytics/heatmap")
 def get_heatmap():
     data = _compute_heatmap()
     return {"heatmap": data, "days": len(data)}
 
+
 class IngestRequest(BaseModel):
     events: List[Dict[str, Any]]
+
 
 @app.post("/api/dpco/analytics/ingest")
 def ingest_events(req: IngestRequest):
@@ -477,12 +498,15 @@ def ingest_events(req: IngestRequest):
     return {"ok": True, "ingested": len(req.events)}
 
 # Dapr pub/sub subscription endpoint
+
+
 @app.get("/dapr/subscribe")
 def dapr_subscribe():
     return [
         {"pubsubname": "kafka-pubsub", "topic": t, "route": f"/dapr/events/{t.replace('.', '/')}"}
         for t in KAFKA_CONSUME_TOPICS
     ]
+
 
 @app.post("/dapr/events/{path:path}")
 async def dapr_event(path: str, request: Request):
@@ -492,6 +516,7 @@ async def dapr_event(path: str, request: Request):
     return {"status": "SUCCESS"}
 
 # ─── Background Threads ───────────────────────────────────────────────────────
+
 
 def _seed_demo_events():
     """Seed 90 days of demo DPCO events for analytics."""
@@ -515,6 +540,7 @@ def _seed_demo_events():
     log.info("[Seed] Seeded 90 days of demo DPCO analytics events")
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
+
 
 if __name__ == "__main__":
     log.info("DPCO Analytics Service starting on port %d", PORT)

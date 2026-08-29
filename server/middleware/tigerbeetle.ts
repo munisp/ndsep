@@ -18,7 +18,7 @@ const TB_ADDRESS = process.env.TIGERBEETLE_ADDRESS ?? "localhost:3001";
 const TB_CLUSTER_ID = parseInt(process.env.TIGERBEETLE_CLUSTER_ID ?? "0", 10);
 const TB_ENABLED = !!process.env.TIGERBEETLE_ADDRESS;
 
-let tbConnected = false;
+const tbConnected = false;
 let tbTransfers = 0;
 let tbErrors = 0;
 

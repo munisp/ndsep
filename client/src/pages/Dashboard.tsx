@@ -95,7 +95,9 @@ export default function Dashboard() {
     try {
       if (val) localStorage.setItem(BGP_DISMISS_KEY, String(Date.now() + 24 * 60 * 60 * 1000));
       else localStorage.removeItem(BGP_DISMISS_KEY);
-    } catch {}
+    } catch {
+      // Local storage may be unavailable in privacy-restricted browser contexts.
+    }
   };
 
   // Real-time live counters — updated via WebSocket without full refetch
@@ -166,10 +168,12 @@ export default function Dashboard() {
   const { data: orchStatus } = trpc.orchestration.status.useQuery(undefined, { refetchInterval: 30000 });
   const orchServices: Array<{ name: string; status: string; latencyMs?: number }> = (orchStatus as any)?.services ?? [];
   const orchHealthy = orchServices.filter(s => s.status === "healthy").length;
+  const shouldShowOrchestration = import.meta.env.VITE_SHOW_ORCHESTRATION === "true";
   const { data: recentAuditLogs } = trpc.siem.auditLogs.useQuery({ limit: 5 }, { refetchInterval: 60_000 });
   const { data: hijackedRoutes } = trpc.bgp.hijacked.useQuery({ limit: 3 }, { refetchInterval: 30_000 });
   const { data: bgpStats } = trpc.bgp.stats.useQuery(undefined, { refetchInterval: 30_000 });
   const bgpAnomalies = (bgpStats as any) ? Number((bgpStats as any).hijacked ?? 0) + Number((bgpStats as any).invalid ?? 0) + Number((bgpStats as any).leaked ?? 0) : 0;
+  const shouldShowBgpAlerts = import.meta.env.VITE_SHOW_BGP_ALERTS === "true";
   const { data: enfCases } = trpc.enforcementCases.list.useQuery({ limit: 100 }, { refetchInterval: 60_000 });
   const { data: leaderboardData } = trpc.leaderboard.list.useQuery({ limit: 10 }, { refetchInterval: 120_000 });
   const leaderboardList = (leaderboardData as any[]) ?? [];
@@ -183,7 +187,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 p-6 overflow-y-auto h-full stagger-children">
       {/* Orchestration Health Bar — hidden for demo presentation */}
-      {false && orchServices.length > 0 && (
+      {shouldShowOrchestration && orchServices.length > 0 && (
         <div className={`rounded-lg border px-4 py-2.5 flex items-center gap-4 flex-wrap ${
           orchHealthy === orchServices.length
             ? "border-green-500/30 bg-green-950/10"
@@ -259,7 +263,7 @@ export default function Dashboard() {
       </div>
 
       {/* BGP Hijack Alert Strip — hidden for demo presentation */}
-      {false && !bgpDismissed && hijackedRoutes && (hijackedRoutes?.length ?? 0) > 0 && (
+      {shouldShowBgpAlerts && !bgpDismissed && hijackedRoutes && (hijackedRoutes?.length ?? 0) > 0 && (
         <div className="rounded-lg border border-red-500/40 bg-red-950/20 px-4 py-2.5">
           <div className="flex items-center gap-2 mb-2">
             <Network className="h-4 w-4 text-red-400" />

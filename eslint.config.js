@@ -30,8 +30,9 @@ export default tseslint.config(
       "prefer-const": "warn",
       // No var
       "no-var": "error",
-      // Require === over ==
-      eqeqeq: ["error", "always"],
+      // Require strict equality, while preserving intentional `value == null`
+      // nullish checks that cover both null and undefined.
+      eqeqeq: ["error", "always", { null: "ignore" }],
     },
   },
   {

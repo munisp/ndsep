@@ -178,7 +178,7 @@ export async function relayToGoBridge(
     clearTimeout(timeout);
     if (!response.ok) throw new Error(`Go bridge relay failed with HTTP ${response.status}`);
   } catch (error) {
-    throw new Error(`Go bridge relay unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Go bridge relay unavailable: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 
