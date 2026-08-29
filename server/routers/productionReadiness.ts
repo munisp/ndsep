@@ -17,6 +17,45 @@ import { getAutoStartStatus, getServiceDefinitions } from "../serviceAutoStart";
 import { getModelDefinitions, getPipelineStatus } from "../mlPipeline";
 import { checkK8sReadiness } from "../k8sReadiness";
 
+export type ProductionReadinessInputs = {
+  middleware: {
+    services: Array<{ name: string; status: string }>;
+    overall: string;
+    connected: number;
+    total: number;
+  };
+  builds: Array<{ success: boolean }>;
+  errors: { errorsLastMinute: number; totalErrors: number };
+  keycloak: { enabled: boolean; jwksCached: boolean; jwksCacheAge: number | null };
+};
+
+/**
+ * Evaluate only evidence that is currently observable by this process.
+ * Authentication is not production-ready merely because a demo fallback exists:
+ * Keycloak must be enabled and must have a fresh verified JWKS cache.
+ */
+export function evaluateProductionReadinessChecks({
+  middleware,
+  builds,
+  errors,
+  keycloak,
+}: ProductionReadinessInputs) {
+  const keycloakCacheIsFresh =
+    keycloak.enabled &&
+    keycloak.jwksCached &&
+    keycloak.jwksCacheAge !== null &&
+    keycloak.jwksCacheAge <= 3600;
+
+  return [
+    { name: "PostgreSQL Connected", pass: middleware.services.some((s) => s.name === "PostgreSQL" && s.status === "connected") },
+    { name: "Redis Available", pass: middleware.services.some((s) => s.name === "Redis" && s.status !== "disconnected") },
+    { name: "Error Rate Normal", pass: errors.errorsLastMinute < 10 },
+    { name: "Worker Binaries Built", pass: builds.length > 0 && builds.filter((b) => b.success).length > builds.length / 2 },
+    { name: "Keycloak Verification Ready", pass: keycloakCacheIsFresh },
+    { name: "Middleware Health", pass: middleware.overall !== "unhealthy" },
+  ];
+}
+
 export const productionReadinessRouter = router({
   // ─── Error Monitoring ────────────────────────────────────────────────────
   errorSummary: protectedProcedure.query(() => {
@@ -59,14 +98,7 @@ export const productionReadinessRouter = router({
     const errors = getErrorSummary();
     const keycloak = getKeycloakHealthStatus();
 
-    const checks = [
-      { name: "PostgreSQL Connected", pass: middleware.services.some((s) => s.name === "PostgreSQL" && s.status === "connected") },
-      { name: "Redis Available", pass: middleware.services.some((s) => s.name === "Redis" && s.status !== "disconnected") },
-      { name: "Error Rate Normal", pass: errors.errorsLastMinute < 10 },
-      { name: "Worker Binaries Built", pass: builds.filter((b) => b.success).length > builds.length / 2 },
-      { name: "Auth Configured", pass: keycloak.enabled || true }, // demo-login counts as configured
-      { name: "Middleware Health", pass: middleware.overall !== "unhealthy" },
-    ];
+    const checks = evaluateProductionReadinessChecks({ middleware, builds, errors, keycloak });
 
     const passed = checks.filter((c) => c.pass).length;
     const score = Math.round((passed / checks.length) * 100);

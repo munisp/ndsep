@@ -1,0 +1,135 @@
+version: 1
+system: NDSEP
+evidence_revision: 855e079b1bf8374bfdf3b673c608bfff60ddb717
+last_updated: 2026-08-29
+status_definitions:
+  verified: Complete implementation trace and successfully executed relevant evidence at evidence_revision.
+  blocked: Evidence is missing, cannot be safely executed in this engagement, or a release blocker remains.
+  incomplete: The implementation or control path is materially incomplete, misleading, or not wired for the claimed purpose.
+  not_applicable: The role does not apply to the actual architecture and includes an explicit reason.
+claims:
+  - id: AG-001
+    claim: Public application traffic is constrained to an HTTPS edge and authenticated gateway before it reaches the NDSEP API.
+    authority: infra/caddy/Caddyfile; config/apisix.yaml; docker-compose.production.yml
+    owner: Platform Engineering
+    component: Public edge and API gateway
+    entry_points: ["Caddy :443", "/api/*", "/trpc/*"]
+    implementation: ["infra/caddy/Caddyfile", "config/apisix.yaml"]
+    production_configuration: ["docker-compose.production.yml", "infra/k8s/ingress.yaml"]
+    data_classification: regulated operational and personal data
+    security_requirements: ["TLS", "OIDC bearer validation", "rate limits", "no direct management-plane exposure"]
+    evidence: ["static configuration review only"]
+    status: blocked
+    reason: No externally reachable, isolated preproduction environment was available to prove every allowed and denied ingress path or confirm the WAF is inline.
+
+  - id: AG-002
+    claim: Identity is derived from verified Keycloak bearer tokens and privileged production actions require signed MFA context plus OPA authorization.
+    authority: server/_core/context.ts; server/keycloak.ts; infra/opa/policies/ndsep_authz.rego
+    owner: Identity and Security Engineering
+    component: Keycloak, tRPC context, OPA, Permify
+    entry_points: ["Authorization bearer token", "/api/*", "/trpc/*"]
+    implementation: ["server/_core/context.ts", "server/keycloak.ts", "infra/opa/policies/ndsep_authz.rego"]
+    production_configuration: ["docker-compose.production.yml", "config/apisix.yaml"]
+    data_classification: identity and authorization data
+    security_requirements: ["signature/issuer/audience validation", "MFA for privileged operations", "deny by default", "tenant isolation"]
+    evidence: ["static code and policy review", "existing unit tests to be rerun"]
+    status: blocked
+    reason: No real Keycloak/OPA/Permify preproduction execution or route-by-role/tenant negative test matrix was available.
+
+  - id: AG-003
+    claim: Internal workers can safely publish status and business events to the API without allowing untrusted internal callers to forge events.
+    authority: server/_core/index.ts; workers/go/shared/shared.go; workers/python/worker_base.py; workers/rust/shared/src/lib.rs
+    owner: Platform Engineering
+    component: Worker relay and realtime broadcast
+    entry_points: ["POST /api/workers/event", "WORKER_RELAY_URL"]
+    implementation: ["server/_core/index.ts", "server/workerManager.ts", "workers/**"]
+    production_configuration: ["docker-compose.production.yml", "infra/k8s/network-policy.yaml"]
+    data_classification: compliance, operational, and notification data
+    security_requirements: ["workload identity", "event schema validation", "replay protection", "tenant-aware broadcast"]
+    evidence: ["source trace recorded in .assurance-worker-relay-callers.txt"]
+    status: incomplete
+    reason: The relay handler trusts any caller that can reach the API directly and accepts event/data without a workload credential or durable replay control; heterogeneous producers require an explicitly coordinated contract change.
+
+  - id: AG-004
+    claim: Production-readiness status is truthful, based on authoritative runtime evidence, and cannot classify demo identity as production authentication.
+    authority: server/routers/productionReadiness.ts; server/keycloakAuth.ts; server/serviceAutoStart.ts; server/mlPipeline.ts; server/k8sReadiness.ts
+    owner: Platform Engineering
+    component: Production readiness router and status providers
+    entry_points: ["productionReadiness.readinessScore", "productionReadiness.serviceStatus", "productionReadiness.mlPipelineStatus", "productionReadiness.k8sReadiness"]
+    implementation: ["server/routers/productionReadiness.ts", "server/keycloakAuth.ts", "server/serviceAutoStart.ts", "server/mlPipeline.ts", "server/k8sReadiness.ts"]
+    production_configuration: ["server/_core/index.ts"]
+    data_classification: operational assurance data
+    security_requirements: ["fail closed", "no synthetic success", "source traceability", "auditable timestamps"]
+    evidence: ["source review identified unconditional authentication pass and in-memory/heuristic status providers"]
+    status: incomplete
+    reason: Multiple published readiness signals are not currently backed by a live identity provider, orchestrator, durable training history, or Kubernetes cluster evidence.
+
+  - id: AG-005
+    claim: Regulated data and events are durably protected across PostgreSQL, Redis, Kafka, Temporal, object storage, backups, reports, and downstream analytics.
+    authority: docker-compose.production.yml; server/_core/index.ts; drizzle migrations; scripts/backup-postgres.sh
+    owner: Data Platform and Compliance
+    component: Persistence, backups, event bus, object storage
+    entry_points: ["database writes", "exports", "worker processing", "backup and restore"]
+    implementation: ["server/db.ts", "server/encryption.ts", "scripts/backup-postgres.sh", "drizzle/**"]
+    production_configuration: ["docker-compose.production.yml", "infra/k8s/**"]
+    data_classification: personal, financial, regulatory, audit, and backup data
+    security_requirements: ["least privilege", "encryption", "retention/deletion propagation", "restore validation"]
+    evidence: ["static configuration review only"]
+    status: blocked
+    reason: No isolated PostgreSQL/Kafka/Redis/Temporal/object-store deployment with non-production data was available for retention, restore, isolation, and recovery validation.
+
+  - id: AG-006
+    claim: Payment, financial, KYC/AML, regulatory, and webhook integrations reject unauthenticated or replayed input and reconcile durable effects.
+    authority: server/_core/index.ts; workers/go/**; workers/python/**; docker-compose.production.yml
+    owner: Integration Engineering
+    component: Webhooks and external provider adapters
+    entry_points: ["Stripe webhook", "Mojaloop callbacks", "worker provider clients"]
+    implementation: ["server/_core/index.ts", "server/mojaloop/**", "workers/**"]
+    production_configuration: ["docker-compose.production.yml"]
+    data_classification: financial and regulatory data
+    security_requirements: ["signed callbacks", "idempotency", "unknown-outcome recovery", "egress allowlists", "reconciliation"]
+    evidence: ["source and configuration inventory only"]
+    status: blocked
+    reason: No provider sandboxes, callback credentials, or end-to-end reconciliation environment were supplied; live funds and production systems were not used.
+
+  - id: AG-007
+    claim: All Node dependency critical/high findings are blocked before merge or release, and exceptions are time-bounded and reviewed.
+    authority: package.json; pnpm-lock.yaml; .github/workflows/security-gate.yml; .github/workflows/weekly-exception-governance-audit.yml
+    owner: Security Engineering
+    component: Dependency governance
+    entry_points: ["pull request", "production branch", "scheduled audit"]
+    implementation: ["scripts/ci/assert-pnpm-audit.mjs", "scripts/ci/weekly-pnpm-exception-audit.mjs"]
+    production_configuration: ["GitHub branch protection/rulesets"]
+    data_classification: release integrity
+    security_requirements: ["high/critical block", "exception expiry", "approval separation", "lockfile binding"]
+    evidence: ["local parser validation against the recorded audit baseline"]
+    status: blocked
+    reason: The controls are present on security/weekly-exception-governance but are not active until the pull request is merged and branch protection requires the gates.
+
+  - id: AG-008
+    claim: The supplied production Compose and Kubernetes descriptors reproduce a secure, deployable NDSEP runtime.
+    authority: docker-compose.production.yml; infra/k8s/**; k8s/**
+    owner: Platform Engineering
+    component: Container and Kubernetes deployment
+    entry_points: ["Docker Compose", "Kubernetes manifests", "GitOps deployment"]
+    implementation: ["Dockerfile", "workers/**/Dockerfile", "infra/k8s/**", "k8s/**"]
+    production_configuration: ["docker-compose.production.yml", "infra/argocd/**"]
+    data_classification: runtime integrity
+    security_requirements: ["immutable images", "least privilege", "network policy", "probes", "resource controls", "rollback"]
+    evidence: ["static inspection; container/cluster tooling and target environment not available"]
+    status: blocked
+    reason: Manifest-presence and regex checks are not cluster validation; the build/deploy path cannot be accepted without a successful isolated build, admission, rollout, and rollback test.
+
+  - id: AG-009
+    claim: Web, REST/tRPC, workers, mobile clients, and scheduled flows maintain the same authorization and data-integrity guarantees.
+    authority: client/**; server/**; mobile/**; workers/**; e2e/**
+    owner: Application Engineering
+    component: Cross-channel behavior
+    entry_points: ["web", "mobile", "REST/tRPC", "workers", "schedulers"]
+    implementation: ["client/**", "server/**", "mobile/**", "workers/**"]
+    production_configuration: ["docker-compose.production.yml", "infra/k8s/**"]
+    data_classification: all platform data classes
+    security_requirements: ["channel parity", "authorization", "durability", "error/retry behavior"]
+    evidence: ["test inventory only"]
+    status: blocked
+    reason: Existing local test evidence does not demonstrate real-dependency, cross-channel parity for all declared runtime components.

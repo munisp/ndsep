@@ -16,7 +16,7 @@ export function BreachListScreen({ navigation }: { navigation: { navigate: (scre
     staleTime: 10_000,
   });
   const onRefresh = async () => { setRefreshing(true); await refetch(); setRefreshing(false); };
-  const breaches = (data?.alerts ?? []).filter((a: { type: string }) => a.type === "breach" || a.type === "incident");
+  const breaches = (data ?? []).filter((alert) => alert.type === "breach" || alert.type === "incident");
 
   return (
     <ScrollView style={s.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.danger} />}>
@@ -29,14 +29,14 @@ export function BreachListScreen({ navigation }: { navigation: { navigate: (scre
         }
       />
       {breaches.length === 0 && <MobileEmptyState title="No active breach incidents" description="Breach incidents will appear here when reported." />}
-      {breaches.map((b: { id: string; title: string; severity: string; reported_at: string; status: string }, idx: number) => (
-        <MobileCard key={idx} style={s.cardOuter}>
-          <Text style={s.breachTitle}>{b.title}</Text>
+      {breaches.map((breach) => (
+        <MobileCard key={breach.id} style={s.cardOuter}>
+          <Text style={s.breachTitle}>{breach.title}</Text>
           <View style={s.row}>
-            <MobileBadge variant={getBadgeVariant(b.severity)}>{b.severity}</MobileBadge>
-            <Text style={s.date}>{new Date(b.reported_at).toLocaleDateString()}</Text>
+            <MobileBadge variant={getBadgeVariant(breach.severity)}>{breach.severity}</MobileBadge>
+            <Text style={s.date}>{new Date(breach.timestamp).toLocaleDateString()}</Text>
           </View>
-          <Text style={s.status}>Status: {b.status}</Text>
+          <Text style={s.status}>Active alert type: {breach.type}</Text>
         </MobileCard>
       ))}
     </ScrollView>

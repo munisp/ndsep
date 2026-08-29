@@ -1,0 +1,207 @@
+name: Security Gate
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - package.json
+      - pnpm-lock.yaml
+      - .npmrc
+      - pnpm-workspace.yaml
+      - patches/**
+      - .github/security/**
+      - .github/workflows/security-gate.yml
+  push:
+    branches: [production]
+  schedule:
+    # Re-check the protected default branch for newly disclosed advisories.
+    - cron: "17 5 * * 1-5"
+  workflow_dispatch:
+
+# Cancel stale checks for superseded pull-request commits, but never cancel a
+# security scan for a production branch push.
+concurrency:
+  group: security-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Use least privilege. The Code Scanning upload uses security-events: write;
+# remove that permission and the upload step if GitHub code scanning is not used.
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dependency-review:
+    name: dependency-review
+    # This action is PR-diff based: it prevents *new* vulnerable dependencies.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Block vulnerable dependency changes
+        uses: actions/dependency-review-action@v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime,development,unknown
+          vulnerability-check: true
+          license-check: true
+          show-patched-versions: true
+          # Never use warn-only here. Approved, time-bounded exceptions are
+          # handled by the baseline audit job and must be CODEOWNERS reviewed.
+          warn-only: false
+
+  pnpm-audit-baseline:
+    name: pnpm-audit-high-critical
+    # This job detects both new and already-present high/critical findings.
+    # It must be a required status check on the production branch.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NODE_VERSION: "22"
+      PNPM_VERSION: "10.34.4"
+      AUDIT_EXCEPTIONS_FILE: .github/security/pnpm-audit-exceptions.json
+      MAX_EXCEPTION_DAYS: "30"
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up patched pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Verify repository declares the approved package manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          declared="$(node -p "require('./package.json').packageManager || ''")"
+          case "$declared" in
+            pnpm@10.34.4*|pnpm@10.34.[5-9]*|pnpm@10.3[5-9].*|pnpm@10.[4-9][0-9].*|pnpm@1[1-9].*) ;;
+            *)
+              echo "::error title=Unsupported pnpm version::package.json must declare pnpm >=10.34.4; found '${declared:-missing}'."
+              exit 1
+              ;;
+          esac
+          test "$(pnpm --version)" = "$PNPM_VERSION"
+
+      - name: Install locked dependency graph without lifecycle scripts
+        shell: bash
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Collect pnpm advisory data
+        id: pnpm_audit
+        shell: bash
+        run: |
+          set +e
+          pnpm audit --json > pnpm-audit.json
+          audit_exit=$?
+          set -e
+          echo "audit_exit=${audit_exit}" >> "$GITHUB_OUTPUT"
+          # The parser below is the deciding gate and reports every violation.
+          # Do not fail early here or the result artifact would not be retained.
+          exit 0
+
+      - name: Block critical and high findings without a valid exception
+        shell: bash
+        run: |
+          node scripts/ci/assert-pnpm-audit.mjs \
+            --input pnpm-audit.json \
+            --threshold high \
+            --allowlist "$AUDIT_EXCEPTIONS_FILE" \
+            --lockfile pnpm-lock.yaml \
+            --max-exception-days "$MAX_EXCEPTION_DAYS"
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-audit-${{ github.sha }}
+          path: |
+            pnpm-audit.json
+            security-gate-summary.md
+          if-no-files-found: error
+          retention-days: 90
+
+  filesystem-vulnerability-scan:
+    name: trivy-high-critical
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run filesystem scan and fail on high or critical issues
+        uses: aquasecurity/trivy-action@v0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+
+      - name: Upload scan results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-filesystem
+
+      - name: Upload Trivy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ github.sha }}
+          path: trivy-results.sarif
+          if-no-files-found: warn
+          retention-days: 90
+
+  security-gate:
+    name: security-gate
+    runs-on: ubuntu-24.04
+    needs:
+      - dependency-review
+      - pnpm-audit-baseline
+      - filesystem-vulnerability-scan
+    # Ensure the check is unambiguously failed if any required scanner failed.
+    if: always()
+    steps:
+      - name: Enforce aggregate security decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "dependency-review=${{ needs.dependency-review.result }}"
+          echo "pnpm-audit-baseline=${{ needs.pnpm-audit-baseline.result }}"
+          echo "filesystem-vulnerability-scan=${{ needs.filesystem-vulnerability-scan.result }}"
+
+          # dependency-review is skipped only on non-PR events.
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ needs.dependency-review.result }}" != "success" ]]; then
+            exit 1
+          fi
+          [[ "${{ needs.pnpm-audit-baseline.result }}" == "success" ]]
+          [[ "${{ needs.filesystem-vulnerability-scan.result }}" == "success" ]]
+
+          {
+            echo "# Security Gate"
+            echo
+            echo "All required high/critical dependency and filesystem gates passed."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -3,7 +3,7 @@
  * Full feature parity with web — all major screens accessible.
  */
 import React from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, type LinkingOptions, type NavigatorScreenParams } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Feather } from "@expo/vector-icons";
@@ -35,8 +35,43 @@ import { BankingScreen } from "../screens/BankingScreen";
 import { DPIAScreen } from "../screens/DPIAScreen";
 import { WorkflowsScreen } from "../screens/WorkflowsScreen";
 
-const Stack = createNativeStackNavigator();
-const Tab = createBottomTabNavigator();
+type AppStackParamList = {
+  DashboardHome: undefined;
+  ComplianceDetail: { id?: string } | undefined;
+  OrganizationDetail: { id?: string } | undefined;
+  ComplianceAudit: undefined;
+  AIGovernance: undefined;
+  DPIA: undefined;
+  DSAR: undefined;
+  DataTransfers: undefined;
+  Banking: undefined;
+  Workflows: undefined;
+  EnforcementList: undefined;
+  CaseDetail: { id?: string } | undefined;
+  PenaltyCalculator: undefined;
+  BreachList: undefined;
+  BreachReport: undefined;
+  BreachTimeline: { id?: string } | undefined;
+  NOCMonitor: undefined;
+  AlertDetail: { alertId?: string } | undefined;
+  NetworkIntelligence: undefined;
+  SettingsHome: undefined;
+  Profile: undefined;
+  Notifications: undefined;
+  Security: undefined;
+  OfflineData: undefined;
+};
+
+type RootTabParamList = {
+  Dashboard: NavigatorScreenParams<AppStackParamList>;
+  Enforcement: NavigatorScreenParams<AppStackParamList>;
+  Breaches: NavigatorScreenParams<AppStackParamList>;
+  NOC: NavigatorScreenParams<AppStackParamList>;
+  Settings: NavigatorScreenParams<AppStackParamList>;
+};
+
+const Stack = createNativeStackNavigator<AppStackParamList>();
+const Tab = createBottomTabNavigator<RootTabParamList>();
 
 const stackOpts = {
   headerStyle: { backgroundColor: colors.card },
@@ -103,7 +138,7 @@ function SettingsStack() {
   );
 }
 
-const linking = {
+const linking: LinkingOptions<RootTabParamList> = {
   prefixes: ["ndsep://", "https://ndsep.gov.ng"],
   config: {
     screens: {

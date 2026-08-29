@@ -386,8 +386,11 @@ async function startServer() {
     }
   });
 
-  // /api/demo-reset — truncates and re-seeds all demo data atomically
-  app.get("/api/demo-reset", async (req, res) => {
+  // /api/demo-reset — truncates and re-seeds all demo data atomically.
+  // Defense in depth: this must remain guarded even if an internal caller bypasses
+  // the public gateway. It is disabled in production unless demo mode is explicitly
+  // enabled, and then requires an authenticated administrator.
+  app.get("/api/demo-reset", demoLoginGuard, requireAdmin, async (req, res) => {
     try {
       const pool = getPool();
       if (!pool) return res.status(503).json({ error: "Database not available" });
@@ -641,7 +644,8 @@ async function startServer() {
   });
 
   // ── Worker status endpoint ────────────────────────────────────────────────
-  app.get("/api/workers/status", (_req, res) => {
+  // Operational inventory may reveal service topology and failure conditions.
+  app.get("/api/workers/status", requireAdmin, (_req, res) => {
     res.json({ workers: getWorkerStatuses() });
   });
 

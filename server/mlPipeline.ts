@@ -53,6 +53,8 @@ interface TrainingResult {
   };
   trainingRows: number;
   trainingTimeMs: number;
+  /** ISO-8601 UTC timestamp recorded when this training attempt completed. */
+  completedAt: string;
   modelVersion: string;
   error?: string;
 }
@@ -144,6 +146,7 @@ export async function trainModel(modelName: string): Promise<TrainingResult> {
       status: "failed",
       trainingRows: 0,
       trainingTimeMs: 0,
+      completedAt: new Date().toISOString(),
       modelVersion: "",
       error: `Unknown model: ${modelName}`,
     };
@@ -174,6 +177,7 @@ export async function trainModel(modelName: string): Promise<TrainingResult> {
       metrics: data.metrics as TrainingResult["metrics"],
       trainingRows: Number(data.training_rows ?? 0),
       trainingTimeMs: Date.now() - start,
+      completedAt: new Date().toISOString(),
       modelVersion: String(data.model_version ?? `v${Date.now()}`),
       error: res.ok ? undefined : String(data.error ?? "Training failed"),
     };
@@ -196,6 +200,7 @@ export async function trainModel(modelName: string): Promise<TrainingResult> {
       status: "failed",
       trainingRows: 0,
       trainingTimeMs: Date.now() - start,
+      completedAt: new Date().toISOString(),
       modelVersion: "",
       error: err instanceof Error ? err.message : String(err),
     };
@@ -214,26 +219,41 @@ export async function trainAllModels(): Promise<TrainingResult[]> {
   return results;
 }
 
+export function deriveModelPipelineStatus(
+  def: ModelDefinition,
+  lastResult: TrainingResult | undefined,
+  now = new Date(),
+): PipelineStatus["models"][number] {
+  if (!lastResult?.completedAt) {
+    return { name: def.name, lastResult, status: "untrained" };
+  }
+
+  const completedAt = new Date(lastResult.completedAt);
+  if (Number.isNaN(completedAt.getTime())) {
+    return { name: def.name, lastResult, status: "untrained" };
+  }
+
+  const nextTrainingAt = new Date(completedAt.getTime() + def.retrainIntervalHours * 3600_000);
+  const status = lastResult.status === "success"
+    ? (now.getTime() > nextTrainingAt.getTime() ? "stale" : "ready")
+    : "untrained";
+
+  return {
+    name: def.name,
+    lastTrained: completedAt.toISOString(),
+    lastResult,
+    nextTraining: nextTrainingAt.toISOString(),
+    status,
+  };
+}
+
 export async function getPipelineStatus(): Promise<PipelineStatus> {
   const workerConnected = await checkWorkerHealth();
+  const now = new Date();
 
   const models = MODEL_DEFINITIONS.map((def) => {
     const lastResult = trainingHistory.get(def.name);
-    let status: "ready" | "training" | "stale" | "untrained" = "untrained";
-    if (lastResult?.status === "success") {
-      const hoursSince = (Date.now() - lastResult.trainingTimeMs) / 3600_000;
-      status = hoursSince > def.retrainIntervalHours ? "stale" : "ready";
-    }
-
-    return {
-      name: def.name,
-      lastTrained: lastResult ? new Date().toISOString() : undefined,
-      lastResult,
-      nextTraining: lastResult
-        ? new Date(Date.now() + def.retrainIntervalHours * 3600_000).toISOString()
-        : undefined,
-      status,
-    };
+    return deriveModelPipelineStatus(def, lastResult, now);
   });
 
   return {

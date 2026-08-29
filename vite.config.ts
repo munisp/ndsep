@@ -270,10 +270,12 @@ export default defineConfig({
     // M14: Bundle analysis — run with ANALYZE=true pnpm build
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ["react", "react-dom"],
-          ui: ["@radix-ui/react-dialog", "@radix-ui/react-dropdown-menu", "@radix-ui/react-tabs"],
-          charts: ["recharts"],
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("react") || id.includes("scheduler")) return "vendor";
+          if (id.includes("@radix-ui/react-dialog") || id.includes("@radix-ui/react-dropdown-menu") || id.includes("@radix-ui/react-tabs")) return "ui";
+          if (id.includes("recharts")) return "charts";
+          return undefined;
         },
       },
     },

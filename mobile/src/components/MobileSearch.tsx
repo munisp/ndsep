@@ -91,7 +91,7 @@ export function MobileSearch({ onClose }: MobileSearchProps) {
         ListEmptyComponent={
           <View style={s.empty}>
             <Feather name="search" size={32} color={colors.textMuted} />
-            <Text style={s.emptyText}>No results for "{query}"</Text>
+            <Text style={s.emptyText}>{`No results for "${query}"`}</Text>
           </View>
         }
         style={s.list}
