@@ -1,3 +1,4 @@
+/* global __ENV */
 /**
  * NDSEP k6 Stress Test — finds breaking point under heavy load
  * Run: k6 run load-tests/k6-stress.js
@@ -43,31 +44,41 @@ export default function () {
     case 0:
       group('Dashboard', () => {
         const res = trpcGet('dashboard.getStats');
-        check(res, { 'status 200': (r) => r.status === 200 }) || errorRate.add(1);
+        if (!check(res, { 'status 200': (r) => r.status === 200 })) {
+          errorRate.add(1);
+        }
       });
       break;
     case 1:
       group('Organizations', () => {
         const res = trpcGet('organizations.list', { page: 1, pageSize: 20 });
-        check(res, { 'status 200': (r) => r.status === 200 }) || errorRate.add(1);
+        if (!check(res, { 'status 200': (r) => r.status === 200 })) {
+          errorRate.add(1);
+        }
       });
       break;
     case 2:
       group('Violations', () => {
         const res = trpcGet('compliance.listViolations', { page: 1, pageSize: 20 });
-        check(res, { 'status 200': (r) => r.status === 200 }) || errorRate.add(1);
+        if (!check(res, { 'status 200': (r) => r.status === 200 })) {
+          errorRate.add(1);
+        }
       });
       break;
     case 3:
       group('Breaches', () => {
         const res = trpcGet('breaches.list', { page: 1, pageSize: 20 });
-        check(res, { 'status 200': (r) => r.status === 200 }) || errorRate.add(1);
+        if (!check(res, { 'status 200': (r) => r.status === 200 })) {
+          errorRate.add(1);
+        }
       });
       break;
     case 4:
       group('Assets', () => {
         const res = trpcGet('assets.list', { page: 1, pageSize: 20 });
-        check(res, { 'status 200': (r) => r.status === 200 }) || errorRate.add(1);
+        if (!check(res, { 'status 200': (r) => r.status === 200 })) {
+          errorRate.add(1);
+        }
       });
       break;
   }

@@ -85,7 +85,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       setModeState(bt);
       localStorage.setItem(STORAGE_KEY, bt);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [backendPrefs]);
 
   const setMode = useCallback((newMode: ThemeMode) => {

@@ -56,13 +56,11 @@ function getNetworkInfo(): { effectiveType: string; downlink: number; rtt: numbe
 }
 
 function calculateScore(effectiveType: string, downlink: number, rtt: number): number {
-  let score = 50;
-
   // Effective type scoring
   const typeScores: Record<string, number> = {
     "4g": 40, "3g": 25, "2g": 10, "slow-2g": 0,
   };
-  score = typeScores[effectiveType] ?? 30;
+  let score = typeScores[effectiveType] ?? 30;
 
   // Downlink bonus/penalty
   if (downlink >= 10) score += 30;

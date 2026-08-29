@@ -95,7 +95,7 @@ describe("Phase 15 — X-Request-ID Middleware (SEC-025)", () => {
   it("every response includes X-Request-ID header", async () => {
     const r = await get("/api/trpc/auth.me");
     expect(r.headers["x-request-id"]).toBeDefined();
-    expect(r.headers["x-request-id"]).toMatch(/^[a-zA-Z0-9\-]{8,64}$/);
+    expect(r.headers["x-request-id"]).toMatch(/^[a-zA-Z0-9-]{8,64}$/);
   });
 
   it("client-provided X-Request-ID is echoed back", async () => {
@@ -108,7 +108,7 @@ describe("Phase 15 — X-Request-ID Middleware (SEC-025)", () => {
     const invalidId = "<script>alert(1)</script>";
     const r = await get("/api/trpc/auth.me", { "x-request-id": invalidId });
     expect(r.headers["x-request-id"]).not.toBe(invalidId);
-    expect(r.headers["x-request-id"]).toMatch(/^[a-zA-Z0-9\-]{8,64}$/);
+    expect(r.headers["x-request-id"]).toMatch(/^[a-zA-Z0-9-]{8,64}$/);
   });
 });
 

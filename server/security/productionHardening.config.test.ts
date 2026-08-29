@@ -14,7 +14,7 @@ function composeServiceBlock(compose: string, service: string): string {
 describe("production security configuration", () => {
   it("keeps Caddy as the only host-published production service", () => {
     const compose = read("docker-compose.production.yml");
-    const allPortBlocks = [...compose.matchAll(/^    ports:\n((?:      - .*\n)+)/gm)];
+    const allPortBlocks = [...compose.matchAll(/^ {4}ports:\n((?: {6}- .*\n)+)/gm)];
     expect(allPortBlocks).toHaveLength(1);
     const caddy = composeServiceBlock(compose, "caddy");
     expect(caddy).toContain('"80:80"');

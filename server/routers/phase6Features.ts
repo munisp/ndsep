@@ -31,7 +31,9 @@ async function exec(sql: string, params: unknown[] = []): Promise<any[]> {
       completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       UNIQUE(user_id, step_id)
     )`);
-  } catch {}
+  } catch {
+    // The migration is retried on the next process start; route handlers fail closed if the table is unavailable.
+  }
 })();
 
 // ── Onboarding checklist steps ────────────────────────────────────────────────

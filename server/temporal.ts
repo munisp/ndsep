@@ -117,9 +117,9 @@ async function loadTemporalSdk(): Promise<boolean> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Connection factory (cached per process)
 // ─────────────────────────────────────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 let _connection: unknown = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 let _client: unknown = null;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,7 +206,7 @@ export async function startWorkflow(
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       logger.error({ err, workflowId: options.workflowId }, "[Temporal] Failed to start workflow via SDK");
-      throw new Error(`Temporal workflow ${options.workflowId} was not started: ${error}`);
+      throw new Error(`Temporal workflow ${options.workflowId} was not started: ${error}`, { cause: err });
     }
 }
 
@@ -238,7 +238,7 @@ export async function describeWorkflow(
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error({ err, workflowId }, "[Temporal] Workflow description failed");
-    throw new Error(`Temporal workflow ${workflowId} could not be described: ${error}`);
+    throw new Error(`Temporal workflow ${workflowId} could not be described: ${error}`, { cause: err });
   }
 }
 
@@ -275,7 +275,7 @@ export async function listWorkflows(options?: {
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error({ err }, "[Temporal] Workflow listing failed");
-    throw new Error(`Temporal workflows could not be listed: ${error}`);
+    throw new Error(`Temporal workflows could not be listed: ${error}`, { cause: err });
   }
 }
 

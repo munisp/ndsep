@@ -27,7 +27,7 @@ let overdueTimer: NodeJS.Timeout | null = null;
 
 export async function runOverdueCheck(): Promise<{ marked: number; notified: number }> {
   const pool = new Pool({ connectionString: PG_URL, ssl: getPgSslConfig(), max: 3 });
-  let marked = 0;
+  let marked: number;
   let notified = 0;
 
   try {

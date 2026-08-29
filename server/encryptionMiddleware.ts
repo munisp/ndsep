@@ -144,7 +144,7 @@ export function autoDecryptRows<T extends Record<string, unknown>>(sql: string, 
   if (tables.length === 0) return rows;
 
   return rows.map(row => {
-    let decrypted = { ...row };
+    const decrypted = { ...row };
     for (const table of tables) {
       const fields = PII_FIELDS[table];
       if (!fields) continue;

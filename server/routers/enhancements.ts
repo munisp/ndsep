@@ -165,12 +165,12 @@ export const dsarRouter = router({
       }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const { rows } = await pool.query(
-        `SELECT *, 
+        `SELECT *,
                 EXTRACT(DAY FROM (response_deadline - NOW())) AS days_remaining,
                 CASE WHEN response_deadline < NOW() AND status NOT IN ('resolved','closed') THEN true ELSE false END AS is_overdue
          FROM citizen_requests ${where}
          ORDER BY response_deadline ASC NULLS LAST
-         LIMIT $${idx++} OFFSET $${idx++}`,
+         LIMIT ${idx++} OFFSET ${idx}`,
         [...params, input?.limit ?? 50, input?.offset ?? 0]
       );
       const countResult = await pool.query(
@@ -220,7 +220,7 @@ export const dpiaRouter = router({
       const params: unknown[] = [];
       let idx = 1;
       if (input?.orgId) { conditions.push(`org_id = $${idx++}`); params.push(input.orgId); }
-      if (input?.status) { conditions.push(`status = $${idx++}`); params.push(input.status); }
+      if (input?.status) { conditions.push(`status = ${idx}`); params.push(input.status); }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const { rows } = await pool.query(
         `SELECT d.*, u.name as created_by_name FROM dpia_assessments d
@@ -529,7 +529,7 @@ export const webhookRouter = router({
       const params: unknown[] = [];
       let idx = 1;
       if (input?.orgId) { conditions.push(`org_id = $${idx++}`); params.push(input.orgId); }
-      if (input?.dpcoOrgId) { conditions.push(`dpco_org_id = $${idx++}`); params.push(input.dpcoOrgId); }
+      if (input?.dpcoOrgId) { conditions.push(`dpco_org_id = ${idx}`); params.push(input.dpcoOrgId); }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const { rows } = await pool.query(
         `SELECT id, org_id, dpco_org_id, url, events, is_active, failure_count,

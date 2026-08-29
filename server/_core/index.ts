@@ -21,6 +21,9 @@ import net from "net";
 import helmet from "helmet";
 import compression from "compression";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
+import Redis from "ioredis";
+import RedisStore, { type RedisReply } from "rate-limit-redis";
+import { randomBytes } from "node:crypto";
 import pinoHttp from "pino-http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
@@ -114,8 +117,6 @@ const safeIpKey = (req: import("express").Request) => ipKeyGenerator(req.ip ?? r
 // Falls back to in-memory if Redis is unavailable
 let rateLimitStore: any = undefined; // undefined = default MemoryStore
 try {
-  const RedisStore = require("rate-limit-redis").default ?? require("rate-limit-redis");
-  const Redis = require("ioredis");
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
   const redisClient = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false });
   redisClient.connect().then(() => {
@@ -123,7 +124,10 @@ try {
   }).catch(() => {
     logger.warn("[RateLimit] Redis unavailable — falling back to in-memory store");
   });
-  rateLimitStore = new RedisStore({ sendCommand: (...args: string[]) => redisClient.call(...args) });
+  rateLimitStore = new RedisStore({
+    sendCommand: (command: string, ...args: string[]) =>
+      redisClient.call(command, ...args) as Promise<RedisReply>,
+  });
 } catch {
   logger.warn("[RateLimit] rate-limit-redis not available — using in-memory store");
 }
@@ -846,7 +850,7 @@ async function startServer() {
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file provided" });
       const category = req.body?.category ?? "other";
-      const randomSuffix = () => require("crypto").randomBytes(5).toString("hex");
+      const randomSuffix = () => randomBytes(5).toString("hex");
       const fileKey = `evidence/${userId}/${Date.now()}-${randomSuffix()}-${file.originalname}`;
       const { url: fileUrl } = await storagePut(fileKey, file.buffer, file.mimetype);
       logger.info({ userId, fileKey, size: file.size, category }, "[evidence-upload] File uploaded to S3");

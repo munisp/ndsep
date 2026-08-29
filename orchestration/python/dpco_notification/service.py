@@ -39,7 +39,7 @@ import time
 import logging
 import threading
 import collections
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -90,78 +90,80 @@ _middleware_status = {
 
 # ─── Alert Rules ──────────────────────────────────────────────────────────────
 
-ALERT_RULES = [
-    {
-        "id": "dpco-licence-expiry-30d",
-        "name": "DPCO Licence Expiry Warning (30 days)",
-        "trigger": "dpco.registry.expiry_approaching",
-        "days_before": 30,
-        "severity": "warning",
-        "recipients": ["dpco_officer", "ndpc_regulator"],
-        "template": "Your DPCO licence {licence_number} expires in 30 days ({expiry_date}). Renew at https://services.ndpc.gov.ng/repo/",
-    },
-    {
-        "id": "dpco-licence-expiry-7d",
-        "name": "DPCO Licence Expiry Warning (7 days)",
-        "trigger": "dpco.registry.expiry_approaching",
-        "days_before": 7,
-        "severity": "critical",
-        "recipients": ["dpco_officer", "ndpc_regulator"],
-        "template": "URGENT: DPCO licence {licence_number} expires in 7 days. Renew immediately.",
-    },
-    {
-        "id": "car-deadline-14d",
-        "name": "CAR Filing Deadline Reminder (14 days)",
-        "trigger": "dpco.car.deadline_approaching",
-        "days_before": 14,
-        "severity": "warning",
-        "recipients": ["dpco_officer", "data_controller"],
-        "template": "CAR filing deadline is in 14 days (31 March {year}). Ensure all client CARs are submitted.",
-    },
-    {
-        "id": "audit-sla-breach",
-        "name": "Audit SLA Breach Alert",
-        "trigger": "dpco.audit.sla_breached",
-        "severity": "critical",
-        "recipients": ["dpco_officer", "ndpc_regulator"],
-        "template": "SLA BREACH: Audit {audit_id} for {org_name} exceeded the 72-hour NDPC notification window.",
-    },
-    {
-        "id": "compliance-score-drop",
-        "name": "Compliance Score Drop Alert",
-        "trigger": "dpco.analytics.score_dropped",
-        "severity": "warning",
-        "recipients": ["dpco_officer", "data_controller"],
-        "template": "Compliance score for {org_name} dropped {drop}pts to {score}. Review required.",
-    },
-    {
-        "id": "verification-issued",
-        "name": "Verification Statement Issued",
-        "trigger": "dpco.verification.issued",
-        "severity": "info",
-        "recipients": ["data_controller", "ndpc_regulator"],
-        "template": "Verification Statement {ref_number} issued by {dpco_name} for {org_name}.",
-    },
-    {
-        "id": "dpco-suspended",
-        "name": "DPCO Licence Suspended",
-        "trigger": "dpco.licence_suspended",
-        "severity": "critical",
-        "recipients": ["dpco_officer", "ndpc_regulator", "data_controller"],
-        "template": "DPCO {dpco_name} (licence {licence_number}) has been SUSPENDED. Reason: {reason}",
-    },
-    {
-        "id": "audit-car-filed",
-        "name": "Audit CAR Filed Successfully",
-        "trigger": "dpco.audit.stage_advanced",
-        "stage_filter": "car_filed",
-        "severity": "info",
-        "recipients": ["dpco_officer", "data_controller", "ndpc_regulator"],
-        "template": "Compliance Audit Return filed for {org_id} by DPCO {dpco_org_id} (Audit: {audit_id}).",
-    },
-]
+ALERT_RULES = [{"id": "dpco-licence-expiry-30d",
+                "name": "DPCO Licence Expiry Warning (30 days)",
+                "trigger": "dpco.registry.expiry_approaching",
+                "days_before": 30,
+                "severity": "warning",
+                "recipients": ["dpco_officer",
+                               "ndpc_regulator"],
+                "template": "Your DPCO licence {licence_number} expires in 30 days ({expiry_date}). Renew at https://services.ndpc.gov.ng/repo/",
+                },
+               {"id": "dpco-licence-expiry-7d",
+                "name": "DPCO Licence Expiry Warning (7 days)",
+                "trigger": "dpco.registry.expiry_approaching",
+                "days_before": 7,
+                "severity": "critical",
+                "recipients": ["dpco_officer",
+                               "ndpc_regulator"],
+                "template": "URGENT: DPCO licence {licence_number} expires in 7 days. Renew immediately.",
+                },
+               {"id": "car-deadline-14d",
+                "name": "CAR Filing Deadline Reminder (14 days)",
+                "trigger": "dpco.car.deadline_approaching",
+                "days_before": 14,
+                "severity": "warning",
+                "recipients": ["dpco_officer",
+                               "data_controller"],
+                "template": "CAR filing deadline is in 14 days (31 March {year}). Ensure all client CARs are submitted.",
+                },
+               {"id": "audit-sla-breach",
+                "name": "Audit SLA Breach Alert",
+                "trigger": "dpco.audit.sla_breached",
+                "severity": "critical",
+                "recipients": ["dpco_officer",
+                               "ndpc_regulator"],
+                "template": "SLA BREACH: Audit {audit_id} for {org_name} exceeded the 72-hour NDPC notification window.",
+                },
+               {"id": "compliance-score-drop",
+                "name": "Compliance Score Drop Alert",
+                "trigger": "dpco.analytics.score_dropped",
+                "severity": "warning",
+                "recipients": ["dpco_officer",
+                               "data_controller"],
+                "template": "Compliance score for {org_name} dropped {drop}pts to {score}. Review required.",
+                },
+               {"id": "verification-issued",
+                "name": "Verification Statement Issued",
+                "trigger": "dpco.verification.issued",
+                "severity": "info",
+                "recipients": ["data_controller",
+                               "ndpc_regulator"],
+                "template": "Verification Statement {ref_number} issued by {dpco_name} for {org_name}.",
+                },
+               {"id": "dpco-suspended",
+                "name": "DPCO Licence Suspended",
+                "trigger": "dpco.licence_suspended",
+                "severity": "critical",
+                "recipients": ["dpco_officer",
+                               "ndpc_regulator",
+                               "data_controller"],
+                "template": "DPCO {dpco_name} (licence {licence_number}) has been SUSPENDED. Reason: {reason}",
+                },
+               {"id": "audit-car-filed",
+                "name": "Audit CAR Filed Successfully",
+                "trigger": "dpco.audit.stage_advanced",
+                "stage_filter": "car_filed",
+                "severity": "info",
+                "recipients": ["dpco_officer",
+                               "data_controller",
+                               "ndpc_regulator"],
+                "template": "Compliance Audit Return filed for {org_id} by DPCO {dpco_org_id} (Audit: {audit_id}).",
+                },
+               ]
 
 # ─── Deduplication ────────────────────────────────────────────────────────────
+
 
 def _is_duplicate(key: str, ttl_seconds: int = 86400) -> bool:
     now = time.time()
@@ -176,6 +178,7 @@ def _is_duplicate(key: str, ttl_seconds: int = 86400) -> bool:
     return False
 
 # ─── Notification Delivery ────────────────────────────────────────────────────
+
 
 def _send_notification(notif: Dict):
     """Deliver a notification via NDSEP relay, Kafka, Fluvio, and Dapr."""
@@ -213,9 +216,13 @@ def _send_notification(notif: Dict):
     _fluvio_publish("dpco.notifications.realtime", notif)
 
     # 4. Dapr state (mark as delivered)
-    _dapr_save_state(f"notif:{notif_id}", {"id": notif_id, "status": "delivered", "sent_at": datetime.now(timezone.utc).isoformat()})
+    _dapr_save_state(
+        f"notif:{notif_id}", {
+            "id": notif_id, "status": "delivered", "sent_at": datetime.now(
+                timezone.utc).isoformat()})
 
 # ─── Event → Notification Routing ────────────────────────────────────────────
+
 
 def _route_event(event: Dict):
     """Match incoming event to alert rules and dispatch notifications."""
@@ -255,6 +262,7 @@ def _route_event(event: Dict):
 
 # ─── Kafka ────────────────────────────────────────────────────────────────────
 
+
 def _kafka_consumer_thread():
     if not KAFKA_ENABLED:
         return
@@ -286,6 +294,7 @@ def _kafka_consumer_thread():
     except ImportError:
         log.warning("[Kafka] kafka-python not installed")
 
+
 def _kafka_produce(topic: str, event: Dict):
     try:
         from kafka import KafkaProducer
@@ -300,6 +309,7 @@ def _kafka_produce(topic: str, event: Dict):
         log.debug("[Kafka] Produce error: %s", e)
 
 # ─── Fluvio ───────────────────────────────────────────────────────────────────
+
 
 def _fluvio_publish(topic: str, data: Dict):
     if not FLUVIO_ENABLED:
@@ -319,6 +329,7 @@ def _fluvio_publish(topic: str, data: Dict):
 
 # ─── Dapr ─────────────────────────────────────────────────────────────────────
 
+
 def _dapr_save_state(key: str, value: Dict):
     if not DAPR_ENABLED:
         return
@@ -336,6 +347,7 @@ def _dapr_save_state(key: str, value: Dict):
         log.debug("[Dapr] State save error: %s", e)
 
 # ─── Expiry Check Cron ────────────────────────────────────────────────────────
+
 
 def _expiry_check_thread():
     """Periodic check for upcoming DPCO licence expiries and CAR deadlines."""
@@ -362,7 +374,9 @@ def _expiry_check_thread():
 
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
 
+
 app = FastAPI(title="NDSEP DPCO Notification Service", version="1.0.0")
+
 
 @app.get("/health")
 def health():
@@ -382,9 +396,11 @@ def health():
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
+
 @app.get("/metrics")
 def get_metrics():
     return {"metrics": dict(_metrics), "middleware": _middleware_status}
+
 
 @app.get("/api/dpco/notifications")
 def list_notifications(limit: int = 50, severity: Optional[str] = None):
@@ -394,14 +410,17 @@ def list_notifications(limit: int = 50, severity: Optional[str] = None):
         result = [n for n in result if n.get("severity") == severity]
     return {"notifications": result[:limit], "total": len(result)}
 
+
 @app.get("/api/dpco/notifications/rules")
 def list_rules():
     return {"rules": ALERT_RULES, "total": len(ALERT_RULES)}
+
 
 class SendRequest(BaseModel):
     rule_id: str
     entity_id: str
     event_data: Dict[str, Any] = {}
+
 
 @app.post("/api/dpco/notifications/send")
 def send_notification(req: SendRequest):
@@ -413,12 +432,15 @@ def send_notification(req: SendRequest):
     return {"ok": True, "rule_id": req.rule_id, "entity_id": req.entity_id}
 
 # Dapr subscription manifest
+
+
 @app.get("/dapr/subscribe")
 def dapr_subscribe():
     return [
         {"pubsubname": "kafka-pubsub", "topic": t, "route": f"/dapr/events/{t.replace('.', '/')}"}
         for t in KAFKA_CONSUME_TOPICS
     ]
+
 
 @app.post("/dapr/events/{path:path}")
 async def dapr_event(path: str, request: Request):

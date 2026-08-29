@@ -766,8 +766,7 @@ export async function createPortalSubmission(data: {
   assessmentAnswers: Record<string, boolean>;
 }) {
   const pool = getSharedPool();
-  try {
-    const token = `NDSEP-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+  const token = `NDSEP-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
     const result = await pool.query(
       `INSERT INTO portal_submissions
         (submission_token, org_name, org_sector, org_country, regulatory_id, contact_name, contact_email, contact_phone,
@@ -793,8 +792,7 @@ export async function createPortalSubmission(data: {
          i <= 1 ? new Date() : null, i === 0 ? new Date() : null]
       );
     }
-    return { id: sub.id as number, submissionToken: sub.submission_token as string };
-  } catch (e) { throw e; }
+  return { id: sub.id as number, submissionToken: sub.submission_token as string };
 }
 
 export async function getPortalSubmissions(limit = 50, sector?: string, phase?: string) {
@@ -1095,8 +1093,7 @@ export async function getOrgRiskScores() {
 
 export async function reviewPortalSubmission(id: number, decision: "advance" | "reject" | "certify", notes: string, reviewerId: number) {
   const pool = getSharedPool();
-  try {
-    const phaseOrder = ["registration", "asset_inventory", "data_catalog", "self_assessment", "initial_audit", "remediation", "certified"];
+  const phaseOrder = ["registration", "asset_inventory", "data_catalog", "self_assessment", "initial_audit", "remediation", "certified"];
     const sub = await pool.query(`SELECT * FROM portal_submissions WHERE id = $1`, [id]);
     if (!sub.rows[0]) throw new Error("Submission not found");
     const current = sub.rows[0].current_phase as string;
@@ -1124,8 +1121,7 @@ export async function reviewPortalSubmission(id: number, decision: "advance" | "
         [id, nextPhase]
       );
     }
-    return { success: true, newPhase: nextPhase };
-  } catch (e) { throw e; }
+  return { success: true, newPhase: nextPhase };
 }
 
 // ─── Penalty Appeals ──────────────────────────────────────────────────────────
@@ -2185,7 +2181,7 @@ export async function updateEnforcementCase(input: {
   if (input.status === "closed" || input.status === "settled") { sets.push(`closed_at = NOW()`); }
   if (input.nitdaReferenceNumber) { sets.push(`nitda_reference_number = $${i++}`); params.push(input.nitdaReferenceNumber); }
   if (input.resolutionNotes) { sets.push(`resolution_notes = $${i++}`); params.push(input.resolutionNotes); }
-  if (input.assignedOfficerId) { sets.push(`assigned_officer_id = $${i++}`); params.push(input.assignedOfficerId); }
+  if (input.assignedOfficerId) { sets.push(`assigned_officer_id = $${i}`); params.push(input.assignedOfficerId); }
   const result = await pool.query(
     `UPDATE enforcement_cases SET ${sets.join(", ")} WHERE id = $1 RETURNING *`,
     params
@@ -3119,8 +3115,7 @@ export async function deleteDcpmiThreshold(id: number) {
 
 export async function evaluateDcpmiStatus(orgId: number) {
   const pool = getSharedPool();
-  try {
-    const orgRes = await pool.query(
+  const orgRes = await pool.query(
       `SELECT o.*, s.code AS sector_code FROM organizations o LEFT JOIN sectors s ON s.name = o.sector WHERE o.id = $1`, [orgId]
     );
     const org = orgRes.rows[0];
@@ -3133,16 +3128,15 @@ export async function evaluateDcpmiStatus(orgId: number) {
 
     const results: Array<{ criterion: string; threshold: number; actual: number; unit: string; met: boolean }> = [];
     for (const t of thresholds.rows) {
-      let actual = 0;
-      if (t.criterion_name === "annual_turnover") actual = Number(org.annual_turnover ?? 0);
-      else if (t.criterion_name === "data_subject_count") actual = Number(org.declared_asset_count ?? 0);
-      else if (t.criterion_name === "employee_count") actual = Number(org.employee_count ?? 0);
-      else actual = Number(org.declared_asset_count ?? 0);
+      const actual = t.criterion_name === "annual_turnover"
+        ? Number(org.annual_turnover ?? 0)
+        : t.criterion_name === "employee_count"
+          ? Number(org.employee_count ?? 0)
+          : Number(org.declared_asset_count ?? 0);
       results.push({ criterion: t.criterion_name, threshold: t.threshold_value, actual, unit: t.threshold_unit, met: actual >= t.threshold_value });
     }
     const isMajorImportance = results.some(r => r.met);
-    return { orgId, orgName: org.name, sector: org.sector, isMajorImportance, criteria: results };
-  } catch (e) { throw e; }
+  return { orgId, orgName: org.name, sector: org.sector, isMajorImportance, criteria: results };
 }
 
 // ─── Pool accessors (used by _core/index.ts for health checks) ───────────────

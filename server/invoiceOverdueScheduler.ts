@@ -45,8 +45,8 @@ export async function runInvoiceOverdueCheck(): Promise<OverdueRunResult> {
   }
 
   const client = await pool.connect();
-  let markedOverdue = 0;
-  let invoiceNumbers: string[] = [];
+  let markedOverdue: number;
+  let invoiceNumbers: string[];
 
   try {
     await client.query("BEGIN");

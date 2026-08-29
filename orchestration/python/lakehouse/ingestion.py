@@ -30,14 +30,57 @@ S3_REGION = os.getenv("AWS_REGION", "us-east-1")
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "")
 DELTA_LAKE_URI = f"s3://{S3_BUCKET}/{S3_PREFIX}" if S3_BUCKET else None
 
-SCHEMAS: Dict[str, pa.Schema] = {
-    "compliance_events": pa.schema([pa.field("id", pa.string()), pa.field("org_id", pa.int64()), pa.field("framework", pa.string()), pa.field("score", pa.float64()), pa.field("event_type", pa.string()), pa.field("ingested_at", pa.timestamp("ms", tz="UTC"))]),
-    "violations": pa.schema([pa.field("id", pa.string()), pa.field("org_id", pa.int64()), pa.field("framework", pa.string()), pa.field("article", pa.string()), pa.field("severity", pa.string()), pa.field("ingested_at", pa.timestamp("ms", tz="UTC"))]),
-    "financial_records": pa.schema([pa.field("id", pa.string()), pa.field("org_id", pa.int64()), pa.field("penalty_id", pa.string()), pa.field("amount_usd", pa.float64()), pa.field("tx_type", pa.string()), pa.field("status", pa.string()), pa.field("ingested_at", pa.timestamp("ms", tz="UTC"))]),
-    "network_events": pa.schema([pa.field("id", pa.string()), pa.field("src_ip", pa.string()), pa.field("dst_ip", pa.string()), pa.field("protocol", pa.string()), pa.field("bytes", pa.int64()), pa.field("ingested_at", pa.timestamp("ms", tz="UTC"))]),
-    "audit_trail": pa.schema([pa.field("id", pa.string()), pa.field("user_id", pa.int64()), pa.field("action", pa.string()), pa.field("resource_type", pa.string()), pa.field("resource_id", pa.string()), pa.field("ingested_at", pa.timestamp("ms", tz="UTC"))]),
-}
-DEFAULT_SCHEMA = pa.schema([pa.field("id", pa.string()), pa.field("data", pa.string()), pa.field("ingested_at", pa.timestamp("ms", tz="UTC"))])
+SCHEMAS: Dict[
+    str, pa.Schema] = {
+        "compliance_events": pa.schema(
+            [
+                pa.field(
+                    "id", pa.string()), pa.field(
+                        "org_id", pa.int64()), pa.field(
+                            "framework", pa.string()), pa.field(
+                                "score", pa.float64()), pa.field(
+                                    "event_type", pa.string()), pa.field(
+                                        "ingested_at", pa.timestamp(
+                                            "ms", tz="UTC"))]), "violations": pa.schema(
+                                                [
+                                                    pa.field(
+                                                        "id", pa.string()), pa.field(
+                                                            "org_id", pa.int64()), pa.field(
+                                                                "framework", pa.string()), pa.field(
+                                                                    "article", pa.string()), pa.field(
+                                                                        "severity", pa.string()), pa.field(
+                                                                            "ingested_at", pa.timestamp(
+                                                                                "ms", tz="UTC"))]), "financial_records": pa.schema(
+                                                                                    [
+                                                                                        pa.field(
+                                                                                            "id", pa.string()), pa.field(
+                                                                                                "org_id", pa.int64()), pa.field(
+                                                                                                    "penalty_id", pa.string()), pa.field(
+                                                                                                        "amount_usd", pa.float64()), pa.field(
+                                                                                                            "tx_type", pa.string()), pa.field(
+                                                                                                                "status", pa.string()), pa.field(
+                                                                                                                    "ingested_at", pa.timestamp(
+                                                                                                                        "ms", tz="UTC"))]), "network_events": pa.schema(
+                                                                                                                            [
+                                                                                                                                pa.field(
+                                                                                                                                    "id", pa.string()), pa.field(
+                                                                                                                                        "src_ip", pa.string()), pa.field(
+                                                                                                                                            "dst_ip", pa.string()), pa.field(
+                                                                                                                                                "protocol", pa.string()), pa.field(
+                                                                                                                                                    "bytes", pa.int64()), pa.field(
+                                                                                                                                                        "ingested_at", pa.timestamp(
+                                                                                                                                                            "ms", tz="UTC"))]), "audit_trail": pa.schema(
+                                                                                                                                                                [
+                                                                                                                                                                    pa.field(
+                                                                                                                                                                        "id", pa.string()), pa.field(
+                                                                                                                                                                            "user_id", pa.int64()), pa.field(
+                                                                                                                                                                                "action", pa.string()), pa.field(
+                                                                                                                                                                                    "resource_type", pa.string()), pa.field(
+                                                                                                                                                                                        "resource_id", pa.string()), pa.field(
+                                                                                                                                                                                            "ingested_at", pa.timestamp(
+                                                                                                                                                                                                "ms", tz="UTC"))]), }
+DEFAULT_SCHEMA = pa.schema([pa.field("id", pa.string()), pa.field("data", pa.string()),
+                           pa.field("ingested_at", pa.timestamp("ms", tz="UTC"))])
 
 
 def _s3_client():
@@ -168,9 +211,14 @@ def _start_kafka_consumer() -> None:
         "ndsep.threat.intel": "threat_intel",
         "ndsep.penalty.issued": "financial_records",
     }
-    config: Dict[str, str] = {"bootstrap.servers": KAFKA_BROKERS, "group.id": "ndsep-lakehouse-ingestion", "auto.offset.reset": "latest", "enable.auto.commit": "false"}
+    config: Dict[str,
+                 str] = {"bootstrap.servers": KAFKA_BROKERS,
+                         "group.id": "ndsep-lakehouse-ingestion",
+                         "auto.offset.reset": "latest",
+                         "enable.auto.commit": "false"}
     if os.getenv("KAFKA_SASL_USER"):
-        config.update({"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN", "sasl.username": os.environ["KAFKA_SASL_USER"], "sasl.password": os.getenv("KAFKA_SASL_PASS", "")})
+        config.update({"security.protocol": "SASL_SSL", "sasl.mechanism": "PLAIN",
+                      "sasl.username": os.environ["KAFKA_SASL_USER"], "sasl.password": os.getenv("KAFKA_SASL_PASS", "")})
 
     def consume() -> None:
         consumer = Consumer(config)
@@ -226,7 +274,15 @@ def health():
         raise
     except Exception as error:
         _raise_storage_error("health check", error)
-    return {"service": "lakehouse-ingestion", "status": "healthy", "version": "3.0.0", "s3_bucket": S3_BUCKET, "delta_lake_uri": DELTA_LAKE_URI, "kafka_configured": bool(KAFKA_BROKERS), "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {
+        "service": "lakehouse-ingestion",
+        "status": "healthy",
+        "version": "3.0.0",
+        "s3_bucket": S3_BUCKET,
+        "delta_lake_uri": DELTA_LAKE_URI,
+        "kafka_configured": bool(KAFKA_BROKERS),
+        "timestamp": datetime.now(
+            timezone.utc).isoformat()}
 
 
 @app.post("/lakehouse/ingest", response_model=IngestResponse)
@@ -234,10 +290,18 @@ def ingest(request: IngestRequest):
     if not request.records:
         raise HTTPException(status_code=400, detail="No records provided")
     if request.dedup_key:
-        logger.warning("dedup_key is not used without a transactional table catalog; event producers must provide idempotency keys")
+        logger.warning(
+            "dedup_key is not used without a transactional table catalog; event producers must provide idempotency keys")
     now = datetime.now(timezone.utc)
     uri = _write_parquet(request.table, request.records)
-    return IngestResponse(ok=True, table=request.table, records_written=len(request.records), partition=now.strftime("%Y-%m-%d"), ingested_at=now.isoformat(), uri=uri)
+    return IngestResponse(
+        ok=True,
+        table=request.table,
+        records_written=len(
+            request.records),
+        partition=now.strftime("%Y-%m-%d"),
+        ingested_at=now.isoformat(),
+        uri=uri)
 
 
 @app.get("/lakehouse/query/{table}")
@@ -247,7 +311,8 @@ def query_table(table: str, limit: int = 50):
     records = _read_recent_records(table, limit)
     if not records and not _list_objects(table):
         raise HTTPException(status_code=404, detail=f"Table {table!r} has no persisted Parquet objects")
-    return {"table": table, "records": records, "total_returned": len(records), "delta_lake_uri": f"{DELTA_LAKE_URI}/{table}"}
+    return {"table": table, "records": records, "total_returned": len(
+        records), "delta_lake_uri": f"{DELTA_LAKE_URI}/{table}"}
 
 
 @app.get("/lakehouse/tables")
@@ -258,7 +323,8 @@ def list_tables():
         suffix = key.removeprefix(f"{S3_PREFIX}/")
         table = suffix.split("/", 1)[0]
         tables[table] = tables.get(table, 0) + 1
-    return {"tables": [{"name": name, "parquet_objects": count, "uri": f"{DELTA_LAKE_URI}/{name}"} for name, count in sorted(tables.items())]}
+    return {"tables": [{"name": name, "parquet_objects": count, "uri": f"{DELTA_LAKE_URI}/{name}"}
+                       for name, count in sorted(tables.items())]}
 
 
 @app.post("/lakehouse/compliance-event")
@@ -288,7 +354,8 @@ def ingest_audit(event: Dict[str, Any]):
 
 @app.on_event("startup")
 def on_startup():
-    logger.info("Lakehouse starting with S3 bucket=%s Kafka configured=%s", S3_BUCKET or "<missing>", bool(KAFKA_BROKERS))
+    logger.info("Lakehouse starting with S3 bucket=%s Kafka configured=%s",
+                S3_BUCKET or "<missing>", bool(KAFKA_BROKERS))
     _start_kafka_consumer()
 
 

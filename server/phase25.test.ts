@@ -613,7 +613,7 @@ describe("Nigerian regulatory compliance rules", () => {
     repeat: boolean;
   }): number {
     const { annualRevenue, violationType, repeat } = params;
-    let rate = 0;
+    let rate: number;
     if (violationType === "minor") rate = 0.01;
     else if (violationType === "major") rate = 0.02;
     else rate = 0.04; // critical

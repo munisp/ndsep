@@ -36,7 +36,7 @@ export function PwaLockScreen({ lock }: PwaLockScreenProps) {
     }
     // Focus hidden input for keyboard PIN entry
     inputRef.current?.focus();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleBiometric() {
     setBiometricLoading(true);

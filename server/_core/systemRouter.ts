@@ -56,7 +56,7 @@ export const systemRouter = router({
     }))
     .mutation(async ({ input }) => {
       const transport = ENV.resendApiKey ? "Resend" : "Forge API (fallback)";
-      let ok = false;
+      let ok: boolean;
       if (input.type === "penalty") {
         ok = await sendPenaltyNotice({
           to: input.to,

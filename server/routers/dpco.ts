@@ -1228,7 +1228,7 @@ export const dpcoRouter = router({
             dpco_org_id, audit_scope, preferred_start_date,
             estimated_data_subjects, processing_activities,
             status, reference_token, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,\'pending\',?,NOW(),NOW())
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,NOW(),NOW())
          RETURNING *`,
         [
           input.orgName, input.orgSector ?? null, input.orgCountry ?? null,

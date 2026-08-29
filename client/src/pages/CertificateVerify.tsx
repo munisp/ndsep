@@ -98,7 +98,7 @@ export default function CertificateVerify() {
       setInputToken(urlToken);
       setQueryToken(urlToken);
     }
-  }, [urlToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [urlToken]);
 
   const { data, isLoading, isFetching } = trpc.verify.certificate.useQuery(
     { token: queryToken },

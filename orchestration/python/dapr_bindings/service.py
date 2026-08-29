@@ -62,7 +62,8 @@ def dapr_request(path: str, method: str = "GET", payload: Any = None, query: Opt
             return json.loads(raw.decode("utf-8")) if raw else None
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
-        raise HTTPException(status_code=503, detail=f"Dapr {method} {path} failed with HTTP {error.code}: {detail[:300]}") from error
+        raise HTTPException(status_code=503,
+                            detail=f"Dapr {method} {path} failed with HTTP {error.code}: {detail[:300]}") from error
     except (URLError, TimeoutError, OSError) as error:
         raise HTTPException(status_code=503, detail=f"Dapr sidecar unavailable: {error}") from error
 
