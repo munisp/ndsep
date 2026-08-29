@@ -299,6 +299,8 @@ jobs:
       JWT_SECRET: test-jwt-secret-for-ci-only
       FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
       NODE_ENV: test
+      # The isolated E2E database is initialized by drizzle-kit before server start.
+      SKIP_DATABASE_MIGRATIONS: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
