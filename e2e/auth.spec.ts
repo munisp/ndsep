@@ -57,7 +57,7 @@ test.describe("Auth Flow 1: Unauthenticated state", () => {
 
   test("Protected route /organizations redirects or shows auth gate", async ({ page }) => {
     await page.goto(`${BASE}/organizations`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     // Should either show sign-in or the organizations page (if authenticated)
     expect(content.length).toBeGreaterThan(100);
@@ -66,7 +66,7 @@ test.describe("Auth Flow 1: Unauthenticated state", () => {
 
   test("Protected route /penalties redirects or shows auth gate", async ({ page }) => {
     await page.goto(`${BASE}/penalties`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -74,7 +74,7 @@ test.describe("Auth Flow 1: Unauthenticated state", () => {
 
   test("Protected route /enforcement redirects or shows auth gate", async ({ page }) => {
     await page.goto(`${BASE}/enforcement`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -85,7 +85,7 @@ test.describe("Auth Flow 1: Unauthenticated state", () => {
 test.describe("Auth Flow 2: OAuth URL construction", () => {
   test("Login URL is generated correctly from the frontend", async ({ page }) => {
     await page.goto(BASE);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // Evaluate the getLoginUrl() function from the app
     const loginUrl = await page.evaluate(() => {

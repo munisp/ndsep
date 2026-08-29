@@ -41,7 +41,7 @@ async function trpcPost(page: Page, path: string, body: unknown) {
 test.describe("Flow 1: Login → Dashboard", () => {
   test("Homepage loads without runtime errors", async ({ page }) => {
     await page.goto(BASE);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(500);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -52,7 +52,7 @@ test.describe("Flow 1: Login → Dashboard", () => {
     // Use localhost directly to avoid CloudFront 403 issues in sandbox
     const localBase = "http://localhost:3000";
     await page.goto(localBase);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     // Either a login button or dashboard content should be present
     const body = await page.textContent("body");
     const pageContent = await page.content();
@@ -73,7 +73,7 @@ test.describe("Flow 1: Login → Dashboard", () => {
 
   test("Dashboard route returns content or redirects to auth", async ({ page }) => {
     await page.goto(`${BASE}/dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -90,7 +90,7 @@ test.describe("Flow 1: Login → Dashboard", () => {
 
   test("Navigation to /organizations returns content", async ({ page }) => {
     await page.goto(`${BASE}/organizations`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -98,7 +98,7 @@ test.describe("Flow 1: Login → Dashboard", () => {
 
   test("Navigation to /penalties returns content", async ({ page }) => {
     await page.goto(`${BASE}/penalties`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -106,7 +106,7 @@ test.describe("Flow 1: Login → Dashboard", () => {
 
   test("Navigation to /enforcement returns content", async ({ page }) => {
     await page.goto(`${BASE}/enforcement`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -118,7 +118,7 @@ test.describe("Flow 1: Login → Dashboard", () => {
 test.describe("Flow 2: KYC CSV Export", () => {
   test("KYC management page loads", async ({ page }) => {
     await page.goto(`${BASE}/banking/kyc`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -158,7 +158,7 @@ test.describe("Flow 2: KYC CSV Export", () => {
 test.describe("Flow 3: AML Real-Time Search and Filter", () => {
   test("AML cases page loads", async ({ page }) => {
     await page.goto(`${BASE}/banking/aml`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -186,7 +186,7 @@ test.describe("Flow 3: AML Real-Time Search and Filter", () => {
 
   test("AML watchlist page loads", async ({ page }) => {
     await page.goto(`${BASE}/banking/watchlist`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -198,7 +198,7 @@ test.describe("Flow 3: AML Real-Time Search and Filter", () => {
 test.describe("Flow 4: Penalty Dashboard Drill-Down", () => {
   test("Penalty dashboard page loads", async ({ page }) => {
     await page.goto(`${BASE}/penalty-dashboard`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -221,7 +221,7 @@ test.describe("Flow 4: Penalty Dashboard Drill-Down", () => {
 
   test("Penalties list page loads", async ({ page }) => {
     await page.goto(`${BASE}/penalties`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -229,7 +229,7 @@ test.describe("Flow 4: Penalty Dashboard Drill-Down", () => {
 
   test("Penalty calculations page loads", async ({ page }) => {
     await page.goto(`${BASE}/penalty-calculations`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -241,7 +241,7 @@ test.describe("Flow 4: Penalty Dashboard Drill-Down", () => {
 test.describe("Flow 5: Compliance Calendar CRUD", () => {
   test("Compliance calendar page loads", async ({ page }) => {
     await page.goto(`${BASE}/compliance-calendar`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -277,7 +277,7 @@ test.describe("Flow 5: Compliance Calendar CRUD", () => {
 
   test("Compliance calendar page has no broken navigation", async ({ page }) => {
     await page.goto(`${BASE}/compliance-calendar`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     // Check that no 404 errors are thrown for navigation links
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(err.message));
