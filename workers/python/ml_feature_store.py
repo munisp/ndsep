@@ -163,7 +163,7 @@ def train_compliance_classifier(X: np.ndarray, y: np.ndarray) -> Dict:
     }
 
     # Save model + scaler
-    version = hashlib.md5(f"{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     model_path = MODEL_DIR / f"compliance_classifier_{version}.joblib"
     scaler_path = MODEL_DIR / f"compliance_scaler_{version}.joblib"
     joblib.dump(rf, model_path)
@@ -206,7 +206,7 @@ def train_anomaly_detector(X: np.ndarray) -> Dict:
     anomaly_labels = iso.predict(X_scaled)
     anomaly_rate = float(np.sum(anomaly_labels == -1) / len(anomaly_labels))
 
-    version = hashlib.md5(f"anomaly-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"anomaly-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     model_path = MODEL_DIR / f"anomaly_detector_{version}.joblib"
     scaler_path = MODEL_DIR / f"anomaly_scaler_{version}.joblib"
     joblib.dump(iso, model_path)

@@ -100,7 +100,7 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 def make_chunk_id(source_id: str, chunk_idx: int) -> int:
     """Generate deterministic integer ID for a chunk."""
     key = f"{source_id}:chunk:{chunk_idx}"
-    return int(hashlib.md5(key.encode()).hexdigest()[:8], 16) % (2**31)
+    return int(hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:8], 16) % (2**31)
 
 
 # ── Embedding ──────────────────────────────────────────────────────────────────

@@ -132,7 +132,7 @@ class ExperimentTracker:
 
     def log_experiment(self, model_name: str, metrics: dict, params: dict, artifact_path: str = ""):
         exp = {
-            "id": hashlib.md5(f"{model_name}-{time.time()}".encode()).hexdigest()[:12],
+            "id": hashlib.md5(f"{model_name}-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:12],
             "model": model_name,
             "metrics": metrics,
             "params": params,
@@ -576,7 +576,7 @@ def train_gnn() -> dict:
             _graph.embeddings[nid] = emb
 
     # Save model weights
-    version = hashlib.md5(f"gnn-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"gnn-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     gnn_path = MODEL_DIR / f"graphsage_{version}.pt"
     lp_path = MODEL_DIR / f"link_predictor_{version}.pt"
     torch.save(_gnn_model.state_dict(), gnn_path)
@@ -792,7 +792,7 @@ def train_lstm() -> dict:
             last_seq = torch.cat([last_seq[:, 1:, :], new_step], dim=1)
 
     # Save model
-    version = hashlib.md5(f"lstm-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"lstm-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     lstm_path = MODEL_DIR / f"lstm_violation_{version}.pt"
     torch.save(_lstm_model.state_dict(), lstm_path)
     torch.save(_lstm_model.state_dict(), MODEL_DIR / "lstm_violation_latest.pt")
@@ -942,7 +942,7 @@ def train_autoencoder() -> dict:
             test_loss = 0
 
     # Save model
-    version = hashlib.md5(f"ae-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"ae-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     ae_path = MODEL_DIR / f"autoencoder_{version}.pt"
     torch.save(_autoencoder.state_dict(), ae_path)
     torch.save(_autoencoder.state_dict(), MODEL_DIR / "autoencoder_anomaly_latest.pt")
@@ -1121,7 +1121,7 @@ def train_xgboost() -> dict:
             log.warning(f"SHAP failed: {e}")
             metrics["shap_available"] = False
 
-    version = hashlib.md5(f"xgb-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"xgb-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     model_path = MODEL_DIR / f"xgboost_breach_{version}.joblib"
     scaler_path = MODEL_DIR / f"xgboost_scaler_{version}.joblib"
     joblib.dump(_xgb_model, model_path)
@@ -1524,7 +1524,7 @@ class PredictionFeedbackStore:
     def log_prediction(self, model: str, features: dict, prediction: dict):
         """Log a prediction for later feedback matching."""
         entry = {
-            "id": hashlib.md5(f"{model}-{time.time()}-{json.dumps(features, sort_keys=True)}".encode()).hexdigest()[:12],
+            "id": hashlib.md5(f"{model}-{time.time()}-{json.dumps(features, sort_keys=True)}".encode(), usedforsecurity=False).hexdigest()[:12],
             "model": model,
             "features": features,
             "prediction": prediction,
@@ -1694,7 +1694,7 @@ class RetrainingEventLog:
                   before_metrics: dict, after_metrics: dict,
                   duration_seconds: float, drift_info: Optional[dict] = None) -> dict:
         event = {
-            "id": hashlib.md5(f"retrain-{time.time()}".encode()).hexdigest()[:12],
+            "id": hashlib.md5(f"retrain-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:12],
             "trigger": trigger,
             "models_retrained": models_retrained,
             "before_metrics": before_metrics,

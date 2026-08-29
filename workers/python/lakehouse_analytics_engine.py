@@ -323,7 +323,7 @@ def run_full_etl() -> dict:
     elapsed = time.time() - start
 
     # Create snapshot record
-    snapshot_id = hashlib.md5(f"{_last_etl}-{total_rows}".encode()).hexdigest()[:12]
+    snapshot_id = hashlib.md5(f"{_last_etl}-{total_rows}".encode(), usedforsecurity=False).hexdigest()[:12]
     snapshot = {
         "id": snapshot_id,
         "timestamp": _last_etl,

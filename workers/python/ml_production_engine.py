@@ -324,7 +324,7 @@ def train_xgboost_breach_predictor() -> dict:
             metrics["shap_available"] = False
 
     # Save model
-    version = hashlib.md5(f"xgb-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"xgb-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     model_path = MODEL_DIR / f"xgboost_breach_{version}.joblib"
     scaler_path = MODEL_DIR / f"xgboost_breach_scaler_{version}.joblib"
     joblib.dump(model, model_path)
@@ -410,7 +410,7 @@ def train_lstm_violation_forecaster() -> dict:
 
     metrics["forecasts"] = forecasts
 
-    version = hashlib.md5(f"lstm-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"lstm-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     model_path = MODEL_DIR / f"lstm_violation_{version}.joblib"
     joblib.dump(model, model_path)
     joblib.dump(scaler, MODEL_DIR / f"lstm_violation_scaler_{version}.joblib")
@@ -453,7 +453,7 @@ def train_isolation_forest() -> dict:
         if label == -1 and i < len(org_ids):
             anomalies.append({"org_id": org_ids[i], "anomaly_score": round(float(score), 4)})
 
-    version = hashlib.md5(f"iso-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"iso-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     joblib.dump(model, MODEL_DIR / f"isolation_forest_{version}.joblib")
     joblib.dump(scaler, MODEL_DIR / f"isolation_forest_scaler_{version}.joblib")
 
@@ -519,7 +519,7 @@ def train_risk_scorer() -> dict:
         model.fit(X_scaled, y_risk)
         metrics = {"accuracy": 1.0, "note": "single class — trivial"}
 
-    version = hashlib.md5(f"rf-{time.time()}".encode()).hexdigest()[:8]
+    version = hashlib.md5(f"rf-{time.time()}".encode(), usedforsecurity=False).hexdigest()[:8]
     joblib.dump(model, MODEL_DIR / f"risk_scorer_{version}.joblib")
     joblib.dump(scaler, MODEL_DIR / f"risk_scorer_scaler_{version}.joblib")
 
