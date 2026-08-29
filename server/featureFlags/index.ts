@@ -31,14 +31,23 @@ export type FeatureFlag = {
 
 const FLAGS_DDL = `
 CREATE TABLE IF NOT EXISTS feature_flags (
-  name VARCHAR(128) PRIMARY KEY,
-  description TEXT,
+  key TEXT PRIMARY KEY,
   enabled BOOLEAN NOT NULL DEFAULT false,
+  rollout_percentage INTEGER NOT NULL DEFAULT 0 CHECK (rollout_percentage BETWEEN 0 AND 100),
+  target_orgs INTEGER[] DEFAULT '{}',
+  target_roles TEXT[] DEFAULT '{}',
+  environment TEXT[] DEFAULT '{production,staging,development}',
+  description TEXT DEFAULT '',
   strategy VARCHAR(32) NOT NULL DEFAULT 'off',
   parameters JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- The initial migration establishes the key-based contract. These additive columns
+-- preserve the existing strategy evaluator for installations upgraded in place.
+ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS strategy VARCHAR(32) NOT NULL DEFAULT 'off';
+ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS parameters JSONB NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS feature_flag_audit (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -79,10 +88,17 @@ async function seedDefaultFlags(): Promise<void> {
   ];
 
   for (const f of defaults) {
+    const rolloutPercentage = f.strategy === "on"
+      ? 100
+      : f.strategy === "percentage"
+        ? Number(f.params.percentage ?? 0)
+        : f.strategy === "gradual"
+          ? Number(f.params.current_percentage ?? 0)
+          : 0;
     await db.execute(sql`
-      INSERT INTO feature_flags (name, description, enabled, strategy, parameters)
-      VALUES (${f.name}, ${f.description}, ${f.enabled}, ${f.strategy}, ${JSON.stringify(f.params)}::jsonb)
-      ON CONFLICT (name) DO NOTHING
+      INSERT INTO feature_flags (key, description, enabled, rollout_percentage, strategy, parameters)
+      VALUES (${f.name}, ${f.description}, ${f.enabled}, ${rolloutPercentage}, ${f.strategy}, ${JSON.stringify(f.params)}::jsonb)
+      ON CONFLICT (key) DO NOTHING
     `);
   }
 }
@@ -95,7 +111,7 @@ export async function isEnabled(
 ): Promise<boolean> {
   const db = (await getDb())!;
   const result = await db.execute(sql`
-    SELECT enabled, strategy, parameters FROM feature_flags WHERE name = ${flagName}
+    SELECT enabled, strategy, parameters FROM feature_flags WHERE key = ${flagName}
   `);
 
   if (result.rows.length === 0) return false;
@@ -143,7 +159,7 @@ export async function setFlag(
   const db = (await getDb())!;
 
   // Get old value for audit
-  const old = await db.execute(sql`SELECT * FROM feature_flags WHERE name = ${name}`);
+  const old = await db.execute(sql`SELECT * FROM feature_flags WHERE key = ${name}`);
   const oldValue = old.rows[0] ?? null;
 
   await db.execute(sql`
@@ -152,7 +168,7 @@ export async function setFlag(
         strategy = COALESCE(${strategy ?? null}, strategy),
         parameters = COALESCE(${parameters ? JSON.stringify(parameters) : null}::jsonb, parameters),
         updated_at = NOW()
-    WHERE name = ${name}
+    WHERE key = ${name}
   `);
 
   // Audit log
@@ -167,8 +183,8 @@ export async function setFlag(
 export async function getAllFlags(): Promise<FeatureFlag[]> {
   const db = (await getDb())!;
   const result = await db.execute(sql`
-    SELECT name, description, enabled, strategy, parameters, created_at, updated_at
-    FROM feature_flags ORDER BY name
+    SELECT key AS name, description, enabled, strategy, parameters, created_at, updated_at
+    FROM feature_flags ORDER BY key
   `);
   return result.rows as FeatureFlag[];
 }
