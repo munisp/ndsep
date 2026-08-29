@@ -654,6 +654,12 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> Json<serde_json::
         "services_monitored": state.services.len(),
         "total_probe_cycles": total,
         "probe_interval_seconds": PROBE_INTERVAL_SECS,
+        "dependency_configuration": {
+            "database_url_present": !state.db_url.trim().is_empty(),
+            "worker_relay_url_present": !state.relay_url.trim().is_empty(),
+            "kafka_brokers_present": !state.kafka_url.trim().is_empty(),
+            "redis_url_present": !state.redis_url.trim().is_empty(),
+        },
     }))
 }
 

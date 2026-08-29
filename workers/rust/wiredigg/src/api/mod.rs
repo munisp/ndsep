@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     response::Json,
     routing::{get, post},
     Router,
@@ -42,6 +42,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/anomaly/analyze", post(analyze_batch))
         // IoT
         .route("/api/iot/devices", get(get_iot_devices))
+        .route("/api/iot/devices/{ip}", get(get_iot_device))
         .route("/api/iot/high-risk", get(get_high_risk_devices))
         // Protocol statistics
         .route("/api/protocols", get(protocol_stats))
@@ -50,6 +51,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/top-destinations", get(top_destinations))
         // Threat intelligence
         .route("/api/threat-intel/add-ip", post(add_malicious_ip))
+        .route("/api/threat-intel/add-domain", post(add_malicious_domain))
         .with_state(state)
 }
 
@@ -225,6 +227,16 @@ async fn get_iot_devices(State(s): State<AppState>) -> Json<Value> {
     }))
 }
 
+async fn get_iot_device(State(s): State<AppState>, Path(ip): Path<String>) -> Json<Value> {
+    match ip.parse::<IpAddr>() {
+        Ok(parsed) => match s.iot.get_device(&parsed) {
+            Some(device) => Json(json!({ "device": device })),
+            None => Json(json!({ "error": "device not found" })),
+        },
+        Err(_) => Json(json!({ "error": "invalid IP address" })),
+    }
+}
+
 async fn get_high_risk_devices(State(s): State<AppState>) -> Json<Value> {
     let devices = s.iot.high_risk_devices();
     Json(json!({
@@ -254,7 +266,7 @@ async fn top_sources(State(s): State<AppState>, Query(params): Query<TopParams>)
         .iter()
         .map(|e| (*e.key(), *e.value()))
         .collect();
-    sources.sort_by(|a, b| b.1.cmp(&a.1));
+    sources.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     sources.truncate(limit);
 
     let items: Vec<Value> = sources
@@ -275,7 +287,7 @@ async fn top_destinations(
         .iter()
         .map(|e| (*e.key(), *e.value()))
         .collect();
-    dests.sort_by(|a, b| b.1.cmp(&a.1));
+    dests.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     dests.truncate(limit);
 
     let items: Vec<Value> = dests
@@ -298,6 +310,23 @@ async fn add_malicious_ip(State(s): State<AppState>, Json(req): Json<AddIpReques
         }
         Err(e) => Json(json!({ "status": "error", "error": e.to_string() })),
     }
+}
+
+#[derive(Deserialize)]
+struct AddDomainRequest {
+    domain: String,
+}
+
+async fn add_malicious_domain(
+    State(s): State<AppState>,
+    Json(req): Json<AddDomainRequest>,
+) -> Json<Value> {
+    let domain = req.domain.trim().to_ascii_lowercase();
+    if domain.is_empty() || domain.contains(char::is_whitespace) {
+        return Json(json!({ "status": "error", "error": "domain must be a non-empty hostname" }));
+    }
+    s.threat.add_malicious_domain(domain.clone());
+    Json(json!({ "status": "added", "domain": domain }))
 }
 
 use std::net::IpAddr;

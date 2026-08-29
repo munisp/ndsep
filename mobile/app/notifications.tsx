@@ -242,6 +242,7 @@ export default function NotificationsScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const [isAnalyzingInsights, setIsAnalyzingInsights] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   async function loadFeed() {
     const [feed, unread] = await Promise.all([getActivityFeed(), getUnreadActivityCount()]);
@@ -250,11 +251,17 @@ export default function NotificationsScreen() {
   }
 
   useEffect(() => {
-    void loadFeed();
-    const unsubscribe = subscribeActivityFeed(() => {
-      void loadFeed();
-    });
-    return unsubscribe;
+    const initialLoad = setTimeout(() => { void loadFeed(); }, 0);
+    const unsubscribe = subscribeActivityFeed(() => { void loadFeed(); });
+    return () => {
+      clearTimeout(initialLoad);
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(clock);
   }, []);
 
   const pendingInsightIds = useMemo(
@@ -269,10 +276,13 @@ export default function NotificationsScreen() {
 
   useEffect(() => {
     if (!pendingInsightIds || isAnalyzingInsights) return;
-    setIsAnalyzingInsights(true);
-    analyzeActivities(items)
-      .catch(() => undefined)
-      .finally(() => setIsAnalyzingInsights(false));
+    const analysis = setTimeout(() => {
+      setIsAnalyzingInsights(true);
+      analyzeActivities(items)
+        .catch(() => undefined)
+        .finally(() => setIsAnalyzingInsights(false));
+    }, 0);
+    return () => clearTimeout(analysis);
   }, [analyzeActivities, isAnalyzingInsights, items, pendingInsightIds]);
 
   async function handleRefresh() {
@@ -413,7 +423,7 @@ export default function NotificationsScreen() {
               </View>
             ) : (
               handoffAlerts.map((alert) => {
-                const hoursRemaining = Math.max(0, Math.round((new Date(alert.dueAt).getTime() - Date.now()) / (1000 * 60 * 60)));
+                const hoursRemaining = Math.max(0, Math.round((new Date(alert.dueAt).getTime() - now) / (1000 * 60 * 60)));
                 const warning = hoursRemaining <= 6;
                 return (
                   <Link key={alert.handoffId} href={{ pathname: "/permit/[id]", params: { id: alert.caseId } } as never} asChild>

@@ -94,8 +94,6 @@ struct IterationResult {
 
 #[derive(Debug, Clone)]
 struct SectorIterResult {
-    sector: String,
-    jurisdiction: String,
     compliance_delta: f64,
     breach_delta: f64,
     penalty_delta: f64,
@@ -106,6 +104,7 @@ fn run_single_iteration(
     duration: usize,
     sla: f64,
     pen_mult: f64,
+    compliance_threshold: f64,
     seed: u64,
 ) -> IterationResult {
     let mut rng = StdRng::seed_from_u64(seed);
@@ -123,7 +122,8 @@ fn run_single_iteration(
         let budget_factor = (sector.avg_budget_usd / 10000.0).max(1.0).log10() * 0.1;
         let staff_factor = (sector.staff_count_avg as f64 * 0.02).min(0.3);
         let tech_factor = sector.tech_maturity * 0.05;
-        let base_improvement = (100.0 - sector.avg_compliance) * 0.02 * pen_mult;
+        let target_gap = (compliance_threshold - sector.avg_compliance).max(0.0);
+        let base_improvement = target_gap * 0.02 * pen_mult;
 
         // Stochastic factors
         let budget_shock: f64 = rng.gen::<f64>() * 0.3 - 0.15;
@@ -178,8 +178,6 @@ fn run_single_iteration(
         }
 
         sector_results.push(SectorIterResult {
-            sector: sector.sector.clone(),
-            jurisdiction: sector.jurisdiction.clone(),
             compliance_delta: comp_delta,
             breach_delta: breach_delta * 100.0,
             penalty_delta: pen_delta,
@@ -192,9 +190,9 @@ fn run_single_iteration(
         0.0
     };
 
-    for m in 0..duration {
-        if total_orgs > 0 {
-            monthly_comp[m] /= total_orgs as f64;
+    if total_orgs > 0 {
+        for value in &mut monthly_comp {
+            *value /= total_orgs as f64;
         }
     }
 
@@ -260,6 +258,7 @@ fn round2(v: f64) -> f64 {
 async fn run_monte_carlo(Json(req): Json<MonteCarloRequest>) -> Json<MonteCarloResponse> {
     let start = std::time::Instant::now();
     let iterations = req.iterations.max(100);
+    let compliance_threshold = req.compliance_threshold.clamp(0.0, 100.0);
 
     let results: Vec<IterationResult> = (0..iterations)
         .into_par_iter()
@@ -270,6 +269,7 @@ async fn run_monte_carlo(Json(req): Json<MonteCarloRequest>) -> Json<MonteCarloR
                 req.duration_months,
                 req.breach_sla_hours,
                 req.penalty_multiplier,
+                compliance_threshold,
                 seed,
             )
         })

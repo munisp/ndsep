@@ -13,7 +13,11 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use axum::{routing::{get, post}, Json, Router};
+use axum::{
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -123,6 +127,37 @@ fn sha3_256_hex(data: &[u8]) -> String {
     hex::encode(hash)
 }
 
+type ApiError = (StatusCode, Json<serde_json::Value>);
+
+fn require_algorithm(requested: Option<&str>, expected: &str) -> Result<(), ApiError> {
+    match requested {
+        Some(value) if value != expected => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "unsupported algorithm",
+                "expected": expected,
+            })),
+        )),
+        _ => Ok(()),
+    }
+}
+
+fn decode_public_key(public_key: &str) -> Result<Vec<u8>, ApiError> {
+    let decoded = B64.decode(public_key).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "public_key must be valid base64"})),
+        )
+    })?;
+    if decoded.len() != 1952 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "public_key has an invalid Dilithium3 length"})),
+        ));
+    }
+    Ok(decoded)
+}
+
 fn generate_keypair_kyber() -> KeyPair {
     let mut rng = rand::thread_rng();
     // Simulate Kyber-768 keypair (production: use pqcrypto-kyber)
@@ -227,33 +262,41 @@ async fn gen_sig_keypair() -> Json<KeyPair> {
     Json(generate_keypair_dilithium())
 }
 
-async fn encapsulate(Json(req): Json<EncapsulateRequest>) -> Json<EncapsulationResult> {
+async fn encapsulate(
+    Json(req): Json<EncapsulateRequest>,
+) -> Result<Json<EncapsulationResult>, ApiError> {
+    require_algorithm(req.algorithm.as_deref(), "CRYSTALS-Kyber-768")?;
     let pk = req.public_key_b64.unwrap_or_else(|| {
-        let kp = generate_keypair_kyber();
-        kp.public_key
+        let keypair = generate_keypair_kyber();
+        keypair.public_key
     });
-    Json(encapsulate_kyber(&pk))
+    Ok(Json(encapsulate_kyber(&pk)))
 }
 
-async fn sign(Json(req): Json<SignRequest>) -> Json<SignResult> {
-    let kp = generate_keypair_dilithium();
-    Json(sign_dilithium(req.message.as_bytes(), &kp.secret_key))
+async fn sign(Json(req): Json<SignRequest>) -> Result<Json<SignResult>, ApiError> {
+    require_algorithm(req.algorithm.as_deref(), "CRYSTALS-Dilithium3")?;
+    let keypair = generate_keypair_dilithium();
+    Ok(Json(sign_dilithium(
+        req.message.as_bytes(),
+        &keypair.secret_key,
+    )))
 }
 
-async fn verify(Json(req): Json<VerifyRequest>) -> Json<VerifyResult> {
+async fn verify(Json(req): Json<VerifyRequest>) -> Result<Json<VerifyResult>, ApiError> {
+    require_algorithm(req.algorithm.as_deref(), "CRYSTALS-Dilithium3")?;
+    let public_key = decode_public_key(&req.public_key)?;
     let message_hash = sha3_256_hex(req.message.as_bytes());
-    // Simplified verification
-    let sig_bytes = B64.decode(&req.signature).unwrap_or_default();
-    let valid = sig_bytes.len() > 32 && {
+    let signature = B64.decode(&req.signature).unwrap_or_default();
+    let valid = public_key.len() == 1952 && signature.len() > 32 && {
         let expected_prefix = Sha3_256::digest(req.message.as_bytes());
-        sig_bytes[..32] == expected_prefix[..]
+        signature[..32] == expected_prefix[..]
     };
 
-    Json(VerifyResult {
+    Ok(Json(VerifyResult {
         valid,
-        algorithm: req.algorithm.unwrap_or_else(|| "CRYSTALS-Dilithium3".to_string()),
+        algorithm: "CRYSTALS-Dilithium3".to_string(),
         message_hash,
-    })
+    }))
 }
 
 async fn hybrid_encrypt(Json(req): Json<HybridEncryptRequest>) -> Json<HybridEncryptResult> {

@@ -18,7 +18,7 @@ mod protocol;
 use std::env;
 use std::net::SocketAddr;
 
-use log::info;
+use log::{info, warn};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
@@ -27,6 +27,41 @@ use analysis::iot::IoTDetector;
 use analysis::threat::ThreatClassifier;
 use api::AppState;
 use capture::engine::CaptureEngine;
+
+fn start_live_analysis(state: &AppState) {
+    let mut packet_events = state.capture.sender.subscribe();
+    let analysis_state = state.clone();
+
+    tokio::spawn(async move {
+        loop {
+            match packet_events.recv().await {
+                Ok(packet) => {
+                    let anomaly = analysis_state.anomaly.analyze(&packet);
+                    if anomaly.is_anomalous {
+                        analysis_state
+                            .capture
+                            .anomaly_count
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+
+                    let threats = analysis_state.threat.classify(&packet);
+                    if !threats.is_empty() {
+                        analysis_state
+                            .capture
+                            .threat_count
+                            .fetch_add(threats.len() as u64, std::sync::atomic::Ordering::Relaxed);
+                    }
+
+                    analysis_state.iot.process_packet(&packet);
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    warn!("wiredigg analysis dropped {count} buffered packets");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
 
 #[tokio::main]
 async fn main() {
@@ -76,6 +111,8 @@ async fn main() {
         threat,
         iot,
     };
+
+    start_live_analysis(&state);
 
     let cors = CorsLayer::new()
         .allow_origin(Any)

@@ -1,13 +1,19 @@
 import { Link } from "expo-router";
+import { useEffect } from "react";
 import { ScrollView, StyleSheet, Text, View, Platform } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { useMobilePlatformBundle } from "@/lib/mobile-sync";
 import type { ParcelRecord } from "@/lib/mobile-data";
 
-let leafletCssLoaded = false;
 
 function WebLeafletMap({ parcel }: { parcel: ParcelRecord }) {
+  useEffect(() => {
+    if (Platform.OS === "web") {
+      void import("leaflet/dist/leaflet.css");
+    }
+  }, []);
+
   if (Platform.OS !== "web") {
     return (
       <View className="rounded-[28px] border border-border bg-surface p-5">
@@ -17,11 +23,6 @@ function WebLeafletMap({ parcel }: { parcel: ParcelRecord }) {
         </Text>
       </View>
     );
-  }
-
-  if (!leafletCssLoaded) {
-    require("leaflet/dist/leaflet.css");
-    leafletCssLoaded = true;
   }
 
   const { MapContainer, TileLayer, CircleMarker, Popup } = require("react-leaflet");

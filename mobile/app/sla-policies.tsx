@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Linking, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -7,8 +7,7 @@ import { trpc } from "@/lib/trpc";
 export default function SlaPoliciesScreen() {
   const policies = trpc.localPolicy.list.useQuery();
   const [selected, setSelected] = useState("lagos");
-  const [hours, setHours] = useState("120");
-  const [checklist, setChecklist] = useState("");
+  const [draft, setDraft] = useState<{ jurisdiction: string; hours: string; checklist: string } | null>(null);
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
@@ -16,7 +15,12 @@ export default function SlaPoliciesScreen() {
   const update = trpc.localPolicy.update.useMutation({ onSuccess: async (policy) => { await policies.refetch(); setMessage(`${policy.label} is now local policy version ${policy.version}.`); }, onError: (error) => setMessage(error.message || "A configured administrator session is required.") });
   const exportPdf = trpc.localPolicy.exportPdf.useMutation({ onSuccess: (exported) => { setMessage(`${exported.fileName} prepared. SHA-256: ${exported.sha256.slice(0, 16)}… ${exported.disclaimer}`); void Linking.openURL(`data:${exported.mimeType};base64,${exported.contentBase64}`); }, onError: (error) => setMessage(error.message || "Export requires a configured administrator session.") });
 
-  useEffect(() => { if (current) { setHours(String(current.slaHours)); setChecklist(current.checklist.join("\n")); } }, [current?.jurisdiction, current?.version]);
+  const defaultHours = current ? String(current.slaHours) : "120";
+  const defaultChecklist = current?.checklist.join("\n") ?? "";
+  const hours = draft?.jurisdiction === selected ? draft.hours : defaultHours;
+  const checklist = draft?.jurisdiction === selected ? draft.checklist : defaultChecklist;
+  function setHours(hours: string) { setDraft({ jurisdiction: selected, hours, checklist }); }
+  function setChecklist(checklist: string) { setDraft({ jurisdiction: selected, hours, checklist }); }
   function save() {
     const items = checklist.split("\n").map((item) => item.trim()).filter(Boolean);
     const slaHours = Number(hours);

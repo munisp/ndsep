@@ -107,8 +107,8 @@ fn read_request(stream: &mut TcpStream) -> (String, String, String) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut request_line = String::new();
     let _ = reader.read_line(&mut request_line);
-    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
-    let method = parts.get(0).copied().unwrap_or("").to_string();
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
+    let method = parts.first().copied().unwrap_or("").to_string();
     let path = parts.get(1).copied().unwrap_or("").to_string();
     let mut content_length = 0usize;
     loop {

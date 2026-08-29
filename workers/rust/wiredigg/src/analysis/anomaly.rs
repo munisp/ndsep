@@ -282,37 +282,97 @@ impl AnomalyDetector {
         }
     }
 
-    pub fn extract_features(&self, packet: &CapturedPacket) -> Vec<f64> {
+    fn update_profile(&self, packet: &CapturedPacket) -> Option<TrafficProfile> {
+        let source = packet.src_ip?;
+        let now = Utc::now();
+        let mut profile = self
+            .ip_profiles
+            .entry(source)
+            .or_insert_with(|| TrafficProfile {
+                packets_per_window: Vec::new(),
+                bytes_per_window: Vec::new(),
+                unique_ports: Vec::new(),
+                protocol_distribution: HashMap::new(),
+                last_seen: now,
+                total_packets: 0,
+                avg_packet_size: 0.0,
+                port_entropy: 0.0,
+            });
+
+        profile.total_packets += 1;
+        profile.packets_per_window.push(1);
+        profile.bytes_per_window.push(packet.length as u64);
+        if profile.packets_per_window.len() > 60 {
+            profile.packets_per_window.remove(0);
+            profile.bytes_per_window.remove(0);
+        }
+        if let Some(port) = packet.dst_port {
+            if !profile.unique_ports.contains(&port) {
+                profile.unique_ports.push(port);
+            }
+        }
+        *profile
+            .protocol_distribution
+            .entry(packet.protocol.name().to_string())
+            .or_insert(0) += 1;
+        profile.avg_packet_size +=
+            (packet.length as f64 - profile.avg_packet_size) / profile.total_packets as f64;
+        profile.last_seen = now;
+
+        let total_protocols: f64 = profile.protocol_distribution.values().sum::<u64>() as f64;
+        profile.port_entropy = if total_protocols > 0.0 {
+            profile
+                .protocol_distribution
+                .values()
+                .map(|count| {
+                    let probability = *count as f64 / total_protocols;
+                    -probability * probability.log2()
+                })
+                .sum()
+        } else {
+            0.0
+        };
+
+        Some(profile.clone())
+    }
+
+    fn extract_features(
+        &self,
+        packet: &CapturedPacket,
+        profile: Option<&TrafficProfile>,
+    ) -> Vec<f64> {
         let size = packet.length as f64;
         let is_syn = packet
             .flags
-            .map(|f| if f.syn && !f.ack { 1.0 } else { 0.0 })
+            .map(|flags| if flags.syn && !flags.ack { 1.0 } else { 0.0 })
             .unwrap_or(0.0);
         let is_small = if size < 64.0 { 1.0 } else { 0.0 };
         let is_large = if size > 1400.0 { 1.0 } else { 0.0 };
-        let port_val = packet.dst_port.unwrap_or(0) as f64;
-        let ttl = packet.ttl.unwrap_or(64) as f64;
+        let packet_rate = profile.map_or(0.0, |entry| entry.packets_per_window.len() as f64);
+        let byte_rate = profile.map_or(0.0, |entry| {
+            entry.bytes_per_window.iter().sum::<u64>() as f64
+        });
+        let average_size = profile.map_or(size, |entry| entry.avg_packet_size);
+        let port_entropy = profile.map_or(0.0, |entry| entry.port_entropy);
+        let unique_ports = profile.map_or(0.0, |entry| entry.unique_ports.len() as f64);
 
         vec![
-            size,        // packet_size
-            port_val,    // dst_port_normalized
-            is_syn,      // tcp_syn_ratio
-            is_small,    // small_packet_ratio
-            is_large,    // large_packet_ratio
-            ttl / 255.0, // normalized_ttl
-            if packet.dns_query.is_some() { 1.0 } else { 0.0 },
-            if packet.http_method.is_some() {
-                1.0
-            } else {
-                0.0
-            },
+            packet_rate,
+            byte_rate,
+            average_size,
+            port_entropy,
+            unique_ports,
+            is_syn,
+            is_small,
+            is_large,
         ]
     }
 
     pub fn analyze(&self, packet: &CapturedPacket) -> AnomalyResult {
         self.total_analyzed.fetch_add(1, Ordering::Relaxed);
 
-        let features = self.extract_features(packet);
+        let profile = self.update_profile(packet);
+        let features = self.extract_features(packet, profile.as_ref());
 
         // Update rolling statistics
         {
@@ -371,7 +431,10 @@ impl AnomalyDetector {
     }
 
     pub fn train_on_batch(&self, packets: &[CapturedPacket]) {
-        let data: Vec<Vec<f64>> = packets.iter().map(|p| self.extract_features(p)).collect();
+        let data: Vec<Vec<f64>> = packets
+            .iter()
+            .map(|packet| self.extract_features(packet, None))
+            .collect();
         if data.len() >= self.min_training_samples {
             let mut forest = self.forest.write();
             forest.fit(&data);

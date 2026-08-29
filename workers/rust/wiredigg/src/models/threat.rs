@@ -57,37 +57,6 @@ pub enum ThreatType {
 }
 
 impl ThreatType {
-    pub fn default_severity(&self) -> ThreatSeverity {
-        match self {
-            Self::RansomwareActivity | Self::CommandAndControl | Self::DataExfiltration => {
-                ThreatSeverity::Critical
-            }
-            Self::SynFlood
-            | Self::DdosAmplification
-            | Self::ArpSpoofing
-            | Self::ManInTheMiddle
-            | Self::MalwareBeacon
-            | Self::PrivilegeEscalation
-            | Self::DnsExfiltration
-            | Self::UnencryptedPii => ThreatSeverity::High,
-            Self::PortScan
-            | Self::BruteForce
-            | Self::LateralMovement
-            | Self::DnsTunnel
-            | Self::IcmpTunnel
-            | Self::TlsDowngrade
-            | Self::CertificateAnomaly
-            | Self::SlowLoris
-            | Self::DnsRebinding
-            | Self::CryptoMining => ThreatSeverity::Medium,
-            Self::SuspiciousPayload
-            | Self::BeaconPattern
-            | Self::UnauthorizedAccess
-            | Self::PolicyViolation => ThreatSeverity::Low,
-            Self::ProtocolAnomaly | Self::AnomalousTraffic => ThreatSeverity::Info,
-        }
-    }
-
     pub fn mitre_mapping(&self) -> (&'static str, &'static str) {
         match self {
             Self::PortScan => ("Discovery", "T1046 Network Service Scanning"),

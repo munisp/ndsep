@@ -635,20 +635,19 @@ async fn detect_bandwidth_anomalies(state: &AppState, records: &[NetFlowRecord])
                 "[NetFlow] Large flow detected: {} -> {} ({} bytes)",
                 record.src_ip, record.dst_ip, record.bytes
             );
-            let _ = persist_noc_alert(
-                state,
-                &alert_id,
-                "netflow",
-                "high",
-                "bandwidth_anomaly",
-                &format!(
+            let alert = PersistedNocAlert {
+                alert_id: &alert_id,
+                source: "netflow",
+                severity: "high",
+                category: "bandwidth_anomaly".to_string(),
+                description: format!(
                     "Large flow: {} -> {} ({} bytes)",
                     record.src_ip, record.dst_ip, record.bytes
                 ),
-                Some(&record.src_ip),
-                None,
-            )
-            .await;
+                source_ip: Some(&record.src_ip),
+                service: None,
+            };
+            persist_noc_alert(state, &alert).await;
         }
     }
 }
@@ -947,59 +946,57 @@ async fn get_db_client(db_url: &str) -> Option<tokio_postgres::Client> {
     }
 }
 
+struct PersistedNocAlert<'a> {
+    alert_id: &'a str,
+    source: &'a str,
+    severity: &'a str,
+    category: String,
+    description: String,
+    source_ip: Option<&'a str>,
+    service: Option<&'a str>,
+}
+
 async fn persist_snmp_alert(state: &AppState, trap: &SnmpTrap) {
-    persist_noc_alert(
-        state,
-        &trap.trap_id,
-        "snmp",
-        &trap.severity,
-        &trap.oid_name,
-        &format!(
+    let alert = PersistedNocAlert {
+        alert_id: &trap.trap_id,
+        source: "snmp",
+        severity: &trap.severity,
+        category: trap.oid_name.clone(),
+        description: format!(
             "SNMP trap from {}: {} = {}",
             trap.source_ip, trap.oid_name, trap.value
         ),
-        Some(&trap.source_ip),
-        None,
-    )
-    .await;
+        source_ip: Some(&trap.source_ip),
+        service: None,
+    };
+    persist_noc_alert(state, &alert).await;
 }
 
 async fn persist_syslog_alert(state: &AppState, msg: &SyslogMessage) {
-    let severity = map_syslog_to_noc_severity(msg.severity);
-    persist_noc_alert(
-        state,
-        &msg.msg_id,
-        "syslog",
-        severity,
-        &format!("syslog_{}", facility_name(msg.facility)),
-        &format!(
+    let alert = PersistedNocAlert {
+        alert_id: &msg.msg_id,
+        source: "syslog",
+        severity: map_syslog_to_noc_severity(msg.severity),
+        category: format!("syslog_{}", facility_name(msg.facility)),
+        description: format!(
             "[{}] {}: {}",
             syslog_severity_name(msg.severity),
             msg.app_name,
             msg.message
         ),
-        Some(&msg.source_ip),
-        Some(&msg.hostname),
-    )
-    .await;
+        source_ip: Some(&msg.source_ip),
+        service: Some(&msg.hostname),
+    };
+    persist_noc_alert(state, &alert).await;
 }
 
-async fn persist_noc_alert(
-    state: &AppState,
-    alert_id: &str,
-    source: &str,
-    severity: &str,
-    category: &str,
-    description: &str,
-    source_ip: Option<&str>,
-    service: Option<&str>,
-) {
+async fn persist_noc_alert(state: &AppState, alert: &PersistedNocAlert<'_>) {
     let client = match get_db_client(&state.db_url).await {
         Some(c) => c,
         None => return,
     };
 
-    let title = format!("[{source}] {category}");
+    let title = format!("[{}] {}", alert.source, alert.category);
     let sql = "INSERT INTO noc_alerts (alert_id, source, severity, category, title, description, source_ip, affected_service)
         VALUES ($1, $2, $3, $4, $5, $6, $7::inet, $8)
         ON CONFLICT (alert_id) DO UPDATE SET last_seen = NOW(), repeat_count = noc_alerts.repeat_count + 1";
@@ -1008,14 +1005,14 @@ async fn persist_noc_alert(
         .execute(
             sql,
             &[
-                &alert_id,
-                &source,
-                &severity,
-                &category,
+                &alert.alert_id,
+                &alert.source,
+                &alert.severity,
+                &alert.category,
                 &title,
-                &description,
-                &source_ip,
-                &service,
+                &alert.description,
+                &alert.source_ip,
+                &alert.service,
             ],
         )
         .await

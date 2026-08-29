@@ -6,7 +6,12 @@
 //! - Verification API (prove specific entries haven't been tampered with)
 //! - Anchoring interface for Ethereum L2 / Hyperledger submission
 
-use axum::{extract::State, http::StatusCode, routing::{get, post}, Json, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -51,8 +56,12 @@ fn sha256_hex(data: &[u8]) -> String {
 fn compute_entry_hash(entry: &AuditEntry) -> String {
     let data = format!(
         "{}:{}:{}:{}:{}:{}",
-        entry.id, entry.aggregate_type, entry.aggregate_id,
-        entry.event_type, entry.payload_hash, entry.prev_hash,
+        entry.id,
+        entry.aggregate_type,
+        entry.aggregate_id,
+        entry.event_type,
+        entry.payload_hash,
+        entry.prev_hash,
     );
     sha256_hex(data.as_bytes())
 }
@@ -91,7 +100,11 @@ fn compute_merkle_proof(hashes: &[String], index: usize) -> Vec<ProofNode> {
     let mut idx = index;
 
     while current_level.len() > 1 {
-        let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
+        let sibling_idx = if idx.is_multiple_of(2) {
+            idx + 1
+        } else {
+            idx - 1
+        };
         let sibling = if sibling_idx < current_level.len() {
             current_level[sibling_idx].clone()
         } else {
@@ -100,7 +113,11 @@ fn compute_merkle_proof(hashes: &[String], index: usize) -> Vec<ProofNode> {
 
         proof.push(ProofNode {
             hash: sibling,
-            position: if idx % 2 == 0 { "right".into() } else { "left".into() },
+            position: if idx.is_multiple_of(2) {
+                "right".into()
+            } else {
+                "left".into()
+            },
         });
 
         let mut next_level = Vec::new();
@@ -206,7 +223,11 @@ async fn append_entry(
     let mut s = state.write().await;
 
     let payload_hash = sha256_hex(req.payload.to_string().as_bytes());
-    let prev_hash = s.entries.last().map(|e| e.hash.clone()).unwrap_or_else(|| sha256_hex(b"genesis"));
+    let prev_hash = s
+        .entries
+        .last()
+        .map(|e| e.hash.clone())
+        .unwrap_or_else(|| sha256_hex(b"genesis"));
 
     let mut entry = AuditEntry {
         id: s.next_id,
@@ -264,9 +285,7 @@ async fn verify_chain(State(state): State<SharedState>) -> Json<VerifyResponse> 
     })
 }
 
-async fn get_merkle_root(
-    State(state): State<SharedState>,
-) -> Json<serde_json::Value> {
+async fn get_merkle_root(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let mut s = state.write().await;
     let today = Utc::now().format("%Y-%m-%d").to_string();
 
@@ -302,7 +321,10 @@ async fn get_proof(
 ) -> Result<Json<ProofResponse>, StatusCode> {
     let s = state.read().await;
 
-    let idx = s.entries.iter().position(|e| e.id == entry_id)
+    let idx = s
+        .entries
+        .iter()
+        .position(|e| e.id == entry_id)
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let hashes: Vec<String> = s.entries.iter().map(|e| e.hash.clone()).collect();
@@ -332,7 +354,10 @@ async fn get_entries(
     axum::extract::Query(params): axum::extract::Query<BTreeMap<String, String>>,
 ) -> Json<Vec<AuditEntry>> {
     let s = state.read().await;
-    let limit = params.get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(50);
+    let limit = params
+        .get("limit")
+        .and_then(|l| l.parse::<usize>().ok())
+        .unwrap_or(50);
     let entries: Vec<AuditEntry> = s.entries.iter().rev().take(limit).cloned().collect();
     Json(entries)
 }

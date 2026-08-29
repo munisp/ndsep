@@ -190,23 +190,35 @@ async fn index_document(
             ERROR_COUNTER.inc();
             let status = resp.status();
             let detail = resp.text().await.unwrap_or_default();
-            tracing::error!("OpenSearch rejected index write with HTTP {}: {}", status, detail);
-            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({
-                "success": false,
-                "id": doc_id,
-                "index": req.index,
-                "error": format!("OpenSearch returned HTTP {}", status),
-            }))).into_response()
+            tracing::error!(
+                "OpenSearch rejected index write with HTTP {}: {}",
+                status,
+                detail
+            );
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({
+                    "success": false,
+                    "id": doc_id,
+                    "index": req.index,
+                    "error": format!("OpenSearch returned HTTP {}", status),
+                })),
+            )
+                .into_response()
         }
         Err(error) => {
             ERROR_COUNTER.inc();
             tracing::error!("OpenSearch index request failed: {}", error);
-            (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
-                "success": false,
-                "id": doc_id,
-                "index": req.index,
-                "error": "OpenSearch is unavailable",
-            }))).into_response()
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "success": false,
+                    "id": doc_id,
+                    "index": req.index,
+                    "error": "OpenSearch is unavailable",
+                })),
+            )
+                .into_response()
         }
     }
 }
@@ -267,7 +279,11 @@ async fn search_documents(
             ERROR_COUNTER.inc();
             let status = resp.status();
             let detail = resp.text().await.unwrap_or_default();
-            tracing::error!("OpenSearch rejected search with HTTP {}: {}", status, detail);
+            tracing::error!(
+                "OpenSearch rejected search with HTTP {}: {}",
+                status,
+                detail
+            );
             (
                 StatusCode::BAD_GATEWAY,
                 Json(serde_json::json!({
@@ -319,7 +335,10 @@ async fn bulk_index(
         Ok(resp) if resp.status().is_success() => {
             let count = req.documents.len() as u64;
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
-            let rejected = body.get("errors").and_then(|value| value.as_bool()).unwrap_or(true);
+            let rejected = body
+                .get("errors")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
             if rejected {
                 ERROR_COUNTER.inc();
                 tracing::error!("OpenSearch bulk write returned per-document failures");
@@ -347,7 +366,11 @@ async fn bulk_index(
             ERROR_COUNTER.inc();
             let status = resp.status();
             let detail = resp.text().await.unwrap_or_default();
-            tracing::error!("OpenSearch rejected bulk write with HTTP {}: {}", status, detail);
+            tracing::error!(
+                "OpenSearch rejected bulk write with HTTP {}: {}",
+                status,
+                detail
+            );
             (
                 StatusCode::BAD_GATEWAY,
                 Json(serde_json::json!({
@@ -394,7 +417,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
                 "indices": NDSEP_INDICES.len(),
                 "opensearch_url": state.opensearch_url,
             })),
-        ).into_response(),
+        )
+            .into_response(),
         Ok(response) => {
             ERROR_COUNTER.inc();
             (
@@ -404,7 +428,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
                     "service": "ndsep-opensearch-indexer",
                     "error": format!("OpenSearch returned HTTP {}", response.status()),
                 })),
-            ).into_response()
+            )
+                .into_response()
         }
         Err(_error) => {
             ERROR_COUNTER.inc();
@@ -415,7 +440,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
                     "service": "ndsep-opensearch-indexer",
                     "error": "OpenSearch is unavailable",
                 })),
-            ).into_response()
+            )
+                .into_response()
         }
     }
 }
@@ -530,13 +556,25 @@ mod tests {
 
     #[tokio::test]
     async fn index_write_rejection_is_reported_as_gateway_failure() {
-        let url = upstream(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({"error": "rejected"})).await;
-        let app = Router::new().route("/index", post(index_document)).with_state(state(url));
-        let response = app.oneshot(json_request("/index", serde_json::json!({
-            "index": "ndsep-audit-logs",
-            "id": "audit-1",
-            "document": {"action": "write"}
-        }))).await.unwrap();
+        let url = upstream(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            serde_json::json!({"error": "rejected"}),
+        )
+        .await;
+        let app = Router::new()
+            .route("/index", post(index_document))
+            .with_state(state(url));
+        let response = app
+            .oneshot(json_request(
+                "/index",
+                serde_json::json!({
+                    "index": "ndsep-audit-logs",
+                    "id": "audit-1",
+                    "document": {"action": "write"}
+                }),
+            ))
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
         let body = response_json(response).await;
@@ -545,15 +583,27 @@ mod tests {
 
     #[tokio::test]
     async fn bulk_per_document_rejection_is_not_acknowledged() {
-        let url = upstream(StatusCode::OK, serde_json::json!({
-            "errors": true,
-            "items": [{"index": {"status": 400, "error": "mapping rejected"}}]
-        })).await;
-        let app = Router::new().route("/bulk", post(bulk_index)).with_state(state(url));
-        let response = app.oneshot(json_request("/bulk", serde_json::json!({
-            "index": "ndsep-audit-logs",
-            "documents": [{"action": "write"}]
-        }))).await.unwrap();
+        let url = upstream(
+            StatusCode::OK,
+            serde_json::json!({
+                "errors": true,
+                "items": [{"index": {"status": 400, "error": "mapping rejected"}}]
+            }),
+        )
+        .await;
+        let app = Router::new()
+            .route("/bulk", post(bulk_index))
+            .with_state(state(url));
+        let response = app
+            .oneshot(json_request(
+                "/bulk",
+                serde_json::json!({
+                    "index": "ndsep-audit-logs",
+                    "documents": [{"action": "write"}]
+                }),
+            ))
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
         let body = response_json(response).await;
@@ -563,12 +613,19 @@ mod tests {
 
     #[tokio::test]
     async fn unavailable_search_returns_service_unavailable_not_empty_success() {
-        let app = Router::new().route("/search", post(search_documents))
+        let app = Router::new()
+            .route("/search", post(search_documents))
             .with_state(state("http://127.0.0.1:9".to_string()));
-        let response = app.oneshot(json_request("/search", serde_json::json!({
-            "index": "ndsep-audit-logs",
-            "query": "breach"
-        }))).await.unwrap();
+        let response = app
+            .oneshot(json_request(
+                "/search",
+                serde_json::json!({
+                    "index": "ndsep-audit-logs",
+                    "query": "breach"
+                }),
+            ))
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         let body = response_json(response).await;
@@ -578,9 +635,18 @@ mod tests {
 
     #[tokio::test]
     async fn health_returns_unhealthy_when_upstream_is_unreachable() {
-        let app = Router::new().route("/health", get(health))
+        let app = Router::new()
+            .route("/health", get(health))
             .with_state(state("http://127.0.0.1:9".to_string()));
-        let response = app.oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         let body = response_json(response).await;
@@ -590,13 +656,25 @@ mod tests {
 
     #[tokio::test]
     async fn accepted_index_write_is_acknowledged_only_after_upstream_success() {
-        let url = upstream(StatusCode::CREATED, serde_json::json!({"result": "created"})).await;
-        let app = Router::new().route("/index", post(index_document)).with_state(state(url));
-        let response = app.oneshot(json_request("/index", serde_json::json!({
-            "index": "ndsep-audit-logs",
-            "id": "audit-2",
-            "document": {"action": "create"}
-        }))).await.unwrap();
+        let url = upstream(
+            StatusCode::CREATED,
+            serde_json::json!({"result": "created"}),
+        )
+        .await;
+        let app = Router::new()
+            .route("/index", post(index_document))
+            .with_state(state(url));
+        let response = app
+            .oneshot(json_request(
+                "/index",
+                serde_json::json!({
+                    "index": "ndsep-audit-logs",
+                    "id": "audit-2",
+                    "document": {"action": "create"}
+                }),
+            ))
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;

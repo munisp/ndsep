@@ -99,15 +99,19 @@ fn handle_enqueue(state: &Arc<Mutex<OfflineResilienceState>>, body: &str) -> Str
         }
     }
 
+    let queued_id = entry.id.clone();
+    let queued_at = entry.created_at;
     s.dedup_cache.insert(hash, now_ms());
     s.queue.push(entry);
 
     // Sort by priority (higher first)
-    s.queue.sort_by(|a, b| b.priority.cmp(&a.priority));
+    s.queue
+        .sort_by_key(|entry| std::cmp::Reverse(entry.priority));
 
     format!(
-        r#"{{"status":"queued","id":"{}","queue_size":{}}}"#,
-        id,
+        r#"{{"status":"queued","id":"{}","created_at_ms":{},"queue_size":{}}}"#,
+        queued_id,
+        queued_at,
         s.queue.len()
     )
 }
@@ -124,7 +128,7 @@ fn handle_request(
         ("GET", "/stats") => {
             let s = state.lock().unwrap();
             let stats = format!(
-                r#"{{"queue_size":{},"processed":{},"failed":{},"dedup_cache_size":{},"bandwidth":{{"quality":"{}","score":{},"batch_size":{},"compress":{}}}}}"#,
+                r#"{{"queue_size":{},"processed":{},"failed":{},"dedup_cache_size":{},"bandwidth":{{"quality":"{}","score":{},"batch_size":{},"compress":{},"poll_interval_ms":{}}}}}"#,
                 s.queue.len(),
                 s.processed_count,
                 s.failed_count,
@@ -133,6 +137,7 @@ fn handle_request(
                 s.bandwidth_profile.score,
                 s.bandwidth_profile.batch_size,
                 s.bandwidth_profile.compress,
+                s.bandwidth_profile.poll_interval_ms,
             );
             (200, stats)
         }
