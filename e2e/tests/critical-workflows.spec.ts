@@ -24,7 +24,7 @@ test.describe("Dashboard", () => {
 test.describe("Compliance Workflows", () => {
   test("organization list loads with data", async ({ page }) => {
     await page.goto("/organizations");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     // Should have either org cards or a table
     const content = await page.textContent("body");
     expect(content).toBeTruthy();
@@ -32,21 +32,21 @@ test.describe("Compliance Workflows", () => {
 
   test("enforcement dashboard loads", async ({ page }) => {
     await page.goto("/enforcement");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.textContent("body");
     expect(content).toBeTruthy();
   });
 
   test("breach incidents page loads", async ({ page }) => {
     await page.goto("/breach-incidents");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.textContent("body");
     expect(content).toBeTruthy();
   });
 
   test("data transfers page loads", async ({ page }) => {
     await page.goto("/data-transfers");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.textContent("body");
     expect(content).toBeTruthy();
   });
@@ -55,7 +55,7 @@ test.describe("Compliance Workflows", () => {
 test.describe("Network Intelligence", () => {
   test("network intelligence page loads with tabs", async ({ page }) => {
     await page.goto("/network-intelligence");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.textContent("body");
     expect(content).toBeTruthy();
   });
@@ -73,7 +73,7 @@ test.describe("Sector Dashboards", () => {
   for (const sector of sectors) {
     test(`${sector.name} dashboard loads`, async ({ page }) => {
       await page.goto(sector.path);
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
       const content = await page.textContent("body");
       expect(content).toBeTruthy();
     });

@@ -34,7 +34,7 @@ async function trpcQuery(page: import("@playwright/test").Page, path: string, in
 test.describe("Penalty Flow 1: Penalties list and summary", () => {
   test("Penalties page loads without errors", async ({ page }) => {
     await page.goto(`${BASE}/penalties`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -84,7 +84,7 @@ test.describe("Penalty Flow 1: Penalties list and summary", () => {
 test.describe("Penalty Flow 2: Enforcement cases", () => {
   test("Enforcement page loads without errors", async ({ page }) => {
     await page.goto(`${BASE}/enforcement`);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
@@ -142,7 +142,7 @@ test.describe("Penalty Flow 3: Penalty appeals workflow", () => {
 test.describe("Penalty Flow 4: Dashboard KPIs", () => {
   test("Dashboard page loads and shows KPI section", async ({ page }) => {
     await page.goto(BASE);
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     const content = await page.content();
     expect(content.length).toBeGreaterThan(100);
     expect(content).not.toContain("Unhandled Runtime Error");
