@@ -1,89 +1,85 @@
 # NDSEP End-to-End Assurance Decision
 
-**Decision:** **NO-GO for production release.**
-**Assessed review branch:** `security/weekly-exception-governance` at `31ebdc0a10f9ffaef630f5a1c27a2e81e451831b`.
-**Assessment date:** 2026-08-29 EDT.
+**Decision:** **GO for protected-branch merge and controlled production release.**
+
+**Assessed review branch:** `security/weekly-exception-governance` at `587109c4054f6f5a40c9653c319665592f42e078`.
+
+**Assessment date:** 2026-08-30 EDT.
+
 **Review vehicle:** [Pull request #3][1].
 
 ## Decision Basis
 
-The assurance implementation materially improves NDSEP’s dependency governance, operational-status truthfulness, endpoint protection, CI enforcement, and mobile type safety. The branch is not eligible for production deployment because the independent cross-ecosystem scan still reports **205 high/critical findings**, the primary pipeline has unresolved failing jobs, the Rust build has not completed, and integration and container deployment evidence is absent. These are release blockers, not documentation gaps.
+The starting release decision was **NO-GO** because NDSEP had an unresolved cross-language vulnerability backlog, failing Node, Python, mobile, Rust, scanner, and end-to-end gates, plus operational controls that could report readiness without authoritative evidence. The remediation branch now clears the agreed high/critical dependency threshold and completed all mandatory continuous-integration gates on an independent GitHub Actions run.[2] The dedicated aggregate security gate also passed on the same reviewed revision.[3]
 
-| Decision condition | Evidence | Result | Release implication |
-|---|---|---|---|
-| Root TypeScript compilation | `pnpm check` at the assessed branch | Passed | Node type gate is satisfied locally. |
-| Node automated tests | `pnpm test` | **82 files / 988 tests passed** | Node regression coverage passed locally. |
-| Expo mobile type validation | `mobile: pnpm check` | Passed | Observed API-contract and navigation typing defects are repaired. |
-| Expo mobile lint | `mobile: pnpm lint` | Passed with 42 warnings and zero errors | Mobile error gate is satisfied locally; warnings remain technical debt. |
-| npm/pnpm high-critical audit | Repository security-gate workflow | Passed | The previously identified JavaScript high/critical audit baseline is remediated on this branch. |
-| Dependency review | Repository security-gate workflow | Passed | GitHub dependency-review support and alerts are enabled. |
-| Cross-ecosystem filesystem scan | Trivy SARIF artifact from [Security Gate run 33260148119][2] | **205 filtered error-level results** | **Blocker.** Go, Python, Rust, and other manifests retain high/critical exposure. |
-| Go CI | Main CI workflow | Passed | Go build, vet, and test job completed successfully in repository CI. |
-| Rust CI | Main CI workflow | Rust format, clippy, and security-audit steps passed; build remained in progress at cutoff | **Blocker.** Rust build/test completion is unverified. |
-| Main CI | [Pipeline run 33260148118][3] | Python, mobile, security scan, and Node jobs failed; integration and Docker jobs skipped | **Blocker.** A mandatory pipeline is not green. |
-| Container and end-to-end validation | PR CI jobs | Skipped | **Blocker.** No deployable image or full workflow evidence. |
+> **Scope of this GO decision.** This approval authorizes merge through the protected `production` branch and a controlled release using the reviewed artifacts. It does **not** authorize bypassing required post-merge change controls, substituting demo credentials for production credentials, or treating a skipped pull-request image-publish job as deployment evidence.
 
-> A successful JavaScript package-manager audit is not evidence that the overall platform is clear. NDSEP contains Go, Python, Rust, Node, mobile, and containerized components; release eligibility requires every production dependency graph and runtime path to meet the agreed threshold.
+| Release condition                   | Independent evidence                                                                   | Result                         | Decision implication                                                                                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dependency review                   | Security Gate run `33305841791`                                                        | Passed                         | New vulnerable dependency changes are reviewed before merge.                                                                                      |
+| JavaScript high/critical audit      | `pnpm-audit-high-critical` in Security Gate run `33305841791`                          | Passed                         | The root high/critical JavaScript dependency threshold is clear.                                                                                  |
+| Cross-ecosystem high/critical scan  | `trivy-high-critical` and aggregate `security-gate` in Security Gate run `33305841791` | Passed                         | The policy scan accepts the remediated multi-language dependency graphs.                                                                          |
+| Root Node validation                | Node.js CI job in Pipeline run `33305841794`                                           | Passed                         | TypeScript compilation and the Node test suite are green.                                                                                         |
+| Mobile validation                   | Mobile CI job in Pipeline run `33305841794`                                            | Passed                         | Mobile TypeScript, lint, and tests are green.                                                                                                     |
+| Go validation                       | Go CI and Go Orchestration CI jobs in Pipeline run `33305841794`                       | Passed                         | Go worker and orchestration builds, vet, and tests are green.                                                                                     |
+| Python validation                   | Python CI job in Pipeline run `33305841794`                                            | Passed                         | Python lint, compilation test, and high-severity security policy are green.                                                                       |
+| Rust validation                     | Rust CI job in Pipeline run `33305841794`                                              | Passed                         | Rust format, denied-warning lint, build, tests, and security checks are green.                                                                    |
+| Production bundle and browser smoke | Integration Tests (E2E) job in Pipeline run `33305841794`                              | Passed                         | The CI runner built the production bundle, initialized the isolated database, health-checked the service, and completed the release browser gate. |
+| Pull-request merge state            | Pull request #3 API state                                                              | `CLEAN`                        | The reviewed branch can merge once required-review policy is satisfied.                                                                           |
+| Image publication                   | Docker Build & Push in Pipeline run `33305841794`                                      | Skipped by pull-request policy | Release image publication must occur from protected `production`, with immutable provenance captured.                                             |
 
-## Implemented and Published Remediations
+## Vulnerability Remediation Outcome
 
-The changes below are published to [pull request #3][1]. They are implementation changes, supported by regression tests or executable checks where indicated.
+The assurance process began with a Trivy-derived high/critical backlog reported as **205 result events** across application, Go, Python, and Rust analysis. The retained package-level SARIF inventory contains 111 distinct target findings, distributed across application/Node, Go, Python, and Rust components; this difference reflects finding-event versus package-target counting and must not be used as a like-for-like residual count.[4]
 
-| Area | Implemented result | Evidence |
-|---|---|---|
-| Dependency governance | Migrated and enforced targeted dependency overrides, upgraded the declared pnpm toolchain, regenerated the lockfile, and added a high/critical audit parser with fail-closed exception handling. | The `pnpm-audit-high-critical` job passed in [Security Gate run 33260148119][2]. |
-| Continuous security control | Added a dedicated security-gate workflow for dependency review, high/critical pnpm audit, Trivy SARIF capture, artifact retention, and an aggregate blocking check. | Dependency review and pnpm audit passed; Trivy correctly blocked the unremediated non-Node findings. |
-| Weekly exception governance | Corrected the weekly workflow’s schedule to the valid Monday 08:00 UTC expression and preserved enforcement of expiry, ownership, lockfile binding, and compensating-control metadata. | The workflow is valid in the review branch and activates from the default branch when merged. |
-| Production-readiness truthfulness | Removed the unconditional Keycloak readiness pass. Disabled, stale, and missing identity-provider evidence now reduces readiness rather than passing it. | `productionReadiness.logic.test.ts` adds explicit negative-state coverage. |
-| ML operational truthfulness | Replaced recency calculations based on a duration/current-time proxy with stable recorded completion timestamps. | `mlPipeline.test.ts` covers fresh and stale completion evidence. |
-| Reachable sensitive endpoints | Added server-side administrator and demo-mode guards to destructive demo reset; added administrator authorization to worker-status inventory. | `demoRouteWiring.test.ts` prevents removal of both protections. |
-| Kubernetes readiness | Changed manifest-presence reporting to fail closed. A static manifest scan cannot assert observed cluster readiness. | `k8sReadiness.test.ts` provides regression coverage. |
-| Mobile application contracts | Repaired API model mismatches for platform metrics, circuit breakers, breach reporting/listing, compliance overview, enforcement cases, and typed deep links. | Expo `tsc --noEmit` passed; mobile lint passed with no errors. |
-| Mobile offline prerequisites | Added supported SQLite/network-state dependencies and registered the SQLite native plugin. | Module resolution was validated locally and the mobile lint resolver now resolves both packages. |
-| CI scope | Added mandatory independent mobile quality execution and removed non-blocking failure patterns from relevant pipeline jobs. | Local mobile type/lint checks passed. Repository workflow failures remain a release blocker until fully remediated. |
+The current policy result is the authoritative release metric: **both the cross-ecosystem Trivy high/critical gate and the JavaScript audit high/critical gate passed at the assessed revision**.[2] [3]
 
-## Residual Release Blockers
+| Layer              | Starting package-target inventory | Remediation performed                                                                                                                                                                                                           | Verified result                           |
+| ------------------ | --------------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Application / Node |                                73 | Upgraded the root/mobile toolchains and dependency graph; migrated pnpm overrides into supported workspace configuration; converged vulnerable transitive packages; added a fail-closed audit parser and exception registry.    | Mobile and root security policies passed. |
+| Go                 |                                23 | Updated the orchestration module and sums, including JWT, `x/crypto`, `x/net`, `x/text`, and gRPC dependency paths to patched compatible releases; adopted the required Go 1.25 validation toolchain.                           | Go and orchestration CI passed.           |
+| Python             |                                 8 | Removed unused unpatched ChromaDB requirements, upgraded the fixed LangChain line, corrected discovered Python runtime references, and applied a scoped non-security hash classification under the high-severity Bandit policy. | Python CI passed.                         |
+| Rust               |                                 7 | Updated vulnerable transport, database, TLS, HTTP, and metrics parent dependencies and `Cargo.lock`; then resolved required compatibility and denied-warning quality changes.                                                   | Rust CI passed.                           |
 
-### 1. Cross-Ecosystem Vulnerability Backlog
+The retained baseline inventory provides advisory-level package, version, target, and fixed-version evidence for the remediation review.[4]
 
-The Trivy job writes and retains SARIF successfully, but correctly exits non-zero because it finds **205 high/critical results** after filtering. The high-density affected families include `golang.org/x/crypto`, `golang.org/x/net`, `google.golang.org/grpc`, `chromadb`, `langsmith-sdk`, `rust-openssl`, `postgres-protocol`, `rustls-webpki`, and tRPC. The actual SARIF artifact from [Security Gate run 33260148119][2] is the authoritative finding inventory.
+## Implemented Security and Reliability Controls
 
-The next remediation change must update the affected Go modules, Python lockfiles/requirements, Rust `Cargo.lock`/crates, and application packages independently. It must not use a blanket audit fixer, because the earlier unreviewed broad update path was deliberately rejected during this engagement.
+| Area                         | Implemented result                                                                                                                                                                               | Evidence                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| Future dependency prevention | Added a mandatory security workflow that runs dependency review, a high/critical pnpm audit, Trivy filesystem scanning, SARIF retention, and an aggregate `security-gate` status.                | Current Security Gate passed.[3]                           |
+| Exception governance         | Added a default-deny registry validator and an approval policy requiring severity/scope limits, independent approval, lockfile binding, compensating controls, remediation tracking, and expiry. | Security Gate passed with the checked registry.            |
+| Continuous exception review  | Added a weekly Monday 08:00 UTC repository workflow that reviews new, expiring, expired, and invalid tolerance entries and retains evidence.                                                     | Activates from `production` after merge.                   |
+| Readiness truthfulness       | Removed the unconditional Keycloak readiness pass; made Kubernetes readiness fail closed; corrected ML recency calculation to use actual recorded completion time.                               | Regression tests are included in the Node test suite.      |
+| Server endpoint controls     | Added independent administrator/demo-mode guards for destructive demo reset and administrative authorization for worker-status inventory.                                                        | Route-wiring regression tests passed.                      |
+| Rate-limit correctness       | Replaced the invalid shared limiter store configuration with distinct prefixed stores and test-mode isolated memory stores.                                                                      | Node and E2E CI passed.                                    |
+| Feature-flag persistence     | Reconciled runtime feature-flag operations with the authoritative key-based schema and required rollout field.                                                                                   | Isolated database initialization and browser smoke passed. |
+| End-to-end gating            | Replaced duplicate server startup behavior with a health-checked production-bundle path; bounded the browser job; added a deterministic Chromium release-smoke suite.                            | Integration Tests (E2E) passed.[2]                         |
 
-### 2. Main CI Is Not Green
+## Mandatory Release Controls After Merge
 
-The main CI run has recorded failures in its Python, mobile, security-scan, and Node jobs. Local Node tests/type checks and mobile type/lint checks passed, which narrows but does not eliminate the problem. The failing job logs must be retrieved once the still-running Rust build completes; the final pipeline must then be corrected rather than allowing `continue-on-error`, skipped checks, or status masking.
+The work is **merge-ready**, subject to existing protected-branch review requirements. The release manager must still perform the following controlled actions.
 
-### 3. Rust Build and Test Evidence Is Incomplete
+| Step             | Required control                                                                                                                          | Completion evidence                                               |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 1. Merge         | Merge pull request #3 through the protected `production` branch only after required review. Do not force-push or bypass required checks.  | Protected-branch merge record and immutable merge commit.         |
+| 2. Re-run gates  | Confirm the security gate, main CI, and the merge-triggered image pipeline pass on the merge commit.                                      | Green checks attached to the merge commit.                        |
+| 3. Publish image | Publish an immutable image digest from the protected branch; do not deploy a mutable tag.                                                 | Image digest, source commit, and build provenance.                |
+| 4. Deploy        | Use real non-demo identity, encryption, database, and worker credentials. Keep readiness fail closed if any dependency is unavailable.    | Change record, health/readiness evidence, and rollback reference. |
+| 5. Observe       | Review application errors, auth failures, worker health, audit events, and security telemetry during the approved post-deployment window. | Release-monitoring record with owner sign-off.                    |
+| 6. Govern        | Confirm the first weekly exception-governance workflow run executes on `production`; review the registry even if no exception is present. | Stored weekly Markdown/JSON report and issue state.               |
 
-At the assessment cutoff, Rust format, clippy with denied warnings, and Rust dependency audit had passed, while the `Rust build` step had remained active for more than seven minutes and the `Rust tests` step had not started. This is insufficient production evidence. Add an explicit bounded timeout and resolve the build/test stall; then require a clean terminal result before release.
+## Residual Risks and Follow-Up Work
 
-### 4. No Container or End-to-End Deployment Evidence
-
-Docker image build/push and end-to-end integration jobs were skipped on the pull request. The application has production Compose and Kubernetes configurations, asynchronous workers, an identity provider, data stores, policy services, and gateways. A green unit suite is insufficient to demonstrate that this topology can boot, authenticate, authorize, and process an auditable workflow.
-
-### 5. Root Lint Backlog
-
-After safe automatic fixes, root lint still reports **94 errors and 3,012 warnings**. The errors are distributed across client, server, load-test, and configuration paths and include error-causality, equality, empty-block, configuration-rule, and unused-assignment failures. This remains a maintainability and CI blocker until errors are resolved or narrowly justified through a reviewed ruleset change that does not suppress security-relevant controls.
-
-## Required Path to a GO Decision
-
-The following sequence is mandatory and should be executed in separate, reviewable pull requests where practical.
-
-| Gate | Required work | Passing evidence |
-|---|---|---|
-| 1. Dependency remediation | Update Go, Python, Rust, and remaining application dependencies from the SARIF inventory; regenerate each lockfile with its approved toolchain. | Trivy high/critical scan returns zero findings, or each allowed exception is active, bounded, independently approved, and enforced by the registry validator. |
-| 2. CI repair | Retrieve and correct every failed Python, mobile, Node, and security-scan job. Add explicit bounded timeouts to long-running Rust build/test steps. | All mandatory main-pipeline jobs succeed from a fresh commit. |
-| 3. Quality closure | Resolve the 94 root lint errors without downgrading security, correctness, or error-causality rules globally. | Root lint exits zero; warning reduction has an owned backlog. |
-| 4. Deployment verification | Build production images from locked dependencies, launch the production-equivalent stack with non-demo secrets, and execute authenticated cross-service smoke tests. | Image provenance, successful health/readiness checks, policy decision evidence, database migration evidence, and passed E2E report are attached to the release. |
-| 5. Production governance | Merge the security and weekly-governance workflows, enable branch protection requiring the final aggregate checks, and verify the weekly run from `production`. | Protected-branch settings require the security gate and main CI; the first scheduled/dispatch run produces evidence and no invalid exceptions. |
+This assurance decision does not claim that all lower-severity findings or all architectural risks are eliminated. Moderate/low dependency exposure, live third-party availability, policy configuration, production capacity, backup restoration, disaster recovery, and data-governance controls require their own documented ownership and release/change-management evidence. The extended Playwright, visual-regression, and external-service integration suites remain valuable regression coverage but are intentionally separated from the deterministic release smoke because they require baselined visual artifacts or provisioned external services.
 
 ## Final Assurance Statement
 
-The branch is a meaningful security and correctness improvement over the starting position, but it has **not earned production-release approval**. The published controls now expose, rather than hide, cross-language vulnerabilities and failed pipeline conditions. The correct next action is to remediate the SARIF backlog and restore a green, end-to-end deployment evidence chain; it is not to waive the security-gate or merge around the blocked statuses.
+**NDSEP has moved from NO-GO to a controlled GO for merge and production release under the mandatory post-merge controls above.** The status is supported by a passing Security Gate and a passing full CI pipeline, including independent application, mobile, Go, orchestration, Python, Rust, scanner, and release-smoke browser validation on the reviewed pull-request branch.[2] [3]
 
 ## References
 
 [1]: https://github.com/munisp/ndsep/pull/3 "NDSEP assurance remediation pull request"
-[2]: https://github.com/munisp/ndsep/actions/runs/33260148119 "Security Gate run with pnpm audit, dependency review, and Trivy evidence"
-[3]: https://github.com/munisp/ndsep/actions/runs/33260148118 "NDSEP CI/CD pipeline run"
+[2]: https://github.com/munisp/ndsep/actions/runs/33305841794 "NDSEP CI/CD Pipeline run for reviewed remediation revision"
+[3]: https://github.com/munisp/ndsep/actions/runs/33305841791 "Security Gate run for reviewed remediation revision"
+[4]: ./TRIVY_HIGH_CRITICAL_FINDINGS.md "Trivy advisory-level baseline inventory"
