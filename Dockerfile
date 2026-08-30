@@ -6,7 +6,8 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@latest --activate
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile --prod=false
 
 # ── Stage 2: Build ───────────────────────────────────────────
@@ -26,7 +27,8 @@ RUN addgroup -g 1001 -S ndsep && adduser -S ndsep -u 1001 -G ndsep
 
 # Install production-only dependencies
 RUN corepack enable && corepack prepare pnpm@latest --activate
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile --prod && pnpm store prune
 
 # Copy built assets
