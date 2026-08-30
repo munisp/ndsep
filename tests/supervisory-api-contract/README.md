@@ -27,18 +27,18 @@ Use a protected CI secret store or a short-lived workload identity. Never place 
 | `CBN_TEST_OAUTH_TOKEN` | Yes | Short-lived staging access token bound to `CBN_TEST_CLIENT_CERT_FILE` and scoped `ndsep.supervisory.read`. |
 | `CBN_TEST_EVENT_ID_AUTHORIZED` | Yes | Test event inside the test client’s authorized portfolio. |
 | `CBN_TEST_EVENT_ID_OUT_OF_SCOPE` | Yes | Existing test event outside the test client’s assigned portfolio. |
-| `CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE` | Optional | Special fixture that safely produces a `503` from the verifier path. |
-| `CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE` | Optional | Short-lived test token without `ndsep.supervisory.read`; expects `403`. |
-| `CBN_TEST_OAUTH_TOKEN_INVALID` | Optional | Expired or intentionally invalid non-production token; expects `401`. |
-| `CBN_TEST_BAD_SERVER_SPKI_PINS` | Optional | Deliberately incorrect base64 pins; validates that pin mismatch prevents HTTP request. |
-| `CBN_TEST_SSE_SAMPLE_FILE` | Optional | Captured redacted JSON payload of one staging SSE notice; must contain no sensitive material. |
+| `CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE` | Yes | Special fixture that safely produces a `503` from the verifier path. |
+| `CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE` | Yes | Short-lived test token without `ndsep.supervisory.read`; expects `403`. |
+| `CBN_TEST_OAUTH_TOKEN_INVALID` | Yes | Expired or intentionally invalid non-production token; expects `401`. |
+| `CBN_TEST_BAD_SERVER_SPKI_PINS` | Yes | Deliberately incorrect base64 pins; validates that pin mismatch prevents HTTP request. |
+| `CBN_TEST_SSE_SAMPLE_FILE` | Yes | Path to a captured redacted JSON payload of one staging SSE notice; must contain no sensitive material. The protected workflow derives it from `CBN_STAGING_SUPERVISORY_API_SSE_SAMPLE_B64`. |
 
 The OAuth token must be certificate-bound. The gateway validates its `cnf.x5t#S256` value against the client certificate used for the TLS handshake. A bearer token alone is an authentication failure. RFC 8705 specifies this mutual-TLS and certificate-bound token relationship and requires a resource server to reject a certificate/token mismatch.[1]
 
 ## Execution sequence
 
 1. Review the target and require an approved staging change. Verify that `CBN_TEST_BASE_URL` is a staging DNS name and that the mounted client certificate belongs to the test workload—not a real CBN user.
-2. Deploy the supervisory API backed by the non-production PostgreSQL evidence projection. Seed only redacted fixtures: one event in the caller’s portfolio, one event out of scope, and (optionally) a verifier-unavailable fixture. Seed no raw evidence links, personal data, credentials or actual CBN reports.
+2. Deploy the supervisory API backed by the non-production PostgreSQL evidence projection. Seed only redacted fixtures: one event in the caller’s portfolio, one event out of scope, and one verifier-unavailable fixture. Capture one minimized/redacted SSE notice fixture. Seed no raw evidence links, personal data, credentials or actual CBN reports.
 3. Deploy the gateway from the exact candidate OCI digest and configure it to return `X-NDSEP-Release-Digest: ${CBN_TEST_EXPECTED_RELEASE_DIGEST}` on supervisory success responses. Configure TLS 1.3, client-certificate requirement, expected URI SAN, private-CA trust bundle, active-plus-next SPKI pins, and certificate-bound access-token validation. See the companion mTLS design.
 4. Run local tests first. They do not require any environment variables:
 
@@ -56,7 +56,7 @@ The OAuth token must be certificate-bound. The gateway validates its `cnf.x5t#S2
    ```
 
 7. Retain only the test report, test target, commit/digest, test start/end time, result, and sanitized request IDs. Place no HTTP body, access token, private key, raw event, CBN report content, or certificate in artifacts.
-8. Remove/expire the test token and short-lived test certificate. Review gateway and PostgreSQL audit events to confirm the tests were read-only and portfolio-scoped.
+8. A run with any skipped network test is a failed/incomplete acceptance result. Remove/expire the test token and short-lived test certificate. Review gateway and PostgreSQL audit events to confirm the tests were read-only and portfolio-scoped.
 
 ## Required endpoint behavior
 
@@ -78,7 +78,7 @@ The OAuth token must be certificate-bound. The gateway validates its `cnf.x5t#S2
 
 ## CI gate
 
-Run `npm run test:unit` on every pull request that changes the OpenAPI contract, dashboard API, evidence-status logic, RLS query layer, or SIEM mapping. Run `npm run test:integration` only after the staging environment is created from the candidate immutable image digest and the approved, short-lived test identity is injected. The promotion gate must require both suites, plus the existing direct final-digest scan, signature/attestation verification and Gatekeeper policy tests. A skipped optional negative test is not a successful test; report it as `not run` until a suitable staging fixture is available.
+Run `npm run test:unit` on every pull request that changes the OpenAPI contract, dashboard API, evidence-status logic, RLS query layer, or SIEM mapping. Run `npm run test:integration` only after the staging environment is created from the candidate immutable image digest and the approved, short-lived test identity is injected. The promotion gate must require both suites, plus the existing direct final-digest scan, signature/attestation verification and Gatekeeper policy tests. Every listed negative test is mandatory. A skipped network test is not a successful acceptance result and blocks promotion until the required staging fixture/identity is available.
 
 ## Relationship to the OpenAPI contract
 

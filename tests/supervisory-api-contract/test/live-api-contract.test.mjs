@@ -24,6 +24,11 @@ const REQUIRED = [
   'CBN_TEST_OAUTH_TOKEN',
   'CBN_TEST_EVENT_ID_AUTHORIZED',
   'CBN_TEST_EVENT_ID_OUT_OF_SCOPE',
+  'CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE',
+  'CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE',
+  'CBN_TEST_OAUTH_TOKEN_INVALID',
+  'CBN_TEST_BAD_SERVER_SPKI_PINS',
+  'CBN_TEST_SSE_SAMPLE_FILE',
 ];
 
 function requireLiveConfig() {
@@ -189,11 +194,7 @@ test('write attempts to read-only supervisory endpoint are rejected', options, a
   assert.equal(response.status, 405, `Expected 405 for read-only API: ${safeResponseDetails(response)}`);
 });
 
-test('integrity-dependency failure is explicit and never becomes a verified response', options, async (t) => {
-  if (!process.env.CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE) {
-    t.skip('Set CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE to execute this controlled staging negative test.');
-    return;
-  }
+test('integrity-dependency failure is explicit and never becomes a verified response', options, async () => {
   const config = loadMtlsConfig();
   const eventId = process.env.CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE;
   const response = await request(config, createMtlsAgent(config), 'GET', `/v1/break-glass/events/${eventId}/integrity`);
@@ -201,22 +202,14 @@ test('integrity-dependency failure is explicit and never becomes a verified resp
   assert.ok(!response.body || response.body.result !== 'verified', 'Unavailable verifier must not return a verified result.');
 });
 
-test('SSE event contract is minimized and forces client re-fetch', options, async (t) => {
-  if (!process.env.CBN_TEST_SSE_SAMPLE_FILE) {
-    t.skip('Set CBN_TEST_SSE_SAMPLE_FILE to a captured, redacted staging SSE event fixture.');
-    return;
-  }
+test('SSE event contract is minimized and forces client re-fetch', options, async () => {
   const sample = JSON.parse(fs.readFileSync(process.env.CBN_TEST_SSE_SAMPLE_FILE, 'utf8'));
   assertSseNotice(sample);
   assert.deepEqual(Object.keys(sample).sort(), ['complianceStatus', 'eventId', 'eventType', 'evidenceStatus', 'occurredAt']);
 });
 
 
-test('server certificate pin mismatch prevents the API request before HTTP processing', options, async (t) => {
-  if (!process.env.CBN_TEST_BAD_SERVER_SPKI_PINS) {
-    t.skip('Set CBN_TEST_BAD_SERVER_SPKI_PINS to intentionally incorrect base64 SPKI values for this staging-only negative test.');
-    return;
-  }
+test('server certificate pin mismatch prevents the API request before HTTP processing', options, async () => {
   const config = loadMtlsConfig();
   const badConfig = { ...config, pins: new Set(process.env.CBN_TEST_BAD_SERVER_SPKI_PINS.split(',').map((value) => value.trim()).filter(Boolean)) };
   await assert.rejects(
@@ -225,11 +218,7 @@ test('server certificate pin mismatch prevents the API request before HTTP proce
   );
 });
 
-test('insufficient token scope is rejected even when the client certificate is valid', options, async (t) => {
-  if (!process.env.CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE) {
-    t.skip('Set CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE to a staging token that lacks ndsep.supervisory.read.');
-    return;
-  }
+test('insufficient token scope is rejected even when the client certificate is valid', options, async () => {
   const config = loadMtlsConfig();
   const response = await request(config, createMtlsAgent(config), 'GET', '/v1/break-glass/summary', {
     token: process.env.CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE,
@@ -245,11 +234,7 @@ test('malformed event identifier is rejected before database/event lookup', opti
   assert.ok(!response.body || !response.body.evidence, '400 response must not contain evidence metadata.');
 });
 
-test('expired or invalid mTLS-bound token is rejected', options, async (t) => {
-  if (!process.env.CBN_TEST_OAUTH_TOKEN_INVALID) {
-    t.skip('Set CBN_TEST_OAUTH_TOKEN_INVALID to an expired/invalid non-production token for this negative test.');
-    return;
-  }
+test('expired or invalid mTLS-bound token is rejected', options, async () => {
   const config = loadMtlsConfig();
   const response = await request(config, createMtlsAgent(config), 'GET', '/v1/break-glass/summary', {
     token: process.env.CBN_TEST_OAUTH_TOKEN_INVALID,

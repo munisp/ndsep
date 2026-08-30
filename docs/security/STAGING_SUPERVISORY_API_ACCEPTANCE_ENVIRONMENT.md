@@ -42,6 +42,7 @@ Store each listed value as an **environment secret** of `staging-supervisory-acc
 | `CBN_STAGING_SUPERVISORY_API_WRONG_SCOPE_TOKEN` | Short-lived certificate-bound test token without `ndsep.supervisory.read`. | Used only to verify `403`. |
 | `CBN_STAGING_SUPERVISORY_API_INVALID_TOKEN` | Expired/invalid, non-production token. | Used only to verify `401`. |
 | `CBN_STAGING_SUPERVISORY_API_BAD_SPKI_PINS` | Deliberately incorrect base64 pins. | Must never equal an active/next production or staging pin. |
+| `CBN_STAGING_SUPERVISORY_API_SSE_SAMPLE_B64` | Base64-encoded, redacted/minimized SSE notice fixture. | Must contain only the published SSE contract fields; no raw evidence URI or personal data. |
 | `CBN_STAGING_SUPERVISORY_API_CA_PEM_B64` | Base64 encoded non-production CA trust bundle. | No production CA roots. |
 | `CBN_STAGING_SUPERVISORY_API_CLIENT_CERT_PEM_B64` | Base64 encoded short-lived non-production client certificate. | Exact test workload URI SAN only. |
 | `CBN_STAGING_SUPERVISORY_API_CLIENT_KEY_PEM_B64` | Base64 encoded corresponding client private key. | HSM/workload-identity issuance preferred; if file based, short-lived and runner-read-only. |
@@ -185,6 +186,8 @@ gh secret set CBN_STAGING_SUPERVISORY_API_INVALID_TOKEN \
   --repo munisp/ndsep --env staging-supervisory-acceptance < invalid-token.txt
 gh secret set CBN_STAGING_SUPERVISORY_API_BAD_SPKI_PINS \
   --repo munisp/ndsep --env staging-supervisory-acceptance < intentionally-invalid-pins.txt
+gh secret set CBN_STAGING_SUPERVISORY_API_SSE_SAMPLE_B64 \
+  --repo munisp/ndsep --env staging-supervisory-acceptance < redacted-sse-notice.json.b64
 ```
 
 After setting them, use `gh secret list --repo munisp/ndsep --env staging-supervisory-acceptance` only to confirm **secret names**. The CLI cannot retrieve secret values, and no person should attempt to do so through GitHub.
@@ -201,7 +204,7 @@ gh workflow run staging-supervisory-api-acceptance.yml \
   -f expected_release_digest='sha256:[64 lowercase hexadecimal characters]'
 ```
 
-12. Approve the environment when GitHub prompts the designated reviewers. The job first runs the dependency-free schema tests, validates required configuration, materializes the short-lived staging PEM files under the runner’s temporary directory with `0600` key permissions, and runs the live read-only test suite.
+12. Approve the environment when GitHub prompts the designated reviewers. The job first runs the dependency-free schema tests, validates all required positive and negative fixtures, materializes the short-lived staging PEM files and the redacted SSE fixture under the runner’s temporary directory with `0600` key permissions, and runs the live read-only test suite. Any skipped network test is an incomplete/failed acceptance result.
 13. The suite passes only if the gateway performs TLS 1.3 mTLS, the server key is one of the active/next pins, client URI-SAN/token binding is accepted, response headers attest the exact candidate digest, authorized results meet schema/minimization rules, and mandatory negative requests return the expected `401`, `403`, `404`, `405`, `400` and `503` behavior. It must also show SPKI mismatch failure before HTTP processing.
 14. Review the protected job log for the test result and runner cleanup. Retain only the accepted run URL/ID, deployment SHA/digest, timestamps, sanitized request IDs, result, and operator approvals in the evidence ledger. Do not attach test responses, raw evidence, private keys, certificates or tokens to the change ticket.
 15. Confirm the job’s `Remove mTLS key material` step ran under `always()`, and revoke/expire the issued test token/certificate after the test window. Review gateway and PostgreSQL audit records to prove that requests were read-only and claim-scoped.
