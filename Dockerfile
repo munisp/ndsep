@@ -31,18 +31,14 @@ COPY package.json pnpm-lock.yaml ./
 COPY patches ./patches
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts && pnpm store prune
 
-# Copy built assets
+# Copy the actual Vite/esbuild output. Vite writes browser assets beneath
+# dist/public and esbuild writes the Node entry point to dist/index.js.
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/client/dist ./client/dist
+
+# Retain schema files for explicit migration tooling. Go and Python workers are
+# independently built and deployed by docker-compose.production.yml; they do
+# not belong in the Node.js API image.
 COPY --from=builder /app/drizzle ./drizzle
-COPY --from=builder /app/server ./server
-COPY --from=builder /app/shared ./shared
-
-# Copy Go worker binaries
-COPY --from=builder /app/workers/go/bin ./workers/go/bin
-
-# Copy Python workers (runtime)
-COPY --from=builder /app/workers/python ./workers/python
 
 # Security: set ownership
 RUN chown -R ndsep:ndsep /app
@@ -58,4 +54,4 @@ EXPOSE 3000
 ENV NODE_ENV=production
 ENV PORT=3000
 
-CMD ["node", "dist/server/_core/index.js"]
+CMD ["node", "dist/index.js"]
