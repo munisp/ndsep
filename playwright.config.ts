@@ -33,14 +33,15 @@ export default defineConfig({
       use: { ...devices["iPhone 14"] },
     },
   ],
-  webServer: process.env.CI && !process.env.E2E_BASE_URL
-    ? {
-        command: "pnpm run dev",
-        url: "http://localhost:3000/api/health",
-        // CI starts and health-checks the production bundle in the workflow.
-        // Reuse it here rather than racing a second dev server for port 3000.
-        reuseExistingServer: true,
-        timeout: 120_000,
-      }
-    : undefined,
+  webServer:
+    process.env.CI && !process.env.E2E_BASE_URL
+      ? {
+          command: "pnpm run dev",
+          url: "http://localhost:3000/api/health",
+          // CI starts and health-checks the production bundle in the workflow.
+          // Reuse it here rather than racing a second dev server for port 3000.
+          reuseExistingServer: true,
+          timeout: 120_000,
+        }
+      : undefined,
 });

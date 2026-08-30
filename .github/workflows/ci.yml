@@ -328,8 +328,8 @@ jobs:
           done
           cat /tmp/ndsep-server.log
           exit 1
-      - run: pnpm run e2e:critical -- --project=chromium --timeout=30000 --global-timeout=900000
-        name: Run critical Chromium E2E tests
+      - run: pnpm run e2e:release-smoke -- --project=chromium --workers=1 --timeout=30000 --global-timeout=300000
+        name: Run release-smoke Chromium E2E tests
       - uses: actions/upload-artifact@v4
         if: always()
         with:
