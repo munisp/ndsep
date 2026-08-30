@@ -269,6 +269,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - name: Install locked dependency graph for audit
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Audit npm packages (fail on high/critical)
         run: pnpm audit --audit-level=high
 
