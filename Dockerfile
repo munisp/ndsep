@@ -29,7 +29,7 @@ RUN addgroup -g 1001 -S ndsep && adduser -S ndsep -u 1001 -G ndsep
 RUN corepack enable && corepack prepare pnpm@latest --activate
 COPY package.json pnpm-lock.yaml ./
 COPY patches ./patches
-RUN pnpm install --frozen-lockfile --prod && pnpm store prune
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts && pnpm store prune
 
 # Copy built assets
 COPY --from=builder /app/dist ./dist
