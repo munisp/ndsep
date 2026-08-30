@@ -1,0 +1,61 @@
+# This identity is for the staging release controller only. The GitHub Actions
+# acceptance runner must not receive a Kubernetes token or RoleBinding.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ndsep-staging-release-controller
+  namespace: ndsep-staging
+  labels:
+    app.kubernetes.io/part-of: ndsep
+    ndsep.io/role: staging-release-controller
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ndsep-staging-release-controller
+  namespace: ndsep-staging
+  labels:
+    app.kubernetes.io/part-of: ndsep
+rules:
+  # A release can patch only the designated staging API Deployment; it cannot
+  # read broad workload inventory, create/delete workloads, or access secrets.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["ndsep-api"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/status"]
+    resourceNames: ["ndsep-api"]
+    verbs: ["get"]
+  # The controller can read, but never change, the release evidence pointer.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["ndsep-release-metadata"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ndsep-staging-release-controller
+  namespace: ndsep-staging
+  labels:
+    app.kubernetes.io/part-of: ndsep
+subjects:
+  - kind: ServiceAccount
+    name: ndsep-staging-release-controller
+    namespace: ndsep-staging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ndsep-staging-release-controller
+---
+# The API workload must not have a Kubernetes API credential by default.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ndsep-api
+  namespace: ndsep-staging
+  labels:
+    app.kubernetes.io/part-of: ndsep
+automountServiceAccountToken: false

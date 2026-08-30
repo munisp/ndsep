@@ -1,0 +1,197 @@
+name: Staging Supervisory API Acceptance
+
+on:
+  pull_request:
+    branches: [main, develop, staging, production]
+    paths:
+      - 'tests/supervisory-api-contract/**'
+      - 'server/**'
+      - 'drizzle/**'
+      - 'infra/**'
+      - '.github/workflows/staging-supervisory-api-acceptance.yml'
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      expected_release_digest:
+        description: 'Required full sha256 digest of the already deployed staging candidate'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-supervisory-api-acceptance-${{ github.event.deployment.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  unit-contract:
+    name: Supervisory API contract unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Run dependency-free response-contract checks
+        working-directory: tests/supervisory-api-contract
+        run: node --test test/schema-contract.test.mjs
+
+  staging-security-authorization:
+    name: Staging acceptance security authorization
+    needs: unit-contract
+    # This pre-authorization is deliberately separate from the compliance environment
+    # below. GitHub allows one required reviewer to approve an environment; two sequential
+    # environments therefore provide two distinct, non-self-approving control points.
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/production') ||
+      (github.event_name == 'deployment_status' &&
+       github.event.deployment.environment == 'staging' &&
+       github.event.deployment_status.state == 'success')
+    runs-on: ubuntu-latest
+    environment: staging-supervisory-security-review
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      EXPECTED_RELEASE_DIGEST: ${{ inputs.expected_release_digest || github.event.deployment.payload.image_digest }}
+    steps:
+      - name: Validate reviewed staging candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ vars.NDSEP_STAGING_ACCEPTANCE_ENVIRONMENT_CONFIGURED }}" == 'true' ]] || {
+            echo 'Security-review environment configuration marker is absent.' >&2
+            exit 1
+          }
+          [[ "${EXPECTED_RELEASE_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]] || {
+            echo 'Staging deployment did not provide a full immutable OCI digest.' >&2
+            exit 1
+          }
+          echo "Approved candidate digest: ${EXPECTED_RELEASE_DIGEST}" >> "${GITHUB_STEP_SUMMARY}"
+
+  staging-mtls-contract:
+    name: Staging mTLS supervisory API acceptance
+    needs: staging-security-authorization
+    # This secret-bearing job runs only after the security approval above and a second,
+    # separate compliance approval on the staging-supervisory-acceptance environment.
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/production') ||
+      (github.event_name == 'deployment_status' &&
+       github.event.deployment.environment == 'staging' &&
+       github.event.deployment_status.state == 'success')
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    environment: staging-supervisory-acceptance
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # Every deployment controller must include the full published OCI digest in
+      # deployment.payload.image_digest. A moving tag/commit SHA is rejected by the test.
+      EXPECTED_RELEASE_DIGEST: ${{ inputs.expected_release_digest || github.event.deployment.payload.image_digest }}
+      CBN_TEST_BASE_URL: ${{ secrets.CBN_STAGING_SUPERVISORY_API_URL }}
+      CBN_TEST_SERVER_SPKI_PINS: ${{ secrets.CBN_STAGING_SUPERVISORY_API_SPKI_PINS }}
+      CBN_TEST_OAUTH_TOKEN: ${{ secrets.CBN_STAGING_SUPERVISORY_API_BOUND_TOKEN }}
+      CBN_TEST_EVENT_ID_AUTHORIZED: ${{ secrets.CBN_STAGING_SUPERVISORY_API_EVENT_ID_AUTHORIZED }}
+      CBN_TEST_EVENT_ID_OUT_OF_SCOPE: ${{ secrets.CBN_STAGING_SUPERVISORY_API_EVENT_ID_OUT_OF_SCOPE }}
+      CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE: ${{ secrets.CBN_STAGING_SUPERVISORY_API_EVENT_ID_INTEGRITY_UNAVAILABLE }}
+      CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE: ${{ secrets.CBN_STAGING_SUPERVISORY_API_WRONG_SCOPE_TOKEN }}
+      CBN_TEST_OAUTH_TOKEN_INVALID: ${{ secrets.CBN_STAGING_SUPERVISORY_API_INVALID_TOKEN }}
+      CBN_TEST_BAD_SERVER_SPKI_PINS: ${{ secrets.CBN_STAGING_SUPERVISORY_API_BAD_SPKI_PINS }}
+      # Base64-encoded redacted SSE fixture and non-production PEM material are decoded only into $RUNNER_TEMP.
+      CBN_TEST_SSE_SAMPLE_B64: ${{ secrets.CBN_STAGING_SUPERVISORY_API_SSE_SAMPLE_B64 }}
+      CBN_TEST_CA_PEM_B64: ${{ secrets.CBN_STAGING_SUPERVISORY_API_CA_PEM_B64 }}
+      CBN_TEST_CLIENT_CERT_PEM_B64: ${{ secrets.CBN_STAGING_SUPERVISORY_API_CLIENT_CERT_PEM_B64 }}
+      CBN_TEST_CLIENT_KEY_PEM_B64: ${{ secrets.CBN_STAGING_SUPERVISORY_API_CLIENT_KEY_PEM_B64 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Validate protected test configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ vars.NDSEP_STAGING_ACCEPTANCE_ENVIRONMENT_CONFIGURED }}" == 'true' ]] || {
+            echo 'Compliance-approval environment configuration marker is absent.' >&2
+            exit 1
+          }
+          [[ "${EXPECTED_RELEASE_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]] || {
+            echo 'Staging deployment did not provide a full immutable OCI digest.' >&2
+            exit 1
+          }
+          [[ "${CBN_TEST_BASE_URL}" =~ ^https:// ]] || {
+            echo 'CBN_STAGING_SUPERVISORY_API_URL must use HTTPS.' >&2
+            exit 1
+          }
+          for name in \
+            CBN_TEST_SERVER_SPKI_PINS \
+            CBN_TEST_OAUTH_TOKEN \
+            CBN_TEST_EVENT_ID_AUTHORIZED \
+            CBN_TEST_EVENT_ID_OUT_OF_SCOPE \
+            CBN_TEST_EVENT_ID_INTEGRITY_UNAVAILABLE \
+            CBN_TEST_OAUTH_TOKEN_WRONG_SCOPE \
+            CBN_TEST_OAUTH_TOKEN_INVALID \
+            CBN_TEST_BAD_SERVER_SPKI_PINS \
+            CBN_TEST_SSE_SAMPLE_B64 \
+            CBN_TEST_CA_PEM_B64 \
+            CBN_TEST_CLIENT_CERT_PEM_B64 \
+            CBN_TEST_CLIENT_KEY_PEM_B64; do
+            [[ -n "${!name:-}" ]] || { echo "Missing protected staging configuration: ${name}" >&2; exit 1; }
+          done
+      - name: Materialize short-lived non-production mTLS files
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          credentials_dir="${RUNNER_TEMP}/ndsep-cbn-mtls"
+          mkdir -p "${credentials_dir}"
+          printf '%s' "${CBN_TEST_CA_PEM_B64}" | base64 --decode > "${credentials_dir}/ca.pem"
+          printf '%s' "${CBN_TEST_CLIENT_CERT_PEM_B64}" | base64 --decode > "${credentials_dir}/client.crt"
+          printf '%s' "${CBN_TEST_CLIENT_KEY_PEM_B64}" | base64 --decode > "${credentials_dir}/client.key"
+          printf '%s' "${CBN_TEST_SSE_SAMPLE_B64}" | base64 --decode > "${credentials_dir}/sse-notice.json"
+          chmod 600 "${credentials_dir}/client.key"
+          {
+            echo "CBN_TEST_CA_FILE=${credentials_dir}/ca.pem"
+            echo "CBN_TEST_CLIENT_CERT_FILE=${credentials_dir}/client.crt"
+            echo "CBN_TEST_CLIENT_KEY_FILE=${credentials_dir}/client.key"
+            echo "CBN_TEST_SSE_SAMPLE_FILE=${credentials_dir}/sse-notice.json"
+            echo "CBN_TEST_EXPECTED_RELEASE_DIGEST=${EXPECTED_RELEASE_DIGEST}"
+            echo 'RUN_CBN_CONTRACT_TESTS=true'
+          } >> "${GITHUB_ENV}"
+      - name: Run mTLS-bound supervisory API acceptance suite
+        id: acceptance
+        working-directory: tests/supervisory-api-contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap test/live-api-contract.test.mjs | tee "${RUNNER_TEMP}/ndsep-supervisory-api-acceptance.tap"
+          if grep -q '# SKIP' "${RUNNER_TEMP}/ndsep-supervisory-api-acceptance.tap"; then
+            echo 'A required live acceptance test was skipped; staging acceptance is not complete.' >&2
+            exit 1
+          fi
+      - name: Remove mTLS key material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf -- "${RUNNER_TEMP}/ndsep-cbn-mtls"
+          rm -f -- "${RUNNER_TEMP}/ndsep-supervisory-api-acceptance.tap"
+      - name: Publish non-sensitive acceptance result
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Staging Supervisory API Acceptance'
+            echo
+            echo "- Candidate digest: \`${EXPECTED_RELEASE_DIGEST:-missing}\`"
+            echo "- Trusted staging deployment: \`${{ github.event.deployment.id || 'manual-revalidation' }}\`"
+            echo "- Result: \`${{ steps.acceptance.outcome }}\`"
+            echo
+            echo 'No token, certificate, private-key, response body, raw evidence, or report content is published.'
+          } >> "${GITHUB_STEP_SUMMARY}"
