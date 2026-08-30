@@ -3,14 +3,6 @@ name: Security Gate
 on:
   pull_request:
     branches: [production]
-    paths:
-      - package.json
-      - pnpm-lock.yaml
-      - .npmrc
-      - pnpm-workspace.yaml
-      - patches/**
-      - .github/security/**
-      - .github/workflows/security-gate.yml
   push:
     branches: [production]
   schedule:
