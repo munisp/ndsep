@@ -6,10 +6,13 @@
  */
 
 import { logger } from "../logger";
+import { assertOpenSearchIndex, getOpenSearchConfig } from "../opensearchConfig";
 
-const OS_URL = process.env.OPENSEARCH_URL ?? "http://localhost:9200";
-const OS_USER = process.env.OPENSEARCH_USER ?? "admin";
-const OS_PASS = process.env.OPENSEARCH_PASS ?? "admin";
+const openSearchConfig = getOpenSearchConfig();
+const OS_URL = openSearchConfig.url;
+const OS_USER = openSearchConfig.username;
+const OS_PASS = openSearchConfig.password;
+const OS_ENABLED = openSearchConfig.enabled;
 
 // Index definitions
 export const INDICES = {
@@ -20,8 +23,11 @@ export const INDICES = {
   ASSETS: "ndsep-assets",
 } as const;
 
-function authHeader(): string {
-  return "Basic " + Buffer.from(`${OS_USER}:${OS_PASS}`).toString("base64");
+const MIDDLEWARE_INDEX_NAMES = Object.values(INDICES);
+
+function authHeaders(): Record<string, string> {
+  if (!OS_USER || !OS_PASS) return {};
+  return { Authorization: "Basic " + Buffer.from(`${OS_USER}:${OS_PASS}`).toString("base64") };
 }
 
 // ── Search Operations ────────────────────────────────────────────────────────
@@ -33,6 +39,8 @@ export interface SearchResult<T = unknown> {
 }
 
 export async function search(index: string, query: string, options?: { from?: number; size?: number; filters?: Record<string, unknown> }): Promise<SearchResult> {
+  assertOpenSearchIndex(index, MIDDLEWARE_INDEX_NAMES);
+  if (!OS_ENABLED) return { hits: [], total: 0, took: 0 };
   try {
     const body: Record<string, unknown> = {
       query: {
@@ -54,8 +62,9 @@ export async function search(index: string, query: string, options?: { from?: nu
 
     const res = await fetch(`${OS_URL}/${index}/_search`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: authHeader() },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!res.ok) throw new Error(`OpenSearch error: ${res.status}`);
@@ -71,7 +80,7 @@ export async function search(index: string, query: string, options?: { from?: nu
       took: data.took ?? 0,
     };
   } catch (err) {
-    logger.warn({ err, index, query }, "[OpenSearch] Search failed");
+    logger.warn({ err, index, queryLength: query.length }, "[OpenSearch] Search failed");
     return { hits: [], total: 0, took: 0 };
   }
 }
@@ -79,11 +88,14 @@ export async function search(index: string, query: string, options?: { from?: nu
 // ── Indexing Operations ──────────────────────────────────────────────────────
 
 export async function indexDocument(index: string, id: string, document: unknown): Promise<boolean> {
+  assertOpenSearchIndex(index, MIDDLEWARE_INDEX_NAMES);
+  if (!OS_ENABLED) return false;
   try {
     const res = await fetch(`${OS_URL}/${index}/_doc/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: authHeader() },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(document),
+      signal: AbortSignal.timeout(10_000),
     });
     return res.ok;
   } catch (err) {
@@ -93,6 +105,8 @@ export async function indexDocument(index: string, id: string, document: unknown
 }
 
 export async function bulkIndex(index: string, documents: Array<{ id: string; doc: unknown }>): Promise<number> {
+  assertOpenSearchIndex(index, MIDDLEWARE_INDEX_NAMES);
+  if (!OS_ENABLED) return 0;
   try {
     const bulkBody = documents.flatMap(d => [
       JSON.stringify({ index: { _index: index, _id: d.id } }),
@@ -101,12 +115,16 @@ export async function bulkIndex(index: string, documents: Array<{ id: string; do
 
     const res = await fetch(`${OS_URL}/_bulk`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-ndjson", Authorization: authHeader() },
+      headers: { "Content-Type": "application/x-ndjson", ...authHeaders() },
       body: bulkBody,
+      signal: AbortSignal.timeout(30_000),
     });
 
-    const data = await res.json();
-    return documents.length - (data.errors ? data.items.filter((i: any) => i.index?.error).length : 0);
+    const data = await res.json() as { errors?: boolean; items?: Array<{ index?: { error?: unknown } }> };
+    if (!res.ok || data.errors) {
+      throw new Error(`OpenSearch bulk index failed with HTTP ${res.status}`);
+    }
+    return documents.length;
   } catch (err) {
     logger.warn({ err, index }, "[OpenSearch] Bulk index failed");
     return 0;
@@ -116,9 +134,11 @@ export async function bulkIndex(index: string, documents: Array<{ id: string; do
 // ── Health Check ─────────────────────────────────────────────────────────────
 
 export async function checkOpenSearchHealth(): Promise<{ healthy: boolean; url: string; clusterStatus?: string }> {
+  if (!OS_ENABLED) return { healthy: false, url: OS_URL };
   try {
     const res = await fetch(`${OS_URL}/_cluster/health`, {
-      headers: { Authorization: authHeader() },
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return { healthy: false, url: OS_URL };
     const data = await res.json();
