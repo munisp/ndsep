@@ -82,6 +82,14 @@ describe("production release artifact hardening", () => {
     ).toThrow(/immutable lowercase OCI SHA-256 reference/);
   });
 
+  it("rejects local build directives in rendered production Compose", () => {
+    expect(() =>
+      verifyRenderedCompose("services:\n  api:\n    build: .\n")
+    ).toThrow(
+      /production configuration must not contain local build directives/
+    );
+  });
+
   it("binds clean scan and SBOM evidence to the immutable digest before release signing", () => {
     const evidence = verifyReleaseEvidence({
       Results: [{ Vulnerabilities: [] }],

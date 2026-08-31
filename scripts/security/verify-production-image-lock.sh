@@ -20,6 +20,11 @@ line_number=0
 
 while IFS= read -r line || [[ -n "$line" ]]; do
   line_number=$((line_number + 1))
+  if [[ "$line" =~ ^[[:space:]]*build:([[:space:]]|$) ]]; then
+    echo "$compose_file:$line_number: production configuration must not contain local build directives" >&2
+    invalid=1
+  fi
+
   if [[ "$line" =~ ^[[:space:]]*image:[[:space:]]*(.+)[[:space:]]*$ ]]; then
     image=${BASH_REMATCH[1]}
     image=${image%%[[:space:]]#*}
