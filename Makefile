@@ -162,6 +162,10 @@ docker-prod-up: ## Start production stack only after rendered configuration has 
 	@test -n "$(PRODUCTION_ENV_FILE)" || (echo "$(RED)Set PRODUCTION_ENV_FILE to an approved production environment file$(RESET)" && exit 1)
 	@tmp_config=$$(mktemp); \
 	  trap 'rm -f "$$tmp_config"' EXIT; \
+	  node scripts/security/render-alertmanager-config.mjs \
+	    infra/prometheus/alertmanager.yml \
+	    .ndsep-runtime/alertmanager.yml \
+	    "$(PRODUCTION_ENV_FILE)"; \
 	  docker compose --env-file "$(PRODUCTION_ENV_FILE)" -f docker-compose.production.yml config > "$$tmp_config"; \
 	  bash scripts/security/verify-production-image-lock.sh "$$tmp_config"; \
 	  docker compose --env-file "$(PRODUCTION_ENV_FILE)" -f docker-compose.production.yml up -d --wait

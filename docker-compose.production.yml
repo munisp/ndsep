@@ -479,7 +479,7 @@ services:
       - "--web.external-url=http://alertmanager:9093"
       - "--log.level=warn"
     volumes:
-      - ./infra/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./.ndsep-runtime/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./infra/prometheus/templates:/etc/alertmanager/templates:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]

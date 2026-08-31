@@ -3,23 +3,20 @@
 # ============================================
 # Routes alerts to Slack, PagerDuty, and email based on severity and team.
 #
-# Environment variables (set in .env.production):
-#   SLACK_WEBHOOK_URL          — Slack Incoming Webhook URL
-#   PAGERDUTY_INTEGRATION_KEY  — PagerDuty Events API v2 key
-#   NITDA_COMPLIANCE_EMAIL     — Compliance team email
-#   SMTP_HOST                  — SMTP server hostname
-#   SMTP_FROM                  — Sender email address
+# This is a template. The `make docker-prod-up` path renders it with required
+# approved values from the designated production environment file into a mode-0600
+# runtime file. Do not deploy this unrendered template.
 ###############################################################################
 
 global:
   # How long to wait before sending a notification again if it has already been sent
   resolve_timeout: 5m
   # SMTP defaults (used by email receiver)
-  smtp_smarthost: "${SMTP_HOST:-smtp.gmail.com:587}"
-  smtp_from: "${SMTP_FROM:-ndsep-alerts@nitda.gov.ng}"
+  smtp_smarthost: "__NDSEP_SMTP_HOST__"
+  smtp_from: "__NDSEP_SMTP_FROM__"
   smtp_require_tls: true
   # Slack defaults
-  slack_api_url: "${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/PLACEHOLDER}"
+  slack_api_url: "__NDSEP_SLACK_WEBHOOK_URL__"
   # HTTP client settings
   http_config:
     follow_redirects: true
@@ -45,7 +42,7 @@ route:
       group_wait: 10s
       group_interval: 2m
       repeat_interval: 1h
-      continue: true  # Also send to Slack
+      continue: true # Also send to Slack
 
     - match:
         severity: critical
@@ -111,13 +108,12 @@ inhibit_rules:
 
 # ─── Receivers ────────────────────────────────────────────────────────────────
 receivers:
-
   # ── Slack: General Platform Channel ─────────────────────────────────────────
   - name: slack-general
     slack_configs:
       - channel: "#ndsep-alerts"
         send_resolved: true
-        title: "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}"
+        title: '{{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
         text: |
           *Severity:* {{ .CommonLabels.severity | toUpper }}
           *Team:* {{ .CommonLabels.team }}
@@ -126,12 +122,12 @@ receivers:
           *Description:* {{ .Annotations.description }}
           *Started:* {{ .StartsAt | since }}
           {{ end }}
-        color: "{{ if eq .Status \"firing\" }}danger{{ else }}good{{ end }}"
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
         footer: "NDSEP Monitoring | {{ .CommonLabels.instance }}"
         actions:
           - type: button
             text: "View Dashboard"
-            url: "${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/metrics"
+            url: "__NDSEP_PLATFORM_URL__/metrics"
 
   # ── Slack: Critical Alerts Channel ───────────────────────────────────────────
   - name: slack-critical
@@ -166,7 +162,7 @@ receivers:
         actions:
           - type: button
             text: "View Compliance Dashboard"
-            url: "${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/compliance"
+            url: "__NDSEP_PLATFORM_URL__/compliance"
 
   # ── Slack: Security Channel ───────────────────────────────────────────────
   - name: slack-security
@@ -180,12 +176,12 @@ receivers:
           *Description:* {{ .Annotations.description }}
           *Started:* {{ .StartsAt | since }}
           {{ end }}
-        color: "{{ if eq .Status \"firing\" }}danger{{ else }}good{{ end }}"
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
 
   # ── PagerDuty: Critical Escalation ───────────────────────────────────────
   - name: pagerduty-critical
     pagerduty_configs:
-      - routing_key: "${PAGERDUTY_INTEGRATION_KEY:-PLACEHOLDER_KEY}"
+      - routing_key: "__NDSEP_PAGERDUTY_INTEGRATION_KEY__"
         send_resolved: true
         severity: "{{ .CommonLabels.severity }}"
         description: "{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}"
@@ -196,13 +192,13 @@ receivers:
           platform: "NDSEP"
           environment: "production"
         links:
-          - href: "${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/metrics"
+          - href: "__NDSEP_PLATFORM_URL__/metrics"
             text: "View NDSEP Dashboard"
 
   # ── Email: Compliance Team ────────────────────────────────────────────────
   - name: email-compliance
     email_configs:
-      - to: "${NITDA_COMPLIANCE_EMAIL:-compliance@nitda.gov.ng}"
+      - to: "__NDSEP_NITDA_COMPLIANCE_EMAIL__"
         send_resolved: true
         headers:
           Subject: "[NDSEP Alert] {{ .GroupLabels.alertname }} — {{ .Status | toUpper }}"
@@ -215,4 +211,4 @@ receivers:
           <p><strong>Description:</strong> {{ .Annotations.description }}</p>
           <p><strong>Started:</strong> {{ .StartsAt }}</p>
           {{ end }}
-          <p><a href="${PLATFORM_URL:-https://ndsep.nitda.gov.ng}/compliance">View Compliance Dashboard</a></p>
+          <p><a href="__NDSEP_PLATFORM_URL__/compliance">View Compliance Dashboard</a></p>

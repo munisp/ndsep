@@ -122,6 +122,8 @@ client/dev-dist/
 .manus/db/
 demo-screenshots/
 test-results/
+# Generated from an approved production environment file by make docker-prod-up.
+.ndsep-runtime/
 __pycache__/
 workers/python/vendor/
 workers/python/models/
