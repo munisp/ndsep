@@ -114,6 +114,14 @@ export function validateEnvironment(): void {
     if ((process.env.WORKER_EVENT_HMAC_SECRET ?? "").length < 32) {
       errors.push("  WORKER_EVENT_HMAC_SECRET: must be a high-entropy secret of at least 32 characters");
     }
+    if ((process.env.PERMIFY_ENABLED ?? "false") === "true") {
+      if (!/^https:\/\//.test(process.env.PERMIFY_URL ?? "")) {
+        errors.push("  PERMIFY_URL: enabled production authorization requires an https:// endpoint");
+      }
+      if ((process.env.PERMIFY_AUTH_TOKEN ?? "").length < 32) {
+        errors.push("  PERMIFY_AUTH_TOKEN: enabled production authorization requires a high-entropy bearer credential");
+      }
+    }
   }
 
   for (const rule of SECTOR_API_KEYS) {

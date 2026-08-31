@@ -19,6 +19,22 @@ const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const REDIS_ENABLED = (process.env.REDIS_ENABLED ?? "true") === "true";
 const REDIS_TLS_ENABLED = process.env.REDIS_TLS === "true";
 const REDIS_TLS_CA = process.env.REDIS_TLS_CA_PATH;
+const IS_PRODUCTION = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+
+function validateRedisConfiguration(): void {
+  if (!IS_PRODUCTION || !REDIS_ENABLED) return;
+  if (!/^rediss:\/\//.test(REDIS_URL)) {
+    throw new Error("Enabled production Redis requires a rediss:// endpoint");
+  }
+  if (!REDIS_TLS_ENABLED || process.env.REDIS_TLS_REJECT_UNAUTHORIZED === "false") {
+    throw new Error("Enabled production Redis requires TLS certificate verification");
+  }
+  if (!REDIS_TLS_CA || !fs.existsSync(REDIS_TLS_CA)) {
+    throw new Error("Enabled production Redis requires a readable REDIS_TLS_CA_PATH");
+  }
+}
+
+validateRedisConfiguration();
 
 let hits = 0;
 let misses = 0;
@@ -51,7 +67,7 @@ if (REDIS_ENABLED) {
 
   redis.on("connect", () => {
     connected = true;
-    logger.info(`[Redis] Connected to ${REDIS_URL}`);
+    logger.info(`[Redis] Connected to ${REDIS_URL.replace(/:\/\/.*@/, "://**@")}`);
   });
 
   redis.on("ready", () => { connected = true; });

@@ -4,7 +4,10 @@
  * Required integrations propagate unavailable or rejected operations so callers cannot report side effects that did not occur.
  */
 
-import { permifyCheck as checkPermifyPermission } from "./permify";
+import {
+  permifyCheck as checkPermifyPermission,
+  permifyWriteRelationship as writePermifyRelationship,
+} from "./permify";
 
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
@@ -23,21 +26,40 @@ const DAPR_STATE_URL = process.env.DAPR_STATE_URL || "http://localhost:8167";
 
 // ─── Shared fetch helper ─────────────────────────────────────────────────────
 
+const IS_PRODUCTION = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+
+function trustedEndpoint(url: string): URL {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(url);
+  } catch {
+    throw new Error("Required integration endpoint is not a valid absolute URL");
+  }
+  if (IS_PRODUCTION && endpoint.protocol !== "https:") {
+    throw new Error(`Required production integration endpoint must use HTTPS: ${endpoint.origin}`);
+  }
+  if (endpoint.username || endpoint.password) {
+    throw new Error(`Required integration endpoint must not contain inline credentials: ${endpoint.origin}`);
+  }
+  return endpoint;
+}
+
 async function postJSON(url: string, body: object): Promise<void> {
+  const endpoint = trustedEndpoint(url);
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(3000),
     });
   } catch (err) {
-    throw new Error(`Required integration POST ${url} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(`Required integration POST ${endpoint.origin} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`Required integration POST ${url} failed with HTTP ${response.status}: ${detail}`);
+    throw new Error(`Required integration POST ${endpoint.origin} failed with HTTP ${response.status}: ${detail}`);
   }
 }
 
@@ -75,7 +97,7 @@ export async function daprStateGet(key: string): Promise<unknown> {
 
 /** Relay an event to Fluvio (high-throughput streaming) */
 export async function fluvioPublish(topic: string, event: object): Promise<void> {
-  await postJSON(`${FLUVIO_RELAY_URL}/publish`, { topic, event });
+  await postJSON(`${FLUVIO_RELAY_URL}/publish`, { topic, payload: event });
   // Also push to consumer for routing
   await postJSON(`${FLUVIO_CONSUMER_URL}/publish`, {
     topic: `ndsep.${topic.replace(/-/g, ".")}`,
@@ -92,7 +114,8 @@ export async function opensearchIndex(index: string, doc: object): Promise<void>
 
 /** Search OpenSearch (returns results or empty array on error) */
 export async function opensearchSearch(index: string, params: object): Promise<unknown[]> {
-  const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search`, {
+  const endpoint = trustedEndpoint(`${OPENSEARCH_QUERY_URL}/search`);
+  const resp = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ index, ...params }),
@@ -105,7 +128,8 @@ export async function opensearchSearch(index: string, params: object): Promise<u
 
 /** Global search across all NDSEP indices */
 export async function opensearchGlobalSearch(q: string, sectors?: string[]): Promise<unknown[]> {
-  const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search/global`, {
+  const endpoint = trustedEndpoint(`${OPENSEARCH_QUERY_URL}/search/global`);
+  const resp = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q, sectors }),
@@ -178,13 +202,17 @@ export async function keycloakValidate(token: string, requiredRoles?: string[]):
   username?: string;
 }> {
   try {
-    const resp = await fetch(`${KEYCLOAK_VALIDATOR_URL}/validate`, {
+    const endpoint = trustedEndpoint(`${KEYCLOAK_VALIDATOR_URL}/validate`);
+    const resp = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, required_roles: requiredRoles }),
       signal: AbortSignal.timeout(3000),
     });
-    return await resp.json() as { valid: boolean; roles: string[]; sub?: string; username?: string };
+    if (!resp.ok) return { valid: false, roles: [] };
+    const result = await resp.json() as { valid?: boolean; roles?: string[]; sub?: string; username?: string };
+    if (!result.valid || !Array.isArray(result.roles)) return { valid: false, roles: [] };
+    return { valid: true, roles: result.roles, sub: result.sub, username: result.username };
   } catch (err) {
     return { valid: false, roles: [] };
   }
@@ -209,9 +237,7 @@ export async function permifyWriteRelationship(
   relation: string,
   subjectId: string
 ): Promise<void> {
-  await postJSON(`${PERMIFY_SYNC_URL}/relationships/write`, {
-    entityType, entityId, relation, subjectType: "user", subjectId,
-  });
+  await writePermifyRelationship(entityType, entityId, relation, "user", subjectId);
 }
 
 // ─── APISIX ──────────────────────────────────────────────────────────────────

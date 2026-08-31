@@ -125,7 +125,8 @@ impl AppState {
     }
 }
 
-async fn ensure_indices(state: &AppState) {
+async fn ensure_indices(state: &AppState) -> Result<(), String> {
+    let mut failures = Vec::new();
     for (index_name, mapping) in NDSEP_INDICES {
         let url = format!("{}/{}", state.opensearch_url, index_name);
         let mut req = state
@@ -138,14 +139,19 @@ async fn ensure_indices(state: &AppState) {
         }
         match req.send().await {
             Ok(resp) => {
-                if resp.status().is_success() || resp.status().as_u16() == 400 {
-                    // 400 = index already exists, that's fine
+                if !(resp.status().is_success() || resp.status().as_u16() == 400) {
+                    failures.push(format!("{} returned HTTP {}", index_name, resp.status()));
                 }
             }
             Err(e) => {
-                tracing::warn!("OpenSearch not available for index {}: {}", index_name, e);
+                failures.push(format!("{} unavailable: {}", index_name, e));
             }
         }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
     }
 }
 
@@ -469,6 +475,16 @@ async fn main() {
     let opensearch_url = get_env("OPENSEARCH_URL", "http://localhost:9200");
     let opensearch_user = get_env("OPENSEARCH_USER", "");
     let opensearch_pass = get_env("OPENSEARCH_PASSWORD", "");
+    let production = env::var("APP_ENV").map(|value| value.eq_ignore_ascii_case("production")).unwrap_or(false)
+        || env::var("NODE_ENV").map(|value| value.eq_ignore_ascii_case("production")).unwrap_or(false);
+    if production && !opensearch_url.starts_with("https://") {
+        tracing::error!("production OpenSearch requires an https:// OPENSEARCH_URL");
+        std::process::exit(1);
+    }
+    if production && (opensearch_user.is_empty() || opensearch_pass.is_empty()) {
+        tracing::error!("production OpenSearch requires OPENSEARCH_USER and OPENSEARCH_PASSWORD");
+        std::process::exit(1);
+    }
     if !opensearch_user.is_empty() && opensearch_pass.is_empty() {
         tracing::error!("OPENSEARCH_PASSWORD must be configured when OPENSEARCH_USER is set");
         std::process::exit(1);
@@ -479,16 +495,29 @@ async fn main() {
         format!("{}:{}", opensearch_user, opensearch_pass)
     };
 
+    let client = Client::builder()
+        .https_only(production)
+        .build()
+        .unwrap_or_else(|error| {
+            tracing::error!("create OpenSearch HTTP client: {}", error);
+            std::process::exit(1);
+        });
     let state = AppState {
-        client: Client::new(),
+        client,
         opensearch_url: opensearch_url.clone(),
         opensearch_auth,
         start_time: Instant::now(),
         index_count: Arc::new(AtomicU64::new(0)),
     };
 
-    // Initialize indices on startup
-    ensure_indices(&state).await;
+    // A production indexer is not ready until the authenticated upstream is reachable.
+    if let Err(error) = ensure_indices(&state).await {
+        if production {
+            tracing::error!("OpenSearch index initialization failed: {}", error);
+            std::process::exit(1);
+        }
+        tracing::warn!("OpenSearch index initialization deferred outside production: {}", error);
+    }
 
     let app = Router::new()
         .route("/index", post(index_document))
