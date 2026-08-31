@@ -8,7 +8,6 @@ driver, avoiding distribution of the model-signing private key to workers.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
