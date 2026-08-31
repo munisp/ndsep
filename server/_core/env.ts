@@ -71,7 +71,7 @@ export const ENV = {
   keycloakRealm: process.env.KEYCLOAK_REALM ?? "ndsep",
   keycloakClientId: process.env.KEYCLOAK_CLIENT_ID ?? "ndsep-platform",
   keycloakClientSecret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
-  keycloakEnabled: process.env.KEYCLOAK_ENABLED !== "false",
+  keycloakEnabled: process.env.KEYCLOAK_ENABLED === "true",
 
   // ── Permify Authorization ─────────────────────────────────────────────────
   // Set PERMIFY_URL to your Permify server (e.g., http://permify:3476).

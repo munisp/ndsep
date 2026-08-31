@@ -5,6 +5,12 @@ import { validateEnvironment } from "./envValidation";
 
 const managedKeys = [
   "NODE_ENV",
+  "APP_ENV",
+  "KEYCLOAK_ENABLED",
+  "KEYCLOAK_URL",
+  "KEYCLOAK_ISSUER_URL",
+  "KEYCLOAK_REALM",
+  "KEYCLOAK_CLIENT_ID",
   "JWT_SECRET",
   "FIELD_ENCRYPTION_KEY",
   "TERMII_API_KEY",
@@ -35,6 +41,7 @@ function applyProductionEnvironment(
 ) {
   const environment: Record<string, string> = {
     NODE_ENV: "production",
+    KEYCLOAK_ENABLED: "false",
     JWT_SECRET: "j".repeat(32),
     FIELD_ENCRYPTION_KEY: "a".repeat(64),
     TERMII_API_KEY: "termii-production-api-key",
@@ -50,7 +57,7 @@ function applyProductionEnvironment(
     PERMIFY_ENABLED: "false",
   };
   for (const key of managedKeys) {
-    const value = overrides[key] ?? environment[key];
+    const value = Object.hasOwn(overrides, key) ? overrides[key] : environment[key];
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
@@ -67,6 +74,39 @@ afterEach(() => {
 describe("production environment hardening", () => {
   it("accepts a complete production baseline without contacting external services", () => {
     applyProductionEnvironment();
+    expect(() => validateEnvironment()).not.toThrow();
+  });
+
+  it("requires an explicit production Keycloak enablement decision", () => {
+    applyProductionEnvironment({ KEYCLOAK_ENABLED: undefined });
+    expect(() => validateEnvironment()).toThrow(
+      /KEYCLOAK_ENABLED: production IAM must be explicitly configured/
+    );
+  });
+
+  it("rejects insecure enabled Keycloak endpoints and placeholder identity settings", () => {
+    applyProductionEnvironment({
+      KEYCLOAK_ENABLED: "true",
+      KEYCLOAK_URL: "http://localhost:8080",
+      KEYCLOAK_ISSUER_URL: "https://user:secret@issuer.example.internal",
+      KEYCLOAK_REALM: "",
+      KEYCLOAK_CLIENT_ID: "placeholder-client",
+    });
+    expect(() => validateEnvironment()).toThrow(
+      /KEYCLOAK_URL[\s\S]*KEYCLOAK_ISSUER_URL[\s\S]*KEYCLOAK_REALM[\s\S]*KEYCLOAK_CLIENT_ID/
+    );
+  });
+
+  it("accepts an explicit secure enabled Keycloak configuration and APP_ENV production alias", () => {
+    applyProductionEnvironment({
+      NODE_ENV: "test",
+      APP_ENV: "production",
+      KEYCLOAK_ENABLED: "true",
+      KEYCLOAK_URL: "https://keycloak.internal.ndsep.gov.ng",
+      KEYCLOAK_ISSUER_URL: "https://identity.ndsep.gov.ng",
+      KEYCLOAK_REALM: "ndsep",
+      KEYCLOAK_CLIENT_ID: "ndsep-platform",
+    });
     expect(() => validateEnvironment()).not.toThrow();
   });
 
@@ -128,6 +168,9 @@ describe("production environment hardening", () => {
     const analyticsSource = readFileSync(
       resolve(root, "orchestration/python/dpco_analytics/service.py"),
       "utf8"
+    );
+    expect(environmentSource).toContain(
+      'keycloakEnabled: process.env.KEYCLOAK_ENABLED === "true"'
     );
     expect(environmentSource).toContain(
       'lakehouseEnabled: process.env.LAKEHOUSE_ENABLED === "true"'

@@ -114,6 +114,20 @@ function invalidProductionCorsOrigins(value: string): string[] {
   return errors;
 }
 
+function invalidProductionServiceUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol !== "https:" ||
+      Boolean(url.username) ||
+      Boolean(url.password) ||
+      ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+    );
+  } catch {
+    return true;
+  }
+}
+
 const INFRASTRUCTURE_VARS: EnvRule[] = [
   { name: "LAKEHOUSE_S3_ACCESS_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 access key — using MinIO dev default" },
   { name: "LAKEHOUSE_S3_SECRET_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 secret key — using MinIO dev default" },
@@ -125,7 +139,7 @@ const INFRASTRUCTURE_VARS: EnvRule[] = [
  * In development: logs warnings for missing variables.
  */
 export function validateEnvironment(): void {
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -175,6 +189,25 @@ export function validateEnvironment(): void {
       }
       if ((process.env.PERMIFY_AUTH_TOKEN ?? "").length < 32) {
         errors.push("  PERMIFY_AUTH_TOKEN: enabled production authorization requires a high-entropy bearer credential");
+      }
+    }
+    const keycloakEnabled = process.env.KEYCLOAK_ENABLED;
+    if (keycloakEnabled !== "true" && keycloakEnabled !== "false") {
+      errors.push("  KEYCLOAK_ENABLED: production IAM must be explicitly configured as true or false");
+    } else if (keycloakEnabled === "true") {
+      const keycloakUrl = process.env.KEYCLOAK_URL ?? "";
+      const issuerUrl = process.env.KEYCLOAK_ISSUER_URL ?? keycloakUrl;
+      if (invalidProductionServiceUrl(keycloakUrl)) {
+        errors.push("  KEYCLOAK_URL: enabled production IAM requires a non-local https:// endpoint without inline credentials");
+      }
+      if (invalidProductionServiceUrl(issuerUrl)) {
+        errors.push("  KEYCLOAK_ISSUER_URL: enabled production IAM requires a non-local https:// issuer endpoint without inline credentials");
+      }
+      for (const name of ["KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID"]) {
+        const value = process.env[name] ?? "";
+        if (value.length < 2 || isPlaceholderValue(value)) {
+          errors.push(`  ${name}: enabled production IAM requires a non-placeholder configured value`);
+        }
       }
     }
   }

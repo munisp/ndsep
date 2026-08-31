@@ -100,6 +100,15 @@ describe("production security configuration", () => {
     expect(realm.clients[0].redirectUris.join("\n")).not.toContain("*.manus");
   });
 
+  it("keeps the production template aligned with explicit IAM and OpenSearch startup gates", () => {
+    const environment = read(".env.production.example");
+    expect(environment).toContain("KEYCLOAK_ENABLED=true");
+    expect(environment).toContain("KEYCLOAK_URL=https://");
+    expect(environment).toContain("KEYCLOAK_ISSUER_URL=https://");
+    expect(environment).toContain("OPENSEARCH_ENABLED=true");
+    expect(environment).toContain("OPENSEARCH_URL=https://");
+  });
+
   it("requires explicit production values for privileged credentials and alert routes", () => {
     const compose = read("docker-compose.production.yml");
     for (const requiredSetting of [
