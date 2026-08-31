@@ -475,8 +475,12 @@ async fn main() {
     let opensearch_url = get_env("OPENSEARCH_URL", "http://localhost:9200");
     let opensearch_user = get_env("OPENSEARCH_USER", "");
     let opensearch_pass = get_env("OPENSEARCH_PASSWORD", "");
-    let production = env::var("APP_ENV").map(|value| value.eq_ignore_ascii_case("production")).unwrap_or(false)
-        || env::var("NODE_ENV").map(|value| value.eq_ignore_ascii_case("production")).unwrap_or(false);
+    let production = env::var("APP_ENV")
+        .map(|value| value.eq_ignore_ascii_case("production"))
+        .unwrap_or(false)
+        || env::var("NODE_ENV")
+            .map(|value| value.eq_ignore_ascii_case("production"))
+            .unwrap_or(false);
     if production && !opensearch_url.starts_with("https://") {
         tracing::error!("production OpenSearch requires an https:// OPENSEARCH_URL");
         std::process::exit(1);
@@ -516,7 +520,10 @@ async fn main() {
             tracing::error!("OpenSearch index initialization failed: {}", error);
             std::process::exit(1);
         }
-        tracing::warn!("OpenSearch index initialization deferred outside production: {}", error);
+        tracing::warn!(
+            "OpenSearch index initialization deferred outside production: {}",
+            error
+        );
     }
 
     let app = Router::new()

@@ -4,10 +4,7 @@
  * Required integrations propagate unavailable or rejected operations so callers cannot report side effects that did not occur.
  */
 
-import {
-  permifyCheck as checkPermifyPermission,
-  permifyWriteRelationship as writePermifyRelationship,
-} from "./permify";
+import { permifyCheck as checkPermifyPermission } from "./permify";
 
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
@@ -48,7 +45,7 @@ async function postJSON(url: string, body: object): Promise<void> {
   const endpoint = trustedEndpoint(url);
   let response: Response;
   try {
-    response = await fetch(endpoint, {
+    response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -77,16 +74,18 @@ export async function daprStateSet(key: string, value: unknown): Promise<void> {
 
 /** Get a value from the Dapr state store */
 export async function daprStateGet(key: string): Promise<unknown> {
+  const url = `${DAPR_STATE_URL}/state/get`;
+  const endpoint = trustedEndpoint(url);
   let resp: Response;
   try {
-    resp = await fetch(`${DAPR_STATE_URL}/state/get`, {
+    resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key }),
       signal: AbortSignal.timeout(2000),
     });
   } catch (err) {
-    throw new Error(`Dapr state lookup for ${key} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(`Dapr state lookup for ${key} at ${endpoint.origin} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (!resp.ok) throw new Error(`Dapr state lookup for ${key} failed with HTTP ${resp.status}`);
   const data = await resp.json() as { value: unknown };
@@ -114,8 +113,9 @@ export async function opensearchIndex(index: string, doc: object): Promise<void>
 
 /** Search OpenSearch (returns results or empty array on error) */
 export async function opensearchSearch(index: string, params: object): Promise<unknown[]> {
-  const endpoint = trustedEndpoint(`${OPENSEARCH_QUERY_URL}/search`);
-  const resp = await fetch(endpoint, {
+  const url = `${OPENSEARCH_QUERY_URL}/search`;
+  trustedEndpoint(url);
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ index, ...params }),
@@ -128,8 +128,9 @@ export async function opensearchSearch(index: string, params: object): Promise<u
 
 /** Global search across all NDSEP indices */
 export async function opensearchGlobalSearch(q: string, sectors?: string[]): Promise<unknown[]> {
-  const endpoint = trustedEndpoint(`${OPENSEARCH_QUERY_URL}/search/global`);
-  const resp = await fetch(endpoint, {
+  const url = `${OPENSEARCH_QUERY_URL}/search/global`;
+  trustedEndpoint(url);
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q, sectors }),
@@ -202,8 +203,9 @@ export async function keycloakValidate(token: string, requiredRoles?: string[]):
   username?: string;
 }> {
   try {
-    const endpoint = trustedEndpoint(`${KEYCLOAK_VALIDATOR_URL}/validate`);
-    const resp = await fetch(endpoint, {
+    const url = `${KEYCLOAK_VALIDATOR_URL}/validate`;
+    trustedEndpoint(url);
+    const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, required_roles: requiredRoles }),
@@ -237,7 +239,9 @@ export async function permifyWriteRelationship(
   relation: string,
   subjectId: string
 ): Promise<void> {
-  await writePermifyRelationship(entityType, entityId, relation, "user", subjectId);
+  await postJSON(`${PERMIFY_SYNC_URL}/relationships/write`, {
+    entityType, entityId, relation, subjectType: "user", subjectId,
+  });
 }
 
 // ─── APISIX ──────────────────────────────────────────────────────────────────
@@ -249,6 +253,7 @@ export async function apisixRegisterRoute(params: {
   upstreamUrl: string;
   plugins?: object;
 }): Promise<void> {
+  trustedEndpoint(params.upstreamUrl);
   await postJSON(`${APISIX_MANAGER_URL}/routes`, {
     route_id: params.routeId,
     uri: params.uri,
