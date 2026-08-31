@@ -814,17 +814,19 @@ async function startServer() {
       const data = await generateAuditReturnData(year);
       const pdfBuffer = await generateAuditReturnPdf(data);
       let finalBuffer = pdfBuffer;
+      let cryptographicallySigned = false;
       try {
         finalBuffer = await signPdf(pdfBuffer);
+        cryptographicallySigned = true;
         const certInfo = getSigningCertInfo();
         logger.info({ year, certSubject: certInfo.subject }, "Audit return PDF signed");
       } catch (signErr: any) {
-        logger.warn({ msg: signErr.message }, "PDF signing failed — serving unsigned");
+        logger.error({ msg: signErr.message }, "PDF signing failed — refusing to label an unsigned audit return as signed");
       }
       const dateStr = new Date().toISOString().slice(0, 10);
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="NDSEP-Annual-Audit-Return-${year}-${dateStr}.pdf"`);
-      res.setHeader("X-NDSEP-Signed", "true");
+      res.setHeader("X-NDSEP-Signed", String(cryptographicallySigned));
       res.send(finalBuffer);
     } catch (err: unknown) {
       logger.error({ err }, "Audit return PDF generation failed");
