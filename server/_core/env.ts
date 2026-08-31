@@ -111,9 +111,9 @@ export const ENV = {
   lakehouseCatalogUrl: process.env.LAKEHOUSE_CATALOG_URL ?? "http://localhost:8181",
   lakehouseS3Endpoint: process.env.LAKEHOUSE_S3_ENDPOINT ?? "http://localhost:9000",
   lakehouseS3Bucket: process.env.LAKEHOUSE_S3_BUCKET ?? "ndsep-lakehouse",
-  lakehouseS3AccessKey: process.env.LAKEHOUSE_S3_ACCESS_KEY ?? "minioadmin",
-  lakehouseS3SecretKey: process.env.LAKEHOUSE_S3_SECRET_KEY ?? "minioadmin",
-  lakehouseEnabled: process.env.LAKEHOUSE_ENABLED !== "false",
+  lakehouseS3AccessKey: process.env.LAKEHOUSE_S3_ACCESS_KEY ?? "",
+  lakehouseS3SecretKey: process.env.LAKEHOUSE_S3_SECRET_KEY ?? "",
+  lakehouseEnabled: process.env.LAKEHOUSE_ENABLED === "true",
 
   // ── Orchestration Service URLs ────────────────────────────────────────────
   // These are the internal ports for the orchestration Go/Python services.
@@ -128,10 +128,10 @@ export const ENV = {
   orchestrationMlPipelineUrl: process.env.ORCHESTRATION_ML_PIPELINE_URL ?? "http://localhost:8125",
 
   // ── Termii SMS Enforcement Alerts ─────────────────────────────────────────
-  termiiApiKey: process.env.TERMII_API_KEY ?? "TLtest_default_key_ndsep_2026",
+  termiiApiKey: process.env.TERMII_API_KEY ?? "",
   termiiBaseUrl: process.env.TERMII_BASE_URL ?? "https://api.ng.termii.com",
   termiiSenderId: process.env.TERMII_SENDER_ID ?? "NDSEP",
-  termiiEnabled: process.env.TERMII_ENABLED !== "false",
+  termiiEnabled: process.env.TERMII_ENABLED === "true",
   ndpcPhoneNumber: process.env.NDPC_PHONE_NUMBER ?? "+2348012345678",
   ndpcEmail: process.env.NDPC_EMAIL ?? "enforcement@ndpc.gov.ng",
   slaAlertEmail: process.env.SLA_ALERT_EMAIL ?? "sla-alerts@ndsep.nitda.gov.ng",
@@ -152,12 +152,12 @@ export const ENV = {
   vaultMaxFileSizeMb: parseInt(process.env.VAULT_MAX_FILE_SIZE_MB ?? "50", 10),
 
   // ── API Key Management ────────────────────────────────────────────────────
-  apiKeySalt: process.env.API_KEY_SALT ?? "ndsep_api_key_salt_2026_production_default",
+  apiKeySalt: process.env.API_KEY_SALT ?? "",
   apiKeyPrefix: process.env.API_KEY_PREFIX ?? "ndsep_live_",
   apiKeyTestPrefix: process.env.API_KEY_TEST_PREFIX ?? "ndsep_test_",
 
   // ── Webhook Delivery ──────────────────────────────────────────────────────
-  webhookSigningSecret: process.env.WEBHOOK_SIGNING_SECRET ?? "ndsep_webhook_signing_secret_2026_default",
+  webhookSigningSecret: process.env.WEBHOOK_SIGNING_SECRET ?? "",
   webhookTimeoutMs: parseInt(process.env.WEBHOOK_TIMEOUT_MS ?? "10000", 10),
   webhookMaxRetries: parseInt(process.env.WEBHOOK_MAX_RETRIES ?? "3", 10),
 

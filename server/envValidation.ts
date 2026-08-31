@@ -12,13 +12,15 @@ interface EnvRule {
   name: string;
   insecureDefaults: string[];
   description: string;
+  minimumLength?: number;
 }
 
 const SECURITY_SENSITIVE_VARS: EnvRule[] = [
   {
     name: "JWT_SECRET",
     insecureDefaults: ["", "dev-test-secret-key-at-least-32-chars-long"],
-    description: "Session signing key — unsigned tokens if missing",
+    minimumLength: 32,
+    description: "Session signing key — unsigned tokens if missing or predictable",
   },
   {
     name: "FIELD_ENCRYPTION_KEY",
@@ -38,16 +40,19 @@ const SECURITY_SENSITIVE_VARS: EnvRule[] = [
   {
     name: "API_KEY_SALT",
     insecureDefaults: ["ndsep_api_key_salt_2026_production_default", ""],
+    minimumLength: 32,
     description: "API key hashing salt — predictable hashes if using default",
   },
   {
     name: "WEBHOOK_SIGNING_SECRET",
     insecureDefaults: ["ndsep_webhook_signing_secret_2026_default", ""],
+    minimumLength: 32,
     description: "Webhook signature key — signatures forgeable with default",
   },
   {
     name: "APISIX_ADMIN_KEY",
     insecureDefaults: ["CHANGE_ME_IN_PRODUCTION", ""],
+    minimumLength: 32,
     description: "APISIX admin API key — gateway admin accessible with known key",
   },
   {
@@ -81,6 +86,10 @@ const SECTOR_API_KEYS: EnvRule[] = [
   { name: "CBN_FINTECH_API_KEY", insecureDefaults: ["cbn-fintech-api-key-placeholder", ""], description: "CBN (fintech) regulator API key" },
 ];
 
+function isPlaceholderValue(value: string): boolean {
+  return /(?:CHANGE_ME|PLACEHOLDER|_DEFAULT(?:_|$)|example\.)/i.test(value);
+}
+
 const INFRASTRUCTURE_VARS: EnvRule[] = [
   { name: "LAKEHOUSE_S3_ACCESS_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 access key — using MinIO dev default" },
   { name: "LAKEHOUSE_S3_SECRET_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 secret key — using MinIO dev default" },
@@ -98,7 +107,11 @@ export function validateEnvironment(): void {
 
   for (const rule of SECURITY_SENSITIVE_VARS) {
     const value = process.env[rule.name] ?? "";
-    if (rule.insecureDefaults.includes(value)) {
+    if (
+      rule.insecureDefaults.includes(value) ||
+      isPlaceholderValue(value) ||
+      (rule.minimumLength !== undefined && value.length < rule.minimumLength)
+    ) {
       if (isProduction) {
         errors.push(`  ${rule.name}: ${rule.description}`);
       } else {
@@ -114,6 +127,20 @@ export function validateEnvironment(): void {
     if ((process.env.WORKER_EVENT_HMAC_SECRET ?? "").length < 32) {
       errors.push("  WORKER_EVENT_HMAC_SECRET: must be a high-entropy secret of at least 32 characters");
     }
+    if (!/^[a-f0-9]{64}$/i.test(process.env.FIELD_ENCRYPTION_KEY ?? "")) {
+      errors.push("  FIELD_ENCRYPTION_KEY: must be exactly 32 random bytes encoded as 64 hexadecimal characters");
+    }
+    if ((process.env.LAKEHOUSE_ENABLED ?? "false") === "true") {
+      if (!/^https:\/\//.test(process.env.LAKEHOUSE_CATALOG_URL ?? "")) {
+        errors.push("  LAKEHOUSE_CATALOG_URL: enabled production lakehouse requires an https:// catalog endpoint");
+      }
+      for (const key of ["LAKEHOUSE_S3_ACCESS_KEY", "LAKEHOUSE_S3_SECRET_KEY"]) {
+        const value = process.env[key] ?? "";
+        if (value.length < 16 || value === "minioadmin") {
+          errors.push(`  ${key}: enabled production lakehouse requires a non-default credential of at least 16 characters`);
+        }
+      }
+    }
     if ((process.env.PERMIFY_ENABLED ?? "false") === "true") {
       if (!/^https:\/\//.test(process.env.PERMIFY_URL ?? "")) {
         errors.push("  PERMIFY_URL: enabled production authorization requires an https:// endpoint");
@@ -126,7 +153,11 @@ export function validateEnvironment(): void {
 
   for (const rule of SECTOR_API_KEYS) {
     const value = process.env[rule.name] ?? "";
-    if (rule.insecureDefaults.includes(value)) {
+    if (
+      rule.insecureDefaults.includes(value) ||
+      isPlaceholderValue(value) ||
+      (rule.minimumLength !== undefined && value.length < rule.minimumLength)
+    ) {
       if (isProduction) {
         warnings.push(`  ${rule.name}: ${rule.description} — sector monitor will fail API calls`);
       }
@@ -135,7 +166,11 @@ export function validateEnvironment(): void {
 
   for (const rule of INFRASTRUCTURE_VARS) {
     const value = process.env[rule.name] ?? "";
-    if (rule.insecureDefaults.includes(value)) {
+    if (
+      rule.insecureDefaults.includes(value) ||
+      isPlaceholderValue(value) ||
+      (rule.minimumLength !== undefined && value.length < rule.minimumLength)
+    ) {
       if (isProduction) {
         warnings.push(`  ${rule.name}: ${rule.description}`);
       }

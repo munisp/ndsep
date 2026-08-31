@@ -68,9 +68,9 @@ FLUVIO_ENABLED = os.getenv("FLUVIO_ENABLED", "true").lower() == "true"
 LAKEHOUSE_CATALOG_URL = os.getenv("LAKEHOUSE_CATALOG_URL", "http://localhost:8181")
 LAKEHOUSE_S3_ENDPOINT = os.getenv("LAKEHOUSE_S3_ENDPOINT", "http://localhost:9000")
 LAKEHOUSE_S3_BUCKET = os.getenv("LAKEHOUSE_S3_BUCKET", "ndsep-lakehouse")
-LAKEHOUSE_S3_ACCESS_KEY = os.getenv("LAKEHOUSE_S3_ACCESS_KEY", "minioadmin")
-LAKEHOUSE_S3_SECRET_KEY = os.getenv("LAKEHOUSE_S3_SECRET_KEY", "minioadmin")
-LAKEHOUSE_ENABLED = os.getenv("LAKEHOUSE_ENABLED", "true").lower() == "true"
+LAKEHOUSE_S3_ACCESS_KEY = os.getenv("LAKEHOUSE_S3_ACCESS_KEY", "")
+LAKEHOUSE_S3_SECRET_KEY = os.getenv("LAKEHOUSE_S3_SECRET_KEY", "")
+LAKEHOUSE_ENABLED = os.getenv("LAKEHOUSE_ENABLED", "false").lower() == "true"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 DAPR_HTTP_PORT = os.getenv("DAPR_HTTP_PORT", "3500")
 DAPR_ENABLED = os.getenv("DAPR_ENABLED", "true").lower() == "true"
