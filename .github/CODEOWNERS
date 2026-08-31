@@ -1,0 +1,35 @@
+# NDSEP security and production-release ownership
+#
+# The protected production branch must require code-owner review and at least
+# two independent approvals. This file routes the security-sensitive paths to
+# the repository owner until an authorized administrator replaces or augments
+# it with managed security, platform, and compliance teams.
+#
+# This file does not grant access or replace GitHub branch/environment rules.
+# It is intentionally source-controlled so review routing is auditable.
+
+# Dependency-exception governance and scheduled enforcement
+/.github/security/pnpm-audit-exceptions.json @munisp
+/PNPM_AUDIT_EXCEPTION_POLICY.md @munisp
+/scripts/ci/assert-pnpm-audit.mjs @munisp
+/scripts/ci/weekly-pnpm-exception-audit.mjs @munisp
+/.github/workflows/security-gate.yml @munisp
+/.github/workflows/weekly-exception-governance-audit.yml @munisp
+
+# Release artifact, container, and production startup controls
+/Dockerfile @munisp
+/docker-compose.production.yml @munisp
+/Makefile @munisp
+/scripts/security/ @munisp
+/.github/workflows/ci.yml @munisp
+/.env.production.example @munisp
+
+# Authorization, identity, and policy enforcement
+/server/envValidation.ts @munisp
+/server/workerEventAuth.ts @munisp
+/server/middlewareExtensions.ts @munisp
+/server/opensearchConfig.ts @munisp
+/server/keycloak.ts @munisp
+/server/keycloakAuth.ts @munisp
+/infra/opa/ @munisp
+/orchestration/keycloak/ @munisp
