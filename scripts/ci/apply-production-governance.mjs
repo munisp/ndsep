@@ -79,7 +79,6 @@ export function buildEnvironmentPayload(reviewerId) {
       custom_branch_policies: false,
     },
     prevent_self_review: true,
-    can_admins_bypass: false,
   };
 }
 
@@ -210,6 +209,7 @@ export function buildPlan({ repository, branch, environment, pullRequest, state 
       "Validate .github/CODEOWNERS from the production base branch with GitHub's CODEOWNERS errors endpoint.",
       "Update only pull-request review protection to require two approvals, CODEOWNER review, stale-review dismissal, and last-push approval.",
       "Create or update production-release with required reviewer(s), self-review prevention, and protected-branch-only deployment policy.",
+      "An environment administrator must separately disable administrator bypass in the GitHub environment protection UI; the documented REST payload does not expose that write field.",
       "Run the read-only post-merge governance verifier and retain its live API-backed result.",
     ],
   };
