@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ndsep-ml-candidate-trainer
+  namespace: ndsep-staging
+  labels:
+    app.kubernetes.io/name: ndsep-ml-foundation
+    ndsep.ai/mode: candidate-only
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ndsep-ml-candidate-training
+  namespace: ndsep-staging
+  labels:
+    app.kubernetes.io/name: ndsep-ml-foundation
+    ndsep.ai/mode: candidate-only
+spec:
+  # The job is intentionally disabled until data/model-risk approval, immutable
+  # image digest and storage controls are separately accepted.
+  suspend: true
+  schedule: "0 2 * * 0"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 4
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: ndsep-ml-foundation
+            ndsep.ai/mode: candidate-only
+        spec:
+          serviceAccountName: ndsep-ml-candidate-trainer
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: candidate-trainer
+              # Release automation must replace this deliberately invalid marker
+              # with a directly scanned, signed and admitted immutable digest.
+              image: REPLACE_WITH_SIGNED_ML_FOUNDATION_DIGEST
+              imagePullPolicy: IfNotPresent
+              command: ["python3", "continuous_candidate.py"]
+              args:
+                - --lakehouse-dir
+                - /var/lib/ndsep-ml/lakehouse
+                - --model-output-dir
+                - /var/lib/ndsep-ml/candidate-models
+                - --run-evidence-dir
+                - /var/lib/ndsep-ml/evidence
+                - --signing-key
+                - /var/run/ndsep-model-signer/candidate-model-signing-key.pem
+                - --events
+                - "6000"
+                - --tenants
+                - "12"
+                - --days
+                - "180"
+                - --seed
+                - "20260830"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 2Gi
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
+              volumeMounts:
+                - name: lakehouse
+                  mountPath: /var/lib/ndsep-ml/lakehouse
+                  readOnly: false
+                - name: candidate-models
+                  mountPath: /var/lib/ndsep-ml/candidate-models
+                  readOnly: false
+                - name: evidence
+                  mountPath: /var/lib/ndsep-ml/evidence
+                  readOnly: false
+                - name: signer-key
+                  mountPath: /var/run/ndsep-model-signer
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: lakehouse
+              persistentVolumeClaim:
+                claimName: ndsep-synthetic-lakehouse-pvc
+            - name: candidate-models
+              persistentVolumeClaim:
+                claimName: ndsep-candidate-models-pvc
+            - name: evidence
+              persistentVolumeClaim:
+                claimName: ndsep-ml-candidate-evidence-pvc
+            - name: signer-key
+              secret:
+                secretName: ndsep-ml-candidate-signing
+                defaultMode: 0400
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 128Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ndsep-ml-candidate-training-no-egress
+  namespace: ndsep-staging
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ndsep-ml-foundation
+      ndsep.ai/mode: candidate-only
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress: []
