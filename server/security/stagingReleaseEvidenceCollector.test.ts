@@ -438,6 +438,29 @@ describe("staging release evidence collector", () => {
     expect(existsSync(output)).toBe(false);
   });
 
+  it("rejects malformed nested Trivy result entries before any write", async () => {
+    const source = await createDirectory("ndsep-staging-source-");
+    const output = join(
+      await createDirectory("ndsep-staging-output-parent-"),
+      "bundle"
+    );
+    await writeCompleteEvidence(source);
+    await writeJson(source, "trivy.json", {
+      scanner: "trivy",
+      mode: "direct-image",
+      scanTarget: IMAGE,
+      results: [{ target: "runtime" }],
+    });
+
+    expect(() =>
+      collectStagingReleaseEvidence({
+        sourceDirectory: source,
+        outputDirectory: output,
+      })
+    ).toThrow("trivy.json: results[0].vulnerabilities must be an array");
+    expect(existsSync(output)).toBe(false);
+  });
+
   it("rejects malformed Trivy result collections before any write", async () => {
     const source = await createDirectory("ndsep-staging-source-");
     const output = join(

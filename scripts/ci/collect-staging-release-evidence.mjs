@@ -131,10 +131,13 @@ function validateEvidence(sourceDirectory) {
     Array.isArray(trivy.results),
     "trivy.json: results must be an array"
   );
-  const highCritical = trivy.results.flatMap(result =>
-      Array.isArray(result?.vulnerabilities) ? result.vulnerabilities : []
-    )
-    .filter(finding => ["HIGH", "CRITICAL"].includes(finding?.severity));
+  const highCritical = trivy.results.flatMap((result, index) => {
+    requireCondition(
+      isEvidenceObject(result) && Array.isArray(result.vulnerabilities),
+      `trivy.json: results[${index}].vulnerabilities must be an array`
+    );
+    return result.vulnerabilities;
+  }).filter(finding => ["HIGH", "CRITICAL"].includes(finding?.severity));
   requireCondition(
     highCritical.length === 0,
     `trivy.json: found ${highCritical.length} HIGH/CRITICAL finding(s)`
