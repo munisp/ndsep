@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -13,6 +18,7 @@ import { pathToFileURL } from "node:url";
 
 const IMAGE_REFERENCE = /^[a-z0-9./:_-]+@sha256:([a-f0-9]{64})$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/;
+const ISO_8601_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const REQUIRED_ARTIFACTS = [
   "candidate.json",
   "trivy.json",
@@ -36,8 +42,29 @@ function readJson(directory, filename) {
     existsSync(path),
     `${filename}: required source evidence file is missing`
   );
+  requireCondition(
+    lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(),
+    `${filename}: source evidence must be a regular non-symlink file`
+  );
+  let descriptor;
+  let content;
   try {
-    return { path, value: JSON.parse(readFileSync(path, "utf8")) };
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    requireCondition(
+      fstatSync(descriptor).isFile(),
+      `${filename}: source evidence must be a regular non-symlink file`
+    );
+    content = readFileSync(descriptor);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("regular non-symlink")) {
+      throw error;
+    }
+    throw new Error(`${filename}: source evidence must be a regular non-symlink file`);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  try {
+    return { path, content, value: JSON.parse(content.toString("utf8")) };
   } catch (error) {
     throw new Error(
       `${filename}: must be valid JSON (${error instanceof Error ? error.message : String(error)})`
@@ -45,8 +72,8 @@ function readJson(directory, filename) {
   }
 }
 
-function sha256(path) {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+function sha256(content) {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function digestFromImage(image) {
@@ -72,8 +99,10 @@ function validateEvidence(sourceDirectory) {
     "candidate.json: sourceCommit must be a full lower-case Git SHA"
   );
   requireCondition(
-    Number.isFinite(Date.parse(candidate.builtAt ?? "")),
-    "candidate.json: builtAt must be an ISO-8601 timestamp"
+    typeof candidate.builtAt === "string" &&
+      ISO_8601_UTC.test(candidate.builtAt) &&
+      Number.isFinite(Date.parse(candidate.builtAt)),
+    "candidate.json: builtAt must be an ISO-8601 UTC timestamp"
   );
 
   const trivy = records["trivy.json"].value;
@@ -85,8 +114,11 @@ function validateEvidence(sourceDirectory) {
     trivy.scanTarget === candidate.image,
     "trivy.json: scanTarget must equal candidate image"
   );
-  const highCritical = (Array.isArray(trivy.results) ? trivy.results : [])
-    .flatMap(result =>
+  requireCondition(
+    Array.isArray(trivy.results),
+    "trivy.json: results must be an array"
+  );
+  const highCritical = trivy.results.flatMap(result =>
       Array.isArray(result?.vulnerabilities) ? result.vulnerabilities : []
     )
     .filter(finding => ["HIGH", "CRITICAL"].includes(finding?.severity));
@@ -210,8 +242,10 @@ export function collectStagingReleaseEvidence({
 }) {
   const source = resolve(sourceDirectory);
   requireCondition(
-    existsSync(source) && statSync(source).isDirectory(),
-    "source directory must exist"
+    existsSync(source) &&
+      statSync(source).isDirectory() &&
+      !lstatSync(source).isSymbolicLink(),
+    "source directory must exist and must not be a symbolic link"
   );
   const evidence = validateEvidence(source);
   const manifest = {
@@ -221,7 +255,7 @@ export function collectStagingReleaseEvidence({
     candidate: evidence.candidate,
     files: REQUIRED_ARTIFACTS.map(filename => ({
       filename,
-      sha256: sha256(evidence.records[filename].path),
+      sha256: sha256(evidence.records[filename].content),
     })),
     integrityNotice:
       "This bundle copies validated upstream evidence; it does not perform deployments, scans, signatures, approvals, or compliance determinations.",
@@ -230,16 +264,22 @@ export function collectStagingReleaseEvidence({
   if (!write) return manifest;
   const output = resolve(outputDirectory);
   requireCondition(
+    !existsSync(output) || !lstatSync(output).isSymbolicLink(),
+    "output directory must not be a symbolic link"
+  );
+  requireCondition(
     !existsSync(output) || readdirSync(output).length === 0,
     "output directory must be empty to prevent mixing evidence runs"
   );
   mkdirSync(output, { recursive: true, mode: 0o700 });
+  requireCondition(
+    statSync(output).isDirectory() && !lstatSync(output).isSymbolicLink(),
+    "output directory must be a regular directory"
+  );
   for (const { filename } of manifest.files) {
-    writeFileSync(
-      resolve(output, filename),
-      readFileSync(evidence.records[filename].path),
-      { mode: 0o600 }
-    );
+    writeFileSync(resolve(output, filename), evidence.records[filename].content, {
+      mode: 0o600,
+    });
   }
   writeFileSync(
     resolve(output, "evidence-manifest.json"),
@@ -249,7 +289,7 @@ export function collectStagingReleaseEvidence({
   return manifest;
 }
 
-function parseArguments(argumentsList) {
+export function parseCollectorArguments(argumentsList) {
   const options = { write: false };
   for (let index = 0; index < argumentsList.length; index += 1) {
     const argument = argumentsList[index];
@@ -288,7 +328,7 @@ if (
 ) {
   try {
     const result = collectStagingReleaseEvidence(
-      parseArguments(process.argv.slice(2))
+      parseCollectorArguments(process.argv.slice(2))
     );
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
