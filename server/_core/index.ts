@@ -313,8 +313,12 @@ async function startServer() {
   app.use(express.json({
     limit: "2mb",
     verify: (req, _res, buffer) => {
-      if (req.url?.split("?", 1)[0] === "/api/workers/event") {
+      const path = req.url?.split("?", 1)[0];
+      if (path === "/api/workers/event") {
         (req as express.Request & { rawWorkerEventBody?: Buffer }).rawWorkerEventBody = Buffer.from(buffer);
+      }
+      if (path?.startsWith("/api/mojaloop/transfers/")) {
+        (req as express.Request & { rawMojaloopCallbackBody?: Buffer }).rawMojaloopCallbackBody = Buffer.from(buffer);
       }
     },
   }));

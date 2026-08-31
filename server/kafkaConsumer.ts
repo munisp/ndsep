@@ -15,6 +15,18 @@ import { opensearchIndex, lakehouseIngest } from "./middlewareExtensions";
 const KAFKA_BROKERS = process.env.KAFKA_BROKERS || "localhost:9092";
 const KAFKA_ENABLED = process.env.KAFKA_ENABLED !== "false";
 const CONSUMER_GROUP = "ndsep-api-consumer";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const KAFKA_SASL_USERNAME = process.env.KAFKA_SASL_USERNAME;
+const KAFKA_SASL_PASSWORD = process.env.KAFKA_SASL_PASSWORD;
+
+function assertConsumerConfiguration(): void {
+  if (IS_PRODUCTION && (!KAFKA_SASL_USERNAME || !KAFKA_SASL_PASSWORD)) {
+    throw new Error("Kafka SASL credentials are required in production");
+  }
+  if (IS_PRODUCTION && KAFKA_BROKERS.split(",").some((broker) => /(^|[/:])localhost([/:]|$)/i.test(broker.trim()))) {
+    throw new Error("Kafka localhost broker is not permitted in production");
+  }
+}
 
 // Event-driven handlers for domain-specific reactions
 async function handleBreachEvent(event: KafkaEvent): Promise<void> {
@@ -135,16 +147,23 @@ async function processMessage(topic: string, value: string): Promise<void> {
       promises.push(route.handler(event));
     }
 
-    await Promise.allSettled(promises);
+    // A consumer offset may advance only after every required projection and handler succeeds.
+    await Promise.all(promises);
     metrics.messagesProcessed++;
   } catch (err) {
     metrics.errors++;
-    logger.warn({ err: err instanceof Error ? err.message : String(err), topic }, "[KafkaConsumer] Message processing failed");
-    // Route failed messages to DLQ for exponential backoff retry
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err: message, topic }, "[KafkaConsumer] Message processing failed; refusing offset acknowledgement");
     try {
       const { addToDLQ } = await import("./productionGaps");
-      addToDLQ(topic, `msg-${Date.now()}`, value, err instanceof Error ? err.message : String(err));
-    } catch { /* DLQ module unavailable — message lost */ }
+      const eventId = (() => { try { return String((JSON.parse(value) as KafkaEvent).metadata?.event_id ?? (JSON.parse(value) as KafkaEvent).entity_id ?? "unknown"); } catch { return "malformed"; } })();
+      await Promise.resolve(addToDLQ(topic, `kafka-${eventId}`, value, message));
+    } catch (dlqError) {
+      logger.error({ err: dlqError instanceof Error ? dlqError.message : String(dlqError), topic }, "[KafkaConsumer] DLQ failure; message remains unacknowledged");
+    }
+    // KafkaJS will not commit the offset when eachMessage rejects. A non-production REST
+    // poller also receives this failure for explicit operational visibility.
+    throw err instanceof Error ? err : new Error(message);
   }
 }
 
@@ -161,11 +180,15 @@ export async function startKafkaConsumer(): Promise<void> {
   logger.info({ brokers: KAFKA_BROKERS, group: CONSUMER_GROUP }, "[KafkaConsumer] Starting");
 
   try {
-    // Try KafkaJS (optional dependency)
+    assertConsumerConfiguration();
+    // Production requires authenticated KafkaJS transport. The REST fallback is limited to
+    // explicitly non-production developer environments because it cannot prove commits.
     const { Kafka } = await import("kafkajs");
     const kafka = new Kafka({
       clientId: "ndsep-api",
       brokers: KAFKA_BROKERS.split(","),
+      ssl: IS_PRODUCTION ? true : undefined,
+      sasl: IS_PRODUCTION ? { mechanism: "plain", username: KAFKA_SASL_USERNAME!, password: KAFKA_SASL_PASSWORD! } : undefined,
       retry: { retries: 5, initialRetryTime: 1000, maxRetryTime: 30000 },
       connectionTimeout: 10000,
     });
@@ -189,9 +212,15 @@ export async function startKafkaConsumer(): Promise<void> {
     kafkaClient = consumer;
     logger.info({ topics }, "[KafkaConsumer] Subscribed and running");
   } catch (err) {
-    logger.info({ err: err instanceof Error ? err.message : String(err) }, "[KafkaConsumer] KafkaJS not available, using HTTP polling fallback");
+    metrics.errors++;
+    if (IS_PRODUCTION) {
+      metrics.running = false;
+      logger.error({ err: err instanceof Error ? err.message : String(err) }, "[KafkaConsumer] Production Kafka startup failed; REST polling fallback is forbidden");
+      throw err;
+    }
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[KafkaConsumer] Non-production KafkaJS unavailable; using development REST polling fallback");
 
-    // HTTP polling fallback via Kafka REST proxy (if available at kafka:8082)
+    // HTTP polling fallback is developer-only and never establishes a production delivery claim.
     const REST_URL = process.env.KAFKA_REST_URL || `http://${KAFKA_BROKERS.split(",")[0].replace(":9092", ":8082")}`;
     let running = true;
 
@@ -208,8 +237,9 @@ export async function startKafkaConsumer(): Promise<void> {
               await processMessage(record.topic, JSON.stringify(record.value));
             }
           }
-        } catch {
-          // Silent — REST proxy may not be available
+        } catch (error) {
+          metrics.errors++;
+          logger.warn({ err: error instanceof Error ? error.message : String(error) }, "[KafkaConsumer] Development REST poll failed");
         }
         await new Promise(r => setTimeout(r, 5000)); // Poll every 5s
       }
