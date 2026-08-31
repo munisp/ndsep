@@ -454,6 +454,26 @@ jobs:
           gh attestation verify \
             "oci://${{ steps.image.outputs.ref }}" \
             --repo "$GITHUB_REPOSITORY" > release-evidence/github-provenance-verify.txt
+      - name: Normalize verified candidate evidence for readiness gate
+        if: success()
+        env:
+          EVIDENCE_URI_PREFIX: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/release-evidence-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/normalize-release-evidence.mjs \
+            --image "${{ steps.image.outputs.ref }}" \
+            --source-commit "${{ github.sha }}" \
+            --built-at "${{ github.event.head_commit.timestamp }}" \
+            --trivy release-evidence/trivy-image.json \
+            --trivy-uri "$EVIDENCE_URI_PREFIX/trivy-image.json" \
+            --sbom release-evidence/image-sbom.cdx.json \
+            --sbom-uri "$EVIDENCE_URI_PREFIX/image-sbom.cdx.json" \
+            --provenance release-evidence/github-provenance-verify.txt \
+            --provenance-uri "$EVIDENCE_URI_PREFIX/github-provenance-verify.txt" \
+            --cosign release-evidence/cosign-verify.json \
+            --cosign-uri "$EVIDENCE_URI_PREFIX/cosign-verify.json" \
+            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --out-dir release-evidence
       - name: Upload release evidence
         if: always()
         uses: actions/upload-artifact@v4

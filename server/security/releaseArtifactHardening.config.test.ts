@@ -176,8 +176,16 @@ describe("production release artifact hardening", () => {
     expect(dockerJob).toContain("verify-release-image-evidence.sh");
     expect(dockerJob).toContain("cosign sign --yes");
     expect(dockerJob).toContain("cosign verify");
+    expect(dockerJob).toContain("normalize-release-evidence.mjs");
+    expect(dockerJob).toContain("--out-dir release-evidence");
     expect(dockerJob.indexOf("verify-release-image-evidence.sh")).toBeLessThan(
       dockerJob.indexOf("cosign sign --yes")
+    );
+    expect(dockerJob.indexOf("cosign verify")).toBeLessThan(
+      dockerJob.indexOf("normalize-release-evidence.mjs")
+    );
+    expect(dockerJob.indexOf("normalize-release-evidence.mjs")).toBeLessThan(
+      dockerJob.indexOf("Upload release evidence")
     );
     expect(dockerJob).toContain("release-evidence");
     expect(dockerJob).toContain(
