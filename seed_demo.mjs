@@ -1,14 +1,11 @@
+/**
+ * Synthetic demo fixture only. Requires an explicitly named non-production
+ * PostgreSQL target and SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY.
+ */
 import pg from 'pg';
-import { readFile } from 'fs/promises';
+import { getSyntheticSeedPoolOptions } from './scripts/lib/synthetic-seed-safety.mjs';
 
-if (!process.env.DATABASE_URL) {
-  console.error("DATABASE_URL environment variable is required. Set it before running this script.");
-  process.exit(1);
-}
-const pool = new pg.Pool({ 
-  connectionString: process.env.DATABASE_URL, 
-  ssl: false 
-});
+const pool = new pg.Pool(getSyntheticSeedPoolOptions(process.env));
 
 const client = await pool.connect();
 try {
@@ -82,6 +79,7 @@ try {
   await client.query('ROLLBACK');
   console.error('Seed error:', e.message);
   console.error(e.stack);
+  process.exitCode = 1;
 } finally {
   client.release();
   await pool.end();

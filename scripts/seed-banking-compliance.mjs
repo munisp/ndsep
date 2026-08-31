@@ -5,15 +5,15 @@
  *        nip_transactions, compliance_policies, breach_incidents,
  *        consent_records, data_catalog_entries, enforcement_actions
  *
- * Run: node scripts/seed-banking-compliance.mjs
+ * Synthetic non-production usage only:
+ *   SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY \
+ *     DATABASE_URL=postgresql://.../ndsep_synthetic node scripts/seed-banking-compliance.mjs
  */
 import pg from "pg";
+import { getSyntheticSeedPoolOptions } from "./lib/synthetic-seed-safety.mjs";
 const { Pool } = pg;
 
-const DB_URL = process.env.LOCAL_DATABASE_URL ??
-  (process.env.DATABASE_URL || "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db");
-
-const pool = new Pool({ connectionString: DB_URL, ssl: false });
+const pool = new Pool(getSyntheticSeedPoolOptions(process.env));
 
 async function q(sql, params = []) {
   const client = await pool.connect();

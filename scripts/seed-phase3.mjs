@@ -1,8 +1,11 @@
+/**
+ * Synthetic non-production fixture seed. Requires an explicit named synthetic,
+ * demo, test, sandbox, or staging PostgreSQL database target and confirmation.
+ */
 import pg from "pg";
+import { getSyntheticSeedPoolOptions } from "./lib/synthetic-seed-safety.mjs";
 const { Pool } = pg;
-const pool = new Pool({
-  connectionString: (process.env.DATABASE_URL || "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"),
-});
+const pool = new Pool(getSyntheticSeedPoolOptions(process.env));
 
 async function seed() {
   const client = await pool.connect();
@@ -352,4 +355,7 @@ async function seed() {
   }
 }
 
-seed().catch(console.error);
+seed().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

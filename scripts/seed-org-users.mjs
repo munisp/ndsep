@@ -1,19 +1,13 @@
 /**
  * Seed organization_users table
- * Links existing users to existing organizations for demo data.
+ * Links existing users to existing organizations for synthetic demo data.
+ * Requires SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY and an explicitly
+ * named non-production DATABASE_URL or POSTGRES_URL.
  */
 import pg from "pg";
-import * as dotenv from "dotenv";
-
-dotenv.config();
-
+import { getSyntheticSeedPoolOptions } from "./lib/synthetic-seed-safety.mjs";
 const { Pool } = pg;
-const PG_URL = process.env.LOCAL_DATABASE_URL ?? process.env.DATABASE_URL ?? "postgresql://ndsep_user:changeme@localhost:5432/ndsep_db";
-
-const pool = new Pool({
-  connectionString: PG_URL,
-  ssl: PG_URL.includes("sslmode=require") ? { rejectUnauthorized: false } : false,
-});
+const pool = new Pool(getSyntheticSeedPoolOptions(process.env));
 
 async function seed() {
   const client = await pool.connect();

@@ -11,6 +11,7 @@
 
 import pg from "pg";
 import { getPgSslConfig } from "./dbSslConfig";
+import { getPrimaryDatabasePoolOptions } from "./dbPoolConfig";
 import { logger } from "./logger";
 import { handleError } from "./errorClassifier";
 
@@ -21,17 +22,16 @@ let _replicaAvailable = false;
 export function initReadReplica(): boolean {
   const replicaUrl = process.env.DATABASE_REPLICA_URL;
   if (!replicaUrl) {
+    _replicaAvailable = false;
     logger.info("[ReadReplica] DATABASE_REPLICA_URL not set — using primary for all queries");
     return false;
   }
 
   try {
     _readPool = new pg.Pool({
-      connectionString: replicaUrl,
-      ssl: getPgSslConfig(),
-      max: 20,
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 5_000,
+      ...getPrimaryDatabasePoolOptions(replicaUrl, getPgSslConfig(replicaUrl)),
+      application_name: process.env.DB_REPLICA_APPLICATION_NAME ?? "ndsep-api-read",
+      allowExitOnIdle: process.env.NODE_ENV === "test",
     });
 
     _readPool.on("error", (err) => {

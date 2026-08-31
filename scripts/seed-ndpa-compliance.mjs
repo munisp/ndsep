@@ -1,15 +1,13 @@
 /**
  * NDPA Compliance Tables Seed Script
  * Seeds all 18 new NDPA compliance tables with realistic Nigerian demo data.
- * Uses the DATABASE_URL env var (PostgreSQL via Neon/Supabase).
+ * Synthetic non-production usage only. It requires DATABASE_URL or POSTGRES_URL
+ * and SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY.
  */
 import pg from "pg";
-import dotenv from "dotenv";
-dotenv.config();
-
+import { getSyntheticSeedPoolOptions } from "./lib/synthetic-seed-safety.mjs";
 const { Pool } = pg;
-const DB_URL = process.env.POSTGRES_URL || (process.env.DATABASE_URL || "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db");
-const pool = new Pool({ connectionString: DB_URL, ssl: false });
+const pool = new Pool(getSyntheticSeedPoolOptions(process.env));
 
 async function query(sql, params = []) {
   const client = await pool.connect();

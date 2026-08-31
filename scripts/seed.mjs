@@ -1,33 +1,23 @@
 /**
  * NDSEP Database Seed Script — Nigerian Demo Data
  * Uses correct PostgreSQL schema column names from drizzle/schema.ts
- * Run: pnpm db:seed          (skips if data exists)
- * Run: pnpm db:seed:force    (always re-seeds)
+ * Synthetic non-production usage only:
+ *   SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY \
+ *     DATABASE_URL=postgresql://.../ndsep_synthetic pnpm db:seed
+ *   SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY \
+ *     DATABASE_URL=postgresql://.../ndsep_synthetic FORCE_SEED=1 pnpm db:seed
+ *
+ * Production-labelled targets and NODE_ENV=production are refused.
  */
 import pg from "pg";
-import { readFileSync, existsSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { getSyntheticSeedPoolOptions } from "./lib/synthetic-seed-safety.mjs";
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-const envPath = join(__dir, "..", ".env");
-if (existsSync(envPath)) {
-  const lines = readFileSync(envPath, "utf8").split("\n");
-  for (const line of lines) {
-    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-    if (m) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
-}
 
 const { Pool } = pg;
-// Use local PostgreSQL (not TiDB) — the app uses drizzle-orm/node-postgres
-const DB_URL =
-  process.env.POSTGRES_URL ||
-  (process.env.DATABASE_URL || "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db");
 const FORCE = process.env.FORCE_SEED === "1";
-const pool = new Pool({ connectionString: DB_URL, ssl: false });
 
 async function seed() {
+  const pool = new Pool(getSyntheticSeedPoolOptions(process.env));
   const client = await pool.connect();
   try {
     console.log("🌱 Seeding NDSEP database with Nigerian demo data...");
@@ -322,4 +312,7 @@ async function seed() {
   }
 }
 
-seed().catch(console.error);
+seed().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
