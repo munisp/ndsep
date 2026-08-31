@@ -76,6 +76,10 @@ function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
 }
 
+function isEvidenceObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function digestFromImage(image) {
   const match = String(image ?? "").match(IMAGE_REFERENCE);
   requireCondition(
@@ -92,17 +96,26 @@ function validateEvidence(sourceDirectory) {
       return [filename, record];
     })
   );
+  for (const filename of REQUIRED_ARTIFACTS) {
+    requireCondition(
+      isEvidenceObject(records[filename].value),
+      `${filename}: must be a JSON object`
+    );
+  }
   const candidate = records["candidate.json"].value;
   const digest = digestFromImage(candidate.image);
   requireCondition(
     COMMIT_SHA.test(candidate.sourceCommit ?? ""),
     "candidate.json: sourceCommit must be a full lower-case Git SHA"
   );
+  const builtAt = candidate.builtAt;
+  const builtAtEpoch = typeof builtAt === "string" ? Date.parse(builtAt) : NaN;
   requireCondition(
-    typeof candidate.builtAt === "string" &&
-      ISO_8601_UTC.test(candidate.builtAt) &&
-      Number.isFinite(Date.parse(candidate.builtAt)),
-    "candidate.json: builtAt must be an ISO-8601 UTC timestamp"
+    typeof builtAt === "string" &&
+      ISO_8601_UTC.test(builtAt) &&
+      Number.isFinite(builtAtEpoch) &&
+      new Date(builtAtEpoch).toISOString() === builtAt,
+    "candidate.json: builtAt must be a canonical ISO-8601 UTC timestamp"
   );
 
   const trivy = records["trivy.json"].value;

@@ -392,7 +392,49 @@ describe("staging release evidence collector", () => {
         sourceDirectory: source,
         outputDirectory: output,
       })
-    ).toThrow("candidate.json: builtAt must be an ISO-8601 UTC timestamp");
+    ).toThrow("candidate.json: builtAt must be a canonical ISO-8601 UTC timestamp");
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it("rejects an invalid calendar timestamp even when it matches the UTC shape", async () => {
+    const source = await createDirectory("ndsep-staging-source-");
+    const output = join(
+      await createDirectory("ndsep-staging-output-parent-"),
+      "bundle"
+    );
+    await writeCompleteEvidence(source);
+    await writeJson(source, "candidate.json", {
+      image: IMAGE,
+      sourceCommit: "b".repeat(40),
+      builtAt: "2026-02-30T20:00:00.000Z",
+    });
+
+    expect(() =>
+      collectStagingReleaseEvidence({
+        sourceDirectory: source,
+        outputDirectory: output,
+      })
+    ).toThrow(
+      "candidate.json: builtAt must be a canonical ISO-8601 UTC timestamp"
+    );
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it("rejects non-object upstream evidence records before field access", async () => {
+    const source = await createDirectory("ndsep-staging-source-");
+    const output = join(
+      await createDirectory("ndsep-staging-output-parent-"),
+      "bundle"
+    );
+    await writeCompleteEvidence(source);
+    await writeJson(source, "service-matrix.json", []);
+
+    expect(() =>
+      collectStagingReleaseEvidence({
+        sourceDirectory: source,
+        outputDirectory: output,
+      })
+    ).toThrow("service-matrix.json: must be a JSON object");
     expect(existsSync(output)).toBe(false);
   });
 
