@@ -16,6 +16,7 @@
     "seed:all": "node scripts/seed-comprehensive.mjs",
     "seed:all:force": "FORCE_SEED=1 node scripts/seed-comprehensive.mjs",
     "seed:verify": "node scripts/verify-synthetic-seed-coverage.mjs",
+    "seed:verify:scenario": "node scripts/verify-synthetic-fixture-scenario.mjs",
     "e2e": "playwright test",
     "e2e:release-smoke": "playwright test e2e/release-smoke.spec.ts",
     "e2e:release-smoke:chromium": "playwright test e2e/release-smoke.spec.ts --project=chromium --workers=1 --timeout=30000 --global-timeout=300000",
