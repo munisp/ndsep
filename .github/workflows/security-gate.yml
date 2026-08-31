@@ -220,8 +220,8 @@ jobs:
           set -euo pipefail
           test -f drizzle/0035_digital_twin_noc_runtime_schema.sql
           grep -Fq '"tag": "0035_digital_twin_noc_runtime_schema"' drizzle/meta/_journal.json
-          ! rg -n -i '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0035_digital_twin_noc_runtime_schema.sql
-          test "$(rg -c '^CREATE TABLE' drizzle/0035_digital_twin_noc_runtime_schema.sql)" -ge 17
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0035_digital_twin_noc_runtime_schema.sql
+          test "$(grep -Ec '^CREATE TABLE' drizzle/0035_digital_twin_noc_runtime_schema.sql)" -ge 17
       - name: Validate fixture-script syntax and explicit refusal paths
         shell: bash
         run: |
