@@ -79,6 +79,7 @@ export function buildEnvironmentPayload(reviewerId) {
       custom_branch_policies: false,
     },
     prevent_self_review: true,
+    can_admins_bypass: false,
   };
 }
 
@@ -103,6 +104,7 @@ export function assessRootGaps({ pullRequest, codeowners, codeownersErrors, prot
   if (environment?.name !== DEFAULT_ENVIRONMENT) gaps.push("production-release-missing");
   if (requiredReviewers.length === 0) gaps.push("production-release-reviewers-missing");
   if (environment?.prevent_self_review !== true) gaps.push("production-release-self-review-denial-disabled");
+  if (environment?.can_admins_bypass !== false) gaps.push("production-release-admin-bypass-enabled");
   if (policy.protected_branches !== true || policy.custom_branch_policies !== false) gaps.push("production-release-branch-policy-disabled");
 
   return gaps;

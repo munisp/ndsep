@@ -87,6 +87,7 @@ function evaluatePostMergeGovernance({ owner, repo, branch, pullRequest, evidenc
   requireCondition(errors, environment.name === "production-release", "production-release: environment is missing or misnamed");
   requireCondition(errors, requiredReviewerRule?.reviewers?.length > 0, "production-release: required reviewer protection is absent");
   requireCondition(errors, environment.prevent_self_review === true, "production-release: self-review prevention is disabled");
+  requireCondition(errors, environment.can_admins_bypass === false, "production-release: administrator bypass is enabled");
   requireCondition(errors, branchPolicy.protected_branches === true && branchPolicy.custom_branch_policies === false, "production-release: protected-branch deployment policy is not enforced");
   requireCondition(errors, waitTimerRule === undefined || Number(waitTimerRule.wait_timer ?? 0) >= 0, "production-release: invalid wait-timer rule");
 

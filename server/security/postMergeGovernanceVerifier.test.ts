@@ -35,6 +35,7 @@ async function writePassingFixtures(directory: string) {
     name: "production-release",
     protection_rules: [{ type: "required_reviewers", reviewers: [{ type: "User", id: 123 }] }],
     prevent_self_review: true,
+    can_admins_bypass: false,
     deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
   });
   await writeFixture(directory, "pr19.json", {
@@ -81,6 +82,22 @@ describe("post-merge governance verifier", () => {
     const result = verifyPostMergeGovernance({ repository: "munisp/ndsep", branch: "production", pullRequest: 19, fixtureDirectory: directory });
     expect(result.status).toBe("blocked");
     expect(result.errors).toContain("production: required CODEOWNER review is disabled");
+  });
+
+  it("fails closed when the protected release environment permits administrator bypass", async () => {
+    const directory = await createFixtureDirectory();
+    await writePassingFixtures(directory);
+    await writeFixture(directory, "production-release-environment.json", {
+      name: "production-release",
+      protection_rules: [{ type: "required_reviewers", reviewers: [{ type: "User", id: 123 }] }],
+      prevent_self_review: true,
+      can_admins_bypass: true,
+      deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
+    });
+
+    const result = verifyPostMergeGovernance({ repository: "munisp/ndsep", branch: "production", pullRequest: 19, fixtureDirectory: directory });
+    expect(result.status).toBe("blocked");
+    expect(result.errors).toContain("production-release: administrator bypass is enabled");
   });
 
   it("fails closed when the bootstrap pull request is not merged", async () => {

@@ -27,6 +27,7 @@ function passingState() {
       name: "production-release",
       protection_rules: [{ type: "required_reviewers", reviewers: [{ type: "User", id: 42 }] }],
       prevent_self_review: true,
+      can_admins_bypass: false,
       deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
     },
   };
@@ -48,6 +49,7 @@ describe("production governance automation", () => {
       reviewers: [{ type: "User", id: 42 }],
       deployment_branch_policy: { protected_branches: true, custom_branch_policies: false },
       prevent_self_review: true,
+      can_admins_bypass: false,
     });
     expect(() => buildEnvironmentPayload(0)).toThrow("Reviewer ID must be a positive integer");
   });
@@ -72,6 +74,7 @@ describe("production governance automation", () => {
         "production-release-missing",
         "production-release-reviewers-missing",
         "production-release-self-review-denial-disabled",
+        "production-release-admin-bypass-enabled",
         "production-release-branch-policy-disabled",
       ])
     );
