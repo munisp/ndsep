@@ -127,6 +127,25 @@ describe("production release artifact hardening", () => {
     expect(workflow).toMatch(
       /needs:\s*\[\s*node-ci,\s*go-ci,\s*go-orchestration-ci,\s*python-ci,\s*rust-ci,\s*security,\s*integration,?\s*\]/
     );
+    expect(workflow).toMatch(
+      /docker:\s*\n\s+name: Docker Build & Push[\s\S]*?environment:\s*\n\s+name: production-release/
+    );
+  });
+
+  it("routes exception and release-control changes to an accountable code owner", async () => {
+    const codeownersPath = resolve(root, ".github/CODEOWNERS");
+    const codeowners = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(codeownersPath, "utf8")
+    );
+    for (const ownedPath of [
+      "/.github/security/pnpm-audit-exceptions.json @munisp",
+      "/PNPM_AUDIT_EXCEPTION_POLICY.md @munisp",
+      "/scripts/ci/weekly-pnpm-exception-audit.mjs @munisp",
+      "/.github/workflows/security-gate.yml @munisp",
+      "/.github/workflows/ci.yml @munisp",
+    ]) {
+      expect(codeowners).toContain(ownedPath);
+    }
   });
 
   it("refuses direct registry publication and validates image locks before production Compose startup", async () => {

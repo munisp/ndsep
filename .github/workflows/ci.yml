@@ -344,6 +344,10 @@ jobs:
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
+    # This environment must be created and protected by an authorized GitHub
+    # administrator. Its reviewers gate registry publication after all CI passes.
+    environment:
+      name: production-release
     needs:
       [
         node-ci,
