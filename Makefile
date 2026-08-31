@@ -135,19 +135,17 @@ workers-clean: ## Remove compiled worker binaries
 	rm -rf $(RUST_DIR)/target/release/
 
 # ─── Docker ───────────────────────────────────────────────────────────────────
-docker-build: ## Build Docker image
-	@echo "$(GREEN)Building Docker image $(DOCKER_REPO):$(DOCKER_TAG)...$(RESET)"
+docker-build: ## Build a local development image only; production publishing is protected CI only
+	@echo "$(GREEN)Building local development image $(DOCKER_REPO):dev-$(DOCKER_TAG)...$(RESET)"
 	docker build \
 	  --build-arg APP_VERSION=$(APP_VERSION) \
 	  --build-arg BUILD_DATE=$(shell date -u +%Y-%m-%dT%H:%M:%SZ) \
-	  -t $(DOCKER_REPO):$(DOCKER_TAG) \
-	  -t $(DOCKER_REPO):latest \
+	  -t $(DOCKER_REPO):dev-$(DOCKER_TAG) \
 	  .
 
-docker-push: ## Push Docker image to registry
-	@echo "$(GREEN)Pushing $(DOCKER_REPO):$(DOCKER_TAG)...$(RESET)"
-	docker push $(DOCKER_REPO):$(DOCKER_TAG)
-	docker push $(DOCKER_REPO):latest
+docker-push: ## Refuse direct image publication; use the protected production workflow
+	@echo "$(RED)Direct image publishing is disabled. Merge an approved candidate through the protected production CI workflow.$(RESET)"
+	@false
 
 docker-up: ## Start all infrastructure services (dev)
 	@echo "$(GREEN)Starting infrastructure services...$(RESET)"
@@ -160,8 +158,13 @@ docker-down: ## Stop all infrastructure services
 docker-logs: ## Follow logs for all services
 	docker compose logs -f
 
-docker-prod-up: ## Start production stack
-	docker compose -f docker-compose.production.yml up -d --wait
+docker-prod-up: ## Start production stack only after rendered configuration has immutable image digests
+	@test -n "$(PRODUCTION_ENV_FILE)" || (echo "$(RED)Set PRODUCTION_ENV_FILE to an approved production environment file$(RESET)" && exit 1)
+	@tmp_config=$$(mktemp); \
+	  trap 'rm -f "$$tmp_config"' EXIT; \
+	  docker compose --env-file "$(PRODUCTION_ENV_FILE)" -f docker-compose.production.yml config > "$$tmp_config"; \
+	  bash scripts/security/verify-production-image-lock.sh "$$tmp_config"; \
+	  docker compose --env-file "$(PRODUCTION_ENV_FILE)" -f docker-compose.production.yml up -d --wait
 
 docker-prod-down: ## Stop production stack
 	docker compose -f docker-compose.production.yml down
