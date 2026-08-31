@@ -14,6 +14,7 @@
     "db:seed": "node scripts/seed.mjs",
     "db:seed:force": "FORCE_SEED=1 node scripts/seed.mjs",
     "seed:all": "node scripts/seed-comprehensive.mjs",
+    "seed:remaining": "node scripts/seed-remaining-synthetic-fixtures.mjs",
     "seed:all:force": "FORCE_SEED=1 node scripts/seed-comprehensive.mjs",
     "seed:verify": "node scripts/verify-synthetic-seed-coverage.mjs",
     "seed:verify:scenario": "node scripts/verify-synthetic-fixture-scenario.mjs",

@@ -245,6 +245,13 @@
       "when": 1786640400000,
       "tag": "0034_dpco_final_lifecycle_identifier_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1788219175186,
+      "tag": "0035_digital_twin_noc_runtime_schema",
+      "breakpoints": true
     }
   ]
 }

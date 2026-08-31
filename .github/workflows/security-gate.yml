@@ -171,6 +171,78 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  evidence-contract-verification:
+    name: evidence-contract-verification
+    # Source-level verification only: this job has no deployment environment,
+    # no write token, no database target, and no access to production secrets.
+    # It verifies the code that will later reject malformed governance and
+    # release-evidence records; it cannot manufacture such evidence.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      NODE_VERSION: "22"
+      PNPM_VERSION: "10.34.4"
+      NODE_ENV: test
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up patched pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install locked dependency graph without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Type-check verifier and seed-control boundaries
+        run: pnpm exec tsc --noEmit
+      - name: Verify fixture, governance, and evidence anti-tampering controls
+        run: |
+          pnpm exec vitest run \
+            server/security/syntheticSeedSafety.test.ts \
+            server/security/syntheticFixturePlan.test.ts \
+            server/security/stagingReleaseEvidenceCollector.test.ts \
+            server/security/releaseEvidenceNormalizer.test.ts \
+            server/security/postMergeGovernanceVerifier.test.ts \
+            server/security/releaseArtifactHardening.config.test.ts \
+            --maxWorkers=1
+      - name: Verify schema-only reconciliation migration is DDL-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f drizzle/0035_digital_twin_noc_runtime_schema.sql
+          grep -Fq '"tag": "0035_digital_twin_noc_runtime_schema"' drizzle/meta/_journal.json
+          ! rg -n -i '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0035_digital_twin_noc_runtime_schema.sql
+          test "$(rg -c '^CREATE TABLE' drizzle/0035_digital_twin_noc_runtime_schema.sql)" -ge 17
+      - name: Validate fixture-script syntax and explicit refusal paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/seed-remaining-synthetic-fixtures.mjs
+          node --check scripts/verify-synthetic-fixture-scenario.mjs
+          set +e
+          env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test node scripts/seed-remaining-synthetic-fixtures.mjs > refusal.log 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -Fq 'SYNTHETIC_SEED_CONFIRMATION' refusal.log
+      - name: Upload source-control verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-contract-verification-${{ github.sha }}
+          path: refusal.log
+          if-no-files-found: warn
+          retention-days: 90
+
   security-gate:
     name: security-gate
     runs-on: ubuntu-24.04
@@ -178,6 +250,7 @@ jobs:
       - dependency-review
       - pnpm-audit-baseline
       - filesystem-vulnerability-scan
+      - evidence-contract-verification
     # Ensure the check is unambiguously failed if any required scanner failed.
     if: always()
     steps:
@@ -188,6 +261,7 @@ jobs:
           echo "dependency-review=${{ needs.dependency-review.result }}"
           echo "pnpm-audit-baseline=${{ needs.pnpm-audit-baseline.result }}"
           echo "filesystem-vulnerability-scan=${{ needs.filesystem-vulnerability-scan.result }}"
+          echo "evidence-contract-verification=${{ needs.evidence-contract-verification.result }}"
 
           # dependency-review is skipped only on non-PR events.
           if [[ "${{ github.event_name }}" == "pull_request" && "${{ needs.dependency-review.result }}" != "success" ]]; then
@@ -195,6 +269,7 @@ jobs:
           fi
           [[ "${{ needs.pnpm-audit-baseline.result }}" == "success" ]]
           [[ "${{ needs.filesystem-vulnerability-scan.result }}" == "success" ]]
+          [[ "${{ needs.evidence-contract-verification.result }}" == "success" ]]
 
           {
             echo "# Security Gate"
