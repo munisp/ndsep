@@ -55,6 +55,21 @@ const SECURITY_SENSITIVE_VARS: EnvRule[] = [
     insecureDefaults: [""],
     description: "PostgreSQL connection string — server cannot function without DB",
   },
+  {
+    name: "REDIS_URL",
+    insecureDefaults: ["", "redis://localhost:6379"],
+    description: "Redis transport — production rate limiting and replay protection require a non-default TLS endpoint",
+  },
+  {
+    name: "WORKER_EVENT_HMAC_SECRET",
+    insecureDefaults: [""],
+    description: "Worker-event authentication secret — unsigned worker events must not be accepted",
+  },
+  {
+    name: "CORS_ORIGINS",
+    insecureDefaults: ["", "*"],
+    description: "CORS origin allow-list — wildcard origins are not permitted in production",
+  },
 ];
 
 const SECTOR_API_KEYS: EnvRule[] = [
@@ -89,6 +104,15 @@ export function validateEnvironment(): void {
       } else {
         warnings.push(`  ${rule.name}: ${rule.description} (using dev default)`);
       }
+    }
+  }
+
+  if (isProduction) {
+    if (!/^rediss:\/\//.test(process.env.REDIS_URL ?? "")) {
+      errors.push("  REDIS_URL: production replay protection requires a rediss:// endpoint with a private CA/identity policy");
+    }
+    if ((process.env.WORKER_EVENT_HMAC_SECRET ?? "").length < 32) {
+      errors.push("  WORKER_EVENT_HMAC_SECRET: must be a high-entropy secret of at least 32 characters");
     }
   }
 

@@ -72,6 +72,7 @@ import { registerMobileApi } from "../mobileApi";
 import { registerMojaloopCallbacks } from "../mojaloopCallback";
 import { sdk } from "./sdk";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { validateWorkerEventShape, verifyWorkerEventSignature, workerEventNonceKey, WORKER_EVENT_MAX_AGE_MS } from "../workerEventAuth";
 import { getSessionCookieOptions } from "./cookies";
 
 // ─── Startup time for uptime calculation ─────────────────────────────────────
@@ -163,6 +164,38 @@ const authLimiter = rateLimit({
   ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:auth:") } : {}),
 });
 /** Worker event relay: configurable per minute (internal workers) */
+const workerNonceMemory = new Map<string, number>();
+let workerNonceRedis: Redis | undefined;
+
+async function claimWorkerEventNonce(workerId: string, nonce: string): Promise<boolean> {
+  const key = workerEventNonceKey(workerId, nonce);
+  const now = Date.now();
+  const ttlMs = WORKER_EVENT_MAX_AGE_MS;
+  if (process.env.NODE_ENV === "production") {
+    try {
+      if (!workerNonceRedis) {
+        workerNonceRedis = new Redis(process.env.REDIS_URL!, {
+          lazyConnect: true,
+          maxRetriesPerRequest: 1,
+          enableOfflineQueue: false,
+          tls: process.env.REDIS_URL?.startsWith("rediss:") ? {} : undefined,
+        });
+      }
+      if (workerNonceRedis.status === "wait") await workerNonceRedis.connect();
+      return await workerNonceRedis.set(key, "1", "PX", ttlMs, "NX") === "OK";
+    } catch (err) {
+      logger.error({ err, workerId }, "[WorkerEvent] nonce store unavailable; rejecting event");
+      return false;
+    }
+  }
+  workerNonceMemory.forEach((expiresAt, existing) => {
+    if (expiresAt <= now) workerNonceMemory.delete(existing);
+  });
+  if (workerNonceMemory.has(key)) return false;
+  workerNonceMemory.set(key, now + ttlMs);
+  return true;
+}
+
 const workerLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WORKER_WINDOW_MS ?? "60000", 10),
   max: parseInt(process.env.RATE_LIMIT_WORKER_MAX ?? "500", 10),
@@ -277,7 +310,14 @@ async function startServer() {
   );
 
   // ── Body parsers ─────────────────────────────────────────────────────────
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({
+    limit: "2mb",
+    verify: (req, _res, buffer) => {
+      if (req.url?.split("?", 1)[0] === "/api/workers/event") {
+        (req as express.Request & { rawWorkerEventBody?: Buffer }).rawWorkerEventBody = Buffer.from(buffer);
+      }
+    },
+  }));
   app.use(express.urlencoded({ limit: "2mb", extended: true }));
 
   // ── WAF + API Gateway ────────────────────────────────────────────────────
@@ -463,7 +503,7 @@ async function startServer() {
     const runningWorkers = workers.filter(w => w.status === "running").length;
     const totalWorkers = workers.length;
 
-    const ready = dbOk;
+    const ready = dbOk && (!isProd || redisOk);
     res.status(ready ? 200 : 503).json({
       status: ready ? "ready" : "not_ready",
       checks: {
@@ -650,10 +690,40 @@ async function startServer() {
   );
 
   // ── Worker event relay endpoint ───────────────────────────────────────────
-  app.post("/api/workers/event", (req, res) => {
-    const { event, data } = req.body;
-    if (event && data) broadcast(event, data);
-    res.json({ ok: true });
+  // Every production event must be authenticated by a supervised worker using a
+  // shared secret injected at deployment time. The signed string includes a body
+  // hash, identity, timestamp and nonce; the nonce is claimed atomically in Redis.
+  app.post("/api/workers/event", async (req, res) => {
+    const workerId = String(req.header("x-ndsep-worker-id") ?? "");
+    const timestamp = String(req.header("x-ndsep-event-timestamp") ?? "");
+    const nonce = String(req.header("x-ndsep-event-nonce") ?? "");
+    const signature = String(req.header("x-ndsep-event-signature") ?? "");
+    const shapeError = validateWorkerEventShape(workerId, req.body?.event, req.body?.data);
+    if (shapeError) {
+      res.status(400).json({ error: "invalid_worker_event", detail: shapeError });
+      return;
+    }
+    const rawBody = (req as express.Request & { rawWorkerEventBody?: Buffer }).rawWorkerEventBody;
+    if (!rawBody) {
+      logger.error({ workerId }, "[WorkerEvent] exact request bytes unavailable; rejecting event");
+      res.status(503).json({ error: "worker_event_verification_unavailable" });
+      return;
+    }
+    const verificationError = verifyWorkerEventSignature(process.env.WORKER_EVENT_HMAC_SECRET ?? "", {
+      workerId, timestamp, nonce, signature, rawBody,
+    });
+    if (verificationError) {
+      logger.warn({ workerId, reason: verificationError }, "[WorkerEvent] rejected unauthenticated event");
+      res.status(401).json({ error: "worker_event_authentication_failed" });
+      return;
+    }
+    if (!(await claimWorkerEventNonce(workerId, nonce))) {
+      logger.warn({ workerId }, "[WorkerEvent] rejected replayed event or unavailable nonce store");
+      res.status(409).json({ error: "worker_event_replay_or_nonce_store_unavailable" });
+      return;
+    }
+    broadcast(req.body.event, { ...req.body.data, _worker_id: workerId, _event_timestamp: timestamp });
+    res.status(202).json({ accepted: true, workerId, timestamp });
   });
 
   // ── Worker status endpoint ────────────────────────────────────────────────
