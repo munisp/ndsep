@@ -70,6 +70,20 @@ describe("production environment hardening", () => {
     expect(() => validateEnvironment()).not.toThrow();
   });
 
+  it("rejects browser origins that are plaintext, local, credentialed, or path-bearing", () => {
+    for (const origin of [
+      "http://ndsep.operations.gov.ng",
+      "https://localhost:3000",
+      "https://user:pass@ndsep.operations.gov.ng",
+      "https://ndsep.operations.gov.ng/api",
+    ]) {
+      applyProductionEnvironment({ CORS_ORIGINS: origin });
+      expect(() => validateEnvironment()).toThrow(
+        /CORS_ORIGINS: production origins must be explicit HTTPS origins/
+      );
+    }
+  });
+
   it("rejects weak or absent signing material instead of accepting application defaults", () => {
     applyProductionEnvironment({
       API_KEY_SALT: "short",

@@ -90,6 +90,30 @@ function isPlaceholderValue(value: string): boolean {
   return /(?:CHANGE_ME|PLACEHOLDER|_DEFAULT(?:_|$)|example\.)/i.test(value);
 }
 
+function invalidProductionCorsOrigins(value: string): string[] {
+  const origins = value.split(",").map((origin) => origin.trim()).filter(Boolean);
+  if (origins.length === 0) return ["CORS_ORIGINS must contain at least one explicit HTTPS origin"];
+
+  const errors: string[] = [];
+  for (const origin of origins) {
+    try {
+      const url = new URL(origin);
+      if (
+        url.protocol !== "https:" ||
+        url.origin !== origin ||
+        url.username ||
+        url.password ||
+        ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+      ) {
+        errors.push(origin);
+      }
+    } catch {
+      errors.push(origin);
+    }
+  }
+  return errors;
+}
+
 const INFRASTRUCTURE_VARS: EnvRule[] = [
   { name: "LAKEHOUSE_S3_ACCESS_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 access key — using MinIO dev default" },
   { name: "LAKEHOUSE_S3_SECRET_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 secret key — using MinIO dev default" },
@@ -123,6 +147,10 @@ export function validateEnvironment(): void {
   if (isProduction) {
     if (!/^rediss:\/\//.test(process.env.REDIS_URL ?? "")) {
       errors.push("  REDIS_URL: production replay protection requires a rediss:// endpoint with a private CA/identity policy");
+    }
+    const invalidCorsOrigins = invalidProductionCorsOrigins(process.env.CORS_ORIGINS ?? "");
+    if (invalidCorsOrigins.length > 0) {
+      errors.push(`  CORS_ORIGINS: production origins must be explicit HTTPS origins without paths, credentials, or localhost values (${invalidCorsOrigins.join(", ")})`);
     }
     if ((process.env.WORKER_EVENT_HMAC_SECRET ?? "").length < 32) {
       errors.push("  WORKER_EVENT_HMAC_SECRET: must be a high-entropy secret of at least 32 characters");
