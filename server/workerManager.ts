@@ -53,6 +53,7 @@ export interface WorkerDef {
 const _rawDbUrl = getDatabaseUrl();
 const DB_URL = _rawDbUrl.includes("sslmode=") ? _rawDbUrl : _rawDbUrl + "?sslmode=disable";
 const RELAY_URL = process.env.WORKER_RELAY_URL ?? "http://localhost:3000/api/workers/event";
+const ENABLE_CANDIDATE_ML_FOUNDATION = process.env.NDSEP_ENABLE_CANDIDATE_ML_FOUNDATION === "true";
 
 export const WORKER_DEFS: WorkerDef[] = [
   {
@@ -124,6 +125,21 @@ export const WORKER_DEFS: WorkerDef[] = [
       "scikit-learn Random Forest risk classification + Isolation Forest anomaly detection. Runs predictions every 25 seconds.",
     technology: "Python · scikit-learn · numpy · Apache Sedona · Ray",
   },
+  ...(ENABLE_CANDIDATE_ML_FOUNDATION ? [{
+    id: "ml-foundation-candidate",
+    name: "CPU Candidate ML Foundation",
+    layer: "L6",
+    language: "Python" as const,
+    command: "python3",
+    args: [path.join(PYTHON_DIR, "ml_foundation", "service.py")],
+    port: 8251,
+    env: {
+      NDSEP_ML_PORT: "8251",
+      NDSEP_ML_MODEL_DIR: process.env.NDSEP_ML_MODEL_DIR ?? "/var/lib/ndsep-ml/models",
+    },
+    description: "Signed synthetic-only CPU MLP and GraphSAGE candidate inference. Returns human-review support only; no automated enforcement.",
+    technology: "Python · PyTorch CPU · PyTorch Geometric · signed artifacts",
+  }] : []),
   {
     id: "siem-correlator",
     name: "SIEM Alert Correlator",

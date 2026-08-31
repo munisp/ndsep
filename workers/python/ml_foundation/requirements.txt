@@ -1,0 +1,17 @@
+# NDSEP ML Foundation — CPU-only candidate training
+# Production deployment must install from a locked, hash-pinned requirements file.
+torch==2.13.0+cpu
+torch-geometric==2.8.0.post1
+ray[train]==2.58.0
+duckdb==1.5.5
+pyarrow==25.0.1
+numpy>=1.26,<3
+scikit-learn==1.9.0
+fastapi>=0.104,<1
+uvicorn[standard]>=0.24,<1
+cryptography>=42,<51
+pydantic>=2,<3
+
+# This package intentionally does not depend on Neo4j, cloud credentials, or a
+# regulated source system. It is synthetic-only until an approved governed
+# Lakehouse dataset contract is separately implemented.

@@ -250,6 +250,7 @@ import {
 import { phase12Router } from "./routers/phase12Features";
 import { phase13Router } from "./routers/phase13Features";
 import { productionReadinessRouter } from "./routers/productionReadiness";
+import { mlFoundationRouter } from "./routers/mlFoundation";
 import { temporalRouter, searchRouter as opensearchRouter, wafRouter, gatewayRouter, authzRouter, kafkaMetricsRouter, ledgerRouter } from "./routers/middlewareWiring";
 import { osirisIntelRouter } from "./routers/osirisIntel";
 import { socintRouter } from "./routers/socint";
@@ -316,6 +317,7 @@ export const appRouter = router({
   insurance: insuranceRouter,
   fintech: fintechRouter,
   workflows: workflowRouter,
+  mlFoundation: mlFoundationRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(async ({ ctx }) => {
