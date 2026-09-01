@@ -214,6 +214,7 @@ jobs:
             server/security/postMergeGovernanceVerifier.test.ts \
             server/security/releaseArtifactHardening.config.test.ts \
             server/security/breakGlassEmergencyRelease.test.ts \
+            server/security/breakGlassSiemPagerIntegration.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only
         shell: bash
@@ -231,6 +232,8 @@ jobs:
           node --check scripts/verify-synthetic-fixture-scenario.mjs
           node --check scripts/ci/verify-break-glass-authorization.mjs
           node --check scripts/ci/generate-break-glass-evidence.mjs
+          node --check scripts/ci/verify-break-glass-evidence.mjs
+          node --check scripts/ci/publish-break-glass-alerts.mjs
           set +e
           env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test node scripts/seed-remaining-synthetic-fixtures.mjs > refusal.log 2>&1
           status=$?

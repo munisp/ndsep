@@ -19,6 +19,11 @@ on:
         description: "Type AUTHORIZE_DIGEST_BOUND_BREAK_GLASS to create a one-time authorization evidence pack"
         required: true
         type: string
+      alert_delivery_confirm:
+        description: "Optional: type DELIVER_SANITIZED_BREAK_GLASS_EVENTS only after confirming protected SIEM and PagerDuty routes"
+        required: false
+        default: ""
+        type: string
 
 permissions: {}
 
@@ -194,12 +199,47 @@ jobs:
             '{schemaVersion:"ndsep.break-glass-attestation-reference.v1", attestationId:$id, attestationUrl:$url}' \
             > break-glass-evidence/github-attestation-reference.json
 
-      - name: Upload break-glass evidence
+      - name: Verify hash-chained evidence before external disclosure
+        if: success()
+        run: |
+          set -euo pipefail
+          node scripts/ci/verify-break-glass-evidence.mjs \
+            --evidence-dir break-glass-evidence
+
+      - name: Render sanitized SIEM and pager delivery preview
+        if: success() && inputs.alert_delivery_confirm != 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS'
+        run: |
+          set -euo pipefail
+          node scripts/ci/publish-break-glass-alerts.mjs \
+            --evidence-dir break-glass-evidence \
+            --out-dir break-glass-alert-delivery
+
+      - name: Deliver sanitized SIEM and PagerDuty alerts
+        if: success() && inputs.alert_delivery_confirm == 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS'
+        env:
+          BREAK_GLASS_DELIVERY_CONFIRMATION: DELIVER_SANITIZED_BREAK_GLASS_EVENTS
+          BREAK_GLASS_ALERT_DELIVERY_POLICY: .github/security/break-glass-alert-delivery-policy.json
+          BREAK_GLASS_SIEM_MODE: ${{ vars.BREAK_GLASS_SIEM_MODE }}
+          BREAK_GLASS_SIEM_ENDPOINT: ${{ vars.BREAK_GLASS_SIEM_ENDPOINT }}
+          BREAK_GLASS_SPLUNK_INDEX: ${{ vars.BREAK_GLASS_SPLUNK_INDEX }}
+          BREAK_GLASS_ELASTIC_INDEX: ${{ vars.BREAK_GLASS_ELASTIC_INDEX }}
+          BREAK_GLASS_SIEM_TOKEN: ${{ secrets.BREAK_GLASS_SIEM_TOKEN }}
+          PAGERDUTY_ROUTING_KEY: ${{ secrets.PAGERDUTY_ROUTING_KEY }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/publish-break-glass-alerts.mjs \
+            --evidence-dir break-glass-evidence \
+            --out-dir break-glass-alert-delivery \
+            --deliver
+
+      - name: Upload break-glass evidence and alert delivery receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: break-glass-evidence-${{ inputs.candidate_digest }}
-          path: break-glass-evidence/
+          path: |
+            break-glass-evidence/
+            break-glass-alert-delivery/
           if-no-files-found: warn
           retention-days: 365
 
@@ -214,4 +254,5 @@ jobs:
             echo "- Candidate digest: \`${{ inputs.candidate_digest }}\`"
             echo '- Deployment performed: **no**; this workflow emits authorization evidence only.'
             echo '- Readiness credit: **none**.'
+            echo "- SIEM/PagerDuty delivery: ${{ inputs.alert_delivery_confirm == 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS' && 'requested (sanitized receipt retained)' || 'dry-run preview only' }}."
           } >> "$GITHUB_STEP_SUMMARY"

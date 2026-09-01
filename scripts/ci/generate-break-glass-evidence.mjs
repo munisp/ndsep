@@ -48,7 +48,7 @@ async function readRegularBuffer(path, label) {
 async function readJson(path, label) {
   const raw = await readRegularBuffer(path, label);
   try {
-    return { value: JSON.parse(raw.toString("utf8")), sha256: sha256(raw) };
+    return { raw, value: JSON.parse(raw.toString("utf8")), sha256: sha256(raw) };
   } catch {
     throw new Error(`${label} is not valid JSON`);
   }
@@ -191,7 +191,7 @@ export async function generateBreakGlassEvidence(args) {
     sourceCommit: args["source-commit"],
     digest: args["candidate-digest"],
   };
-  const [{ value: authorizationVerification, sha256: authorizationVerificationSha256 }, { value: releaseEvidence, sha256: releaseEvidenceSha256 }, cosignRaw, provenanceRaw] = await Promise.all([
+  const [{ raw: authorizationVerificationRaw, value: authorizationVerification, sha256: authorizationVerificationSha256 }, { raw: releaseEvidenceRaw, value: releaseEvidence, sha256: releaseEvidenceSha256 }, cosignRaw, provenanceRaw] = await Promise.all([
     readJson(args["authorization-verification"], "Authorization verification"),
     readJson(args["release-evidence"], "Release evidence"),
     readRegularBuffer(args["cosign-verification"], "Cosign verification"),
@@ -223,8 +223,8 @@ export async function generateBreakGlassEvidence(args) {
   const releaseEvidenceCopyPath = resolve(args["out-dir"], "break-glass-release-evidence.json");
   const cosignCopyPath = resolve(args["out-dir"], "break-glass-cosign-verification.json");
   const provenanceCopyPath = resolve(args["out-dir"], "break-glass-github-provenance-verification.txt");
-  await writePrivateJson(authorizationCopyPath, authorizationVerification);
-  await writePrivateJson(releaseEvidenceCopyPath, releaseEvidence);
+  await writePrivateBuffer(authorizationCopyPath, authorizationVerificationRaw);
+  await writePrivateBuffer(releaseEvidenceCopyPath, releaseEvidenceRaw);
   await writePrivateBuffer(cosignCopyPath, cosignRaw);
   await writePrivateBuffer(provenanceCopyPath, provenanceRaw);
 
