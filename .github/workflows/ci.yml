@@ -339,6 +339,46 @@ jobs:
           path: test-results/
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Schema drift verification — protected, read-only staging comparison
+  # ─────────────────────────────────────────────────────────────────────────────
+  schema-drift-verification:
+    name: Protected Staging Schema Drift Verification
+    runs-on: ubuntu-latest
+    # Reuse the intended production release boundary. Authorized administrators
+    # must configure required reviewers, prevent bypass, and load read-only
+    # baseline/staging URLs before this gate can execute.
+    environment:
+      name: production-release
+    if: github.ref == 'refs/heads/production'
+    permissions:
+      contents: read
+    env:
+      SCHEMA_DRIFT_BASELINE_DATABASE_URL: ${{ secrets.SCHEMA_DRIFT_BASELINE_DATABASE_URL }}
+      SCHEMA_DRIFT_STAGING_DATABASE_URL: ${{ secrets.SCHEMA_DRIFT_STAGING_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install locked dependency graph
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Compare protected staging schema with clean baseline
+        run: node scripts/ci/verify-staging-schema-drift.mjs > schema-drift-verification.json
+      - name: Upload sanitized schema-drift result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-drift-verification-${{ github.sha }}
+          path: schema-drift-verification.json
+          if-no-files-found: warn
+          retention-days: 365
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Docker candidate build + signed digest evidence (protected production push)
   # ─────────────────────────────────────────────────────────────────────────────
   docker:
@@ -357,6 +397,7 @@ jobs:
         rust-ci,
         security,
         integration,
+        schema-drift-verification,
       ]
     permissions:
       contents: read

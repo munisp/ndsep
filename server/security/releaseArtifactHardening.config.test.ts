@@ -125,7 +125,7 @@ describe("production release artifact hardening", () => {
       /docker:\s*\n\s+name: Docker Build & Push[\s\S]*?if: github\.ref == 'refs\/heads\/production'/
     );
     expect(workflow).toMatch(
-      /needs:\s*\[\s*node-ci,\s*go-ci,\s*go-orchestration-ci,\s*python-ci,\s*rust-ci,\s*security,\s*integration,?\s*\]/
+      /needs:\s*\[\s*node-ci,\s*go-ci,\s*go-orchestration-ci,\s*python-ci,\s*rust-ci,\s*security,\s*integration,\s*schema-drift-verification,?\s*\]/
     );
     expect(workflow).toMatch(
       /docker:\s*\n\s+name: Docker Build & Push[\s\S]*?environment:\s*\n\s+name: production-release/
