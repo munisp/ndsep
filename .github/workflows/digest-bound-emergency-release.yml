@@ -1,0 +1,217 @@
+name: Digest-Bound Emergency Release Authorization
+
+on:
+  workflow_dispatch:
+    inputs:
+      incident_issue:
+        description: "Incident issue containing the canonical authorization record and independent approvals"
+        required: true
+        type: string
+      source_commit:
+        description: "Full SHA of the already reviewed production hotfix commit"
+        required: true
+        type: string
+      candidate_digest:
+        description: "Existing signed candidate digest, e.g. sha256:<64 lowercase hex>"
+        required: true
+        type: string
+      confirm:
+        description: "Type AUTHORIZE_DIGEST_BOUND_BREAK_GLASS to create a one-time authorization evidence pack"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: digest-bound-break-glass-${{ inputs.source_commit }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Verify Independent Emergency Authorization and Candidate Evidence
+    if: >-
+      github.ref == 'refs/heads/production' &&
+      inputs.confirm == 'AUTHORIZE_DIGEST_BOUND_BREAK_GLASS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production-release
+    permissions:
+      contents: read
+      issues: read
+      packages: read
+      id-token: write
+      attestations: write
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository }}
+      COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+      COSIGN_CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/emergency-candidate-preflight.yml@refs/heads/production
+      AUTHORIZATION_POLICY: .github/security/break-glass-authorization-policy.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Bind dispatch to the current protected production commit
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$REQUESTED_SOURCE_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Validate emergency input shape
+        env:
+          INCIDENT_ISSUE: ${{ inputs.incident_issue }}
+          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$INCIDENT_ISSUE" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+
+      - name: Verify issue-bound independent authorizations
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p break-glass-work
+          node scripts/ci/verify-break-glass-authorization.mjs \
+            --issue "${{ inputs.incident_issue }}" \
+            --repository "$GITHUB_REPOSITORY" \
+            --candidate-digest "${{ inputs.candidate_digest }}" \
+            --source-commit "${{ inputs.source_commit }}" \
+            --dispatch-actor "${{ github.actor }}" \
+            --policy "$AUTHORIZATION_POLICY" \
+            --out-dir break-glass-work
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve pre-existing immutable candidate reference
+        id: image
+        env:
+          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
+        run: |
+          set -euo pipefail
+          echo "ref=${IMAGE_NAME}@${CANDIDATE_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Direct candidate image scan (HIGH/CRITICAL gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: json
+          output: break-glass-work/trivy-image.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          vuln-type: os,library
+
+      - name: Generate candidate CycloneDX SBOM
+        if: success()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: cyclonedx
+          output: break-glass-work/image-sbom.cdx.json
+          vuln-type: os,library
+
+      - name: Bind direct-scan and SBOM evidence to the authorized digest
+        if: success()
+        run: |
+          set -euo pipefail
+          bash scripts/security/verify-release-image-evidence.sh \
+            "$IMAGE_NAME" \
+            "${{ inputs.candidate_digest }}" \
+            "${{ inputs.source_commit }}" \
+            break-glass-work/trivy-image.json \
+            break-glass-work/image-sbom.cdx.json \
+            break-glass-work/release-evidence.json
+
+      - name: Install Cosign
+        if: success()
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Verify signed candidate and GitHub provenance
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
+            --output json \
+            "${{ steps.image.outputs.ref }}" > break-glass-work/cosign-verify.json
+          gh attestation verify \
+            "oci://${{ steps.image.outputs.ref }}" \
+            --repo "$GITHUB_REPOSITORY" > break-glass-work/github-provenance-verify.txt
+
+      - name: Generate tamper-evident break-glass evidence pack
+        if: success()
+        run: |
+          set -euo pipefail
+          node scripts/ci/generate-break-glass-evidence.mjs \
+            --authorization-verification break-glass-work/break-glass-authorization-verification.json \
+            --release-evidence break-glass-work/release-evidence.json \
+            --cosign-verification break-glass-work/cosign-verify.json \
+            --provenance-verification break-glass-work/github-provenance-verify.txt \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "${{ inputs.source_commit }}" \
+            --candidate-digest "${{ inputs.candidate_digest }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --actor "${{ github.actor }}" \
+            --workflow-ref "https://github.com/${{ github.repository }}/actions/workflows/digest-bound-emergency-release.yml@refs/heads/production" \
+            --generated-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --out-dir break-glass-evidence
+
+      - name: Attest the break-glass evidence root
+        id: attest_evidence
+        if: success()
+        uses: actions/attest@0fae56888724ae3bba68e14ff82712d5c3d8e1f0 # v2.2.0
+        with:
+          subject-path: break-glass-evidence/break-glass-evidence-root.json
+          predicate-type: https://ndsep.example.org/attestation/break-glass-evidence/v1
+          predicate-path: break-glass-evidence/break-glass-evidence-manifest.json
+
+      - name: Preserve attestation reference
+        if: success()
+        env:
+          ATTESTATION_ID: ${{ steps.attest_evidence.outputs.attestation-id }}
+          ATTESTATION_URL: ${{ steps.attest_evidence.outputs.attestation-url }}
+          ATTESTATION_BUNDLE: ${{ steps.attest_evidence.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          [[ -n "$ATTESTATION_ID" && -n "$ATTESTATION_URL" && -s "$ATTESTATION_BUNDLE" ]]
+          cp "$ATTESTATION_BUNDLE" break-glass-evidence/github-attestation-bundle.json
+          jq -n \
+            --arg id "$ATTESTATION_ID" \
+            --arg url "$ATTESTATION_URL" \
+            '{schemaVersion:"ndsep.break-glass-attestation-reference.v1", attestationId:$id, attestationUrl:$url}' \
+            > break-glass-evidence/github-attestation-reference.json
+
+      - name: Upload break-glass evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: break-glass-evidence-${{ inputs.candidate_digest }}
+          path: break-glass-evidence/
+          if-no-files-found: warn
+          retention-days: 365
+
+      - name: Publish non-sensitive authorization summary
+        if: always()
+        run: |
+          {
+            echo '## Digest-bound emergency release authorization'
+            echo
+            echo "- Incident issue: #${{ inputs.incident_issue }}"
+            echo "- Source commit: \`${{ inputs.source_commit }}\`"
+            echo "- Candidate digest: \`${{ inputs.candidate_digest }}\`"
+            echo '- Deployment performed: **no**; this workflow emits authorization evidence only.'
+            echo '- Readiness credit: **none**.'
+          } >> "$GITHUB_STEP_SUMMARY"

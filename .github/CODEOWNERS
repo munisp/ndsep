@@ -22,6 +22,11 @@
 /Makefile @munisp
 /scripts/security/ @munisp
 /.github/workflows/ci.yml @munisp
+/.github/workflows/emergency-candidate-preflight.yml @munisp
+/.github/workflows/digest-bound-emergency-release.yml @munisp
+/.github/security/break-glass-authorization-policy.json @munisp
+/scripts/ci/verify-break-glass-authorization.mjs @munisp
+/scripts/ci/generate-break-glass-evidence.mjs @munisp
 /.env.production.example @munisp
 
 # Authorization, identity, and policy enforcement
