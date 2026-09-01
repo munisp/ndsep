@@ -220,6 +220,7 @@ jobs:
             server/security/paymentCommandLifecycle.config.test.ts \
             server/security/apisixDurableRouteRegistry.config.test.ts \
             server/security/permifyPostgresFailClosed.config.test.ts \
+            server/security/keycloakPostgresFailClosed.config.test.ts \
             server/redisRateLimitStore.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only

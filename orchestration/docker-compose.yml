@@ -72,14 +72,19 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:23.0
-    command: start-dev --import-realm
+    command: start --import-realm
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: ndsep_admin_2026
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:?KEYCLOAK_ADMIN_USER is required}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep
-      KC_DB_USERNAME: ndsep
-      KC_DB_PASSWORD: ndsep_secure_2026
+      KC_DB_URL: ${KEYCLOAK_DB_URL:?KEYCLOAK_DB_URL is required}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+      KC_HOSTNAME_STRICT: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
     ports: ["8080:8080"]
     depends_on: [postgres]
     networks: [ndsep-net]
