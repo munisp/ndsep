@@ -999,8 +999,8 @@ function DashboardLayoutContent({
         <FloatingChatBubble />
         <WhatsNewModal />
         <PwaInstallPrompt />
-        <main id="main-content" role="main" className="flex-1 min-h-0 overflow-hidden gradient-mesh">
-          <div className="relative z-10 h-full">
+        <main id="main-content" role="main" className="flex-1 min-h-0 overflow-y-auto overscroll-contain gradient-mesh">
+          <div className="relative z-10 min-h-full">
             <PageTransition>{children}</PageTransition>
           </div>
         </main>
