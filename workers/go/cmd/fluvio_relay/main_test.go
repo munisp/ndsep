@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -68,5 +69,60 @@ func TestTopicCreateIsDisabled(t *testing.T) {
 	handleTopicCreate(response, request)
 	if response.Code != http.StatusNotImplemented {
 		t.Fatalf("topic creation status = %d, want 501", response.Code)
+	}
+}
+
+func TestValidateFluvioConfigurationFailsWithoutDestination(t *testing.T) {
+	originalEndpoint := FLUVIO_ENDPOINT
+	originalURL, hadURL := os.LookupEnv("FLUVIO_PRODUCE_URL")
+	defer func() {
+		FLUVIO_ENDPOINT = originalEndpoint
+		if hadURL {
+			_ = os.Setenv("FLUVIO_PRODUCE_URL", originalURL)
+		} else {
+			_ = os.Unsetenv("FLUVIO_PRODUCE_URL")
+		}
+	}()
+	FLUVIO_ENDPOINT = ""
+	_ = os.Unsetenv("FLUVIO_PRODUCE_URL")
+	if err := validateFluvioConfiguration(); err == nil {
+		t.Fatal("expected Fluvio relay without endpoint configuration to fail")
+	}
+}
+
+func TestValidateFluvioConfigurationRequiresHTTPSAndTokenInProduction(t *testing.T) {
+	originalEndpoint := FLUVIO_ENDPOINT
+	originalNodeEnv, hadNodeEnv := os.LookupEnv("NODE_ENV")
+	originalURL, hadURL := os.LookupEnv("FLUVIO_PRODUCE_URL")
+	originalToken, hadToken := os.LookupEnv("FLUVIO_AUTH_TOKEN")
+	defer func() {
+		FLUVIO_ENDPOINT = originalEndpoint
+		if hadNodeEnv {
+			_ = os.Setenv("NODE_ENV", originalNodeEnv)
+		} else {
+			_ = os.Unsetenv("NODE_ENV")
+		}
+		if hadURL {
+			_ = os.Setenv("FLUVIO_PRODUCE_URL", originalURL)
+		} else {
+			_ = os.Unsetenv("FLUVIO_PRODUCE_URL")
+		}
+		if hadToken {
+			_ = os.Setenv("FLUVIO_AUTH_TOKEN", originalToken)
+		} else {
+			_ = os.Unsetenv("FLUVIO_AUTH_TOKEN")
+		}
+	}()
+	FLUVIO_ENDPOINT = ""
+	_ = os.Setenv("NODE_ENV", "production")
+	_ = os.Setenv("FLUVIO_PRODUCE_URL", "http://fluvio.internal/produce")
+	_ = os.Setenv("FLUVIO_AUTH_TOKEN", "short")
+	if err := validateFluvioConfiguration(); err == nil {
+		t.Fatal("expected production HTTP Fluvio endpoint to fail")
+	}
+	_ = os.Setenv("FLUVIO_PRODUCE_URL", "https://fluvio.internal/produce")
+	_ = os.Setenv("FLUVIO_AUTH_TOKEN", "0123456789abcdef0123456789abcdef")
+	if err := validateFluvioConfiguration(); err != nil {
+		t.Fatalf("expected complete production Fluvio configuration to validate: %v", err)
 	}
 }

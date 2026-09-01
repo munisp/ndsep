@@ -58,7 +58,7 @@ describe("durable PostgreSQL event outbox", () => {
   beforeEach(() => {
     stopDurableOutbox();
     vi.clearAllMocks();
-    mocks.daprPublish.mockResolvedValue(false);
+    mocks.daprPublish.mockResolvedValue(undefined);
   });
 
   it("persists the event then reschedules it when Kafka is unavailable", async () => {
@@ -78,7 +78,7 @@ describe("durable PostgreSQL event outbox", () => {
     expect(pool.client.release).toHaveBeenCalledOnce();
   });
 
-  it("marks a claimed durable event published only after Kafka confirms delivery", async () => {
+  it("marks a claimed durable event published only after Kafka and Dapr confirm delivery", async () => {
     const pool = buildPool([durableRow]);
     mocks.getPool.mockReturnValue(pool);
     mocks.kafkaProduce.mockResolvedValue(true);
@@ -88,6 +88,21 @@ describe("durable PostgreSQL event outbox", () => {
     const markPublishedCall = pool.query.mock.calls.find(([sql]) => String(sql).includes("status = 'published'"));
     expect(markPublishedCall).toBeDefined();
     expect(markPublishedCall?.[1]).toEqual([durableRow.id]);
+  });
+
+  it("reschedules a durable event when required Dapr delivery fails", async () => {
+    const pool = buildPool([durableRow]);
+    mocks.getPool.mockReturnValue(pool);
+    mocks.kafkaProduce.mockResolvedValue(true);
+    mocks.daprPublish.mockRejectedValue(new Error("Dapr unavailable"));
+
+    await expect(processDurableOutbox()).resolves.toBe(0);
+
+    const markPublishedCall = pool.query.mock.calls.find(([sql]) => String(sql).includes("status = 'published'"));
+    const rescheduleCall = pool.query.mock.calls.find(([sql]) => String(sql).includes("next_attempt_at"));
+    expect(markPublishedCall).toBeUndefined();
+    expect(rescheduleCall).toBeDefined();
+    expect(rescheduleCall?.[1][1]).toBeGreaterThanOrEqual(5);
   });
 
   it("refuses to publish when PostgreSQL is unavailable instead of using memory", async () => {

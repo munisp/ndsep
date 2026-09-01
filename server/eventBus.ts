@@ -156,12 +156,10 @@ async function publishOutboxRow(row: OutboxRow): Promise<boolean> {
   const event = row.payload as unknown as DomainEvent;
   try {
     const kafkaOk = await kafkaProduce(row.topic, row.aggregate_id, event as unknown as Record<string, unknown>, row.headers);
-    // Dapr receives the same durable event but cannot determine Kafka delivery success.
-    await daprPublish(row.topic, event as unknown as Record<string, unknown>).catch((error) => {
-      logger.warn({ err: error, correlationId: row.correlation_id }, "[EventBus] Dapr side delivery failed");
-      return false;
-    });
     if (!kafkaOk) throw new Error("Kafka publish failed");
+    // Dapr is a required downstream delivery. Any rejection keeps the event in
+    // PostgreSQL for retry rather than claiming a Kafka-only publication.
+    await daprPublish(row.topic, event as unknown as Record<string, unknown>);
     await markPublished(row.id);
     published += 1;
     if (row.attempts > 1) retried += 1;

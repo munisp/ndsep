@@ -567,23 +567,9 @@ export const WORKER_DEFS: WorkerDef[] = [
   // The legacy `api_gateway` worker is intentionally not registered here: it
   // carried a compiled APISIX route map and is superseded by `apisix-manager`,
   // which loads the PostgreSQL-authoritative gateway_routes registry.
-  {
-    id: "event-bus",
-    name: "Kafka + Fluvio Event Bus",
-    language: "Go",
-    layer: "INFRA",
-    command: path.join(BIN_DIR, "event_bus"),
-    args: [],
-    port: 8160,
-    env: {
-      KAFKA_BROKERS: process.env.KAFKA_BROKERS ?? "localhost:9092",
-      KAFKA_ENABLED: process.env.KAFKA_ENABLED ?? "true",
-      FLUVIO_HTTP_URL: process.env.FLUVIO_HTTP_URL ?? "http://localhost:9003",
-      FLUVIO_ENABLED: process.env.FLUVIO_ENABLED ?? "true",
-    },
-    description: "Produces events to 30 NDSEP Kafka topics via IBM/sarama SyncProducer. Publishes edge events to Fluvio via HTTP. Graceful degradation to stub mode.",
-    technology: "Go · Kafka (IBM/sarama) · Fluvio HTTP · gorilla/mux",
-  },
+  // The legacy `event_bus` worker is intentionally not registered here: it
+  // had no durable delivery ledger and declared stub fallback behavior. The
+  // application `eventBus.ts` PostgreSQL transactional outbox owns event state.
   {
     id: "iam-service",
     name: "Keycloak + Permify IAM Service",

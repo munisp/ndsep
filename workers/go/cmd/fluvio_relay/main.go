@@ -21,11 +21,7 @@ import (
 
 var (
 	PORT            = getEnv("FLUVIO_RELAY_PORT", "8151")
-	FLUVIO_ENDPOINT = getEnv("FLUVIO_ENDPOINT", "localhost:9003")
-	FLUVIO_SC_HOST  = getEnv("FLUVIO_SC_HOST", "localhost")
-	FLUVIO_SC_PORT  = getEnv("FLUVIO_SC_PORT", "9003")
-	KAFKA_BROKER    = getEnv("KAFKA_BROKER", "localhost:9092")
-	KAFKA_FALLBACK  = getEnv("KAFKA_FALLBACK_ENABLED", "true")
+	FLUVIO_ENDPOINT = strings.TrimSpace(os.Getenv("FLUVIO_ENDPOINT"))
 )
 
 func getEnv(key, fallback string) string {
@@ -86,6 +82,26 @@ type TopicCreateRequest struct {
 
 func isProduction() bool {
 	return strings.EqualFold(os.Getenv("APP_ENV"), "production") || strings.EqualFold(os.Getenv("NODE_ENV"), "production")
+}
+
+func validateFluvioConfiguration() error {
+	produceURL := strings.TrimRight(strings.TrimSpace(os.Getenv("FLUVIO_PRODUCE_URL")), "/")
+	if FLUVIO_ENDPOINT == "" && produceURL == "" {
+		return errors.New("FLUVIO_ENDPOINT or FLUVIO_PRODUCE_URL is required")
+	}
+	if isProduction() {
+		if produceURL == "" {
+			return errors.New("production Fluvio relay requires FLUVIO_PRODUCE_URL")
+		}
+		parsed, err := url.ParseRequestURI(produceURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			return errors.New("production FLUVIO_PRODUCE_URL must be an absolute HTTPS endpoint")
+		}
+		if len(strings.TrimSpace(os.Getenv("FLUVIO_AUTH_TOKEN"))) < 32 {
+			return errors.New("production Fluvio relay requires a non-placeholder FLUVIO_AUTH_TOKEN of at least 32 characters")
+		}
+	}
+	return nil
 }
 
 func isApprovedTopic(topic string) bool {
@@ -218,8 +234,6 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		"uptime":  time.Since(startTime).Seconds(),
 		"config": map[string]string{
 			"fluvio_endpoint": FLUVIO_ENDPOINT,
-			"kafka_broker":    KAFKA_BROKER,
-			"kafka_fallback":  KAFKA_FALLBACK,
 		},
 		"topics": len(NdsepTopics),
 	})
@@ -239,6 +253,9 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	if err := validateFluvioConfiguration(); err != nil {
+		log.Fatal("[FluvioRelay] ", err)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/produce", handleProduce)
 	mux.HandleFunc("/publish", handleProduce)
@@ -248,7 +265,7 @@ func main() {
 	mux.HandleFunc("/metrics", handleMetrics)
 
 	log.Printf("[FluvioRelay] Starting NDSEP Fluvio Event Relay on port %s", PORT)
-	log.Printf("[FluvioRelay] Fluvio endpoint: %s | Kafka fallback: %s", FLUVIO_ENDPOINT, KAFKA_FALLBACK)
+	log.Printf("[FluvioRelay] Fluvio endpoint: %s", FLUVIO_ENDPOINT)
 	log.Printf("[FluvioRelay] Managing %d NDSEP topics", len(NdsepTopics))
 
 	ctx, cancel := context.WithCancel(context.Background())
