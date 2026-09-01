@@ -199,6 +199,18 @@ jobs:
             '{schemaVersion:"ndsep.break-glass-attestation-reference.v1", attestationId:$id, attestationUrl:$url}' \
             > break-glass-evidence/github-attestation-reference.json
 
+      - name: Verify GitHub attestation for the evidence root
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh attestation verify \
+            break-glass-evidence/break-glass-evidence-root.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://ndsep.example.org/attestation/break-glass-evidence/v1 \
+            > break-glass-evidence/github-attestation-verify.txt
+
       - name: Verify hash-chained evidence before external disclosure
         if: success()
         run: |

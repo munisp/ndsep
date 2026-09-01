@@ -168,6 +168,8 @@ describe("break-glass SIEM and pager evidence integration", () => {
     expect(policy.enabled).toBe(false);
     expect(policy.attestationRequired).toBe(true);
     expect(policy.externalImmutableRetentionRequired).toBe(true);
+    expect(workflow).toContain("gh attestation verify");
+    expect(workflow).toContain("github-attestation-verify.txt");
     expect(workflow).toContain("verify-break-glass-evidence.mjs");
     expect(workflow).toContain("publish-break-glass-alerts.mjs");
     expect(workflow).toContain("DELIVER_SANITIZED_BREAK_GLASS_EVENTS");
