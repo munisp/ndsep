@@ -3,6 +3,8 @@
 packages:
   - "."
 overrides:
+  "browserslist": "4.28.7"
+  "mysql2": "3.22.0"
   "minimatch@9>brace-expansion": "2.1.4"
   "tailwindcss>nanoid": "3.3.7"
   "fast-xml-parser": ">=5.7.0"
@@ -42,7 +44,7 @@ overrides:
   "qs": ">=6.14.2"
   "lodash": ">=4.17.21"
   "lodash-es": ">=4.17.21"
-  "serialize-javascript": ">=6.0.2"
+  "serialize-javascript": "7.0.5"
   "yaml": ">=2.7.1"
   "picomatch": ">=4.0.2"
   "follow-redirects": ">=1.15.6"
