@@ -82,6 +82,7 @@ const STARTUP_TIME = Date.now();
 import { captureError } from "../errorMonitoring";
 import { startHealthMonitor, stopHealthMonitor } from "../middlewareConnector";
 import { startKafkaConsumer, stopKafkaConsumer } from "../kafkaConsumer";
+import { startDurableOutbox, stopDurableOutbox } from "../eventBus";
 import { wafEnforcementMiddleware } from "../wafMiddleware";
 
 process.on("uncaughtException", (err) => {
@@ -1413,6 +1414,7 @@ async function startServer() {
     const database = await getDb();
     if (!database || !getPool()) throw new Error("Database initialization failed after migrations");
     logger.info("[DB] Migrations applied and pool initialized successfully");
+    startDurableOutbox();
   } else {
     logger.warn("[DB] Explicit test-only migration gate bypass enabled");
   }
@@ -1556,6 +1558,7 @@ async function startServer() {
     stopInvoiceOverdueScheduler();
     stopNationalReportScheduler();
     stopSlaBreachScheduler();
+    stopDurableOutbox();
     try { const { stopSessionCleanup } = await import("../security/sessionHardening"); stopSessionCleanup(); } catch { /* ok */ }
     logger.info("[Shutdown] All schedulers and workers stopped");
 

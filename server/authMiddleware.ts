@@ -1,7 +1,9 @@
 /**
- * NDSEP Authentication Middleware for Express routes
- * Supports dual auth: Keycloak OIDC (when KEYCLOAK_ENABLED=true) + internal session.
- * Used to protect PDF download endpoints and other non-tRPC routes.
+ * NDSEP Authentication Middleware for Express routes.
+ *
+ * Production accepts only a cryptographically verified Keycloak bearer token
+ * mapped to a persisted local user. Internal sessions are development/test
+ * tooling and cannot authorize production HTTP routes.
  */
 import type { Request, Response, NextFunction } from "express";
 import { parse as parseCookieHeader } from "cookie";
@@ -11,95 +13,94 @@ import { logger } from "./logger";
 import { getUserByOpenId } from "./db";
 import { keycloakValidate } from "./middlewareExtensions";
 
-const KEYCLOAK_ENABLED = process.env.KEYCLOAK_ENABLED === "true";
+function isProduction(): boolean {
+  return process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+}
+
+function keycloakEnabled(): boolean {
+  return process.env.KEYCLOAK_ENABLED === "true";
+}
 
 function extractToken(req: Request): string | undefined {
   if (req.cookies?.[COOKIE_NAME]) return req.cookies[COOKIE_NAME] as string;
   const header = req.headers.cookie;
   if (!header) return undefined;
-  const parsed = parseCookieHeader(header);
-  return parsed[COOKIE_NAME] || undefined;
+  return parseCookieHeader(header)[COOKIE_NAME];
 }
 
 function extractBearerToken(req: Request): string | undefined {
   const auth = req.headers.authorization;
   if (!auth?.startsWith("Bearer ")) return undefined;
-  return auth.slice(7);
+  const token = auth.slice(7).trim();
+  return token || undefined;
 }
 
-/**
- * Validate via Keycloak OIDC if enabled and Bearer token present.
- * Returns { valid, user } or null if Keycloak path not applicable.
- */
 async function tryKeycloakAuth(req: Request): Promise<{ sub: string; roles: string[]; username?: string } | null> {
-  if (!KEYCLOAK_ENABLED) return null;
+  if (!keycloakEnabled()) return null;
   const bearer = extractBearerToken(req);
   if (!bearer) return null;
-
   try {
     const result = await keycloakValidate(bearer);
-    if (!result.valid) return null;
-    return { sub: result.sub ?? "", roles: result.roles, username: result.username };
-  } catch (err) {
-    logger.warn({ err }, "[Keycloak] Token validation failed, falling back to session");
+    if (!result.valid || !result.sub) return null;
+    return { sub: result.sub, roles: result.roles, username: result.username };
+  } catch (error) {
+    logger.warn({ err: error }, "[Keycloak] token validation failed");
     return null;
   }
 }
 
+function unauthorized(res: Response, message: string): void {
+  res.status(401).json({ error: message });
+}
+
 /**
- * requireSession: validates via Keycloak OIDC (if enabled) or session cookie.
- * Attaches user to req. Returns 401 if no valid auth.
+ * requireSession attaches a persisted user to the request.
+ * In production it accepts only Keycloak bearer tokens and never falls back to
+ * session cookies or creates an ephemeral local identity for an unknown `sub`.
  */
 export async function requireSession(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    // Path 1: Keycloak OIDC Bearer token
     const kcUser = await tryKeycloakAuth(req);
     if (kcUser) {
-      const user = kcUser.sub ? await getUserByOpenId(kcUser.sub) : null;
-      if (user) {
-        (req as any).sessionUser = user;
-        next();
+      const user = await getUserByOpenId(kcUser.sub);
+      if (!user) {
+        res.status(403).json({ error: "Keycloak identity is not provisioned in NDSEP" });
         return;
       }
-      // Keycloak token valid but user not in local DB — still set basic info
-      (req as any).sessionUser = {
-        id: 0,
-        openId: kcUser.sub,
-        username: kcUser.username ?? "keycloak-user",
-        role: kcUser.roles.includes("admin") ? "admin" : kcUser.roles.includes("government_staff") ? "government_staff" : "user",
-      };
+      (req as any).sessionUser = user;
       next();
       return;
     }
 
-    // Path 2: Internal session cookie
+    if (isProduction()) {
+      unauthorized(res, "A valid Keycloak bearer token is required");
+      return;
+    }
+
     const token = extractToken(req);
     if (!token) {
-      res.status(401).json({ error: "Authentication required" });
+      unauthorized(res, "Authentication required");
       return;
     }
     const session = await sdk.verifySession(token);
     if (!session) {
-      res.status(401).json({ error: "Invalid or expired session" });
+      unauthorized(res, "Invalid or expired session");
       return;
     }
     const user = await getUserByOpenId(session.openId);
     if (!user) {
-      res.status(401).json({ error: "User not found" });
+      unauthorized(res, "User not found");
       return;
     }
     (req as any).sessionUser = user;
     next();
-  } catch (err) {
-    logger.warn({ err }, "[requireSession] Session validation failed");
-    res.status(401).json({ error: "Authentication required" });
+  } catch (error) {
+    logger.warn({ err: error }, "[requireSession] authorization failed");
+    unauthorized(res, "Authentication required");
   }
 }
 
-/**
- * requireAdmin: validates session AND checks that user has admin role.
- * Returns 403 if user is not an admin.
- */
+/** Require a persisted NDSEP administrator after the same authentication gate. */
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   await requireSession(req, res, async () => {
     const user = (req as any).sessionUser;

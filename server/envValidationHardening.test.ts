@@ -11,6 +11,8 @@ const managedKeys = [
   "KEYCLOAK_ISSUER_URL",
   "KEYCLOAK_REALM",
   "KEYCLOAK_CLIENT_ID",
+  "DPCO_ANALYTICS_URL",
+  "DPCO_ANALYTICS_SERVICE_TOKEN",
   "JWT_SECRET",
   "FIELD_ENCRYPTION_KEY",
   "TERMII_API_KEY",
@@ -41,7 +43,13 @@ function applyProductionEnvironment(
 ) {
   const environment: Record<string, string> = {
     NODE_ENV: "production",
-    KEYCLOAK_ENABLED: "false",
+    KEYCLOAK_ENABLED: "true",
+    KEYCLOAK_URL: "https://keycloak.internal.ndsep.gov.ng",
+    KEYCLOAK_ISSUER_URL: "https://identity.ndsep.gov.ng",
+    KEYCLOAK_REALM: "ndsep",
+    KEYCLOAK_CLIENT_ID: "ndsep-platform",
+    DPCO_ANALYTICS_URL: "https://analytics.internal.ndsep.gov.ng",
+    DPCO_ANALYTICS_SERVICE_TOKEN: "a".repeat(48),
     JWT_SECRET: "j".repeat(32),
     FIELD_ENCRYPTION_KEY: "a".repeat(64),
     TERMII_API_KEY: "termii-production-api-key",
@@ -77,10 +85,22 @@ describe("production environment hardening", () => {
     expect(() => validateEnvironment()).not.toThrow();
   });
 
-  it("requires an explicit production Keycloak enablement decision", () => {
-    applyProductionEnvironment({ KEYCLOAK_ENABLED: undefined });
+  it("requires enabled real Keycloak IAM in production", () => {
+    for (const keycloakEnabled of [undefined, "false"]) {
+      applyProductionEnvironment({ KEYCLOAK_ENABLED: keycloakEnabled });
+      expect(() => validateEnvironment()).toThrow(
+        /KEYCLOAK_ENABLED: production requires real Keycloak IAM/
+      );
+    }
+  });
+
+  it("rejects insecure Keycloak and analytics service routing configuration", () => {
+    applyProductionEnvironment({
+      DPCO_ANALYTICS_URL: "http://localhost:8330",
+      DPCO_ANALYTICS_SERVICE_TOKEN: "short",
+    });
     expect(() => validateEnvironment()).toThrow(
-      /KEYCLOAK_ENABLED: production IAM must be explicitly configured/
+      /DPCO_ANALYTICS_URL[\s\S]*DPCO_ANALYTICS_SERVICE_TOKEN/
     );
   });
 

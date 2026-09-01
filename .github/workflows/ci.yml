@@ -172,6 +172,22 @@ jobs:
   python-ci:
     name: Python CI (Lint + Test)
     runs-on: ubuntu-latest
+    env:
+      DPCO_ANALYTICS_DATABASE_URL: postgresql://ndsep_ci:ndsep_ci_local_only@127.0.0.1:5432/ndsep_ci?sslmode=disable
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: ndsep_ci
+          POSTGRES_PASSWORD: ndsep_ci_local_only
+          POSTGRES_DB: ndsep_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ndsep_ci -d ndsep_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -181,7 +197,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install flake8 pytest pytest-asyncio
+          pip install flake8 pytest pytest-asyncio fastapi uvicorn pydantic requests "psycopg[binary,pool]"
           find orchestration services/python -name requirements.txt -exec pip install -r {} \;
       - name: Lint with flake8
         run: flake8 orchestration/ workers/python/ --max-line-length=120 --ignore=E501,W503,W504

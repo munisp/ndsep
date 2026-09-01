@@ -252,6 +252,27 @@
       "when": 1788219175186,
       "tag": "0035_digital_twin_noc_runtime_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788277860687,
+      "tag": "0036_dpco_analytics_durable_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788278000000,
+      "tag": "0037_dpco_client_policy_postgres_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788278100000,
+      "tag": "0038_dpco_audit_control_rating_postgres_reconciliation",
+      "breakpoints": true
     }
   ]
 }

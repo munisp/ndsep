@@ -354,6 +354,8 @@ services:
     ports: ["8330:8330"]
     environment:
       PORT: "8330"
+      DPCO_ANALYTICS_DATABASE_URL: ${DPCO_ANALYTICS_DATABASE_URL:?DPCO_ANALYTICS_DATABASE_URL is required}
+      DPCO_ANALYTICS_SERVICE_TOKEN: ${DPCO_ANALYTICS_SERVICE_TOKEN:?DPCO_ANALYTICS_SERVICE_TOKEN is required}
       KAFKA_BROKERS: kafka:29092
       KAFKA_ENABLED: "true"
       FLUVIO_HTTP_URL: http://fluvio:9003
@@ -367,7 +369,7 @@ services:
       DAPR_HTTP_PORT: "3500"
       DAPR_APP_ID: dpco-analytics
       DAPR_ENABLED: "true"
-    depends_on: [kafka, redis]
+    depends_on: [postgres, kafka, redis]
     networks: [ndsep-net]
     restart: unless-stopped
     healthcheck:

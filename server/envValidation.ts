@@ -192,23 +192,29 @@ export function validateEnvironment(): void {
       }
     }
     const keycloakEnabled = process.env.KEYCLOAK_ENABLED;
-    if (keycloakEnabled !== "true" && keycloakEnabled !== "false") {
-      errors.push("  KEYCLOAK_ENABLED: production IAM must be explicitly configured as true or false");
-    } else if (keycloakEnabled === "true") {
-      const keycloakUrl = process.env.KEYCLOAK_URL ?? "";
-      const issuerUrl = process.env.KEYCLOAK_ISSUER_URL ?? keycloakUrl;
-      if (invalidProductionServiceUrl(keycloakUrl)) {
-        errors.push("  KEYCLOAK_URL: enabled production IAM requires a non-local https:// endpoint without inline credentials");
+    if (keycloakEnabled !== "true") {
+      errors.push("  KEYCLOAK_ENABLED: production requires real Keycloak IAM and cannot use local-session or demo authentication");
+    }
+    const keycloakUrl = process.env.KEYCLOAK_URL ?? "";
+    const issuerUrl = process.env.KEYCLOAK_ISSUER_URL ?? keycloakUrl;
+    if (invalidProductionServiceUrl(keycloakUrl)) {
+      errors.push("  KEYCLOAK_URL: production IAM requires a non-local https:// endpoint without inline credentials");
+    }
+    if (invalidProductionServiceUrl(issuerUrl)) {
+      errors.push("  KEYCLOAK_ISSUER_URL: production IAM requires a non-local https:// issuer endpoint without inline credentials");
+    }
+    for (const name of ["KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID"]) {
+      const value = process.env[name] ?? "";
+      if (value.length < 2 || isPlaceholderValue(value)) {
+        errors.push(`  ${name}: production IAM requires a non-placeholder configured value`);
       }
-      if (invalidProductionServiceUrl(issuerUrl)) {
-        errors.push("  KEYCLOAK_ISSUER_URL: enabled production IAM requires a non-local https:// issuer endpoint without inline credentials");
-      }
-      for (const name of ["KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID"]) {
-        const value = process.env[name] ?? "";
-        if (value.length < 2 || isPlaceholderValue(value)) {
-          errors.push(`  ${name}: enabled production IAM requires a non-placeholder configured value`);
-        }
-      }
+    }
+    const analyticsUrl = process.env.DPCO_ANALYTICS_URL ?? "";
+    if (invalidProductionServiceUrl(analyticsUrl)) {
+      errors.push("  DPCO_ANALYTICS_URL: production analytics gateway requires a non-local https:// endpoint without inline credentials");
+    }
+    if ((process.env.DPCO_ANALYTICS_SERVICE_TOKEN ?? "").length < 32) {
+      errors.push("  DPCO_ANALYTICS_SERVICE_TOKEN: production analytics gateway requires a high-entropy service credential of at least 32 characters");
     }
   }
 

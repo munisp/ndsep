@@ -1512,7 +1512,10 @@ export const controlRatingEnum = pgEnum("control_rating", ["compliant", "partial
 export const dpcoAuditControlRatings = pgTable("dpco_audit_control_ratings", {
   id: serial("id").primaryKey(),
   engagementId: integer("engagement_id").notNull(),
+  dpcoOrgId: integer("dpco_org_id"),
   controlId: varchar("control_id", { length: 20 }).notNull(),
+  controlRef: varchar("control_ref", { length: 255 }),
+  controlTitle: varchar("control_title", { length: 255 }),
   rating: controlRatingEnum("rating").notNull(),
   notes: text("notes"),
   ratedBy: varchar("rated_by", { length: 255 }),
@@ -1574,7 +1577,7 @@ export const dpcoTrainingSessions = pgTable("dpco_training_sessions", {
 export type DpcoTrainingSession = typeof dpcoTrainingSessions.$inferSelect;
 
 // ── DPCO Client Policies ──────────────────────────────────────────────────────
-export const dpcoClientPolicyStatusEnum = pgEnum("dpco_client_policy_status", ["draft", "reviewed", "signed", "expired"]);
+export const dpcoClientPolicyStatusEnum = pgEnum("dpco_client_policy_status", ["draft", "customised", "reviewed", "signed", "delivered", "expired"]);
 
 export const dpcoClientPolicies = pgTable("dpco_client_policies", {
   id: serial("id").primaryKey(),
