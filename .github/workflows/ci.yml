@@ -35,6 +35,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
       WEBHOOK_LEDGER_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
+      PAYMENT_COMMAND_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
       JWT_SECRET: test-jwt-secret-for-ci-only
       FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
       NODE_ENV: test

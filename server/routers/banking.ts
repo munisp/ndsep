@@ -17,6 +17,7 @@ import pg from "pg";
 import { getPgSslConfig } from "../dbSslConfig";
 import { getDatabaseUrl } from "../config";
 import { logger } from "../logger";
+import { enqueuePaymentCommand, type EnqueuePaymentCommandInput } from "../paymentCommandProcessor";
 const { Pool } = pg;
 let _pool: InstanceType<typeof Pool> | null = null;
 function getPool(): InstanceType<typeof Pool> {
@@ -35,6 +36,37 @@ async function query(sql: string, params: unknown[] = []): Promise<any[]> {
   const finalSql = pgSql.replace(/\bLIKE\b/g, 'ILIKE');
   const { rows } = await pool.query(finalSql, params);
   return autoDecryptRows(finalSql, rows);
+}
+
+/**
+ * Atomically persists one payment instruction and its durable external-work command.
+ * The processor is allowed to retry after this commit; no downstream call is made in
+ * the request transaction, so a database rollback cannot create an orphaned command.
+ */
+async function persistPaymentAndCommand(
+  paymentInsertSql: string,
+  paymentParams: unknown[],
+  command: EnqueuePaymentCommandInput,
+): Promise<{ paymentId: number; commandId: string; status: "pending_ledger" }> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const inserted = await client.query<{ id: number }>(paymentInsertSql, paymentParams);
+    if (inserted.rowCount !== 1 || !inserted.rows[0]) throw new Error("Payment record was not persisted");
+    const paymentId = inserted.rows[0].id;
+    const persistedCommand = await enqueuePaymentCommand(client, {
+      ...command,
+      nipTransactionId: command.paymentKind === "nip" ? paymentId : undefined,
+      rtgsTransactionId: command.paymentKind === "rtgs" ? paymentId : undefined,
+    });
+    await client.query("COMMIT");
+    return { paymentId, commandId: persistedCommand.id, status: persistedCommand.status };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ─── Helper: generate unique references ──────────────────────────────────────
@@ -772,15 +804,24 @@ const paymentsRouter = router({
 
       const sessionId = genRef("NIP").replace("-", "").substring(0, 40);
       const nibssRef = `NIBSS${Date.now()}`;
-      await query(`
-        INSERT INTO nip_transactions (session_id, sender_bank_code, sender_bank_name, sender_account_number, sender_account_name,
-          receiver_bank_code, receiver_bank_name, receiver_account_number, receiver_account_name,
-          amount, narration, status, nibss_ref, channel_code, aml_flagged, fraud_flagged)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'initiated', ?, ?, ?, ?)
-      `, [sessionId, input.senderBankCode, null, input.senderAccountNumber, input.senderAccountName ?? null,
+      const persistedPayment = await persistPaymentAndCommand(
+        `INSERT INTO nip_transactions (session_id, sender_bank_code, sender_bank_name, sender_account_number, sender_account_name,
+           receiver_bank_code, receiver_bank_name, receiver_account_number, receiver_account_name,
+           amount, narration, status, nibss_ref, channel_code, aml_flagged, fraud_flagged)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'initiated', $12, $13, $14, $15)
+         RETURNING id`,
+        [sessionId, input.senderBankCode, null, input.senderAccountNumber, input.senderAccountName ?? null,
           input.receiverBankCode, null, input.receiverAccountNumber, input.receiverAccountName ?? null,
-          input.amount, input.narration ?? null, nibssRef, input.channelCode ?? "API",
-          amlFlagged ? 1 : 0, fraudFlagged ? 1 : 0]);
+          input.amount, input.narration ?? null, nibssRef, input.channelCode ?? "API", amlFlagged, fraudFlagged],
+        {
+          paymentKind: "nip",
+          paymentReference: sessionId,
+          amount: input.amount,
+          currency: "NGN",
+          debitAccount: input.senderBankCode,
+          creditAccount: input.receiverBankCode,
+        },
+      );
 
       // Auto-create AML case for flagged transactions
       if (amlFlagged || structuringRisk) {
@@ -796,28 +837,18 @@ const paymentsRouter = router({
         } catch { /* non-fatal */ }
       }
 
-      // ── Mojaloop: initiate interbank settlement via payment switch ──
-      mojaloopTransfer({
-        payerFsp: input.senderBankCode,
-        payeeFsp: input.receiverBankCode,
-        amount: String(input.amount),
-        currency: "NGN",
-        reference: sessionId,
-        note: `NIP:${nibssRef}`,
-      }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Mojaloop] NIP settlement fire-and-forget"));
-
-      // ── TigerBeetle: record NIP transfer in financial ledger ──
-      tigerbeetleTransfer({
-        debitAccountId: input.senderBankCode,
-        creditAccountId: input.receiverBankCode,
-        amount: input.amount,
-        currency: "NGN",
-        reference: sessionId,
-        transferType: "NIP_TRANSFER",
-      }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[TigerBeetle] NIP ledger fire-and-forget"));
-
       emitMutationEvent(EVENTS.SWIFT_TRANSACTION, { action: "nip_initiate", sessionId, amount: input.amount, amlFlagged, fraudFlagged, structuringRisk, velocityFlagged, ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return { success: true, sessionId, nibssRef, amlFlagged, fraudFlagged, structuringRisk, velocityFlagged };
+      return {
+        accepted: true,
+        sessionId,
+        nibssRef,
+        paymentCommandId: persistedPayment.commandId,
+        settlementStatus: persistedPayment.status,
+        amlFlagged,
+        fraudFlagged,
+        structuringRisk,
+        velocityFlagged,
+      };
     }),
 
   // RTGS Transactions
@@ -912,13 +943,23 @@ const paymentsRouter = router({
       // Business rule: Determine settlement cycle based on time of day
       const hour = new Date().getHours();
       const settlementCycle = hour < 12 ? "AM" : hour < 16 ? "PM1" : "PM2";
-      await query(`
-        INSERT INTO rtgs_transactions (reference, sender_bank_code, sender_account_number, receiver_bank_code,
-          receiver_account_number, amount, narration, status, priority, settlement_cycle, cbn_ref)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
-      `, [reference, input.senderBankCode, input.senderAccountNumber ?? null, input.receiverBankCode,
+      const persistedPayment = await persistPaymentAndCommand(
+        `INSERT INTO rtgs_transactions (reference, sender_bank_code, sender_account_number, receiver_bank_code,
+           receiver_account_number, amount, narration, status, priority, settlement_cycle, cbn_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10)
+         RETURNING id`,
+        [reference, input.senderBankCode, input.senderAccountNumber ?? null, input.receiverBankCode,
           input.receiverAccountNumber ?? null, input.amount, input.narration ?? null,
-          input.priority, settlementCycle, cbnRef]);
+          input.priority, settlementCycle, cbnRef],
+        {
+          paymentKind: "rtgs",
+          paymentReference: reference,
+          amount: input.amount,
+          currency: "NGN",
+          debitAccount: input.senderBankCode,
+          creditAccount: input.receiverBankCode,
+        },
+      );
 
       // Auto-create AML case for all RTGS (always above CTR threshold)
       try {
@@ -930,28 +971,18 @@ const paymentsRouter = router({
             input.amount]);
       } catch { /* non-fatal */ }
 
-      // ── Mojaloop: initiate RTGS settlement via payment switch ──
-      mojaloopTransfer({
-        payerFsp: input.senderBankCode,
-        payeeFsp: input.receiverBankCode,
-        amount: String(input.amount),
-        currency: "NGN",
-        reference,
-        note: `RTGS:${cbnRef}:${settlementCycle}`,
-      }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Mojaloop] RTGS settlement fire-and-forget"));
-
-      // ── TigerBeetle: record RTGS transfer in financial ledger ──
-      tigerbeetleTransfer({
-        debitAccountId: input.senderBankCode,
-        creditAccountId: input.receiverBankCode,
-        amount: input.amount,
-        currency: "NGN",
-        reference,
-        transferType: "RTGS_TRANSFER",
-      }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[TigerBeetle] RTGS ledger fire-and-forget"));
-
       emitMutationEvent(EVENTS.SWIFT_TRANSACTION, { action: "rtgs_initiate", reference, amount: input.amount, amlFlagged, enhancedDueDiligence, sanctionsFlagged, velocityFlagged, ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return { success: true, reference, cbnRef, settlementCycle, amlFlagged, enhancedDueDiligence, velocityFlagged };
+      return {
+        accepted: true,
+        reference,
+        cbnRef,
+        settlementCycle,
+        paymentCommandId: persistedPayment.commandId,
+        settlementStatus: persistedPayment.status,
+        amlFlagged,
+        enhancedDueDiligence,
+        velocityFlagged,
+      };
     }),
 
   paymentStats: protectedProcedure.query(async () => {

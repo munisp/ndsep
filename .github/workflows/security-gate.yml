@@ -217,6 +217,7 @@ jobs:
             server/security/breakGlassSiemPagerIntegration.test.ts \
             server/security/durableAnalyticsPersistence.config.test.ts \
             server/security/lakehouseDurablePersistence.config.test.ts \
+            server/security/paymentCommandLifecycle.config.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only
         shell: bash
@@ -230,6 +231,10 @@ jobs:
           grep -Fq '"tag": "0039_lakehouse_durable_postgres_storage"' drizzle/meta/_journal.json
           ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0039_lakehouse_durable_postgres_storage.sql
           test "$(grep -Ec '^CREATE TABLE' drizzle/0039_lakehouse_durable_postgres_storage.sql)" -eq 4
+          test -f drizzle/0040_payment_command_durable_lifecycle.sql
+          grep -Fq '"tag": "0040_payment_command_durable_lifecycle"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0040_payment_command_durable_lifecycle.sql
+          grep -Fq 'CREATE TABLE payment_commands' drizzle/0040_payment_command_durable_lifecycle.sql
       - name: Validate fixture-script syntax and explicit refusal paths
         shell: bash
         run: |

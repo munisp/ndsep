@@ -280,6 +280,13 @@
       "when": 1788282893000,
       "tag": "0039_lakehouse_durable_postgres_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788289577146,
+      "tag": "0040_payment_command_durable_lifecycle",
+      "breakpoints": true
     }
   ]
 }

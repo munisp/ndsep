@@ -9,8 +9,8 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getPool } from "./db";
 import { logger } from "./logger";
+import { applyMojaloopPaymentCallback } from "./paymentCommandProcessor";
 import { emitMutationEvent, EVENTS } from "./middlewareIntegration";
 
 const router = Router();
@@ -102,53 +102,19 @@ router.put("/transfers/:transferId", async (req: Request, res: Response) => {
     return;
   }
 
-  const pool = getPool();
-  if (!pool) {
-    res.status(503).json({ error: "Database unavailable" });
-    return;
-  }
-
   try {
-    const client = await pool.connect();
-    let changed = false;
-    try {
-      await client.query("BEGIN");
-      const current = await client.query<{ status: string }>(
-        "SELECT status FROM financial_ledger WHERE reference = $1 FOR UPDATE",
-        [transferId],
-      );
-      if (current.rowCount !== 1) {
-        await client.query("ROLLBACK");
-        res.status(404).json({ error: "Transfer not found" });
-        return;
-      }
-      if (!legalTransition(current.rows[0].status, requestedStatus)) {
-        await client.query("ROLLBACK");
-        logger.error({ transferId, currentStatus: current.rows[0].status, requestedStatus }, "[Mojaloop] Rejected illegal terminal-state transition");
-        res.status(409).json({ error: "Illegal transfer state transition" });
-        return;
-      }
-
-      if (current.rows[0].status !== requestedStatus) {
-        const updated = await client.query(
-          `UPDATE financial_ledger
-             SET status = $1, completed_at = $2, mojaloop_fulfilment = $3, updated_at = NOW()
-           WHERE reference = $4 AND status = $5
-           RETURNING reference`,
-          [requestedStatus, completedAt.toISOString(), body.fulfilment ?? null, transferId, current.rows[0].status],
-        );
-        if (updated.rowCount !== 1) throw new Error("Ledger state changed during callback transaction");
-        changed = true;
-      }
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw error;
-    } finally {
-      client.release();
+    const outcome = await applyMojaloopPaymentCallback(transferId, state, completedAt);
+    if (outcome === "not_found") {
+      res.status(404).json({ error: "Transfer not found" });
+      return;
+    }
+    if (outcome === "illegal_transition") {
+      logger.error({ transferId, requestedStatus }, "[Mojaloop] Rejected illegal payment-command state transition");
+      res.status(409).json({ error: "Illegal transfer state transition" });
+      return;
     }
 
-    if (changed) {
+    if (outcome === "updated") {
       emitMutationEvent(EVENTS.ENFORCEMENT_PAYMENT, {
         entity: "transfer",
         transferId,
@@ -160,7 +126,7 @@ router.put("/transfers/:transferId", async (req: Request, res: Response) => {
     if (state === "ABORTED" && body.errorInformation) {
       logger.warn({ transferId, errorCode: body.errorInformation.errorCode }, "[Mojaloop] Authenticated transfer abort callback");
     }
-    res.status(200).json({ accepted: true, idempotent: !changed, transferId, state: requestedStatus });
+    res.status(200).json({ accepted: true, idempotent: outcome === "idempotent", transferId, state: requestedStatus });
   } catch (err) {
     logger.error({ err, transferId }, "[Mojaloop] Authenticated callback processing failed");
     res.status(500).json({ error: "Internal error" });
@@ -170,10 +136,14 @@ router.put("/transfers/:transferId", async (req: Request, res: Response) => {
 router.get("/transfers/:transferId/status", async (req: Request, res: Response) => {
   const { transferId } = req.params;
   try {
+    const { getPool } = await import("./db");
     const pool = getPool();
     if (!pool) { res.status(503).json({ error: "Database unavailable" }); return; }
     const result = await pool.query(
-      "SELECT reference, status, amount, currency, completed_at FROM financial_ledger WHERE reference = $1",
+      `SELECT payment_reference AS reference, status, amount, currency, completed_at,
+              tigerbeetle_transaction_id, mojaloop_reference
+         FROM payment_commands
+        WHERE payment_reference = $1 OR mojaloop_reference = $1`,
       [transferId],
     );
     if (result.rows.length === 0) { res.status(404).json({ error: "Transfer not found" }); return; }

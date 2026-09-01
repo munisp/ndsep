@@ -2015,7 +2015,7 @@ export type NipTransaction = typeof nipTransactions.$inferSelect;
 export type InsertNipTransaction = typeof nipTransactions.$inferInsert;
 
 export const rtgsStatusEnum = pgEnum("rtgs_status", [
-  "queued", "processing", "settled", "rejected", "cancelled", "pending_funds"
+  "queued", "processing", "settled", "rejected", "cancelled", "pending_funds", "pending_confirmation"
 ]);
 
 export const rtgsTransactions = pgTable("rtgs_transactions", {
@@ -2041,6 +2041,36 @@ export const rtgsTransactions = pgTable("rtgs_transactions", {
 });
 export type RtgsTransaction = typeof rtgsTransactions.$inferSelect;
 export type InsertRtgsTransaction = typeof rtgsTransactions.$inferInsert;
+
+export const paymentCommandKindEnum = pgEnum("payment_command_kind", ["nip", "rtgs"]);
+export const paymentCommandStatusEnum = pgEnum("payment_command_status", [
+  "pending_ledger", "processing_ledger", "pending_settlement", "processing_settlement",
+  "pending_confirmation", "completed", "failed",
+]);
+
+export const paymentCommands = pgTable("payment_commands", {
+  id: uuid("id").primaryKey().notNull(),
+  paymentKind: paymentCommandKindEnum("payment_kind").notNull(),
+  paymentReference: varchar("payment_reference", { length: 64 }).unique().notNull(),
+  nipTransactionId: integer("nip_transaction_id").references(() => nipTransactions.id, { onDelete: "restrict" }),
+  rtgsTransactionId: integer("rtgs_transaction_id").references(() => rtgsTransactions.id, { onDelete: "restrict" }),
+  status: paymentCommandStatusEnum("status").default("pending_ledger").notNull(),
+  amount: bigint("amount", { mode: "number" }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  debitAccount: varchar("debit_account", { length: 128 }).notNull(),
+  creditAccount: varchar("credit_account", { length: 128 }).notNull(),
+  tigerbeetleTransactionId: varchar("tigerbeetle_transaction_id", { length: 128 }),
+  mojaloopReference: varchar("mojaloop_reference", { length: 128 }),
+  attempts: integer("attempts").default(0).notNull(),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type PaymentCommand = typeof paymentCommands.$inferSelect;
+export type InsertPaymentCommand = typeof paymentCommands.$inferInsert;
 
 export const swiftStatusEnum = pgEnum("swift_status", [
   "draft", "sent", "acknowledged", "processed", "rejected", "recalled"
