@@ -328,8 +328,11 @@ services:
     networks: [ndsep-net]
     ports: ["8153:8153"]
     environment:
-      PORT: "8153"
-      APISIX_ADMIN_URL: http://apisix:9180
+      APISIX_MANAGER_PORT: "8153"
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?WORKER_DATABASE_URL is required}
+      APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:?APISIX_ADMIN_URL is required}
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY is required}
+      APISIX_MANAGER_INTERNAL_AUTH_TOKEN: ${APISIX_MANAGER_INTERNAL_AUTH_TOKEN:?APISIX_MANAGER_INTERNAL_AUTH_TOKEN is required}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8153/health"]

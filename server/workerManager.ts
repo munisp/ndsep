@@ -564,22 +564,9 @@ export const WORKER_DEFS: WorkerDef[] = [
     technology: "Python · Apache Iceberg REST · PostgreSQL",
   },
   // ── Orchestration Services (Go + Python) ────────────────────────────────
-  {
-    id: "api-gateway",
-    name: "APISIX API Gateway Service",
-    language: "Go",
-    layer: "INFRA",
-    command: path.join(BIN_DIR, "api_gateway"),
-    args: [],
-    port: 8130,
-    env: {
-      APISIX_ADMIN_URL: process.env.APISIX_ADMIN_URL ?? "http://localhost:9180",
-      APISIX_ADMIN_KEY: process.env.APISIX_ADMIN_KEY ?? "",
-      APISIX_ENABLED: process.env.APISIX_ENABLED ?? "true",
-    },
-    description: "Syncs 30 NDSEP journey routes to APISIX Admin API v3. Graceful degradation to in-memory registry when APISIX is unreachable.",
-    technology: "Go · APISIX Admin API v3 · gorilla/mux",
-  },
+  // The legacy `api_gateway` worker is intentionally not registered here: it
+  // carried a compiled APISIX route map and is superseded by `apisix-manager`,
+  // which loads the PostgreSQL-authoritative gateway_routes registry.
   {
     id: "event-bus",
     name: "Kafka + Fluvio Event Bus",
@@ -958,9 +945,16 @@ export const WORKER_DEFS: WorkerDef[] = [
     command: path.join(BIN_DIR, "apisix_manager"),
     args: [],
     port: 8201,
-    env: { APISIX_PORT: "8201", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, APISIX_ADMIN_URL: process.env.APISIX_ADMIN_URL ?? "http://localhost:9180" },
-    description: "Manages APISIX API gateway routes and plugins for NDSEP services.",
-    technology: "Go · APISIX · REST API",
+    env: {
+      APISIX_MANAGER_PORT: "8201",
+      WORKER_DATABASE_URL: DB_URL,
+      WORKER_RELAY_URL: RELAY_URL,
+      APISIX_ADMIN_URL: process.env.APISIX_ADMIN_URL ?? "",
+      APISIX_ADMIN_KEY: process.env.APISIX_ADMIN_KEY ?? "",
+      APISIX_MANAGER_INTERNAL_AUTH_TOKEN: process.env.APISIX_MANAGER_INTERNAL_AUTH_TOKEN ?? "",
+    },
+    description: "Synchronizes PostgreSQL-authoritative APISIX routes and durable synchronization evidence.",
+    technology: "Go · PostgreSQL · APISIX Admin API",
   },
   {
     id: "bgp-live-monitor",

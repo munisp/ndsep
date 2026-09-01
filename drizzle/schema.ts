@@ -3200,3 +3200,33 @@ export const penaltyCalculations = pgTable("penalty_calculations", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+
+// ─── APISIX Durable Gateway Route Registry ───────────────────────────────────
+export const gatewayRouteSyncStatusEnum = pgEnum("gateway_route_sync_status", ["succeeded", "failed"]);
+
+export const gatewayRoutes = pgTable("gateway_routes", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 160 }).notNull(),
+  uri: varchar("uri", { length: 512 }).notNull().unique(),
+  methods: text("methods").array().notNull(),
+  upstream: varchar("upstream", { length: 512 }).notNull(),
+  plugins: jsonb("plugins").$type<Record<string, unknown>>().notNull().default({}),
+  journeyId: varchar("journey_id", { length: 32 }),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const gatewayRouteSyncAttempts = pgTable("gateway_route_sync_attempts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  routeId: varchar("route_id", { length: 64 }).notNull().references(() => gatewayRoutes.id, { onDelete: "cascade" }),
+  routeVersion: integer("route_version").notNull(),
+  status: gatewayRouteSyncStatusEnum("status").notNull(),
+  httpStatus: integer("http_status"),
+  errorMessage: text("error_message"),
+  attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
+});

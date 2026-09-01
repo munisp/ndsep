@@ -287,6 +287,13 @@
       "when": 1788289577146,
       "tag": "0040_payment_command_durable_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788291472264,
+      "tag": "0041_apisix_durable_route_registry",
+      "breakpoints": true
     }
   ]
 }
