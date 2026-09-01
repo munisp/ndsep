@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertReadOnlyQueryPack,
   assertSchemaComparison,
+  getVerifiedSchemaDriftSslConfig,
   requireDistinctTargets,
   validateSchemaDriftTarget,
 } from "../../scripts/ci/verify-staging-schema-drift.mjs";
@@ -49,6 +50,17 @@ describe("staging schema-drift verifier", () => {
     expect(() => requireDistinctTargets(baseline, baseline)).toThrow(/must be distinct/);
   });
 
+  it("keeps certificate verification enabled and rejects malformed private CA bundles", () => {
+    expect(getVerifiedSchemaDriftSslConfig({})).toEqual({ rejectUnauthorized: true });
+    expect(getVerifiedSchemaDriftSslConfig({
+      SCHEMA_DRIFT_DB_SSL_CA_PEM: "-----BEGIN CERTIFICATE-----\nsynthetic-ca\n-----END CERTIFICATE-----",
+    })).toEqual({
+      rejectUnauthorized: true,
+      ca: "-----BEGIN CERTIFICATE-----\nsynthetic-ca\n-----END CERTIFICATE-----",
+    });
+    expect(() => getVerifiedSchemaDriftSslConfig({ SCHEMA_DRIFT_DB_SSL_CA_PEM: "not-a-pem" })).toThrow(/PEM certificate bundle/);
+  });
+
   it("requires the tracked query pack to remain read-only and fingerprint-complete", async () => {
     const sql = await readFile(queryPackPath, "utf8");
     expect(() => assertReadOnlyQueryPack(sql)).not.toThrow();
@@ -89,6 +101,7 @@ describe("staging schema-drift verifier", () => {
     expect(workflow).toMatch(/schema-drift-verification:[\s\S]*?permissions:\s*\n\s+contents: read/);
     expect(workflow).toMatch(/SCHEMA_DRIFT_BASELINE_DATABASE_URL: \$\{\{ secrets\.SCHEMA_DRIFT_BASELINE_DATABASE_URL \}\}/);
     expect(workflow).toMatch(/SCHEMA_DRIFT_STAGING_DATABASE_URL: \$\{\{ secrets\.SCHEMA_DRIFT_STAGING_DATABASE_URL \}\}/);
+    expect(workflow).toMatch(/SCHEMA_DRIFT_DB_SSL_CA_PEM: \$\{\{ secrets\.SCHEMA_DRIFT_DB_SSL_CA_PEM \}\}/);
     expect(workflow).toMatch(/node scripts\/ci\/verify-staging-schema-drift\.mjs > schema-drift-verification\.json/);
     expect(workflow).toMatch(/docker:[\s\S]*?needs:\s*\[[\s\S]*?schema-drift-verification,[\s\S]*?\]/);
   });

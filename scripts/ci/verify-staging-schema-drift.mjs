@@ -123,6 +123,20 @@ export function requireDistinctTargets(baseline, staging) {
   }
 }
 
+/**
+ * Uses the runner trust store by default. A protected environment may supply a
+ * private CA bundle, but an arbitrary secret value must never disable or weaken
+ * certificate verification.
+ */
+export function getVerifiedSchemaDriftSslConfig(environment = process.env) {
+  const ca = environment.SCHEMA_DRIFT_DB_SSL_CA_PEM;
+  if (ca === undefined || ca === "") return { rejectUnauthorized: true };
+  if (!ca.includes("-----BEGIN CERTIFICATE-----") || !ca.includes("-----END CERTIFICATE-----")) {
+    throw new Error("SCHEMA_DRIFT_DB_SSL_CA_PEM must contain a PEM certificate bundle");
+  }
+  return { rejectUnauthorized: true, ca };
+}
+
 export function assertReadOnlyQueryPack(sql) {
   if (typeof sql !== "string" || sql.trim().length === 0) {
     throw new Error("Schema-drift verification SQL must be non-empty");
@@ -231,7 +245,7 @@ async function collectSchemaReport(client) {
   };
 }
 
-async function collectTargetReport(connectionString, label) {
+async function collectTargetReport(connectionString, label, environment) {
   const target = validateSchemaDriftTarget(connectionString, label);
   const pool = new pg.Pool({
     connectionString,
@@ -243,7 +257,7 @@ async function collectTargetReport(connectionString, label) {
     query_timeout: 30_000,
     lock_timeout: 5_000,
     idle_in_transaction_session_timeout: 15_000,
-    ssl: { rejectUnauthorized: true },
+    ssl: getVerifiedSchemaDriftSslConfig(environment),
   });
   const client = await pool.connect();
   try {
@@ -269,8 +283,8 @@ export async function verifyStagingSchemaDrift(environment = process.env) {
   const sqlPath = join(dirname(fileURLToPath(import.meta.url)), "staging-schema-drift-and-synthetic-fixture-verification.sql");
   assertReadOnlyQueryPack(await readFile(sqlPath, "utf8"));
   const [baseline, staging] = await Promise.all([
-    collectTargetReport(baselineUrl, "SCHEMA_DRIFT_BASELINE_DATABASE_URL"),
-    collectTargetReport(stagingUrl, "SCHEMA_DRIFT_STAGING_DATABASE_URL"),
+    collectTargetReport(baselineUrl, "SCHEMA_DRIFT_BASELINE_DATABASE_URL", environment),
+    collectTargetReport(stagingUrl, "SCHEMA_DRIFT_STAGING_DATABASE_URL", environment),
   ]);
   assertSchemaComparison(baseline, staging);
   return {

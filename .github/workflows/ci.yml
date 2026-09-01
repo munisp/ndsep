@@ -355,6 +355,9 @@ jobs:
     env:
       SCHEMA_DRIFT_BASELINE_DATABASE_URL: ${{ secrets.SCHEMA_DRIFT_BASELINE_DATABASE_URL }}
       SCHEMA_DRIFT_STAGING_DATABASE_URL: ${{ secrets.SCHEMA_DRIFT_STAGING_DATABASE_URL }}
+      # Optional PEM bundle for a private staging PostgreSQL CA. Verification
+      # remains mandatory whether this secret is supplied or the runner trust store is used.
+      SCHEMA_DRIFT_DB_SSL_CA_PEM: ${{ secrets.SCHEMA_DRIFT_DB_SSL_CA_PEM }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
