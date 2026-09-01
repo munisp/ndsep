@@ -1453,11 +1453,15 @@ dependencies = [
  "axum",
  "chrono",
  "lazy_static",
+ "native-tls",
+ "postgres-native-tls",
  "prometheus",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
+ "tokio-postgres",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -1472,6 +1476,8 @@ dependencies = [
  "env_logger",
  "hex",
  "log",
+ "native-tls",
+ "postgres-native-tls",
  "rand 0.8.8",
  "reqwest 0.13.4",
  "serde",
@@ -2171,6 +2177,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618"
 dependencies = [
  "portable-atomic",
+]
+
+[[package]]
+name = "postgres-native-tls"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fef4de47bb81477e0c3deaf153a1b10ae176484713ff1640969f4cb96b653ebc"
+dependencies = [
+ "native-tls",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-postgres",
 ]
 
 [[package]]

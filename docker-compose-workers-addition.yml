@@ -931,10 +931,8 @@ services:
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-writer
     environment:
+      LAKEHOUSE_WRITER_PORT: "8305"
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
-      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
-      PORT: "8305"
     depends_on:
       postgres:
         condition: service_healthy

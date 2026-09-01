@@ -234,6 +234,19 @@ services:
     depends_on: [kafka]
     networks: [ndsep-net]
 
+  lakehouse-ingest:
+    build:
+      context: ../workers/rust
+      dockerfile: Dockerfile
+      args: {WORKER: lakehouse_ingest}
+    ports: ["8163:8163"]
+    environment:
+      LAKEHOUSE_INGEST_PORT: "8163"
+      LAKEHOUSE_DATABASE_URL: ${LAKEHOUSE_INGEST_DATABASE_URL:?LAKEHOUSE_INGEST_DATABASE_URL is required}
+      LAKEHOUSE_URL: ${LAKEHOUSE_INGEST_URL:?LAKEHOUSE_INGEST_URL is required}
+    depends_on: [postgres, lakehouse]
+    networks: [ndsep-net]
+
   dapr-bindings:
     build:
       context: ./python/dapr_bindings

@@ -13,6 +13,7 @@ import {
   serial,
   text,
   timestamp,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 
@@ -102,6 +103,63 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
 
 export type WebhookSubscriptionRecord = typeof webhookSubscriptions.$inferSelect;
 export type WebhookDeliveryRecord = typeof webhookDeliveries.$inferSelect;
+
+// ─── Durable Lakehouse ingestion and feature store ────────────────────────────
+
+export const lakehouseIngestRecords = pgTable("lakehouse_ingest_records", {
+  id: uuid("id").primaryKey(),
+  tableName: text("table_name").notNull(),
+  partitionKey: text("partition_key").notNull(),
+  data: jsonb("data").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  sourceSystem: text("source_system").notNull(),
+  recordHash: varchar("record_hash", { length: 64 }).notNull().unique(),
+  deliveryStatus: varchar("delivery_status", { length: 16 }).notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  leasedAt: timestamp("leased_at", { withTimezone: true }),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const mlFeatureStore = pgTable("ml_feature_store", {
+  id: uuid("id").primaryKey(),
+  featureGroup: text("feature_group").notNull(),
+  entityId: text("entity_id").notNull(),
+  entityType: text("entity_type").notNull().default("organization"),
+  features: jsonb("features").notNull().default(sql`'{}'::jsonb`),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const mlPredictionLog = pgTable("ml_prediction_log", {
+  id: uuid("id").primaryKey(),
+  modelName: text("model_name").notNull(),
+  modelVersion: text("model_version").notNull(),
+  entityId: text("entity_id").notNull(),
+  inputFeatures: jsonb("input_features").notNull().default(sql`'{}'::jsonb`),
+  prediction: jsonb("prediction").notNull(),
+  confidence: real("confidence").notNull().default(0),
+  latencyMs: bigint("latency_ms", { mode: "number" }).notNull().default(0),
+  predictedAt: timestamp("predicted_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const mlLineage = pgTable("ml_lineage", {
+  id: uuid("id").primaryKey(),
+  sourceTable: text("source_table").notNull(),
+  targetTable: text("target_table").notNull(),
+  transformation: text("transformation").notNull(),
+  recordCount: bigint("record_count", { mode: "number" }).notNull().default(0),
+  pipelineRunId: text("pipeline_run_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type LakehouseIngestRecord = typeof lakehouseIngestRecords.$inferSelect;
+export type MlFeatureStoreRecord = typeof mlFeatureStore.$inferSelect;
+export type MlPredictionLogRecord = typeof mlPredictionLog.$inferSelect;
+export type MlLineageRecord = typeof mlLineage.$inferSelect;
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
 

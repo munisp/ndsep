@@ -215,6 +215,8 @@ jobs:
             server/security/releaseArtifactHardening.config.test.ts \
             server/security/breakGlassEmergencyRelease.test.ts \
             server/security/breakGlassSiemPagerIntegration.test.ts \
+            server/security/durableAnalyticsPersistence.config.test.ts \
+            server/security/lakehouseDurablePersistence.config.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only
         shell: bash
@@ -224,6 +226,10 @@ jobs:
           grep -Fq '"tag": "0035_digital_twin_noc_runtime_schema"' drizzle/meta/_journal.json
           ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0035_digital_twin_noc_runtime_schema.sql
           test "$(grep -Ec '^CREATE TABLE' drizzle/0035_digital_twin_noc_runtime_schema.sql)" -ge 17
+          test -f drizzle/0039_lakehouse_durable_postgres_storage.sql
+          grep -Fq '"tag": "0039_lakehouse_durable_postgres_storage"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0039_lakehouse_durable_postgres_storage.sql
+          test "$(grep -Ec '^CREATE TABLE' drizzle/0039_lakehouse_durable_postgres_storage.sql)" -eq 4
       - name: Validate fixture-script syntax and explicit refusal paths
         shell: bash
         run: |

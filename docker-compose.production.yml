@@ -1760,11 +1760,13 @@ services:
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-ingest
     environment:
+      NODE_ENV: production
+      LAKEHOUSE_INGEST_PORT: "8304"
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      KAFKA_BROKERS: kafka:9092
-      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
-      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
-      PORT: "8304"
+      POSTGRES_TLS_CA_FILE: /etc/ndsep/postgres-ca.crt
+      LAKEHOUSE_URL: ${LAKEHOUSE_INGEST_URL:?LAKEHOUSE_INGEST_URL is required}
+    volumes:
+      - ./infra/postgres/server.crt:/etc/ndsep/postgres-ca.crt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -1782,10 +1784,12 @@ services:
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-writer
     environment:
+      NODE_ENV: production
+      LAKEHOUSE_WRITER_PORT: "8305"
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
-      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
-      PORT: "8305"
+      POSTGRES_TLS_CA_FILE: /etc/ndsep/postgres-ca.crt
+    volumes:
+      - ./infra/postgres/server.crt:/etc/ndsep/postgres-ca.crt:ro
     depends_on:
       postgres:
         condition: service_healthy

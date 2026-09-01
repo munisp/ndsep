@@ -75,7 +75,11 @@ describe("durable DPCO analytics and outbox source contracts", () => {
     const migration = read("drizzle/0038_dpco_audit_control_rating_postgres_reconciliation.sql");
     const router = read("server/routers/dpco.ts");
     const schema = read("drizzle/schema.ts");
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 38, tag: "0038_dpco_audit_control_rating_postgres_reconciliation" });
+    expect(
+      journal.entries.some(
+        entry => entry.idx === 38 && entry.tag === "0038_dpco_audit_control_rating_postgres_reconciliation",
+      ),
+    ).toBe(true);
     expect(migration).toContain("uq_dpco_audit_control_ratings_natural_key");
     expect(migration).toContain("duplicate (engagement_id, control_id)");
     expect(router).toContain("ON CONFLICT (engagement_id, control_id)");

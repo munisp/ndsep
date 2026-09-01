@@ -273,6 +273,13 @@
       "when": 1788278100000,
       "tag": "0038_dpco_audit_control_rating_postgres_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788282893000,
+      "tag": "0039_lakehouse_durable_postgres_storage",
+      "breakpoints": true
     }
   ]
 }
