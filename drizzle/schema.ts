@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -72,6 +73,35 @@ export const organizations = pgTable("organizations", {
 
 export type Organization = typeof organizations.$inferSelect;
 export type InsertOrganization = typeof organizations.$inferInsert;
+
+// ─── Webhook subscriptions and durable delivery ledger ───────────────────────
+
+export const webhookSubscriptions = pgTable("webhook_subscriptions", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  url: text("url").notNull(),
+  events: text("events").array().notNull().default(sql`'{}'`),
+  secret: text("secret").notNull(),
+  active: boolean("active").default(true),
+  failureCount: integer("failure_count").default(0),
+  lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const webhookDeliveries = pgTable("webhook_deliveries", {
+  id: serial("id").primaryKey(),
+  subscriptionId: integer("subscription_id").references(() => webhookSubscriptions.id),
+  event: text("event").notNull(),
+  payload: jsonb("payload").notNull(),
+  responseStatus: integer("response_status"),
+  responseBody: text("response_body"),
+  attempt: integer("attempt").default(1),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }).defaultNow(),
+  success: boolean("success").default(false),
+});
+
+export type WebhookSubscriptionRecord = typeof webhookSubscriptions.$inferSelect;
+export type WebhookDeliveryRecord = typeof webhookDeliveries.$inferSelect;
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
 

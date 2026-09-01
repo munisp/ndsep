@@ -50,6 +50,28 @@ function signPayload(payload: string, secret: string): string {
   return crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 
+/**
+ * Persist a delivery attempt in the canonical PostgreSQL webhook ledger.  The
+ * receiver is given a stable event identifier so retries are intentionally
+ * at-least-once and can be deduplicated downstream.  Response bodies are not
+ * persisted because they may contain untrusted or sensitive remote content.
+ */
+export async function recordWebhookDeliveryAttempt(
+  pool: Pick<Pool, "query">,
+  subscription: Pick<WebhookSubscription, "id">,
+  event: WebhookEvent,
+  statusCode: number | null,
+  success: boolean,
+  attempt: number
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO webhook_deliveries
+       (subscription_id, event, payload, response_status, response_body, attempt, delivered_at, success)
+     VALUES ($1, $2, $3::jsonb, $4, NULL, $5, NOW(), $6)`,
+    [subscription.id, event.type, JSON.stringify(event), statusCode, attempt + 1, success]
+  );
+}
+
 async function deliverWebhook(
   subscription: WebhookSubscription,
   event: WebhookEvent,
@@ -74,13 +96,17 @@ async function deliverWebhook(
 
     const success = response.status >= 200 && response.status < 300;
 
-    // Log delivery
-    const pool = getPool();
-    await pool.query(
-      `INSERT INTO webhook_deliveries (subscription_id, event_type, event_id, status_code, success, attempt, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-      [subscription.id, event.type, event.id, response.status, success, attempt + 1]
-    ).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+    // The audit record is authoritative. Do not report remote delivery as a
+    // success when the canonical PostgreSQL ledger cannot record the attempt.
+    try {
+      await recordWebhookDeliveryAttempt(getPool(), subscription, event, response.status, success, attempt);
+    } catch (ledgerError) {
+      logger.error(
+        { err: ledgerError instanceof Error ? ledgerError.message : String(ledgerError), subscriptionId: subscription.id, eventId: event.id },
+        "[Webhook] Delivery response was received but durable audit logging failed"
+      );
+      return false;
+    }
 
     if (success) {
       logger.info({ subscriptionId: subscription.id, eventType: event.type }, "[Webhook] Delivered");
@@ -98,6 +124,19 @@ async function deliverWebhook(
     logger.error({ subscriptionId: subscription.id, status: response.status }, "[Webhook] Delivery failed");
     return false;
   } catch (err) {
+    // Record terminal transport failure when PostgreSQL is available. The
+    // record itself is best-effort only because there is no durable ledger if
+    // the database is unreachable; the function still reports failure.
+    if (attempt >= MAX_RETRIES - 1) {
+      try {
+        await recordWebhookDeliveryAttempt(getPool(), subscription, event, null, false, attempt);
+      } catch (ledgerError) {
+        logger.error(
+          { err: ledgerError instanceof Error ? ledgerError.message : String(ledgerError), subscriptionId: subscription.id, eventId: event.id },
+          "[Webhook] Durable audit logging failed for terminal transport error"
+        );
+      }
+    }
     if (attempt < MAX_RETRIES - 1) {
       const delay = RETRY_DELAYS[attempt] ?? 30000;
       await new Promise(resolve => setTimeout(resolve, delay));
