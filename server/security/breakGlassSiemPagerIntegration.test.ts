@@ -139,7 +139,7 @@ describe("break-glass SIEM and pager evidence integration", () => {
       const result = await publishBreakGlassAlerts({ evidenceDir: evidenceDirectory, outDir: outputDirectory, deliver: true }, { fetchImpl });
       expect(result.delivery.siem).toMatchObject({ configured: true, delivered: true, mode: "splunk-hec", status: 202 });
       expect(result.delivery.pagerDuty).toMatchObject({ configured: true, delivered: true, status: 202 });
-      expect(calls.map(call => call.url)).toEqual([
+      expect(calls.slice(0, 2).map(call => call.url)).toEqual([
         "https://siem.example/services/collector/event",
         "https://events.pagerduty.com/v2/enqueue",
       ]);
@@ -150,6 +150,14 @@ describe("break-glass SIEM and pager evidence integration", () => {
       expect(pagerRequest.event_action).toBe("trigger");
       expect(pagerRequest.dedup_key).toContain("BG-2026-ABCD");
       expect(JSON.stringify(pagerRequest)).not.toContain("splunk-token-not-written");
+
+      process.env.BREAK_GLASS_SIEM_MODE = "elastic";
+      process.env.BREAK_GLASS_SIEM_ENDPOINT = "https://elastic.example";
+      process.env.BREAK_GLASS_ELASTIC_INDEX = "ndsep-break-glass";
+      const elasticOutputDirectory = resolve(outputDirectory, "..", "elastic-delivery");
+      const elasticResult = await publishBreakGlassAlerts({ evidenceDir: evidenceDirectory, outDir: elasticOutputDirectory, deliver: true }, { fetchImpl });
+      expect(elasticResult.delivery.siem).toMatchObject({ configured: true, delivered: true, mode: "elastic", status: 202 });
+      expect(calls[2].url).toMatch(/^https:\/\/elastic\.example\/ndsep-break-glass\/_create\/[a-f0-9]{64}$/);
     });
   });
 
