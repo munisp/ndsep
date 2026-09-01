@@ -14,15 +14,17 @@ const IS_PRODUCTION = process.env.NODE_ENV === "production";
 let tbTransactions = 0;
 let tbErrors = 0;
 
-export type TbTransactionType = "penalty" | "fine" | "settlement" | "refund" | "escrow";
+export type TbTransactionType = "penalty" | "fine" | "settlement" | "refund" | "escrow" | "transfer";
 
 export interface TbTransaction {
   id?: string;
   orgId: string;
   penaltyId: string;
-  amountUsd: number;
+  amount: number;
   currency?: string;
   type: TbTransactionType;
+  debitAccountId?: string;
+  creditAccountId?: string;
   description?: string;
   issuedBy?: string;
   timestamp?: string;
@@ -37,14 +39,14 @@ export interface TbTransactionResult {
 }
 
 export interface TbBalance {
-  orgId: string;
-  total_penalties_issued: number;
-  total_penalties_paid: number;
-  total_escrow_held: number;
-  total_refunds: number;
-  net_liability: number;
+  org_id: string;
   currency: string;
-  lastUpdated: string;
+  debits_posted: string;
+  credits_posted: string;
+  debits_pending: string;
+  credits_pending: string;
+  net_position: string;
+  last_updated: string;
 }
 
 function requireTrustedTigerBeetleTransport(): void {
@@ -56,10 +58,14 @@ function requireTrustedTigerBeetleTransport(): void {
 function validateTransaction(tx: TbTransaction): void {
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(tx.orgId)) throw new Error("Invalid TigerBeetle orgId");
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(tx.penaltyId)) throw new Error("Invalid TigerBeetle penaltyId");
-  if (!Number.isFinite(tx.amountUsd) || tx.amountUsd <= 0 || !Number.isSafeInteger(Math.round(tx.amountUsd * 100))) {
-    throw new Error("TigerBeetle amountUsd must be a finite positive currency amount");
+  if (!Number.isFinite(tx.amount) || tx.amount <= 0 || !Number.isSafeInteger(Math.round(tx.amount * 100))) {
+    throw new Error("TigerBeetle amount must be a finite positive currency amount");
   }
-  if (tx.currency && !/^[A-Z]{3}$/.test(tx.currency)) throw new Error("TigerBeetle currency must be a three-letter ISO code");
+  if (tx.currency && !/^(NGN|USD)$/.test(tx.currency)) throw new Error("TigerBeetle currency must be NGN or USD");
+  if (tx.type === "transfer") {
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(tx.debitAccountId ?? "")) throw new Error("TigerBeetle transfer requires a valid debitAccountId");
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(tx.creditAccountId ?? "")) throw new Error("TigerBeetle transfer requires a valid creditAccountId");
+  }
 }
 
 function idempotencyKey(tx: TbTransaction): string {
@@ -68,9 +74,11 @@ function idempotencyKey(tx: TbTransaction): string {
     id: tx.id ?? null,
     orgId: tx.orgId,
     penaltyId: tx.penaltyId,
-    amountUsd: tx.amountUsd.toFixed(2),
+    amount: tx.amount.toFixed(2),
     currency: tx.currency ?? "USD",
     type: tx.type,
+    debitAccountId: tx.debitAccountId ?? null,
+    creditAccountId: tx.creditAccountId ?? null,
   });
   return createHash("sha256").update(canonical).digest("hex");
 }
@@ -87,9 +95,11 @@ export async function createTigerBeetleTransaction(tx: TbTransaction): Promise<T
       body: JSON.stringify({
         org_id: tx.orgId,
         penalty_id: tx.penaltyId,
-        amount_usd: tx.amountUsd,
+        amount: tx.amount,
         currency: tx.currency ?? "USD",
         type: tx.type,
+        debit_account_id: tx.debitAccountId,
+        credit_account_id: tx.creditAccountId,
         description: tx.description ?? `${tx.type} for org ${tx.orgId}`,
         issued_by: tx.issuedBy ?? "system",
         timestamp: tx.timestamp ?? new Date().toISOString(),
@@ -114,11 +124,11 @@ export async function createTigerBeetleTransaction(tx: TbTransaction): Promise<T
   }
 }
 
-export async function getTigerBeetleBalance(orgId: string): Promise<TbBalance> {
+export async function getTigerBeetleBalance(orgId: string, currency: "NGN" | "USD" = "NGN"): Promise<TbBalance> {
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(orgId)) throw new Error("Invalid TigerBeetle orgId");
   requireTrustedTigerBeetleTransport();
   try {
-    const res = await fetch(`${TB_BASE}/balance/${encodeURIComponent(orgId)}`, { signal: AbortSignal.timeout(TB_TIMEOUT_MS) });
+    const res = await fetch(`${TB_BASE}/balance/${encodeURIComponent(orgId)}?currency=${currency}`, { signal: AbortSignal.timeout(TB_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`TigerBeetle balance lookup failed with HTTP ${res.status}`);
     return await res.json() as TbBalance;
   } catch (error) {

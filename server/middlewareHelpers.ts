@@ -83,7 +83,7 @@ export function broadcastEvent(event: string, data: Record<string, unknown>): vo
 // ─── TigerBeetle ─────────────────────────────────────────────────────────────
 export async function recordFinancialTransaction(
   type: TbTransactionType,
-  amountUsd: number,
+  amount: number,
   orgId: string,
   penaltyId: string,
   description?: string,
@@ -91,7 +91,7 @@ export async function recordFinancialTransaction(
   const { tigerbeetleResilience } = await import("./resilience");
   await tigerbeetleResilience(() => createTigerBeetleTransaction({
     type,
-    amountUsd,
+    amount,
     orgId,
     penaltyId,
     description,

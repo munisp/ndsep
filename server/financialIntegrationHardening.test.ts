@@ -33,14 +33,14 @@ describe("financial integration hardening", () => {
   });
 
   it("creates a stable TigerBeetle idempotency key and rejects invalid money", () => {
-    const base = { orgId: "org-1", penaltyId: "penalty-1", amountUsd: 12.5, type: "penalty" as const };
+    const base = { orgId: "org-1", penaltyId: "penalty-1", amount: 12.5, type: "penalty" as const };
     expect(tigerbeetle.idempotencyKey(base)).toEqual(tigerbeetle.idempotencyKey({ ...base }));
-    expect(() => tigerbeetle.validateTransaction({ ...base, amountUsd: 0 })).toThrow("positive");
+    expect(() => tigerbeetle.validateTransaction({ ...base, amount: 0 })).toThrow("positive");
   });
 
   it("requires a durable TigerBeetle acknowledgement identifier pair", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ transaction_id: "only-one" }), { status: 200 })));
-    await expect(createTigerBeetleTransaction({ orgId: "org-1", penaltyId: "p-1", amountUsd: 5, type: "penalty" })).rejects.toThrow("missing durable transaction identifiers");
+    await expect(createTigerBeetleTransaction({ orgId: "org-1", penaltyId: "p-1", amount: 5, type: "penalty" })).rejects.toThrow("missing durable transaction identifiers");
   });
 
   it("throws for Kafka required delivery when the broker health check cannot establish delivery", async () => {

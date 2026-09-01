@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"math/big"
 	"net/http"
 	"os"
@@ -17,9 +16,10 @@ import (
 )
 
 const (
-	ledgerCode   uint32 = 1
-	accountCode  uint16 = 1
-	transferCode uint16 = 1
+	usdLedgerCode uint32 = 1
+	ngnLedgerCode uint32 = 2
+	accountCode   uint16 = 1
+	transferCode  uint16 = 1
 )
 
 type application struct {
@@ -27,14 +27,17 @@ type application struct {
 }
 
 type transactionRequest struct {
-	OrgID       string  `json:"org_id"`
-	PenaltyID   string  `json:"penalty_id"`
-	AmountUSD   float64 `json:"amount_usd"`
-	Currency    string  `json:"currency"`
-	Type        string  `json:"type"`
-	Description string  `json:"description"`
-	IssuedBy    string  `json:"issued_by"`
-	Timestamp   string  `json:"timestamp"`
+	OrgID           string      `json:"org_id"`
+	PenaltyID       string      `json:"penalty_id"`
+	Amount          json.Number `json:"amount"`
+	AmountUSD       json.Number `json:"amount_usd"` // legacy name accepted only for a safe migration path
+	Currency        string      `json:"currency"`
+	Type            string      `json:"type"`
+	DebitAccountID  string      `json:"debit_account_id"`
+	CreditAccountID string      `json:"credit_account_id"`
+	Description     string      `json:"description"`
+	IssuedBy        string      `json:"issued_by"`
+	Timestamp       string      `json:"timestamp"`
 }
 
 func requiredEnv(name string) string {
@@ -53,33 +56,96 @@ func deterministicID(parts ...string) tb.Uint128 {
 	return tb.BytesToUint128(bytes)
 }
 
-func amountInCents(amount float64) (tb.Uint128, error) {
-	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 {
-		return tb.Uint128{}, fmt.Errorf("amount_usd must be a positive finite value")
+func configuredLedger(currency string) (uint32, string, error) {
+	switch normalized := strings.ToUpper(strings.TrimSpace(currency)); normalized {
+	case "USD":
+		return usdLedgerCode, normalized, nil
+	case "NGN":
+		return ngnLedgerCode, normalized, nil
+	default:
+		return 0, "", fmt.Errorf("unsupported currency %q; only NGN and USD are configured", currency)
 	}
-	cents := math.Round(amount * 100)
-	if cents > float64(^uint64(0)) {
-		return tb.Uint128{}, fmt.Errorf("amount_usd exceeds supported range")
-	}
-	return tb.ToUint128(uint64(cents)), nil
 }
 
-func uint128ToUSD(value tb.Uint128) float64 {
-	number := value.BigInt()
-	asFloat, _ := new(big.Float).SetInt(number).Float64()
-	return asFloat / 100.0
+func validateExternalID(name, value string) error {
+	if len(value) == 0 || len(value) > 128 {
+		return fmt.Errorf("%s must contain 1 to 128 characters", name)
+	}
+	for _, character := range []byte(value) {
+		if !(character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '.' || character == '_' || character == ':' || character == '-') {
+			return fmt.Errorf("%s contains an unsupported character", name)
+		}
+	}
+	return nil
+}
+
+// amountInMinorUnits accepts a JSON decimal without exponent notation and converts
+// it exactly to kobo/cents. Floating point values are never used for ledger amounts.
+func amountInMinorUnits(value json.Number) (tb.Uint128, string, error) {
+	raw := strings.TrimSpace(value.String())
+	if raw == "" || strings.HasPrefix(raw, "-") || strings.HasPrefix(raw, "+") || strings.ContainsAny(raw, "eE") {
+		return tb.Uint128{}, "", fmt.Errorf("amount must be a positive decimal with at most two fractional digits")
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) > 2 || parts[0] == "" {
+		return tb.Uint128{}, "", fmt.Errorf("amount must be a positive decimal with at most two fractional digits")
+	}
+	whole := parts[0]
+	fraction := ""
+	if len(parts) == 2 {
+		fraction = parts[1]
+		if len(fraction) > 2 {
+			return tb.Uint128{}, "", fmt.Errorf("amount cannot include more than two fractional digits")
+		}
+	}
+	for _, part := range []string{whole, fraction} {
+		for _, character := range []byte(part) {
+			if character < '0' || character > '9' {
+				return tb.Uint128{}, "", fmt.Errorf("amount must contain decimal digits only")
+			}
+		}
+	}
+	fraction += strings.Repeat("0", 2-len(fraction))
+	minor, ok := new(big.Int).SetString(strings.TrimLeft(whole+fraction, "0"), 10)
+	if !ok {
+		return tb.Uint128{}, "", fmt.Errorf("amount cannot be parsed")
+	}
+	if minor.Sign() <= 0 {
+		return tb.Uint128{}, "", fmt.Errorf("amount must be greater than zero")
+	}
+	if minor.BitLen() > 128 {
+		return tb.Uint128{}, "", fmt.Errorf("amount exceeds TigerBeetle's unsigned 128-bit range")
+	}
+	return tb.BigIntToUint128(minor), minor.String(), nil
+}
+
+func uint128ToDecimal(value tb.Uint128) string {
+	minor := value.BigInt()
+	quotient, remainder := new(big.Int), new(big.Int)
+	quotient.QuoRem(minor, big.NewInt(100), remainder)
+	return fmt.Sprintf("%s.%02d", quotient.String(), remainder.Uint64())
+}
+
+func signedMinorToDecimal(minor *big.Int) string {
+	if minor.Sign() >= 0 {
+		return uint128ToDecimal(tb.BigIntToUint128(minor))
+	}
+	absolute := new(big.Int).Abs(minor)
+	return "-" + uint128ToDecimal(tb.BigIntToUint128(absolute))
 }
 
 func validateCreateResults[T any](results []T, describe func(T) string) error {
-	if len(results) == 0 {
-		return nil
+	for _, result := range results {
+		if detail := describe(result); detail != "" {
+			return fmt.Errorf("TigerBeetle rejected event: %s", detail)
+		}
 	}
-	return fmt.Errorf("TigerBeetle rejected event: %s", describe(results[0]))
+	return nil
 }
 
-func (app *application) ensureAccount(id tb.Uint128) error {
+func (app *application) ensureAccount(id tb.Uint128, ledger uint32) error {
 	results, err := app.client.CreateAccounts([]tb.Account{{
-		ID: id, Ledger: ledgerCode, Code: accountCode,
+		ID: id, Ledger: ledger, Code: accountCode,
 		Flags: tb.AccountFlags{History: true}.ToUint16(),
 	}})
 	if err != nil {
@@ -93,16 +159,44 @@ func (app *application) ensureAccount(id tb.Uint128) error {
 	})
 }
 
-func (app *application) ensureAccounts(orgID string) (tb.Uint128, tb.Uint128, error) {
-	organization := deterministicID("ndsep", "org", orgID)
-	treasury := deterministicID("ndsep", "treasury", "revenue")
-	if err := app.ensureAccount(organization); err != nil {
+func (app *application) ensureAccounts(orgID string, ledger uint32, currency string) (tb.Uint128, tb.Uint128, error) {
+	organization := deterministicID("ndsep", "org", currency, orgID)
+	treasury := deterministicID("ndsep", "treasury", currency, "revenue")
+	if err := app.ensureAccount(organization, ledger); err != nil {
 		return tb.Uint128{}, tb.Uint128{}, err
 	}
-	if err := app.ensureAccount(treasury); err != nil {
+	if err := app.ensureAccount(treasury, ledger); err != nil {
 		return tb.Uint128{}, tb.Uint128{}, err
 	}
 	return organization, treasury, nil
+}
+
+func requestAmount(request transactionRequest) (json.Number, error) {
+	if request.Amount != "" && request.AmountUSD != "" {
+		return "", fmt.Errorf("provide either amount or amount_usd, not both")
+	}
+	if request.Amount != "" {
+		return request.Amount, nil
+	}
+	if request.AmountUSD != "" {
+		return request.AmountUSD, nil
+	}
+	return "", fmt.Errorf("amount is required")
+}
+
+func transferIDForRequest(request transactionRequest, amountMinor string, currency string, idempotencyKey string) (tb.Uint128, error) {
+	if idempotencyKey != "" {
+		if len(idempotencyKey) != 64 {
+			return tb.Uint128{}, fmt.Errorf("Idempotency-Key must be a 64-character SHA-256 hex value")
+		}
+		for _, character := range []byte(idempotencyKey) {
+			if !(character >= '0' && character <= '9' || character >= 'a' && character <= 'f' || character >= 'A' && character <= 'F') {
+				return tb.Uint128{}, fmt.Errorf("Idempotency-Key must be a 64-character SHA-256 hex value")
+			}
+		}
+		return deterministicID("ndsep", "idempotency", strings.ToLower(idempotencyKey)), nil
+	}
+	return deterministicID("ndsep", "transfer", request.OrgID, request.PenaltyID, request.Type, currency, amountMinor, request.DebitAccountID, request.CreditAccountID), nil
 }
 
 func (app *application) health(w http.ResponseWriter, _ *http.Request) {
@@ -117,27 +211,52 @@ func (app *application) health(w http.ResponseWriter, _ *http.Request) {
 
 func (app *application) transaction(w http.ResponseWriter, r *http.Request) {
 	var request transactionRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid JSON: %w", err))
 		return
 	}
-	if strings.TrimSpace(request.OrgID) == "" || strings.TrimSpace(request.PenaltyID) == "" || strings.TrimSpace(request.Type) == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("org_id, penalty_id, and type are required"))
+	request.OrgID = strings.TrimSpace(request.OrgID)
+	request.PenaltyID = strings.TrimSpace(request.PenaltyID)
+	request.Type = strings.TrimSpace(request.Type)
+	if err := validateExternalID("org_id", request.OrgID); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if request.Currency == "" {
-		request.Currency = "USD"
-	}
-	if request.Currency != "USD" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("only USD is configured for this TigerBeetle ledger"))
+	if err := validateExternalID("penalty_id", request.PenaltyID); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	amount, err := amountInCents(request.AmountUSD)
+	if request.Type == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("type is required"))
+		return
+	}
+	ledger, currency, err := configuredLedger(request.Currency)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	organization, treasury, err := app.ensureAccounts(request.OrgID)
+	decimal, err := requestAmount(request)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	amount, amountMinor, err := amountInMinorUnits(decimal)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if request.Timestamp != "" {
+		if _, err := time.Parse(time.RFC3339, request.Timestamp); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("timestamp must use RFC 3339 format"))
+			return
+		}
+	}
+
+	organization, treasury, err := app.ensureAccounts(request.OrgID, ledger, currency)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err)
 		return
@@ -147,14 +266,37 @@ func (app *application) transaction(w http.ResponseWriter, r *http.Request) {
 	case "penalty", "fine", "escrow":
 	case "settlement", "refund":
 		debit, credit = treasury, organization
+	case "transfer":
+		if err := validateExternalID("debit_account_id", request.DebitAccountID); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := validateExternalID("credit_account_id", request.CreditAccountID); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		debit = deterministicID("ndsep", "account", currency, request.DebitAccountID)
+		credit = deterministicID("ndsep", "account", currency, request.CreditAccountID)
+		if err := app.ensureAccount(debit, ledger); err != nil {
+			writeError(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		if err := app.ensureAccount(credit, ledger); err != nil {
+			writeError(w, http.StatusServiceUnavailable, err)
+			return
+		}
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Errorf("unsupported transaction type %q", request.Type))
 		return
 	}
-	transferID := deterministicID("ndsep", "transfer", request.OrgID, request.PenaltyID, request.Type, fmt.Sprintf("%.2f", request.AmountUSD))
+	transferID, err := transferIDForRequest(request, amountMinor, currency, strings.TrimSpace(r.Header.Get("Idempotency-Key")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	results, err := app.client.CreateTransfers([]tb.Transfer{{
 		ID: transferID, DebitAccountID: debit, CreditAccountID: credit,
-		Amount: amount, Ledger: ledgerCode, Code: transferCode,
+		Amount: amount, Ledger: ledger, Code: transferCode,
 	}})
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("create TigerBeetle transfer: %w", err))
@@ -171,17 +313,22 @@ func (app *application) transaction(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"success": true, "transaction_id": transferID.String(), "ledger_entry_id": transferID.String(),
-		"idempotent": len(results) > 0, "status": "posted",
+		"idempotent": len(results) > 0, "status": "posted", "currency": currency, "amount_minor": amountMinor,
 	})
 }
 
 func (app *application) balance(w http.ResponseWriter, r *http.Request) {
 	orgID := mux.Vars(r)["org_id"]
-	if orgID == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("org_id is required"))
+	if err := validateExternalID("org_id", orgID); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	accountID := deterministicID("ndsep", "org", orgID)
+	_, currency, err := configuredLedger(r.URL.Query().Get("currency"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	accountID := deterministicID("ndsep", "org", currency, orgID)
 	accounts, err := app.client.LookupAccounts([]tb.Uint128{accountID})
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("lookup TigerBeetle account: %w", err))
@@ -192,12 +339,15 @@ func (app *application) balance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	account := accounts[0]
-	issued := uint128ToUSD(account.DebitsPosted)
-	paid := uint128ToUSD(account.CreditsPosted)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"orgId": orgID, "total_penalties_issued": issued, "total_penalties_paid": paid,
-		"total_escrow_held": uint128ToUSD(account.DebitsPending), "total_refunds": 0.0,
-		"net_liability": issued - paid, "currency": "USD", "lastUpdated": time.Now().UTC(),
+		"org_id":          orgID,
+		"currency":        currency,
+		"debits_posted":   uint128ToDecimal(account.DebitsPosted),
+		"credits_posted":  uint128ToDecimal(account.CreditsPosted),
+		"debits_pending":  uint128ToDecimal(account.DebitsPending),
+		"credits_pending": uint128ToDecimal(account.CreditsPending),
+		"net_position":    signedMinorToDecimal(new(big.Int).Sub(account.CreditsPosted.BigInt(), account.DebitsPosted.BigInt())),
+		"last_updated":    time.Now().UTC(),
 	})
 }
 

@@ -5,6 +5,7 @@
  */
 
 import { permifyCheck as checkPermifyPermission } from "./permify";
+import { createTigerBeetleTransaction } from "./tigerbeetle";
 
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
@@ -12,7 +13,6 @@ const DAPR_BRIDGE_URL = process.env.DAPR_BRIDGE_URL || "http://localhost:8150";
 const FLUVIO_RELAY_URL = process.env.FLUVIO_RELAY_URL || "http://localhost:8151";
 const MOJALOOP_ADAPTER_URL = process.env.MOJALOOP_ADAPTER_URL || "http://localhost:8152";
 const APISIX_MANAGER_URL = process.env.APISIX_MANAGER_URL || "http://localhost:8153";
-const TIGERBEETLE_LEDGER_URL = process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8160";
 const OPENSEARCH_INDEXER_URL = process.env.OPENSEARCH_INDEXER_URL || "http://localhost:8161";
 const KEYCLOAK_VALIDATOR_URL = process.env.KEYCLOAK_VALIDATOR_URL || "http://localhost:8162";
 const LAKEHOUSE_INGEST_URL = process.env.LAKEHOUSE_INGEST_URL || "http://localhost:8163";
@@ -154,7 +154,7 @@ export async function lakehouseIngest(table: string, records: object[]): Promise
 
 // ─── TigerBeetle ─────────────────────────────────────────────────────────────
 
-/** Record a financial transaction in TigerBeetle */
+/** Record a financial transaction through the TigerBeetle-backed Go ledger proxy. */
 export async function tigerbeetleTransfer(params: {
   debitAccountId: string;
   creditAccountId: string;
@@ -163,13 +163,15 @@ export async function tigerbeetleTransfer(params: {
   reference: string;
   transferType?: string;
 }): Promise<void> {
-  await postJSON(`${TIGERBEETLE_LEDGER_URL}/transfers`, {
-    debit_account_id: params.debitAccountId,
-    credit_account_id: params.creditAccountId,
+  await createTigerBeetleTransaction({
+    orgId: params.debitAccountId,
+    penaltyId: params.reference,
     amount: params.amount,
     currency: params.currency,
-    user_data: params.reference,
-    transfer_type: params.transferType || "REGULATORY_FINE",
+    type: "transfer",
+    debitAccountId: params.debitAccountId,
+    creditAccountId: params.creditAccountId,
+    description: params.transferType ?? "REGULATORY_TRANSFER",
   });
 }
 

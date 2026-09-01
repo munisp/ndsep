@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -25,7 +26,7 @@ func withTigerBeetleTestState(t *testing.T, url string, available bool) {
 
 func TestRecordFeeEntryRejectsUnavailableLedger(t *testing.T) {
 	withTigerBeetleTestState(t, "http://127.0.0.1:1", false)
-	transactionID, err := recordFeeEntry("123", "registration", 1000)
+	transactionID, err := recordFeeEntry("123", "registration", json.Number("1000.00"))
 	if err == nil {
 		t.Fatal("expected unavailable TigerBeetle ledger to return an error")
 	}
@@ -36,7 +37,7 @@ func TestRecordFeeEntryRejectsUnavailableLedger(t *testing.T) {
 
 func TestRecordFeeEntryRejectsNetworkFailure(t *testing.T) {
 	withTigerBeetleTestState(t, "http://127.0.0.1:1", true)
-	transactionID, err := recordFeeEntry("123", "registration", 1000)
+	transactionID, err := recordFeeEntry("123", "registration", json.Number("1000.00"))
 	if err == nil {
 		t.Fatal("expected unreachable TigerBeetle endpoint to return an error")
 	}
@@ -48,14 +49,14 @@ func TestRecordFeeEntryRejectsNetworkFailure(t *testing.T) {
 func TestRecordFeeEntryRejectsUpstreamRejectionAndMalformedSuccess(t *testing.T) {
 	t.Run("rejected status", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/penalty/issue" {
+			if r.URL.Path != "/transaction" {
 				t.Fatalf("unexpected endpoint %q", r.URL.Path)
 			}
 			http.Error(w, `{"error":"ledger rejected transfer"}`, http.StatusBadGateway)
 		}))
 		defer server.Close()
 		withTigerBeetleTestState(t, server.URL, true)
-		transactionID, err := recordFeeEntry("123", "renewal", 1000)
+		transactionID, err := recordFeeEntry("123", "renewal", json.Number("1000.00"))
 		if err == nil || transactionID != "" {
 			t.Fatalf("expected rejected ledger request to fail without ID; id=%q err=%v", transactionID, err)
 		}
@@ -68,7 +69,7 @@ func TestRecordFeeEntryRejectsUpstreamRejectionAndMalformedSuccess(t *testing.T)
 		}))
 		defer server.Close()
 		withTigerBeetleTestState(t, server.URL, true)
-		transactionID, err := recordFeeEntry("123", "renewal", 1000)
+		transactionID, err := recordFeeEntry("123", "renewal", json.Number("1000.00"))
 		if err == nil || transactionID != "" {
 			t.Fatalf("expected missing transaction ID to fail; id=%q err=%v", transactionID, err)
 		}
@@ -77,13 +78,26 @@ func TestRecordFeeEntryRejectsUpstreamRejectionAndMalformedSuccess(t *testing.T)
 
 func TestRecordFeeEntryAcceptsOnlyDurableTransactionID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/transaction" {
+			t.Fatalf("unexpected endpoint %q", r.URL.Path)
+		}
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["org_id"] != "123" || body["penalty_id"] != "dpco:registration:123" || body["currency"] != "NGN" || body["type"] != "fine" {
+			t.Fatalf("unexpected durable ledger request: %#v", body)
+		}
+		if body["amount"] != float64(1000) {
+			t.Fatalf("expected exact NGN amount, got %#v", body["amount"])
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"transaction_id":"tb-registry-123"}`))
 	}))
 	defer server.Close()
 	withTigerBeetleTestState(t, server.URL, true)
 	before := atomic.LoadInt64(&tbEntries)
-	transactionID, err := recordFeeEntry("123", "registration", 1000)
+	transactionID, err := recordFeeEntry("123", "registration", json.Number("1000.00"))
 	if err != nil {
 		t.Fatalf("expected durable TigerBeetle response to succeed: %v", err)
 	}
