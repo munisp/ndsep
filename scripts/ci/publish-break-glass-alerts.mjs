@@ -9,8 +9,8 @@ import { dirname, resolve } from "node:path";
 import { sha256 } from "./verify-break-glass-authorization.mjs";
 import { verifyBreakGlassEvidence } from "./verify-break-glass-evidence.mjs";
 
-const SIEM_MODES = new Set(["splunk-hec", "elastic"]);
-const DELIVERY_CONFIRMATION = "DELIVER_SANITIZED_BREAK_GLASS_EVENTS";
+export const SIEM_MODES = new Set(["splunk-hec", "elastic"]);
+export const DELIVERY_CONFIRMATION = "DELIVER_SANITIZED_BREAK_GLASS_EVENTS";
 const DEFAULT_ALERT_DELIVERY_POLICY = ".github/security/break-glass-alert-delivery-policy.json";
 
 function assert(condition, message) {
@@ -26,7 +26,7 @@ function parseHttpsUrl(value, label) {
   return parsed;
 }
 
-async function readAlertDeliveryPolicy(path, verified) {
+export async function readAlertDeliveryPolicy(path, verified) {
   const stat = await lstat(path);
   assert(stat.isFile() && !stat.isSymbolicLink(), "Break-glass alert delivery policy must be a regular non-symlink file");
   const handle = await open(path, "r");
@@ -53,13 +53,13 @@ async function readAlertDeliveryPolicy(path, verified) {
   return policy;
 }
 
-function nonSecretEnvironment(name) {
+export function nonSecretEnvironment(name) {
   const value = process.env[name];
   assert(typeof value === "string" && value.length > 0, `${name} is required`);
   return value;
 }
 
-function normalizeElasticIndex(value) {
+export function normalizeElasticIndex(value) {
   assert(/^[a-z0-9][a-z0-9._-]{0,254}$/.test(value), "BREAK_GLASS_ELASTIC_INDEX is invalid");
   assert(!value.includes(".."), "BREAK_GLASS_ELASTIC_INDEX is invalid");
   return value;
@@ -103,7 +103,7 @@ export function buildSanitizedAlert(verified) {
   };
 }
 
-function buildSplunkPayload(alert, endpoint, index) {
+export function buildSplunkPayload(alert, endpoint, index) {
   const target = parseHttpsUrl(endpoint, "BREAK_GLASS_SIEM_ENDPOINT");
   assert(/\/services\/collector\/event\/?$/.test(target.pathname),
     "Splunk HEC endpoint must end with /services/collector/event");
@@ -122,7 +122,7 @@ function buildSplunkPayload(alert, endpoint, index) {
   };
 }
 
-function buildElasticPayload(alert, endpoint, index) {
+export function buildElasticPayload(alert, endpoint, index) {
   const target = parseHttpsUrl(endpoint, "BREAK_GLASS_SIEM_ENDPOINT");
   assert(target.pathname === "/" || target.pathname === "", "Elasticsearch endpoint must be an origin without a path");
   const documentId = compactSha(alert.eventId);
@@ -169,7 +169,7 @@ export function buildPagerDutyPayload(alert, routingKey) {
   };
 }
 
-async function postJson(fetchImpl, endpoint, headers, body, label) {
+export async function postJson(fetchImpl, endpoint, headers, body, label) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {

@@ -212,14 +212,64 @@ jobs:
             > break-glass-evidence/github-attestation-verify.txt
 
       - name: Verify hash-chained evidence before external disclosure
+        id: evidence_verify
         if: success()
         run: |
           set -euo pipefail
+          set +e
           node scripts/ci/verify-break-glass-evidence.mjs \
-            --evidence-dir break-glass-evidence
+            --evidence-dir break-glass-evidence \
+            > break-glass-evidence/ledger-verification.log 2>&1
+          status=$?
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo 'status=passed' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          failure_code='evidence-verification-failed'
+          if grep -Fq 'Audit event' break-glass-evidence/ledger-verification.log && grep -Fq 'hash mismatch' break-glass-evidence/ledger-verification.log; then
+            failure_code='audit-event-hash-mismatch'
+          elif grep -Fq 'audit event' break-glass-evidence/ledger-verification.log && grep -Fq 'not valid JSON' break-glass-evidence/ledger-verification.log; then
+            failure_code='audit-event-invalid-json'
+          elif grep -Fq 'audit root hash mismatch' break-glass-evidence/ledger-verification.log; then
+            failure_code='audit-root-hash-mismatch'
+          elif grep -Fq 'artifact' break-glass-evidence/ledger-verification.log && grep -Fq 'sha256 mismatch' break-glass-evidence/ledger-verification.log; then
+            failure_code='artifact-sha256-mismatch'
+          fi
+          echo 'status=failed' >> "$GITHUB_OUTPUT"
+          echo "failure_code=$failure_code" >> "$GITHUB_OUTPUT"
+
+      - name: Deliver sanitized tamper-detection alert
+        if: steps.evidence_verify.outputs.status == 'failed' && inputs.alert_delivery_confirm == 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS'
+        env:
+          BREAK_GLASS_DELIVERY_CONFIRMATION: DELIVER_SANITIZED_BREAK_GLASS_EVENTS
+          BREAK_GLASS_ALERT_DELIVERY_POLICY: .github/security/break-glass-alert-delivery-policy.json
+          BREAK_GLASS_SIEM_MODE: ${{ vars.BREAK_GLASS_SIEM_MODE }}
+          BREAK_GLASS_SIEM_ENDPOINT: ${{ vars.BREAK_GLASS_SIEM_ENDPOINT }}
+          BREAK_GLASS_SPLUNK_INDEX: ${{ vars.BREAK_GLASS_SPLUNK_INDEX }}
+          BREAK_GLASS_ELASTIC_INDEX: ${{ vars.BREAK_GLASS_ELASTIC_INDEX }}
+          BREAK_GLASS_SIEM_TOKEN: ${{ secrets.BREAK_GLASS_SIEM_TOKEN }}
+          PAGERDUTY_ROUTING_KEY: ${{ secrets.PAGERDUTY_ROUTING_KEY }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/publish-break-glass-tamper-alert.mjs \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "${{ inputs.source_commit }}" \
+            --candidate-digest "${{ inputs.candidate_digest }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --failure-code "${{ steps.evidence_verify.outputs.failure_code }}" \
+            --out-dir break-glass-alert-delivery \
+            --deliver
+
+      - name: Fail closed after evidence tamper detection
+        if: steps.evidence_verify.outputs.status == 'failed'
+        run: |
+          set -euo pipefail
+          echo "Break-glass evidence verification failed: ${{ steps.evidence_verify.outputs.failure_code }}" >&2
+          exit 1
 
       - name: Render sanitized SIEM and pager delivery preview
-        if: success() && inputs.alert_delivery_confirm != 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS'
+        if: steps.evidence_verify.outputs.status == 'passed' && inputs.alert_delivery_confirm != 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS'
         run: |
           set -euo pipefail
           node scripts/ci/publish-break-glass-alerts.mjs \
@@ -227,7 +277,7 @@ jobs:
             --out-dir break-glass-alert-delivery
 
       - name: Deliver sanitized SIEM and PagerDuty alerts
-        if: success() && inputs.alert_delivery_confirm == 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS'
+        if: steps.evidence_verify.outputs.status == 'passed' && inputs.alert_delivery_confirm == 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS'
         env:
           BREAK_GLASS_DELIVERY_CONFIRMATION: DELIVER_SANITIZED_BREAK_GLASS_EVENTS
           BREAK_GLASS_ALERT_DELIVERY_POLICY: .github/security/break-glass-alert-delivery-policy.json
@@ -267,4 +317,5 @@ jobs:
             echo '- Deployment performed: **no**; this workflow emits authorization evidence only.'
             echo '- Readiness credit: **none**.'
             echo "- SIEM/PagerDuty delivery: ${{ inputs.alert_delivery_confirm == 'DELIVER_SANITIZED_BREAK_GLASS_EVENTS' && 'requested (sanitized receipt retained)' || 'dry-run preview only' }}."
+            echo "- Hash-chain verification: ${{ steps.evidence_verify.outputs.status || 'not reached' }}."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { generateBreakGlassEvidence } from "../../scripts/ci/generate-break-glass-evidence.mjs";
 import { publishBreakGlassAlerts } from "../../scripts/ci/publish-break-glass-alerts.mjs";
+import { publishBreakGlassTamperAlert } from "../../scripts/ci/publish-break-glass-tamper-alert.mjs";
 import { verifyBreakGlassEvidence } from "../../scripts/ci/verify-break-glass-evidence.mjs";
 import { sha256 } from "../../scripts/ci/verify-break-glass-authorization.mjs";
 
@@ -200,6 +201,57 @@ describe("break-glass SIEM and pager evidence integration", () => {
     });
   });
 
+  it("renders and delivers a sanitized tamper-detection alert only through the reviewed policy", async () => {
+    await withEvidence(async (_evidenceDirectory, outputDirectory) => {
+      const common = {
+        repository,
+        sourceCommit: commit,
+        candidateDigest: digest,
+        runId: "42",
+        failureCode: "audit-event-hash-mismatch",
+      };
+      const dryRun = await publishBreakGlassTamperAlert({ ...common, outDir: outputDirectory, deliver: false });
+      expect(dryRun.receipt.mode).toBe("dry-run");
+      expect(dryRun.alert.eventType).toBe("break_glass.evidence_tamper_detected");
+      expect(dryRun.alert.deliveryScope).toMatch(/no deployment performed/);
+      const enabledPolicyPath = resolve(outputDirectory, "..", "enabled-tamper-alert-policy.json");
+      writeFileSync(enabledPolicyPath, JSON.stringify({
+        schemaVersion: "ndsep.break-glass-alert-delivery-policy.v1",
+        policyId: "ndsep-production-break-glass-alert-delivery",
+        repository,
+        environment: "production-release",
+        enabled: true,
+        allowedSiemModes: ["splunk-hec"],
+        pagerDutyEndpoint: "https://events.pagerduty.com/v2/enqueue",
+        attestationRequired: true,
+        externalImmutableRetentionRequired: true,
+        noReadinessCredit: true,
+      }));
+      process.env.BREAK_GLASS_DELIVERY_CONFIRMATION = "DELIVER_SANITIZED_BREAK_GLASS_EVENTS";
+      process.env.BREAK_GLASS_ALERT_DELIVERY_POLICY = enabledPolicyPath;
+      process.env.BREAK_GLASS_SIEM_MODE = "splunk-hec";
+      process.env.BREAK_GLASS_SIEM_ENDPOINT = "https://siem.example/services/collector/event";
+      process.env.BREAK_GLASS_SIEM_TOKEN = "never-disclosed";
+      process.env.PAGERDUTY_ROUTING_KEY = "B".repeat(32);
+      const calls: Array<{ url: string; init: RequestInit }> = [];
+      const fetchImpl = async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return { ok: true, status: 202 };
+      };
+      const deliveryOutput = resolve(outputDirectory, "..", "tamper-delivery");
+      const delivered = await publishBreakGlassTamperAlert({ ...common, outDir: deliveryOutput, deliver: true }, { fetchImpl });
+      expect(delivered.receipt.siem).toMatchObject({ delivered: true, mode: "splunk-hec", status: 202 });
+      expect(delivered.receipt.pagerDuty).toMatchObject({ delivered: true, status: 202 });
+      expect(calls.map(call => call.url)).toEqual([
+        "https://siem.example/services/collector/event",
+        "https://events.pagerduty.com/v2/enqueue",
+      ]);
+      const siemEvent = JSON.parse(String(calls[0].init.body)).event;
+      expect(siemEvent.tamperDetection.failureCode).toBe("audit-event-hash-mismatch");
+      expect(JSON.stringify(siemEvent)).not.toContain("never-disclosed");
+    });
+  });
+
   it("keeps source alert delivery disabled and evidence-verified until a reviewed policy change", () => {
     const policy = JSON.parse(readFileSync(resolve(sourceRoot, ".github/security/break-glass-alert-delivery-policy.json"), "utf8"));
     const workflow = readFileSync(resolve(sourceRoot, ".github/workflows/digest-bound-emergency-release.yml"), "utf8");
@@ -210,6 +262,11 @@ describe("break-glass SIEM and pager evidence integration", () => {
     expect(workflow).toContain("gh attestation verify");
     expect(workflow).toContain("github-attestation-verify.txt");
     expect(workflow).toContain("verify-break-glass-evidence.mjs");
+    expect(workflow).toContain("id: evidence_verify");
+    expect(workflow).toContain("ledger-verification.log");
+    expect(workflow).toContain("publish-break-glass-tamper-alert.mjs");
+    expect(workflow).toContain("audit-event-hash-mismatch");
+    expect(workflow).toContain("Fail closed after evidence tamper detection");
     expect(workflow).toContain("publish-break-glass-alerts.mjs");
     expect(workflow).toContain("DELIVER_SANITIZED_BREAK_GLASS_EVENTS");
     expect(workflow).toContain("BREAK_GLASS_SIEM_TOKEN");
