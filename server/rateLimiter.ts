@@ -1,119 +1,97 @@
 /**
- * Rate Limiting Middleware — NDSEP Enhancement (Priority 4)
- * Per-organisation and per-IP rate limiting using express-rate-limit.
- * Falls back to in-memory store when Redis is unavailable.
+ * Rate Limiting Middleware — distributed Redis-backed enforcement in runtime.
+ * Test runs use isolated express-rate-limit memory stores only.
  */
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import type { Request } from "express";
+import { redisRateLimitStore } from "./redisRateLimitStore";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/** IPv6-safe IP key: normalises /56 subnets so IPv6 users can't bypass limits */
 function safeIpKey(req: Request): string {
   const ip = req.ip ?? req.socket.remoteAddress ?? "unknown";
   return ipKeyGenerator(ip);
 }
 
 function getOrgKey(req: Request): string {
-  // Use org ID from session if available, otherwise fall back to IP (IPv6-safe)
-  const orgId = (req as any).session?.orgId ?? (req as any).user?.orgId;
-  if (orgId) return `org:${orgId}`;
-  return safeIpKey(req);
+  const orgId = (req as { session?: { orgId?: string }; user?: { orgId?: string } }).session?.orgId
+    ?? (req as { session?: { orgId?: string }; user?: { orgId?: string } }).user?.orgId;
+  return orgId ? `org:${orgId}` : safeIpKey(req);
 }
 
 function standardHeaders() {
-  return {
-    standardHeaders: "draft-7" as const,
-    legacyHeaders: false,
-  };
+  return { standardHeaders: "draft-7" as const, legacyHeaders: false, passOnStoreError: false };
 }
 
-// ─── Rate Limiters ──────────────────────────────────────────────────────────
-
-/**
- * Global API rate limiter — 1000 req/15min per IP.
- * Applied to all /api/* routes.
- */
+/** Global API rate limiter — 1,000 requests per 15 minutes per source IP. */
 export const globalApiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 1000,
   message: { error: "Too many requests. Please try again later.", code: "RATE_LIMITED" },
   keyGenerator: safeIpKey,
   skip: (req: Request) => req.path === "/api/health",
+  store: redisRateLimitStore("ndsep:global-api:"),
   ...standardHeaders(),
 });
 
-/**
- * Auth rate limiter — 20 req/15min per IP.
- * Applied to /api/oauth/* routes to prevent brute force.
- */
+/** Authentication rate limiter — 20 requests per 15 minutes per source IP. */
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   message: { error: "Too many authentication attempts. Please wait 15 minutes.", code: "AUTH_RATE_LIMITED" },
   keyGenerator: safeIpKey,
+  store: redisRateLimitStore("ndsep:auth:"),
   ...standardHeaders(),
 });
 
-/**
- * tRPC mutation rate limiter — 200 mutations/15min per org.
- * Applied to /api/trpc POST requests.
- */
+/** tRPC mutation limiter — 200 write operations per 15 minutes per organization. */
 export const trpcMutationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
   message: { error: "Too many write operations. Please slow down.", code: "MUTATION_RATE_LIMITED" },
-  keyGenerator: (req: Request) => getOrgKey(req),
+  keyGenerator: getOrgKey,
   skip: (req: Request) => req.method !== "POST",
+  store: redisRateLimitStore("ndsep:trpc-mutation:"),
   ...standardHeaders(),
 });
 
-/**
- * File upload rate limiter — 50 uploads/hour per org.
- * Applied to /api/evidence/upload and /api/dsar/upload.
- */
+/** File upload limiter — 50 uploads per hour per organization. */
 export const uploadLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: 60 * 60 * 1000,
   max: 50,
   message: { error: "Upload limit reached. Maximum 50 uploads per hour.", code: "UPLOAD_RATE_LIMITED" },
   keyGenerator: getOrgKey,
+  store: redisRateLimitStore("ndsep:upload:"),
   ...standardHeaders(),
 });
 
-/**
- * Stripe webhook — no rate limit (Stripe controls delivery).
- * Public DSAR submission — 10 req/hour per IP to prevent spam.
- */
+/** Public DSAR limiter — 10 submissions per hour per source IP. */
 export const dsarPublicLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
   message: { error: "Too many DSAR submissions from this IP. Please wait before submitting again.", code: "DSAR_RATE_LIMITED" },
   keyGenerator: safeIpKey,
+  store: redisRateLimitStore("ndsep:dsar:"),
   ...standardHeaders(),
 });
 
-/**
- * BGP SSE stream — 5 concurrent connections per IP.
- */
+/** BGP SSE limiter — five stream openings per minute per source IP. */
 export const bgpSseLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
   message: { error: "Too many SSE connections.", code: "SSE_RATE_LIMITED" },
   keyGenerator: safeIpKey,
+  store: redisRateLimitStore("ndsep:bgp-sse:"),
   ...standardHeaders(),
 });
 
-/**
- * Developer API — 500 req/hour per API key.
- */
+/** Developer API limiter — 500 requests per hour per API key or source IP. */
 export const developerApiLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 500,
-  message: { error: "API rate limit exceeded. Upgrade your plan for higher limits.", code: "API_KEY_RATE_LIMITED" },
+  message: { error: "API rate limit exceeded.", code: "API_KEY_RATE_LIMITED" },
   keyGenerator: (req: Request) => {
-    const apiKey = req.headers["x-api-key"] as string;
-    if (apiKey) return `apikey:${apiKey}`;
-    return safeIpKey(req);
+    const apiKey = req.headers["x-api-key"] as string | undefined;
+    return apiKey ? `apikey:${apiKey}` : safeIpKey(req);
   },
+  store: redisRateLimitStore("ndsep:developer-api:"),
   ...standardHeaders(),
 });

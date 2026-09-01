@@ -22,7 +22,6 @@ import helmet from "helmet";
 import compression from "compression";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import Redis from "ioredis";
-import RedisStore, { type RedisReply } from "rate-limit-redis";
 import { randomBytes } from "node:crypto";
 import pinoHttp from "pino-http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -84,6 +83,7 @@ import { startHealthMonitor, stopHealthMonitor } from "../middlewareConnector";
 import { startKafkaConsumer, stopKafkaConsumer } from "../kafkaConsumer";
 import { startDurableOutbox, stopDurableOutbox } from "../eventBus";
 import { startPaymentCommandProcessor, stopPaymentCommandProcessor } from "../paymentCommandProcessor";
+import { redisRateLimitStore } from "../redisRateLimitStore";
 import { wafEnforcementMiddleware } from "../wafMiddleware";
 
 process.on("uncaughtException", (err) => {
@@ -117,31 +117,17 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 const safeIpKey = (req: import("express").Request) => ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? "unknown");
 
 // Redis-backed rate limit stores survive restarts and work across cluster instances.
-// Each limiter receives an independent store and prefix; express-rate-limit rejects
-// reuse of one store instance across multiple limiter configurations.
-let createRateLimitStore: ((prefix: string) => RedisStore) | undefined;
+// Only explicit test execution uses express-rate-limit's isolated memory store.
+// The shared factory throws during non-test startup when REDIS_URL is absent or
+// production TLS trust requirements are not satisfied; store errors fail closed.
+let createRateLimitStore: ((prefix: string) => ReturnType<typeof redisRateLimitStore>) | undefined;
 if (process.env.NODE_ENV === "test") {
   logger.info("[RateLimit] Test environment uses isolated in-memory stores");
 } else {
-  try {
-    const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-    const redisClient = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false });
-    redisClient.on("error", (err) => {
-      logger.warn({ err }, "[RateLimit] Redis client error");
-    });
-    redisClient.connect().then(() => {
-      logger.info("[RateLimit] Redis-backed stores active");
-    }).catch(() => {
-      logger.warn("[RateLimit] Redis unavailable — rate limit stores may fall back to their configured error policy");
-    });
-    createRateLimitStore = (prefix: string) => new RedisStore({
-      prefix,
-      sendCommand: (command: string, ...args: string[]) =>
-        redisClient.call(command, ...args) as Promise<RedisReply>,
-    });
-  } catch {
-    logger.warn("[RateLimit] rate-limit-redis not available — using in-memory stores");
-  }
+  const configuredStore = redisRateLimitStore("ndsep:startup-check:");
+  if (!configuredStore) throw new Error("Redis rate-limit store is required outside test execution");
+  createRateLimitStore = (prefix: string) => redisRateLimitStore(prefix);
+  logger.info("[RateLimit] Redis-backed stores configured; store failures reject requests");
 }
 
 /** General API rate limit: configurable per IP */
@@ -153,7 +139,7 @@ const apiLimiter = rateLimit({
   message: { error: "Too many requests — please slow down." },
   keyGenerator: safeIpKey,
   skip: (req) => process.env.NODE_ENV === "development" && req.ip === "::1",
-  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:api:") } : {}),
+  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:api:"), passOnStoreError: false } : {}),
 });
 /** Strict auth rate limit: configurable per IP (brute-force protection) */
 const authLimiter = rateLimit({
@@ -163,7 +149,7 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many authentication attempts — please try again later." },
   keyGenerator: safeIpKey,
-  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:auth:") } : {}),
+  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:auth:"), passOnStoreError: false } : {}),
 });
 /** Worker event relay: configurable per minute (internal workers) */
 const workerNonceMemory = new Map<string, number>();
@@ -204,7 +190,7 @@ const workerLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   keyGenerator: safeIpKey,
-  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:worker:") } : {}),
+  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:worker:"), passOnStoreError: false } : {}),
 });
 
 async function startServer() {
