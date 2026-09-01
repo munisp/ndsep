@@ -167,7 +167,10 @@ export async function executeTransfer(
   });
   if (ok) transfers++;
   const d = data as Record<string, unknown>;
-  return { ok, transferId, state: ok ? String(d.transferState ?? "COMMITTED") : undefined };
+  const reportedState = typeof d.transferState === "string" ? d.transferState.trim() : "";
+  // A successful HTTP submission proves only hub acceptance. Terminal settlement
+  // state is established by the authenticated callback path, never inferred here.
+  return { ok, transferId, state: ok ? (reportedState || "ACCEPTED") : undefined };
 }
 
 // ─── Smoke Test ──────────────────────────────────────────────────────────────
@@ -225,7 +228,9 @@ export async function createSettlement(
     settlementModel: settlementModelId,
   });
   const d = data as Record<string, unknown>;
-  return { ok, settlementId: ok ? String(d.id ?? "") : undefined, data: ok ? data : undefined };
+  const settlementId = typeof d.id === "string" ? d.id.trim() : "";
+  // A 2xx response without a durable hub identifier cannot be reconciled safely.
+  return { ok: ok && settlementId.length > 0, settlementId: settlementId || undefined, data: ok && settlementId ? data : undefined };
 }
 
 export async function getSettlements(state?: string): Promise<{ ok: boolean; settlements: unknown[] }> {

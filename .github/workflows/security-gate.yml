@@ -222,6 +222,7 @@ jobs:
             server/security/permifyPostgresFailClosed.config.test.ts \
             server/security/keycloakPostgresFailClosed.config.test.ts \
             server/security/eventDeliveryDurability.config.test.ts \
+            server/security/mojaloopReceiptIntegrity.config.test.ts \
             server/redisRateLimitStore.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only
