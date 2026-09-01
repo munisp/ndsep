@@ -167,7 +167,8 @@ services:
     ports: ["3476:3476", "3478:3478"]
     command: serve
     environment:
-      PERMIFY_DATABASE_ENGINE: memory
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: ${PERMIFY_DATABASE_URI:?PERMIFY_DATABASE_URI is required}
       PERMIFY_LOG_LEVEL: warn
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3476/healthz"]
