@@ -112,6 +112,30 @@ describe("break-glass SIEM and pager evidence integration", () => {
     });
   });
 
+  it("rejects a corrupted manifest before any artifact is disclosed", async () => {
+    await withEvidence(async evidenceDirectory => {
+      const manifestPath = resolve(evidenceDirectory, "break-glass-evidence-manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      manifest.workflow.actor = "tampered-actor";
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      await expect(verifyBreakGlassEvidence(evidenceDirectory)).rejects.toThrow(/Break-glass root manifest hash mismatch/);
+    });
+  });
+
+  it("rejects a changed manifest candidate even if an attacker recomputes its root manifest hash", async () => {
+    await withEvidence(async evidenceDirectory => {
+      const manifestPath = resolve(evidenceDirectory, "break-glass-evidence-manifest.json");
+      const rootPath = resolve(evidenceDirectory, "break-glass-evidence-root.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      const root = JSON.parse(readFileSync(rootPath, "utf8"));
+      manifest.candidate.digest = `sha256:${"8".repeat(64)}`;
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      root.manifest.sha256 = sha256(readFileSync(manifestPath));
+      writeFileSync(rootPath, JSON.stringify(root));
+      await expect(verifyBreakGlassEvidence(evidenceDirectory)).rejects.toThrow(/Break-glass root candidate binding mismatch/);
+    });
+  });
+
   it("rejects an altered ledger event even if an attacker recomputes outer artifact hashes", async () => {
     await withEvidence(async evidenceDirectory => {
       const auditPath = resolve(evidenceDirectory, "break-glass-audit-events.ndjson");
@@ -265,6 +289,8 @@ describe("break-glass SIEM and pager evidence integration", () => {
     expect(workflow).toContain("id: evidence_verify");
     expect(workflow).toContain("ledger-verification.log");
     expect(workflow).toContain("publish-break-glass-tamper-alert.mjs");
+    expect(workflow).toContain("manifest-root-hash-mismatch");
+    expect(workflow).toContain("manifest-candidate-binding-mismatch");
     expect(workflow).toContain("audit-event-hash-mismatch");
     expect(workflow).toContain("Fail closed after evidence tamper detection");
     expect(workflow).toContain("publish-break-glass-alerts.mjs");

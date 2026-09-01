@@ -227,7 +227,11 @@ jobs:
             exit 0
           fi
           failure_code='evidence-verification-failed'
-          if grep -Fq 'Audit event' break-glass-evidence/ledger-verification.log && grep -Fq 'hash mismatch' break-glass-evidence/ledger-verification.log; then
+          if grep -Fq 'Break-glass root manifest hash mismatch' break-glass-evidence/ledger-verification.log; then
+            failure_code='manifest-root-hash-mismatch'
+          elif grep -Fq 'Break-glass root candidate binding mismatch' break-glass-evidence/ledger-verification.log; then
+            failure_code='manifest-candidate-binding-mismatch'
+          elif grep -Fq 'Audit event' break-glass-evidence/ledger-verification.log && grep -Fq 'hash mismatch' break-glass-evidence/ledger-verification.log; then
             failure_code='audit-event-hash-mismatch'
           elif grep -Fq 'audit event' break-glass-evidence/ledger-verification.log && grep -Fq 'not valid JSON' break-glass-evidence/ledger-verification.log; then
             failure_code='audit-event-invalid-json'
