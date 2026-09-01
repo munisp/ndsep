@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { generateBreakGlassEvidence } from "../../scripts/ci/generate-break-glass-evidence.mjs";
 import { publishBreakGlassAlerts } from "../../scripts/ci/publish-break-glass-alerts.mjs";
 import { verifyBreakGlassEvidence } from "../../scripts/ci/verify-break-glass-evidence.mjs";
+import { sha256 } from "../../scripts/ci/verify-break-glass-authorization.mjs";
 
 const repository = "munisp/ndsep";
 const commit = "b".repeat(40);
@@ -22,6 +23,20 @@ afterEach(() => {
     else process.env[key] = value;
   }
 });
+
+function rewriteOuterBundleHashes(evidenceDirectory: string): void {
+  const auditPath = resolve(evidenceDirectory, "break-glass-audit-events.ndjson");
+  const manifestPath = resolve(evidenceDirectory, "break-glass-evidence-manifest.json");
+  const rootPath = resolve(evidenceDirectory, "break-glass-evidence-root.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const root = JSON.parse(readFileSync(rootPath, "utf8"));
+  const auditContents = readFileSync(auditPath);
+  manifest.artifacts.auditEvents.sha256 = sha256(auditContents);
+  root.audit.sha256 = manifest.artifacts.auditEvents.sha256;
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  root.manifest.sha256 = sha256(readFileSync(manifestPath));
+  writeFileSync(rootPath, JSON.stringify(root));
+}
 
 async function withEvidence<T>(callback: (evidenceDirectory: string, outputDirectory: string) => Promise<T>): Promise<T> {
   const directory = mkdtempSync(resolve(tmpdir(), "ndsep-break-glass-siem-"));
@@ -93,6 +108,30 @@ describe("break-glass SIEM and pager evidence integration", () => {
       const auditPath = resolve(evidenceDirectory, "break-glass-audit-events.ndjson");
       writeFileSync(auditPath, `${readFileSync(auditPath, "utf8").replace("exception_consumed", "exception_bypassed")}`);
       await expect(verifyBreakGlassEvidence(evidenceDirectory)).rejects.toThrow(/sha256 mismatch/);
+    });
+  });
+
+  it("rejects an altered ledger event even if an attacker recomputes outer artifact hashes", async () => {
+    await withEvidence(async evidenceDirectory => {
+      const auditPath = resolve(evidenceDirectory, "break-glass-audit-events.ndjson");
+      const newline = String.fromCharCode(10);
+      const rows = readFileSync(auditPath, "utf8").trim().split(newline).map(row => JSON.parse(row));
+      rows[1].data.sbomSha256 = `sha256:${"9".repeat(64)}`;
+      writeFileSync(auditPath, `${rows.map(row => JSON.stringify(row)).join(newline)}${newline}`);
+      rewriteOuterBundleHashes(evidenceDirectory);
+      await expect(verifyBreakGlassEvidence(evidenceDirectory)).rejects.toThrow(/Audit event 2 hash mismatch/);
+    });
+  });
+
+  it("rejects malformed audit JSON even if an attacker recomputes outer artifact hashes", async () => {
+    await withEvidence(async evidenceDirectory => {
+      const auditPath = resolve(evidenceDirectory, "break-glass-audit-events.ndjson");
+      const newline = String.fromCharCode(10);
+      const lines = readFileSync(auditPath, "utf8").trim().split(newline);
+      lines[1] = "{malformed-audit-event";
+      writeFileSync(auditPath, `${lines.join(newline)}${newline}`);
+      rewriteOuterBundleHashes(evidenceDirectory);
+      await expect(verifyBreakGlassEvidence(evidenceDirectory)).rejects.toThrow(/Break-glass audit event 2 is not valid JSON/);
     });
   });
 
