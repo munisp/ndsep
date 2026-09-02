@@ -19,8 +19,8 @@ const EXPECTED_SHARDS = Object.freeze([
   { id: "enforcement-loop", project: "chromium", expectedTests: 24 },
   { id: "penalty-enforcement", project: "chromium", expectedTests: 18 },
   { id: "temporal-kafka", project: "chromium", expectedTests: 16 },
-  { id: "critical-workflows", project: "chromium", expectedTests: 11 },
-  { id: "visual-regression", project: "chromium", expectedTests: 3 },
+  { id: "critical-workflows", project: "chromium", expectedTests: 15 },
+  { id: "visual-regression", project: "chromium", expectedTests: 12 },
 ]);
 
 function requiredEnvironment(name) {

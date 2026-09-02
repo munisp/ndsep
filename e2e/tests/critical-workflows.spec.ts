@@ -1,105 +1,76 @@
-/**
+/*
  * NDSEP Critical Workflow E2E Tests
  *
- * Tests the golden-path user flows that must work for production readiness.
+ * This CI shard runs without Keycloak credentials. It verifies that the public
+ * application shell is responsive, unauthenticated users cannot see privileged
+ * navigation, protected routes present an explicit sign-in boundary, and public
+ * API endpoints use valid paths. Authenticated workflow acceptance belongs in
+ * the protected staging suite, with a real Keycloak-issued session.
  */
 import { test, expect } from "@playwright/test";
 
-test.describe("Dashboard", () => {
-  test("loads main dashboard with compliance overview", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("body")).toBeVisible();
-    // Performance budget: page should load within 3s
-    const timing = await page.evaluate(() => performance.timing.loadEventEnd - performance.timing.navigationStart);
-    expect(timing).toBeLessThan(5000);
+const SIGN_IN_HEADING = "Sign in to continue";
+
+async function expectUnauthenticatedBoundary(page: import("@playwright/test").Page) {
+  await expect(page.getByRole("heading", { name: SIGN_IN_HEADING })).toBeVisible();
+  await expect(page.locator("nav, [role=navigation]")).toHaveCount(0);
+}
+
+test.describe("Unauthenticated dashboard boundary", () => {
+  test("loads the secure sign-in state without evaluating privileged navigation", async ({ page }) => {
+    const startedAt = Date.now();
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expectUnauthenticatedBoundary(page);
+    expect(Date.now() - startedAt).toBeLessThan(5000);
   });
 
-  test("sidebar navigation has all critical sections", async ({ page }) => {
-    await page.goto("/");
-    const sidebar = page.locator("nav, [role=navigation]").first();
-    await expect(sidebar).toBeVisible({ timeout: 10000 });
-  });
-});
-
-test.describe("Compliance Workflows", () => {
-  test("organization list loads with data", async ({ page }) => {
-    await page.goto("/organizations");
-    await page.waitForLoadState("domcontentloaded");
-    // Should have either org cards or a table
-    const content = await page.textContent("body");
-    expect(content).toBeTruthy();
-  });
-
-  test("enforcement dashboard loads", async ({ page }) => {
-    await page.goto("/enforcement");
-    await page.waitForLoadState("domcontentloaded");
-    const content = await page.textContent("body");
-    expect(content).toBeTruthy();
-  });
-
-  test("breach incidents page loads", async ({ page }) => {
-    await page.goto("/breach-incidents");
-    await page.waitForLoadState("domcontentloaded");
-    const content = await page.textContent("body");
-    expect(content).toBeTruthy();
-  });
-
-  test("data transfers page loads", async ({ page }) => {
-    await page.goto("/data-transfers");
-    await page.waitForLoadState("domcontentloaded");
-    const content = await page.textContent("body");
-    expect(content).toBeTruthy();
+  test("does not render sidebar navigation before authentication", async ({ page }) => {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expectUnauthenticatedBoundary(page);
   });
 });
 
-test.describe("Network Intelligence", () => {
-  test("network intelligence page loads with tabs", async ({ page }) => {
-    await page.goto("/network-intelligence");
-    await page.waitForLoadState("domcontentloaded");
-    const content = await page.textContent("body");
-    expect(content).toBeTruthy();
-  });
-});
-
-test.describe("Sector Dashboards", () => {
-  const sectors = [
-    { path: "/banking", name: "Banking" },
-    { path: "/telecom", name: "Telecom" },
-    { path: "/healthcare", name: "Healthcare" },
-    { path: "/insurance", name: "Insurance" },
-    { path: "/energy", name: "Energy" },
+test.describe("Protected route boundaries", () => {
+  const protectedRoutes = [
+    "/organizations",
+    "/enforcement",
+    "/breach-incidents",
+    "/data-transfers",
+    "/network-intelligence",
+    "/banking",
+    "/telecom",
+    "/healthcare",
+    "/insurance",
+    "/energy",
   ];
 
-  for (const sector of sectors) {
-    test(`${sector.name} dashboard loads`, async ({ page }) => {
-      await page.goto(sector.path);
-      await page.waitForLoadState("domcontentloaded");
-      const content = await page.textContent("body");
-      expect(content).toBeTruthy();
+  for (const path of protectedRoutes) {
+    test(`${path} presents the sign-in boundary without privileged content`, async ({ page }) => {
+      await page.goto(path, { waitUntil: "domcontentloaded" });
+      await expectUnauthenticatedBoundary(page);
     });
   }
 });
 
-test.describe("API Responses", () => {
-  test("health endpoint returns 200", async ({ request }) => {
-    const response = await request.get("/health");
-    expect(response.status()).toBeLessThan(500);
+test.describe("Public API responses", () => {
+  test("health endpoint returns a successful health response", async ({ request }) => {
+    const response = await request.get("/api/health");
+    expect(response.status()).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({ status: expect.any(String) }));
   });
 
-  test("tRPC endpoint exists", async ({ request }) => {
-    const response = await request.get("/api/trpc");
-    // Should not be 404 — could be 401 (auth required) or 400 (bad request)
-    expect(response.status()).not.toBe(404);
+  test("auth.me tRPC procedure returns a valid unauthenticated response", async ({ request }) => {
+    const response = await request.get("/api/trpc/auth.me?batch=1&input=%7B%7D");
+    expect(response.status()).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.any(Object));
   });
 });
 
-test.describe("Performance Budgets", () => {
-  test("main page loads under performance budget", async ({ page }) => {
-    const start = Date.now();
-    await page.goto("/");
-    await page.waitForLoadState("domcontentloaded");
-    const elapsed = Date.now() - start;
-    // Page should be interactive within 5s
-    expect(elapsed).toBeLessThan(5000);
+test.describe("Performance budgets", () => {
+  test("the unauthenticated main page reaches the real sign-in boundary within budget", async ({ page }) => {
+    const startedAt = Date.now();
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expectUnauthenticatedBoundary(page);
+    expect(Date.now() - startedAt).toBeLessThan(5000);
   });
 });

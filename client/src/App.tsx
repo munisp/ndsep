@@ -257,6 +257,7 @@ function Router() {
       <Route path="/status" component={OrgStatusTracker} />
       <Route>
     <DashboardLayout>
+      {() => (
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/gov-dashboard" component={Dashboard} />
@@ -510,6 +511,7 @@ function Router() {
         {/* Catch-all — must be last */}
         <Route component={NotFound} />
       </Switch>
+      )}
     </DashboardLayout>
       </Route>
     </Switch>

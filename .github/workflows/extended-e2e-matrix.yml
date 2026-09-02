@@ -54,11 +54,11 @@ jobs:
           - id: critical-workflows
             spec: e2e/tests/critical-workflows.spec.ts
             project: chromium
-            expected_tests: 11
+            expected_tests: 15
           - id: visual-regression
             spec: e2e/visual-regression.spec.ts
             project: chromium
-            expected_tests: 3
+            expected_tests: 12
 
     services:
       postgres:
@@ -118,8 +118,6 @@ jobs:
           done
           cat server.log
           exit 1
-      - name: Write candidate-bound shard manifest
-        run: node scripts/ci/write-e2e-shard-manifest.mjs
       - name: Run release-grade E2E shard without retry masking
         run: |
           pnpm exec playwright test "${{ matrix.spec }}" \
@@ -129,6 +127,9 @@ jobs:
             --timeout=60000 \
             --reporter=line,json \
             --output="$E2E_ARTIFACT_DIRECTORY"
+      - name: Write candidate-bound shard manifest after Playwright output initialization
+        if: always()
+        run: node scripts/ci/write-e2e-shard-manifest.mjs
       - name: Collect per-shard diagnostics in its evidence directory
         if: always()
         shell: bash

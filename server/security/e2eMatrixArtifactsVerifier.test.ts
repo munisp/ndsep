@@ -16,8 +16,8 @@ const shards = [
   ["enforcement-loop", 24],
   ["penalty-enforcement", 18],
   ["temporal-kafka", 16],
-  ["critical-workflows", 11],
-  ["visual-regression", 3],
+  ["critical-workflows", 15],
+  ["visual-regression", 12],
 ] as const;
 const temporaryRoots: string[] = [];
 
@@ -80,7 +80,7 @@ describe("E2E matrix artifact verifier", () => {
     expect(reported).toMatchObject({
       status: "complete_without_retries",
       shardCount: 8,
-      totalExpectedTests: 138,
+      totalExpectedTests: 151,
     });
     expect(evidence).toMatchObject(reported);
   });

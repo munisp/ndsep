@@ -229,6 +229,8 @@ jobs:
             server/security/stagingProductionGoAcceptanceWorkflow.config.test.ts \
             server/security/e2eMatrixArtifactsVerifier.test.ts \
             server/security/extendedE2eMatrixWorkflow.config.test.ts \
+            server/security/themePreferencesDurableStorage.config.test.ts \
+            server/security/threatProtection.test.ts \
             server/redisRateLimitStore.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only
@@ -252,6 +254,10 @@ jobs:
           ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0041_apisix_durable_route_registry.sql
           grep -Fq 'CREATE TABLE gateway_routes' drizzle/0041_apisix_durable_route_registry.sql
           grep -Fq 'CREATE TABLE gateway_route_sync_attempts' drizzle/0041_apisix_durable_route_registry.sql
+          test -f drizzle/0042_theme_preferences_durable_storage.sql
+          grep -Fq '"tag": "0042_theme_preferences_durable_storage"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0042_theme_preferences_durable_storage.sql
+          grep -Fq 'CREATE TABLE "theme_preferences"' drizzle/0042_theme_preferences_durable_storage.sql
       - name: Validate fixture-script syntax and explicit refusal paths
         shell: bash
         run: |

@@ -319,7 +319,10 @@ export const appRouter = router({
   workflows: workflowRouter,
   mlFoundation: mlFoundationRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    // tRPC must receive an explicit null for an unauthenticated request. Returning
+    // undefined serializes to an empty HTTP 200 response, which leaves client
+    // query consumers in an indeterminate loading state.
+    me: publicProcedure.query(opts => opts.ctx.user ?? null),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       // Blacklist the JWT token so it cannot be reused even before expiry

@@ -560,7 +560,7 @@ function NotificationsHeader({ isMobile, activeMenuLabel }: { isMobile: boolean;
 export default function DashboardLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode | (() => React.ReactNode);
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
@@ -653,7 +653,7 @@ export default function DashboardLayout({
       }
     >
       <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
-        {children}
+        {typeof children === "function" ? children() : children}
       </DashboardLayoutContent>
     </SidebarProvider>
   );

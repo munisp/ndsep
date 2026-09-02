@@ -70,10 +70,19 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, [isDark]);
 
-  // Backend sync
+  // Backend sync is intentionally gated by the real session query. The theme
+  // preference endpoints are user-scoped protected procedures; querying them
+  // for an anonymous visitor contaminates the auth.me batch with an expected
+  // UNAUTHORIZED error and can prevent the sign-in boundary from rendering.
+  const authQuery = trpc.auth.me.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const isAuthenticated = Boolean(authQuery.data);
   const setThemeMutation = trpc.themePrefs.set.useMutation();
 
   const { data: backendPrefs } = trpc.themePrefs.get.useQuery(undefined, {
+    enabled: isAuthenticated,
     staleTime: Infinity,
     retry: false,
   });
@@ -94,10 +103,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     // Backend only accepts "light" | "dark" — resolve "auto" before syncing
     const backendTheme: "light" | "dark" = newMode === "auto" ? resolve(newMode) : newMode;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    if (!isAuthenticated) return;
     syncTimerRef.current = setTimeout(() => {
       setThemeMutation.mutate({ theme: backendTheme });
     }, 500);
-  }, [setThemeMutation]);
+  }, [isAuthenticated, setThemeMutation]);
 
   const cycleTheme = useCallback(() => {
     setMode(CYCLE_ORDER[(CYCLE_ORDER.indexOf(mode) + 1) % CYCLE_ORDER.length]);

@@ -48,6 +48,19 @@ export const users = pgTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
+// ─── Per-user UI preferences ─────────────────────────────────────────────────
+
+export const themePreferences = pgTable("theme_preferences", {
+  userId: varchar("user_id", { length: 64 }).primaryKey(),
+  theme: varchar("theme", { length: 16 }).notNull().default("light"),
+  lastSeenChangelogVersion: varchar("last_seen_changelog_version", { length: 128 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ThemePreference = typeof themePreferences.$inferSelect;
+export type InsertThemePreference = typeof themePreferences.$inferInsert;
+
 // ─── Organizations ────────────────────────────────────────────────────────────
 
 export const organizations = pgTable("organizations", {
