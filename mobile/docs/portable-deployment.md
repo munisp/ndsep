@@ -15,7 +15,7 @@ This platform has been refactored toward a **portable stack** so it can run outs
 
 | Variable | Purpose |
 | --- | --- |
-| `DATABASE_URL` | MySQL connection string for Drizzle |
+| `DATABASE_URL` | PostgreSQL connection string for Drizzle, using `postgresql://` or `postgres://` |
 | `JWT_SECRET` or `SESSION_SECRET` | Secret used to sign local JWT sessions |
 | `APP_ID` | Logical app identifier used in local sessions |
 | `AUTH_ISSUER` | JWT issuer string for local auth |
@@ -32,7 +32,7 @@ This platform has been refactored toward a **portable stack** so it can run outs
 
 The backend can run as a standard Node.js service behind Nginx, Caddy, or Traefik. Uploaded files are served from `server/uploads/` locally or mapped to external object storage. For AI extraction, start with **Ollama** for local development and move to a compatible provider only if you need larger multimodal models.
 
-A starter orchestration file is included at `docker-compose.portable.yml`. It brings up the app, MySQL, MinIO, and Ollama so teams can reproduce the portable baseline quickly in non-Manus environments.
+A starter orchestration file is included at `docker-compose.portable.yml`. It brings up the app, PostgreSQL, MinIO, and Ollama so teams can reproduce the portable baseline quickly in non-Manus environments. The file requires explicit PostgreSQL and object-storage credentials; it supplies no default database credential.
 
 ## Suggested next infrastructure steps
 

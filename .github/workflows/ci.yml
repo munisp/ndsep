@@ -85,6 +85,7 @@ jobs:
           --health-retries 5
     env:
       PAYMENT_AUDIT_POSTGRES_URL: postgresql://ndsep_payment_test:ndsep_payment_test_pass@localhost:5432/idlr_payment_test
+      MOBILE_POSTGRES_TEST_DATABASE_URL: postgresql://ndsep_payment_test:ndsep_payment_test_pass@localhost:5432/idlr_payment_test
     defaults:
       run:
         working-directory: mobile
@@ -100,6 +101,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: mobile/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec drizzle-kit migrate
+        name: Apply mobile PostgreSQL migrations to disposable CI database
       - run: pnpm check
         name: Mobile TypeScript check
       - run: pnpm lint

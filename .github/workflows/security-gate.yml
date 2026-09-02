@@ -223,6 +223,7 @@ jobs:
             server/security/keycloakPostgresFailClosed.config.test.ts \
             server/security/eventDeliveryDurability.config.test.ts \
             server/security/mojaloopReceiptIntegrity.config.test.ts \
+            server/security/mobilePostgresPersistence.config.test.ts \
             server/security/productionGoEvidenceVerifier.test.ts \
             server/security/productionGoEvidenceWorkflow.config.test.ts \
             server/security/stagingProductionGoAcceptanceWorkflow.config.test.ts \

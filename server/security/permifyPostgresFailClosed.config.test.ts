@@ -12,7 +12,7 @@ describe("Permify PostgreSQL and fail-closed source contract", () => {
       const start = source.indexOf("  permify:");
       expect(start).toBeGreaterThanOrEqual(0);
       const remainder = source.slice(start);
-      const nextService = remainder.search(/\n  [A-Za-z0-9_-]+:/);
+      const nextService = remainder.search(/\n {2}[A-Za-z0-9_-]+:/);
       const permify = nextService === -1 ? remainder : remainder.slice(0, nextService);
       expect(permify).toContain("PERMIFY_DATABASE_ENGINE: postgres");
       expect(permify).toContain("PERMIFY_DATABASE_URI");
