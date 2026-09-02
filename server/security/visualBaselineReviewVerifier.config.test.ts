@@ -23,7 +23,9 @@ describe("visual baseline review verifier source contract", () => {
       ).size
     ).toBe(12);
     expect(pendingReview.status).toBe("PENDING_INDEPENDENT_HUMAN_REVIEW");
-    expect(pendingReview.candidateCommit).toBe("");
+    expect(pendingReview.schemaVersion).toBe(2);
+    expect(pendingReview.captureCommit).toBe("");
+    expect(pendingReview.pullRequest.captureCommit).toBe("");
     expect(pendingReview.snapshots).toHaveLength(12);
     expect(
       pendingReview.snapshots.every(
@@ -39,11 +41,17 @@ describe("visual baseline review verifier source contract", () => {
     ).toBe(true);
   });
 
-  it("requires all approved snapshot hashes and four distinct independent role approvals at the source head", () => {
+  it("requires all approved snapshot hashes, a reviewed capture ancestor, and four distinct independent role approvals at the final source head", () => {
     const script = read("scripts/ci/verify-visual-baseline-review.mjs");
     expect(script).toContain("VISUAL_REVIEW_HEAD_COMMIT");
     expect(script).toContain("event?.pull_request?.head?.sha !== candidate");
-    expect(script).toContain("review?.candidateCommit !== candidate");
+    expect(script).toContain("review?.captureCommit !== captureCommit");
+    expect(script).toContain(
+      "verifyCaptureIsAncestor(repository, captureCommit, candidate)"
+    );
+    expect(script).toContain(
+      "repos/${repository}/compare/${captureCommit}...${candidate}"
+    );
     expect(script).toContain("review.snapshots.length !== 12");
     expect(script).toContain('entry?.decision !== "accepted"');
     expect(script).toContain(
@@ -58,6 +66,9 @@ describe("visual baseline review verifier source contract", () => {
       expect(script).toContain(`"${role}"`);
     expect(script).toContain("actors.has(approval.actor)");
     expect(script).toContain("review?.commit_id === candidate");
+    expect(script).toContain(
+      "visual baseline captureCommit must be an ancestor of VISUAL_REVIEW_HEAD_COMMIT"
+    );
   });
 
   it("is read-only and cannot update snapshots, reviews, pull requests, workflows, or deployments", () => {

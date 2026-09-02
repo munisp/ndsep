@@ -118,19 +118,19 @@ function verifyContract(contract) {
   return { ids, snapshots };
 }
 
-function verifyReview(review, candidate, expectedIds, event) {
-  if (review?.schemaVersion !== 1)
-    fail("visual baseline review schemaVersion must equal 1");
-  if (review?.candidateCommit !== candidate)
+function verifyReview(review, captureCommit, expectedIds, event) {
+  if (review?.schemaVersion !== 2)
+    fail("visual baseline review schemaVersion must equal 2");
+  if (review?.captureCommit !== captureCommit)
     fail(
-      "visual baseline review candidateCommit must equal VISUAL_REVIEW_HEAD_COMMIT"
+      "visual baseline review captureCommit must equal VISUAL_REVIEW_CAPTURE_COMMIT"
     );
   if (
     review?.pullRequest?.number !== event.pull_request.number ||
-    review?.pullRequest?.headCommit !== candidate
+    review?.pullRequest?.captureCommit !== captureCommit
   )
     fail(
-      "visual baseline review must bind to the current pull request and current head commit"
+      "visual baseline review must bind to the pull request and the reviewed capture commit"
     );
   if (
     review?.matrix?.project !== "chromium" ||
@@ -198,6 +198,37 @@ function verifyReview(review, candidate, expectedIds, event) {
   return { byId, actors };
 }
 
+function verifyCaptureIsAncestor(repository, captureCommit, candidate) {
+  if (captureCommit === candidate) return;
+  let comparison;
+  try {
+    const output = execFileSync(
+      "gh",
+      ["api", `repos/${repository}/compare/${captureCommit}...${candidate}`],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+          CLICOLOR: "0",
+          GH_FORCE_TTY: "0",
+        },
+      }
+    );
+    comparison = JSON.parse(output.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, ""));
+  } catch (error) {
+    const detail =
+      error?.stderr?.toString().trim() || error?.message || String(error);
+    fail(`GitHub capture ancestry read failed: ${detail}`);
+  }
+  if (comparison?.status !== "ahead") {
+    fail(
+      "visual baseline captureCommit must be an ancestor of VISUAL_REVIEW_HEAD_COMMIT"
+    );
+  }
+}
+
 function verifyGitHubApprovals(reviews, actors, candidate) {
   const atHead = new Set(
     reviews
@@ -258,16 +289,20 @@ function main() {
 
   const contract = readJson(contractPath, "visual baseline contract");
   const review = readJson(reviewPath, "visual baseline review");
+  const captureCommit = review?.captureCommit;
+  if (!FULL_SHA.test(captureCommit ?? ""))
+    fail("visual baseline review captureCommit must be a full lower-case SHA");
   const { ids } = verifyContract(contract);
-  const { byId, actors } = verifyReview(review, candidate, ids, event);
+  const { byId, actors } = verifyReview(review, captureCommit, ids, event);
   verifySnapshotHashes(contract, byId, snapshotDirectory);
+  verifyCaptureIsAncestor(repository, captureCommit, candidate);
   verifyGitHubApprovals(
     gitHubReviews(repository, event.pull_request.number),
     actors,
     candidate
   );
   process.stdout.write(
-    `${JSON.stringify({ status: "passed", candidate, snapshots: ids.size, reviewers: actors.size }, null, 2)}\n`
+    `${JSON.stringify({ status: "passed", candidate, captureCommit, snapshots: ids.size, reviewers: actors.size }, null, 2)}\n`
   );
 }
 

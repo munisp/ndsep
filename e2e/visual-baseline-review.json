@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "PENDING_INDEPENDENT_HUMAN_REVIEW",
-  "candidateCommit": "",
+  "captureCommit": "",
   "pullRequest": {
     "number": 18,
-    "headCommit": ""
+    "captureCommit": ""
   },
   "matrix": {
     "project": "chromium",
