@@ -11,7 +11,7 @@ const visualSuite = readFileSync(path.join(root, "e2e/visual-regression.spec.ts"
 describe("extended E2E matrix workflow contract", () => {
   it("declares exactly the eight required first-attempt Chromium shards", () => {
     const expected = [
-      ["auth", "e2e/auth.spec.ts", 12],
+      ["auth", "e2e/auth.spec.ts", 17],
       ["critical-flows", "e2e/critical-flows.spec.ts", 34],
       ["dpco-onboarding", "e2e/dpco-onboarding.spec.ts", 20],
       ["enforcement-loop", "e2e/enforcement-loop.spec.ts", 24],

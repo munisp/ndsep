@@ -13,7 +13,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const EXPECTED_SHARDS = Object.freeze([
-  { id: "auth", project: "chromium", expectedTests: 12 },
+  { id: "auth", project: "chromium", expectedTests: 17 },
   { id: "critical-flows", project: "chromium", expectedTests: 34 },
   { id: "dpco-onboarding", project: "chromium", expectedTests: 20 },
   { id: "enforcement-loop", project: "chromium", expectedTests: 24 },

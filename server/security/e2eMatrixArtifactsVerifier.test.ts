@@ -10,7 +10,7 @@ const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const verifier = path.join(repositoryRoot, "scripts/ci/verify-e2e-matrix-artifacts.mjs");
 const commit = "f328595c389a8ebbd794730442f52287fcea7158";
 const shards = [
-  ["auth", 12],
+  ["auth", 17],
   ["critical-flows", 34],
   ["dpco-onboarding", 20],
   ["enforcement-loop", 24],
@@ -80,7 +80,7 @@ describe("E2E matrix artifact verifier", () => {
     expect(reported).toMatchObject({
       status: "complete_without_retries",
       shardCount: 8,
-      totalExpectedTests: 151,
+      totalExpectedTests: 156,
     });
     expect(evidence).toMatchObject(reported);
   });

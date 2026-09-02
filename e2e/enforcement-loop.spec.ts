@@ -22,14 +22,15 @@ async function trpcQuery(
   path: string,
   input?: unknown
 ): Promise<unknown> {
-  const url = input !== undefined
-    ? `${BASE}/api/trpc/${path}?input=${encodeURIComponent(JSON.stringify(input))}`
+  const wrapped = input !== undefined ? { json: input } : undefined;
+  const url = wrapped
+    ? `${BASE}/api/trpc/${path}?input=${encodeURIComponent(JSON.stringify(wrapped))}`
     : `${BASE}/api/trpc/${path}`;
   const res = await page.request.get(url, {
     headers: { "Content-Type": "application/json" },
   });
   const json = await res.json();
-  return json?.result?.data ?? json;
+  return json?.result?.data?.json ?? json?.result?.data ?? json;
 }
 
 async function trpcMutate(
@@ -43,6 +44,11 @@ async function trpcMutate(
   });
   const json = await res.json();
   return json?.["0"]?.result?.data ?? json;
+}
+
+/** Test-environment session setup only; authenticated Keycloak acceptance is staged separately. */
+async function demoLogin(page: Page, role: "admin" | "dpco") {
+  await page.goto(`${BASE}/api/demo-login?role=${role}`, { waitUntil: "domcontentloaded" });
 }
 
 // ─── Flow 1: Organization → Violation → Penalty ───────────────────────────────
@@ -185,22 +191,14 @@ test.describe("Flow 3: Evidence Package Generate → Verify → Export JSON", ()
     }
   });
 
-  test("tRPC evidencePackages.verify query works", async ({ page }) => {
-    await page.goto(BASE);
-    // First get a package to verify
-    const packages = await trpcQuery(page, "evidencePackages.list") as any[];
-    if (Array.isArray(packages) && packages.length > 0) {
-      const pkg = packages[0];
-      const result = await trpcQuery(page, "evidencePackages.verify", {
-        packageId: pkg.id,
-        contentHash: pkg.contentHash,
-        signature: pkg.signature,
-      });
-      expect(result).toBeDefined();
-    } else {
-      // No packages yet — just verify the endpoint exists
-      test.skip(true, "No evidence packages in DB yet — run pnpm db:seed first");
-    }
+  test("tRPC evidencePackages.verify rejects an unknown evidence hash with the real verifier contract", async ({ page }) => {
+    await demoLogin(page, "admin");
+    const result = await trpcQuery(page, "evidencePackages.verify", {
+      contentHash: "sha256-e2e-unknown-evidence",
+      hmacSignature: "hmac-e2e-unknown-evidence",
+    });
+
+    expect(result).toEqual({ valid: false, package: null });
   });
 });
 

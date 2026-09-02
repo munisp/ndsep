@@ -30,7 +30,7 @@ jobs:
           - id: auth
             spec: e2e/auth.spec.ts
             project: chromium
-            expected_tests: 12
+            expected_tests: 17
           - id: critical-flows
             spec: e2e/critical-flows.spec.ts
             project: chromium
