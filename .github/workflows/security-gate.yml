@@ -227,6 +227,7 @@ jobs:
             server/security/productionGoEvidenceVerifier.test.ts \
             server/security/productionGoEvidenceWorkflow.config.test.ts \
             server/security/stagingProductionGoAcceptanceWorkflow.config.test.ts \
+            server/security/stagingRollbackVerifier.config.test.ts \
             server/security/e2eMatrixArtifactsVerifier.test.ts \
             server/security/extendedE2eMatrixWorkflow.config.test.ts \
             server/security/themePreferencesDurableStorage.config.test.ts \
@@ -258,6 +259,11 @@ jobs:
           grep -Fq '"tag": "0042_theme_preferences_durable_storage"' drizzle/meta/_journal.json
           ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0042_theme_preferences_durable_storage.sql
           grep -Fq 'CREATE TABLE "theme_preferences"' drizzle/0042_theme_preferences_durable_storage.sql
+          test -f drizzle/0043_audit_log_hash_chain_durable.sql
+          grep -Fq '"tag": "0043_audit_log_hash_chain_durable"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0043_audit_log_hash_chain_durable.sql
+          grep -Fq 'CREATE TRIGGER audit_logs_assign_hash_chain' drizzle/0043_audit_log_hash_chain_durable.sql
+          grep -Fq 'pg_advisory_xact_lock' drizzle/0043_audit_log_hash_chain_durable.sql
       - name: Validate fixture-script syntax and explicit refusal paths
         shell: bash
         run: |

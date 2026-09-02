@@ -394,12 +394,14 @@ export const auditLogs = pgTable("audit_logs", {
   resourceId: integer("resource_id"),
   details: text("details"),
   ipAddress: varchar("ip_address", { length: 64 }),
-  userAgent: text("user_agent"),
+    userAgent: text("user_agent"),
   metadata: jsonb("metadata"),
+  previousHash: text("previous_hash"),
+  hashChain: text("hash_chain"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
-
 export type AuditLog = typeof auditLogs.$inferSelect;
+
 
 // ─── Streaming Events ─────────────────────────────────────────────────────────
 
