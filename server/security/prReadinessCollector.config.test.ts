@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..", "..");
-const read = (relative: string) => fs.readFileSync(path.join(root, relative), "utf8");
+const read = (relative: string) =>
+  fs.readFileSync(path.join(root, relative), "utf8");
 
 describe("PR readiness collector source contract", () => {
   it("collects current review/check evidence read-only and never performs a GitHub mutation", () => {
@@ -25,7 +26,10 @@ describe("PR readiness collector source contract", () => {
   it("uses exact Playwright discovery rather than a hard-coded visual baseline list", () => {
     const script = read("scripts/ci/collect-pr-readiness-evidence.mjs");
     expect(script).toContain('"e2e/visual-regression.spec.ts"');
-    expect(script).toContain('"--project=chromium", "--list"');
+    expect(script).toContain(
+      '"--project=chromium", "--list", "--reporter=line"'
+    );
+    expect(script).toContain('PLAYWRIGHT_HTML_OPEN: "never"');
     expect(script).toContain("Visual baseline review set");
     expect(script).not.toContain('"login-page", "dashboard-home"');
   });
@@ -37,11 +41,15 @@ describe("PR readiness collector source contract", () => {
     expect(script).toContain("SEC-001");
     expect(script).toContain("complianceBaselineRegister");
     expect(script).toContain("not evidenced by this read-only PR collector");
-    expect(script).toContain("process.exitCode = report.decision.status === \"BLOCKED\" ? 1 : 0");
+    expect(script).toContain(
+      'process.exitCode = report.decision.status === "BLOCKED" ? 1 : 0'
+    );
   });
 
   it("is wired into the protected source-control security gate", () => {
     const workflow = read(".github/workflows/security-gate.yml");
-    expect(workflow).toContain("server/security/prReadinessCollector.config.test.ts");
+    expect(workflow).toContain(
+      "server/security/prReadinessCollector.config.test.ts"
+    );
   });
 });
