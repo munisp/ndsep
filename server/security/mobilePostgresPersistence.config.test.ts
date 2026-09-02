@@ -37,5 +37,6 @@ describe("mobile PostgreSQL persistence source contract", () => {
     expect(packageJson).not.toContain('"mysql2"');
     expect(ci).toContain("MOBILE_POSTGRES_TEST_DATABASE_URL");
     expect(ci).toContain("pnpm exec drizzle-kit migrate");
+    expect(ci).toContain("DATABASE_URL: ${{ env.MOBILE_POSTGRES_TEST_DATABASE_URL }}");
   });
 });

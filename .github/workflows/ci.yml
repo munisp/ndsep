@@ -103,6 +103,8 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm exec drizzle-kit migrate
         name: Apply mobile PostgreSQL migrations to disposable CI database
+        env:
+          DATABASE_URL: ${{ env.MOBILE_POSTGRES_TEST_DATABASE_URL }}
       - run: pnpm check
         name: Mobile TypeScript check
       - run: pnpm lint
