@@ -227,6 +227,8 @@ jobs:
             server/security/productionGoEvidenceVerifier.test.ts \
             server/security/productionGoEvidenceWorkflow.config.test.ts \
             server/security/stagingProductionGoAcceptanceWorkflow.config.test.ts \
+            server/security/e2eMatrixArtifactsVerifier.test.ts \
+            server/security/extendedE2eMatrixWorkflow.config.test.ts \
             server/redisRateLimitStore.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only

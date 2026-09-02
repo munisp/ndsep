@@ -1,0 +1,180 @@
+name: Extended E2E Matrix
+
+on:
+  pull_request:
+    paths:
+      - "client/**"
+      - "server/**"
+      - "shared/**"
+      - "drizzle/**"
+      - "e2e/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/extended-e2e-matrix.yml"
+      - "scripts/ci/verify-e2e-matrix-artifacts.mjs"
+      - "scripts/ci/write-e2e-shard-manifest.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-shard:
+    name: E2E — ${{ matrix.id }} (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: auth
+            spec: e2e/auth.spec.ts
+            project: chromium
+            expected_tests: 12
+          - id: critical-flows
+            spec: e2e/critical-flows.spec.ts
+            project: chromium
+            expected_tests: 34
+          - id: dpco-onboarding
+            spec: e2e/dpco-onboarding.spec.ts
+            project: chromium
+            expected_tests: 20
+          - id: enforcement-loop
+            spec: e2e/enforcement-loop.spec.ts
+            project: chromium
+            expected_tests: 24
+          - id: penalty-enforcement
+            spec: e2e/penalty-enforcement.spec.ts
+            project: chromium
+            expected_tests: 18
+          - id: temporal-kafka
+            spec: e2e/temporal-kafka.spec.ts
+            project: chromium
+            expected_tests: 16
+          - id: critical-workflows
+            spec: e2e/tests/critical-workflows.spec.ts
+            project: chromium
+            expected_tests: 11
+          - id: visual-regression
+            spec: e2e/visual-regression.spec.ts
+            project: chromium
+            expected_tests: 3
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ndsep_user
+          POSTGRES_PASSWORD: ndsep_test_pass
+          POSTGRES_DB: ndsep_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ndsep_user -d ndsep_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@127.0.0.1:5432/ndsep_test
+      JWT_SECRET: test-jwt-secret-for-ci-only
+      FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+      NODE_ENV: test
+      PORT: "3000"
+      BASE_URL: http://127.0.0.1:3000
+      E2E_BASE_URL: http://127.0.0.1:3000
+      SKIP_DATABASE_MIGRATIONS: "true"
+      E2E_CANDIDATE_COMMIT: ${{ github.sha }}
+      E2E_SHARD: ${{ matrix.id }}-${{ matrix.project }}
+      E2E_PROJECT: ${{ matrix.project }}
+      E2E_TEST_RUN_ID: ${{ github.run_id }}-${{ matrix.id }}-${{ matrix.project }}
+      E2E_ARTIFACT_DIRECTORY: test-results/${{ matrix.id }}-${{ matrix.project }}
+      PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/${{ matrix.id }}-${{ matrix.project }}/test-results.json
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install locked dependency graph
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Apply migrations to this disposable PostgreSQL database
+        run: pnpm exec drizzle-kit push --force > migration.log
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Build and start isolated application
+        run: |
+          set -euo pipefail
+          pnpm run build > build.log 2>&1
+          NODE_ENV=test PORT="$PORT" node dist/index.js > server.log 2>&1 &
+          echo $! > server.pid
+          for attempt in {1..30}; do
+            curl --fail --silent --show-error "$BASE_URL/api/health" > health.json && exit 0
+            sleep 2
+          done
+          cat server.log
+          exit 1
+      - name: Write candidate-bound shard manifest
+        run: node scripts/ci/write-e2e-shard-manifest.mjs
+      - name: Run release-grade E2E shard without retry masking
+        run: |
+          pnpm exec playwright test "${{ matrix.spec }}" \
+            --project="${{ matrix.project }}" \
+            --workers=1 \
+            --retries=0 \
+            --timeout=60000 \
+            --reporter=line,json \
+            --output="$E2E_ARTIFACT_DIRECTORY"
+      - name: Collect per-shard diagnostics in its evidence directory
+        if: always()
+        shell: bash
+        run: |
+          set -u
+          mkdir -p "$E2E_ARTIFACT_DIRECTORY"
+          for file in server.log build.log migration.log health.json; do
+            if [[ -f "$file" ]]; then
+              cp "$file" "$E2E_ARTIFACT_DIRECTORY/$file"
+            fi
+          done
+      - name: Upload per-shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ github.sha }}-${{ matrix.id }}-${{ matrix.project }}
+          path: test-results/${{ matrix.id }}-${{ matrix.project }}/
+          if-no-files-found: warn
+          retention-days: 30
+
+  verify-e2e-matrix:
+    name: Verify Extended E2E Matrix Evidence
+    runs-on: ubuntu-latest
+    needs: [e2e-shard]
+    if: always()
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download each expected shard artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-${{ github.sha }}-*
+          path: e2e-evidence
+      - name: Require complete, candidate-bound, first-attempt results
+        env:
+          E2E_ARTIFACT_ROOT: e2e-evidence
+          E2E_CANDIDATE_COMMIT: ${{ github.sha }}
+          E2E_MATRIX_SUMMARY_PATH: e2e-evidence/e2e-matrix-evidence.json
+        run: node scripts/ci/verify-e2e-matrix-artifacts.mjs
+      - name: Upload verified E2E matrix evidence index
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-matrix-evidence-${{ github.sha }}
+          path: e2e-evidence/
+          if-no-files-found: warn
+          retention-days: 30
