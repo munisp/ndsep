@@ -10,7 +10,7 @@ describe("PR readiness collector source contract", () => {
   it("collects current review/check evidence read-only and never performs a GitHub mutation", () => {
     const script = read("scripts/ci/collect-pr-readiness-evidence.mjs");
     expect(script).toContain("READ_ONLY_PR_READINESS_COLLECTION");
-    expect(script).toContain('"pr", "view"');
+    expect(script).toMatch(/"pr",\s*"view"/);
     expect(script).toContain("review.commit?.oid === head");
     expect(script).toContain("independentApprovalAtHead");
     expect(script).not.toContain('["pr", "review"');
@@ -26,8 +26,8 @@ describe("PR readiness collector source contract", () => {
   it("uses exact Playwright discovery rather than a hard-coded visual baseline list", () => {
     const script = read("scripts/ci/collect-pr-readiness-evidence.mjs");
     expect(script).toContain('"e2e/visual-regression.spec.ts"');
-    expect(script).toContain(
-      '"--project=chromium", "--list", "--reporter=line"'
+    expect(script).toMatch(
+      /"--project=chromium",\s*"--list",\s*"--reporter=line"/
     );
     expect(script).toContain('PLAYWRIGHT_HTML_OPEN: "never"');
     expect(script).toContain("Visual baseline review set");
