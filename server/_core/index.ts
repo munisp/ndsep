@@ -1417,12 +1417,9 @@ async function startServer() {
 
   app.use(traceMiddleware());
 
-  try {
-    const pool = getPool();
-    if (pool) await initWebhookSystem(pool);
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Webhook system init failed — webhooks disabled");
-  }
+  const webhookPool = getPool();
+  if (!webhookPool) throw new Error("Webhook schema verification requires an initialized PostgreSQL pool");
+  await initWebhookSystem(webhookPool);
 
   if (!skipDatabaseGate) {
     const report = await verifyMigrations();
@@ -1450,27 +1447,15 @@ async function startServer() {
     logger.warn({ err }, "[Startup] CQRS projections init skipped");
   }
 
-  try {
-    const { enableRowLevelSecurity } = await import("../multiTenancy");
-    await enableRowLevelSecurity();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Multi-tenancy init skipped");
-  }
+  const { enableRowLevelSecurity } = await import("../multiTenancy");
+  await enableRowLevelSecurity();
 
-  try {
-    const { initMarketplace, mountDeveloperPortal } = await import("../marketplace");
-    await initMarketplace();
-    mountDeveloperPortal(app);
-  } catch (err) {
-    logger.warn({ err }, "[Startup] API marketplace init skipped");
-  }
+  const { initMarketplace, mountDeveloperPortal } = await import("../marketplace");
+  await initMarketplace();
+  mountDeveloperPortal(app);
 
-  try {
-    const { initFeatureFlags } = await import("../featureFlags/index");
-    await initFeatureFlags();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Feature flags init skipped");
-  }
+  const { initFeatureFlags } = await import("../featureFlags/index");
+  await initFeatureFlags();
 
   try {
     const { initRealtimeServer } = await import("../realtime");

@@ -308,6 +308,13 @@
       "when": 1788348294858,
       "tag": "0043_audit_log_hash_chain_durable",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788389839397,
+      "tag": "0044_runtime_schema_ownership_and_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -59,30 +59,19 @@ export async function enableRowLevelSecurity(): Promise<void> {
       );
       if (!exists.rows[0].exists) continue;
 
-      // Enable RLS
-      await pool.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
-
-      // Create policy for org isolation
       const policyName = `${table}_org_isolation`;
-      await pool.query(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_policies WHERE tablename = '${table}' AND policyname = '${policyName}'
-          ) THEN
-            EXECUTE format(
-              'CREATE POLICY %I ON %I FOR ALL USING (%I = current_setting(''app.current_org_id'', true)::int OR current_setting(''app.is_admin'', true) = ''true'')',
-              '${policyName}', '${table}', '${orgCol}'
-            );
-          END IF;
-        END
-        $$;
-      `);
+      const state = await pool.query<{ rls_enabled: boolean; policy_exists: boolean }>(
+        `SELECT
+           COALESCE((SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass(format('public.%I', $1))), false) AS rls_enabled,
+           EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = $1 AND policyname = $2) AS policy_exists`,
+        [table, policyName]
+      );
+      if (!state.rows[0]?.rls_enabled || !state.rows[0]?.policy_exists) {
+        throw new Error(`RLS migration state is incomplete for ${table}.${orgCol}`);
+      }
 
-      logger.info({ table, orgCol }, "[MultiTenancy] RLS enabled on %s", table);
+      logger.info({ table, orgCol }, "[MultiTenancy] RLS migration verified");
     }
-  } catch (err) {
-    logger.warn({ err }, "[MultiTenancy] RLS setup failed — application-level filtering still active");
   } finally {
     await pool.end();
   }
@@ -96,10 +85,10 @@ export async function setTenantContext(
   client: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
   tenant: TenantContext
 ): Promise<void> {
-  if (tenant.dpcoOrgId) {
-    await client.query(`SET LOCAL app.current_org_id = '${tenant.dpcoOrgId}'`);
+  if (tenant.dpcoOrgId !== null) {
+    await client.query("SELECT set_config('app.current_org_id', $1, true)", [String(tenant.dpcoOrgId)]);
   }
-  await client.query(`SET LOCAL app.is_admin = '${tenant.isAdmin}'`);
+  await client.query("SELECT set_config('app.is_admin', $1, true)", [tenant.isAdmin ? "true" : "false"]);
 }
 
 /**

@@ -232,6 +232,7 @@ jobs:
             server/security/visualBaselineReviewVerifier.config.test.ts \
             server/security/visualBaselineReminder.config.test.ts \
             server/security/isolatedVisualRegressionRunner.config.test.ts \
+            server/security/runtimeSchemaOwnership.config.test.ts \
             server/security/e2eMatrixArtifactsVerifier.test.ts \
             server/security/extendedE2eMatrixWorkflow.config.test.ts \
             server/security/themePreferencesDurableStorage.config.test.ts \

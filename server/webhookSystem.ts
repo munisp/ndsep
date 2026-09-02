@@ -29,41 +29,17 @@ export interface WebhookSubscription {
   createdAt: Date;
 }
 
-const WEBHOOK_TABLES_SQL = `
-CREATE TABLE IF NOT EXISTS webhook_subscriptions (
-  id SERIAL PRIMARY KEY,
-  org_id INTEGER NOT NULL,
-  url TEXT NOT NULL,
-  events TEXT[] NOT NULL DEFAULT '{}',
-  secret TEXT NOT NULL,
-  active BOOLEAN DEFAULT true,
-  failure_count INTEGER DEFAULT 0,
-  last_delivery_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_webhook_org ON webhook_subscriptions(org_id);
-
-CREATE TABLE IF NOT EXISTS webhook_deliveries (
-  id SERIAL PRIMARY KEY,
-  subscription_id INTEGER REFERENCES webhook_subscriptions(id),
-  event TEXT NOT NULL,
-  payload JSONB NOT NULL,
-  response_status INTEGER,
-  response_body TEXT,
-  attempt INTEGER DEFAULT 1,
-  delivered_at TIMESTAMPTZ DEFAULT NOW(),
-  success BOOLEAN DEFAULT false
-);
-CREATE INDEX IF NOT EXISTS idx_webhook_delivery_sub ON webhook_deliveries(subscription_id);
-`;
-
 export async function initWebhookSystem(pool: Pool): Promise<void> {
-  try {
-    await pool.query(WEBHOOK_TABLES_SQL);
-    logger.info("[Webhooks] System initialized");
-  } catch (err) {
-    handleError(err, { module: "webhooks", action: "init" });
-  }
+  if (process.env.NODE_ENV === "test") return;
+  const result = await pool.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
+    [["webhook_subscriptions", "webhook_deliveries"]]
+  );
+  const found = new Set(result.rows.map((row) => row.table_name));
+  const missing = ["webhook_subscriptions", "webhook_deliveries"].filter((table) => !found.has(table));
+  if (missing.length) throw new Error(`Webhook migration 0029 is incomplete; missing tables: ${missing.join(", ")}`);
+  logger.info("[Webhooks] Migration-owned schema verified");
 }
 
 /** Register a new webhook subscription */
