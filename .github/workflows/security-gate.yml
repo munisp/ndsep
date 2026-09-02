@@ -229,6 +229,7 @@ jobs:
             server/security/stagingProductionGoAcceptanceWorkflow.config.test.ts \
             server/security/stagingRollbackVerifier.config.test.ts \
             server/security/prReadinessCollector.config.test.ts \
+            server/security/visualBaselineReviewVerifier.config.test.ts \
             server/security/e2eMatrixArtifactsVerifier.test.ts \
             server/security/extendedE2eMatrixWorkflow.config.test.ts \
             server/security/themePreferencesDurableStorage.config.test.ts \

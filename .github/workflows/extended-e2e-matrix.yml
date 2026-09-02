@@ -13,10 +13,14 @@ on:
       - ".github/workflows/extended-e2e-matrix.yml"
       - "scripts/ci/verify-e2e-matrix-artifacts.mjs"
       - "scripts/ci/write-e2e-shard-manifest.mjs"
+      - "scripts/ci/verify-visual-baseline-review.mjs"
+      - "e2e/visual-baseline-contract.json"
+      - "e2e/visual-baseline-review.json"
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   e2e-shard:
@@ -118,6 +122,15 @@ jobs:
           done
           cat server.log
           exit 1
+      - name: Require independently reviewed visual baseline
+        if: matrix.id == 'visual-regression'
+        env:
+          VISUAL_BASELINE_CONTRACT_PATH: e2e/visual-baseline-contract.json
+          VISUAL_BASELINE_REVIEW_PATH: e2e/visual-baseline-review.json
+          VISUAL_SNAPSHOT_DIRECTORY: e2e/visual-regression.spec.ts-snapshots
+          VISUAL_REVIEW_HEAD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci/verify-visual-baseline-review.mjs
       - name: Run release-grade E2E shard without retry masking
         run: |
           pnpm exec playwright test "${{ matrix.spec }}" \
