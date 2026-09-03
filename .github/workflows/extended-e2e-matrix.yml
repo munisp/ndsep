@@ -106,8 +106,8 @@ jobs:
           cache: pnpm
       - name: Install locked dependency graph
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Apply migrations to this disposable PostgreSQL database
-        run: pnpm exec drizzle-kit push --force > migration.log
+      - name: Apply root Drizzle migrations to this disposable PostgreSQL database
+        run: pnpm exec drizzle-kit migrate > migration.log
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Build and start isolated application

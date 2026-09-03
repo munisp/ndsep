@@ -10,8 +10,12 @@ describe("webhook worker cutover contract", () => {
   const migration = read(
     "drizzle/0046_webhook_delivery_attempt_claim_leases.sql"
   );
+  const leaseWindowMigration = read(
+    "drizzle/0047_webhook_delivery_attempt_lease_window.sql"
+  );
   const journal = read("drizzle/meta/_journal.json");
   const nodeDispatcher = read("server/webhookDelivery.ts");
+  const legacyWebhookFacade = read("server/webhookSystem.ts");
   const worker = read("workers/go/cmd/webhook_delivery/main.go");
   const workerTests = read(
     "workers/go/cmd/webhook_delivery/main_integration_test.go"
@@ -30,7 +34,7 @@ describe("webhook worker cutover contract", () => {
     read("infra/grafana/dashboards/ndsep-webhook-delivery-worker.json")
   );
 
-  it("owns queue claim, lease, and canonical outcome linkage through journaled root migration 0046", () => {
+  it("owns queue claim, lease, and canonical outcome linkage through journaled root migrations", () => {
     expect(journal).toContain('"idx": 46');
     expect(journal).toContain(
       '"tag": "0046_webhook_delivery_attempt_claim_leases"'
@@ -47,6 +51,14 @@ describe("webhook worker cutover contract", () => {
     ]) {
       expect(migration).toContain(required);
     }
+    expect(journal).toContain('"idx": 47');
+    expect(journal).toContain(
+      '"tag": "0047_webhook_delivery_attempt_lease_window"'
+    );
+    expect(leaseWindowMigration).toContain(
+      "webhook_delivery_attempt_processing_lease_window_check"
+    );
+    expect(leaseWindowMigration).toContain("claim_expires_at > claimed_at");
   });
 
   it("uses a transaction-scoped SKIP LOCKED claim and token-guarded finalization without runtime DDL", () => {
@@ -89,6 +101,9 @@ describe("webhook worker cutover contract", () => {
     expect(workerTests).toContain(
       "TestWorkerFinalizesInactiveSubscriptionWithoutDeliveryPostgres"
     );
+    expect(workerTests).toContain(
+      "TestWorkerLeaseWindowConstraintRejectsNonFutureLeasePostgres"
+    );
   });
 
   it("keeps active admission asynchronous and instruments it without receiver identifiers", () => {
@@ -98,8 +113,14 @@ describe("webhook worker cutover contract", () => {
     );
     expect(nodeDispatcher).toContain('if (queueMode === "active") {');
     expect(nodeDispatcher).toContain(
-      "const queueMode = getWebhookDeliveryQueueMode()"
+      "dependencies.queueMode ?? getWebhookDeliveryQueueMode()"
     );
+    expect(nodeDispatcher).toContain('org_id AS "organizationId"');
+    expect(nodeDispatcher).toContain("events @> ARRAY[$2::text]");
+    expect(legacyWebhookFacade).toContain(
+      "return dispatchEvent(event, data, orgId, { pool });"
+    );
+    expect(legacyWebhookFacade).not.toContain("fetch(sub.url");
     expect(metrics).toContain("ndsep_webhook_queue_active_mode");
     expect(metrics).toContain("ndsep_webhook_queue_active_enqueued_total");
   });

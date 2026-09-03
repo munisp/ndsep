@@ -329,6 +329,13 @@
       "when": 1788433770654,
       "tag": "0046_webhook_delivery_attempt_claim_leases",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788441709235,
+      "tag": "0047_webhook_delivery_attempt_lease_window",
+      "breakpoints": true
     }
   ]
 }

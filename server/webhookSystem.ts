@@ -9,7 +9,7 @@
 import crypto from "crypto";
 import { Pool } from "pg";
 import { logger } from "./logger";
-import { handleError } from "./errorClassifier";
+import { dispatchEvent } from "./webhookDelivery";
 
 export type WebhookEvent =
   | "breach.reported" | "breach.notified" | "breach.resolved"
@@ -59,81 +59,17 @@ export async function registerWebhook(
   return { id: result.rows[0].id, secret };
 }
 
-/** Sign a webhook payload using HMAC-SHA256 */
-function signPayload(payload: string, secret: string): string {
-  return crypto.createHmac("sha256", secret).update(payload).digest("hex");
-}
-
-/** Deliver a webhook event to all matching subscriptions */
+/**
+ * Compatibility facade for older internal emitters. Delivery is delegated to the
+ * single durable dispatcher; this module must never create an alternate direct
+ * receiver path that can bypass queue admission, canonical ledger semantics, or
+ * the active worker's egress controls.
+ */
 export async function deliverWebhookEvent(
   pool: Pool,
   event: WebhookEvent,
   data: Record<string, unknown>,
   orgId?: number
-): Promise<{ delivered: number; failed: number }> {
-  const query = orgId
-    ? `SELECT * FROM webhook_subscriptions WHERE active = true AND $1 = ANY(events) AND org_id = $2`
-    : `SELECT * FROM webhook_subscriptions WHERE active = true AND $1 = ANY(events)`;
-  const params = orgId ? [event, orgId] : [event];
-  const subs = await pool.query(query, params);
-
-  let delivered = 0;
-  let failed = 0;
-
-  for (const sub of subs.rows) {
-    try {
-      const payload = JSON.stringify({
-        event,
-        data,
-        timestamp: new Date().toISOString(),
-        webhookId: sub.id,
-      });
-      const signature = signPayload(payload, sub.secret);
-
-      const response = await fetch(sub.url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-NDSEP-Signature": `sha256=${signature}`,
-          "X-NDSEP-Event": event,
-          "X-NDSEP-Delivery": crypto.randomUUID(),
-        },
-        body: payload,
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      const success = response.ok;
-      await pool.query(
-        `INSERT INTO webhook_deliveries (subscription_id, event, payload, response_status, success)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [sub.id, event, data, response.status, success]
-      );
-
-      if (success) {
-        delivered++;
-        await pool.query(
-          `UPDATE webhook_subscriptions SET last_delivery_at = NOW(), failure_count = 0 WHERE id = $1`,
-          [sub.id]
-        );
-      } else {
-        failed++;
-        await pool.query(
-          `UPDATE webhook_subscriptions SET failure_count = failure_count + 1 WHERE id = $1`,
-          [sub.id]
-        );
-      }
-    } catch (err) {
-      failed++;
-      handleError(err, { module: "webhooks", subscriptionId: sub.id, event });
-      // Disable after 10 consecutive failures
-      await pool.query(
-        `UPDATE webhook_subscriptions SET failure_count = failure_count + 1,
-         active = CASE WHEN failure_count >= 10 THEN false ELSE active END
-         WHERE id = $1`,
-        [sub.id]
-      );
-    }
-  }
-
-  return { delivered, failed };
+): Promise<{ delivered: number; failed: number; queued: number }> {
+  return dispatchEvent(event, data, orgId, { pool });
 }

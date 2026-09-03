@@ -65,7 +65,7 @@ import { verifyMigrations } from "../migrationVerifier";
 import { applyDatabaseMigrations } from "../dbMigrations";
 import { regenerateSession, generateSessionNonce } from "../sessionSecurity";
 import { traceMiddleware } from "../telemetry";
-import { initWebhookSystem, deliverWebhookEvent } from "../webhookSystem";
+import { initWebhookSystem } from "../webhookSystem";
 import { createVersionedEndpoints } from "../apiVersioning";
 import { registerMobileApi } from "../mobileApi";
 import { registerMojaloopCallbacks } from "../mojaloopCallback";

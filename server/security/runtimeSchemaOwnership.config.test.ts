@@ -34,6 +34,7 @@ describe("runtime schema ownership and RLS source contract", () => {
     const marketplace = read("server/marketplace/index.ts");
     const startup = read("server/_core/index.ts");
     const ci = read(".github/workflows/ci.yml");
+    const extendedE2E = read(".github/workflows/extended-e2e-matrix.yml");
 
     expect(webhook).not.toMatch(/CREATE TABLE|CREATE INDEX|ALTER TABLE/);
     expect(featureFlags).not.toMatch(/CREATE TABLE|CREATE INDEX|ALTER TABLE/);
@@ -51,6 +52,13 @@ describe("runtime schema ownership and RLS source contract", () => {
     expect(startup).not.toContain("Multi-tenancy init skipped");
     expect(ci).toContain("name: Apply root Drizzle migrations");
     expect(ci).toContain("run: pnpm exec drizzle-kit migrate");
+    expect(extendedE2E).toContain(
+      "name: Apply root Drizzle migrations to this disposable PostgreSQL database"
+    );
+    expect(extendedE2E).toContain(
+      "pnpm exec drizzle-kit migrate > migration.log"
+    );
+    expect(extendedE2E).not.toContain("drizzle-kit push --force");
   });
 
   it("uses migration verification and parameterized tenant configuration", () => {

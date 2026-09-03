@@ -161,20 +161,21 @@ func verifySchema(ctx context.Context, db *sql.DB) error {
 		    WHERE conrelid = 'webhook_deliveries'::regclass
 		      AND conname = 'webhook_deliveries_queue_attempt_id_fk'
 		  )
-		  AND (
-		    SELECT count(*) FROM pg_constraint
-		    WHERE conrelid = 'webhook_delivery_attempts'::regclass
-		      AND conname IN (
-		        'webhook_delivery_attempt_processing_claim_check',
-		        'webhook_delivery_attempt_terminal_claim_clear_check'
-		      )
-		  ) = 2`
+			  AND (
+			    SELECT count(*) FROM pg_constraint
+			    WHERE conrelid = 'webhook_delivery_attempts'::regclass
+			      AND conname IN (
+			        'webhook_delivery_attempt_processing_claim_check',
+			        'webhook_delivery_attempt_terminal_claim_clear_check',
+			        'webhook_delivery_attempt_processing_lease_window_check'
+			      )
+			  ) = 3`
 	var ready bool
 	if err := db.QueryRowContext(ctx, schemaCheck).Scan(&ready); err != nil {
 		return fmt.Errorf("verify webhook queue schema: %w", err)
 	}
 	if !ready {
-		return errors.New("migration-owned webhook queue schema is incomplete; apply root migrations through 0046 before starting the worker")
+		return errors.New("migration-owned webhook queue schema is incomplete; apply root migrations through 0047 before starting the worker")
 	}
 	return nil
 }

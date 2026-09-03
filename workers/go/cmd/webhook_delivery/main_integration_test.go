@@ -345,3 +345,24 @@ func TestWorkerFinalizesInactiveSubscriptionWithoutDeliveryPostgres(t *testing.T
 		t.Fatalf("disabled subscription was not terminally finalized: status=%q success=%t dead=%d", status, canonicalSuccess, metrics.dead.Load())
 	}
 }
+
+func TestWorkerLeaseWindowConstraintRejectsNonFutureLeasePostgres(t *testing.T) {
+	db := integrationDatabase(t)
+	resetWorkerFixtures(t, db)
+	attemptID, _ := insertAttempt(t, db, "pending")
+
+	_, err := db.Exec(`
+		UPDATE webhook_delivery_attempts
+		SET status = 'processing',
+		    claimed_at = now(),
+		    claim_token = $2::uuid,
+		    claim_owner = 'invalid-lease-test',
+		    claim_expires_at = now()
+		WHERE id = $1`, attemptID, uuid.New().String())
+	if err == nil {
+		t.Fatal("processing lease with a non-future expiry unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "webhook_delivery_attempt_processing_lease_window_check") {
+		t.Fatalf("unexpected invalid-lease constraint error: %v", err)
+	}
+}

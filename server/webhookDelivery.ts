@@ -119,6 +119,14 @@ type WebhookDeliveryDependencies = {
   queueMode?: WebhookDeliveryQueueMode;
 };
 
+type WebhookDispatchDependencies = Pick<
+  WebhookDeliveryDependencies,
+  "pool" | "queueMode"
+> & {
+  eventId?: string;
+  now?: () => Date;
+};
+
 export function getWebhookDeliveryQueueMode(
   value = process.env.WEBHOOK_DELIVERY_QUEUE_MODE
 ): WebhookDeliveryQueueMode {
@@ -415,27 +423,29 @@ export async function deliverWebhook(
 export async function dispatchEvent(
   eventType: string,
   data: Record<string, unknown>,
-  orgId?: number
+  orgId?: number,
+  dependencies: WebhookDispatchDependencies = {}
 ): Promise<{ delivered: number; failed: number; queued: number }> {
-  const pool = getPool();
+  const pool = dependencies.pool ?? getPool();
+  const now = dependencies.now ?? (() => new Date());
   const event: WebhookEvent = {
-    id: crypto.randomUUID(),
+    id: dependencies.eventId ?? crypto.randomUUID(),
     type: eventType,
     data,
-    timestamp: new Date().toISOString(),
+    timestamp: now().toISOString(),
   };
 
   // Find matching subscriptions
   const { rows: subscriptions } = await pool.query(
-    `SELECT id, url, secret, events, active, organization_id
+    `SELECT id, url, secret, events, active, org_id AS "organizationId"
      FROM webhook_subscriptions
      WHERE active = true
-       AND ($1::int IS NULL OR organization_id = $1)
-       AND events @> $2::jsonb`,
-    [orgId ?? null, JSON.stringify([eventType])]
+       AND ($1::int IS NULL OR org_id = $1)
+       AND events @> ARRAY[$2::text]`,
+    [orgId ?? null, eventType]
   );
 
-  const queueMode = getWebhookDeliveryQueueMode();
+  const queueMode = dependencies.queueMode ?? getWebhookDeliveryQueueMode();
   let delivered = 0;
   let failed = 0;
   let queued = 0;

@@ -3,6 +3,7 @@ import { Pool } from "pg";
 
 import {
   deliverWebhook,
+  dispatchEvent,
   getWebhookShadowMetrics,
   webhookDeliveryAttemptKey,
 } from "./webhookDelivery";
@@ -164,6 +165,44 @@ describe.skipIf(!shouldRun)(
       expect(getWebhookShadowMetrics().activeEnqueued).toBe(
         metricsBefore.activeEnqueued + 1
       );
+    });
+
+    it("uses migration-owned org_id filtering for active dispatch and reports queue acceptance", async () => {
+      await pool.query(
+        `INSERT INTO webhook_subscriptions (org_id, url, events, secret, active)
+         VALUES ($1, $2, $3::text[], $4, true)`,
+        [
+          2,
+          "https://other-org.invalid/ndsep",
+          ["audit.completed"],
+          "other-org-secret",
+        ]
+      );
+      const eventId = "66666666-6666-4666-8666-666666666666";
+
+      const result = await dispatchEvent(
+        "audit.completed",
+        { auditId: "org-scoped-dispatch" },
+        1,
+        {
+          pool,
+          queueMode: "active",
+          eventId,
+          now: () => new Date("2026-09-03T00:00:00.000Z"),
+        }
+      );
+
+      expect(result).toEqual({ delivered: 0, failed: 0, queued: 1 });
+      const queue = await pool.query(
+        `SELECT s.org_id, a.status, a.event_id
+         FROM webhook_delivery_attempts a
+         JOIN webhook_subscriptions s ON s.id = a.subscription_id
+         WHERE a.event_id = $1::uuid`,
+        [eventId]
+      );
+      expect(queue.rows).toEqual([
+        { org_id: 1, status: "pending", event_id: eventId },
+      ]);
     });
 
     it("refuses an inactive subscription before enqueue or synchronous receiver activity", async () => {

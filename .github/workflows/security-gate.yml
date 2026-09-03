@@ -281,6 +281,11 @@ jobs:
           grep -Fq 'webhook_delivery_attempt_processing_claim_check' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
           grep -Fq 'webhook_deliveries_queue_attempt_id_fk' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
           grep -Fq 'uq_webhook_deliveries_queue_attempt' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          test -f drizzle/0047_webhook_delivery_attempt_lease_window.sql
+          grep -Fq '"tag": "0047_webhook_delivery_attempt_lease_window"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0047_webhook_delivery_attempt_lease_window.sql
+          grep -Fq 'webhook_delivery_attempt_processing_lease_window_check' drizzle/0047_webhook_delivery_attempt_lease_window.sql
+          grep -Fq 'claim_expires_at > claimed_at' drizzle/0047_webhook_delivery_attempt_lease_window.sql
       - name: Validate fixture-script syntax and explicit refusal paths
         shell: bash
         run: |
