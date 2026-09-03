@@ -33,6 +33,7 @@ describe("runtime schema ownership and RLS source contract", () => {
     const featureFlags = read("server/featureFlags/index.ts");
     const marketplace = read("server/marketplace/index.ts");
     const startup = read("server/_core/index.ts");
+    const ci = read(".github/workflows/ci.yml");
 
     expect(webhook).not.toMatch(/CREATE TABLE|CREATE INDEX|ALTER TABLE/);
     expect(featureFlags).not.toMatch(/CREATE TABLE|CREATE INDEX|ALTER TABLE/);
@@ -48,6 +49,8 @@ describe("runtime schema ownership and RLS source contract", () => {
       "Webhook system init failed — webhooks disabled"
     );
     expect(startup).not.toContain("Multi-tenancy init skipped");
+    expect(ci).toContain("name: Apply root Drizzle migrations");
+    expect(ci).toContain("run: pnpm exec drizzle-kit migrate");
   });
 
   it("uses migration verification and parameterized tenant configuration", () => {
@@ -57,6 +60,8 @@ describe("runtime schema ownership and RLS source contract", () => {
 
     expect(multiTenancy).not.toMatch(/ALTER TABLE\s+\$?\{?table|CREATE POLICY/);
     expect(multiTenancy).toContain("RLS migration state is incomplete");
+    expect(multiTenancy).toContain("$1::text");
+    expect(multiTenancy).toContain("$2::text");
     expect(multiTenancy).toContain(
       "SELECT set_config('app.current_org_id', $1, true)"
     );

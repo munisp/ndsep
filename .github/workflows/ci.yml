@@ -404,15 +404,17 @@ jobs:
       SKIP_DATABASE_MIGRATIONS: "true"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
-        with: { version: "10.4.1" }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Apply database migrations
-        run: pnpm exec drizzle-kit push --force
+      - name: Apply root Drizzle migrations
+        run: pnpm exec drizzle-kit migrate
       - run: pnpm exec playwright install --with-deps chromium
       - name: Start server and verify readiness
         run: |
