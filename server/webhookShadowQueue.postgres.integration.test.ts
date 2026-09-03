@@ -68,6 +68,7 @@ describe.skipIf(!shouldRun)(
     });
 
     it("durably writes a shadow intent and canonical delivery outcome before reporting successful delivery", async () => {
+      const metricsBefore = getWebhookShadowMetrics();
       const payload = event("11111111-1111-4111-8111-111111111111");
 
       const delivered = await deliverWebhook(subscription, payload, 0, {
@@ -79,7 +80,7 @@ describe.skipIf(!shouldRun)(
         sleep: async () => undefined,
       });
 
-      expect(delivered).toBe(true);
+      expect(delivered).toBe("delivered");
       const queue = await pool.query(
         `SELECT status, attempt_count, last_response_code, delivered_at, idempotency_key
        FROM webhook_delivery_attempts
@@ -103,15 +104,93 @@ describe.skipIf(!shouldRun)(
         { response_status: 202, success: true, attempt: 1 },
       ]);
       expect(getWebhookShadowMetrics()).toMatchObject({
-        enqueued: 1,
-        finalizedDelivered: 1,
-        finalizedDead: 0,
-        enqueueErrors: 0,
-        finalizationErrors: 0,
+        enqueued: metricsBefore.enqueued + 1,
+        finalizedDelivered: metricsBefore.finalizedDelivered + 1,
+        finalizedDead: metricsBefore.finalizedDead,
+        enqueueErrors: metricsBefore.enqueueErrors,
+        finalizationErrors: metricsBefore.finalizationErrors,
       });
     });
 
+    it("accepts active queue mode only after durable pending intent and does not synchronously deliver", async () => {
+      const metricsBefore = getWebhookShadowMetrics();
+      const payload = event("44444444-4444-4444-8444-444444444444");
+      const receiver = vi.fn();
+
+      const accepted = await deliverWebhook(subscription, payload, 0, {
+        pool,
+        queueMode: "active",
+        fetchImpl: receiver as unknown as typeof fetch,
+        sleep: async () => undefined,
+      });
+
+      expect(accepted).toBe("queued");
+      expect(receiver).not.toHaveBeenCalled();
+      const queue = await pool.query(
+        "SELECT status, attempt_count, claim_token, claim_owner, claim_expires_at FROM webhook_delivery_attempts WHERE event_id = $1::uuid",
+        [payload.id]
+      );
+      expect(queue.rows).toEqual([
+        {
+          status: "pending",
+          attempt_count: 0,
+          claim_token: null,
+          claim_owner: null,
+          claim_expires_at: null,
+        },
+      ]);
+      const ledger = await pool.query(
+        "SELECT count(*)::int AS count FROM webhook_deliveries WHERE payload->>'id' = $1",
+        [payload.id]
+      );
+      expect(ledger.rows).toEqual([{ count: 0 }]);
+      expect(getWebhookShadowMetrics().activeEnqueued).toBe(
+        metricsBefore.activeEnqueued + 1
+      );
+
+      const duplicateOutcome = await deliverWebhook(subscription, payload, 0, {
+        pool,
+        queueMode: "active",
+        fetchImpl: receiver as unknown as typeof fetch,
+        sleep: async () => undefined,
+      });
+      expect(duplicateOutcome).toBe("queued");
+      expect(receiver).not.toHaveBeenCalled();
+      const duplicateQueue = await pool.query(
+        "SELECT count(*)::int AS count FROM webhook_delivery_attempts WHERE event_id = $1::uuid",
+        [payload.id]
+      );
+      expect(duplicateQueue.rows).toEqual([{ count: 1 }]);
+      expect(getWebhookShadowMetrics().activeEnqueued).toBe(
+        metricsBefore.activeEnqueued + 1
+      );
+    });
+
+    it("refuses an inactive subscription before enqueue or synchronous receiver activity", async () => {
+      const payload = event("55555555-5555-4555-8555-555555555555");
+      const receiver = vi.fn();
+      const inactiveOutcome = await deliverWebhook(
+        { ...subscription, active: false },
+        payload,
+        0,
+        {
+          pool,
+          queueMode: "active",
+          fetchImpl: receiver as unknown as typeof fetch,
+          sleep: async () => undefined,
+        }
+      );
+      expect(inactiveOutcome).toBe("failed");
+      expect(receiver).not.toHaveBeenCalled();
+      const queue = await pool.query(
+        "SELECT count(*)::int AS count FROM webhook_delivery_attempts WHERE event_id = $1::uuid",
+        [payload.id]
+      );
+      expect(queue.rows).toEqual([{ count: 0 }]);
+    });
+
     it("records terminal transport-partition failure as a dead shadow row without retry masking", async () => {
+      const metricsBefore = getWebhookShadowMetrics();
       const payload = event("22222222-2222-4222-8222-222222222222");
       const fetchPartition = vi
         .fn()
@@ -125,7 +204,7 @@ describe.skipIf(!shouldRun)(
         sleep: noWait,
       });
 
-      expect(delivered).toBe(false);
+      expect(delivered).toBe("failed");
       expect(fetchPartition).toHaveBeenCalledTimes(3);
       expect(noWait).toHaveBeenCalledTimes(2);
 
@@ -150,11 +229,11 @@ describe.skipIf(!shouldRun)(
         { response_status: null, success: false, attempt: 3 },
       ]);
       expect(getWebhookShadowMetrics()).toMatchObject({
-        enqueued: 2,
-        finalizedDelivered: 1,
-        finalizedDead: 1,
-        enqueueErrors: 0,
-        finalizationErrors: 0,
+        enqueued: metricsBefore.enqueued + 1,
+        finalizedDelivered: metricsBefore.finalizedDelivered,
+        finalizedDead: metricsBefore.finalizedDead + 1,
+        enqueueErrors: metricsBefore.enqueueErrors,
+        finalizationErrors: metricsBefore.finalizationErrors,
       });
     });
 
@@ -181,7 +260,7 @@ describe.skipIf(!shouldRun)(
         sleep: async () => undefined,
       });
 
-      expect(delivered).toBe(false);
+      expect(delivered).toBe("failed");
       const orphanedShadowIntent = await pool.query(
         `SELECT a.status, count(d.id)::int AS canonical_rows
        FROM webhook_delivery_attempts a

@@ -40,6 +40,7 @@ const RETRY_DELAYS = [1000, 5000, 30000]; // 1s, 5s, 30s
 
 type WebhookShadowMetrics = {
   enqueued: number;
+  activeEnqueued: number;
   enqueueErrors: number;
   finalizedDelivered: number;
   finalizedDead: number;
@@ -49,6 +50,7 @@ type WebhookShadowMetrics = {
 
 const webhookShadowMetrics: WebhookShadowMetrics = {
   enqueued: 0,
+  activeEnqueued: 0,
   enqueueErrors: 0,
   finalizedDelivered: 0,
   finalizedDead: 0,
@@ -63,7 +65,11 @@ export function getWebhookShadowMetrics(): Readonly<WebhookShadowMetrics> {
 let _pool: Pool | null = null;
 function getPool(): Pool {
   if (!_pool) {
-    _pool = new Pool({ connectionString: getDatabaseUrl(), ssl: getPgSslConfig(), max: 3 });
+    _pool = new Pool({
+      connectionString: getDatabaseUrl(),
+      ssl: getPgSslConfig(),
+      max: 3,
+    });
   }
   return _pool;
 }
@@ -90,11 +96,19 @@ export async function recordWebhookDeliveryAttempt(
     `INSERT INTO webhook_deliveries
        (subscription_id, event, payload, response_status, response_body, attempt, delivered_at, success)
      VALUES ($1, $2, $3::jsonb, $4, NULL, $5, NOW(), $6)`,
-    [subscription.id, event.type, JSON.stringify(event), statusCode, attempt + 1, success]
+    [
+      subscription.id,
+      event.type,
+      JSON.stringify(event),
+      statusCode,
+      attempt + 1,
+      success,
+    ]
   );
 }
 
-export type WebhookDeliveryQueueMode = "disabled" | "shadow";
+export type WebhookDeliveryQueueMode = "disabled" | "shadow" | "active";
+export type WebhookDeliveryOutcome = "delivered" | "queued" | "failed";
 
 type WebhookQueryable = Pick<Pool, "query">;
 
@@ -105,25 +119,38 @@ type WebhookDeliveryDependencies = {
   queueMode?: WebhookDeliveryQueueMode;
 };
 
-export function getWebhookDeliveryQueueMode(value = process.env.WEBHOOK_DELIVERY_QUEUE_MODE): WebhookDeliveryQueueMode {
+export function getWebhookDeliveryQueueMode(
+  value = process.env.WEBHOOK_DELIVERY_QUEUE_MODE
+): WebhookDeliveryQueueMode {
   const mode = value ?? "disabled";
-  if (mode === "disabled" || mode === "shadow") return mode;
-  throw new Error("WEBHOOK_DELIVERY_QUEUE_MODE must be disabled or shadow");
+  if (mode === "disabled" || mode === "shadow" || mode === "active")
+    return mode;
+  throw new Error(
+    "WEBHOOK_DELIVERY_QUEUE_MODE must be disabled, shadow, or active"
+  );
 }
 
-export function webhookDeliveryAttemptKey(subscriptionId: number, eventId: string): string {
-  return crypto.createHash("sha256").update(`${subscriptionId}:${eventId}`).digest("hex");
+export function webhookDeliveryAttemptKey(
+  subscriptionId: number,
+  eventId: string
+): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${subscriptionId}:${eventId}`)
+    .digest("hex");
 }
 
-export async function enqueueWebhookShadowAttempt(
+export async function enqueueWebhookAttempt(
   pool: WebhookQueryable,
   subscription: Pick<WebhookSubscription, "id" | "url">,
   event: WebhookEvent,
+  queueMode: Extract<WebhookDeliveryQueueMode, "shadow" | "active">
 ): Promise<void> {
+  const status = queueMode === "active" ? "pending" : "shadow";
   const result = await pool.query(
     `INSERT INTO webhook_delivery_attempts
        (subscription_id, event_id, event_type, payload, destination_url, status, idempotency_key)
-     VALUES ($1, $2::uuid, $3, $4::jsonb, $5, 'shadow', $6)
+     VALUES ($1, $2::uuid, $3, $4::jsonb, $5, $6::varchar, $7)
      ON CONFLICT (idempotency_key) DO NOTHING`,
     [
       subscription.id,
@@ -131,14 +158,23 @@ export async function enqueueWebhookShadowAttempt(
       event.type,
       JSON.stringify(event),
       subscription.url,
+      status,
       webhookDeliveryAttemptKey(subscription.id, event.id),
-    ],
+    ]
   );
   if (result.rowCount === 1) {
     webhookShadowMetrics.enqueued += 1;
+    if (queueMode === "active") webhookShadowMetrics.activeEnqueued += 1;
     webhookShadowMetrics.lastEnqueuedAtSeconds = Math.floor(Date.now() / 1000);
   }
 }
+
+// Compatibility alias for the committed shadow-only caller and tests.
+export const enqueueWebhookShadowAttempt = (
+  pool: WebhookQueryable,
+  subscription: Pick<WebhookSubscription, "id" | "url">,
+  event: WebhookEvent
+) => enqueueWebhookAttempt(pool, subscription, event, "shadow");
 
 export async function finalizeWebhookShadowAttempt(
   pool: WebhookQueryable,
@@ -146,7 +182,7 @@ export async function finalizeWebhookShadowAttempt(
   eventId: string,
   status: "delivered" | "dead",
   responseCode: number | null,
-  attemptCount: number,
+  attemptCount: number
 ): Promise<void> {
   const result = await pool.query(
     `UPDATE webhook_delivery_attempts
@@ -163,23 +199,33 @@ export async function finalizeWebhookShadowAttempt(
       attemptCount,
       responseCode,
       webhookDeliveryAttemptKey(subscriptionId, eventId),
-    ],
+    ]
   );
   if (result.rowCount !== 1) {
-    throw new Error(`Webhook shadow attempt is missing or already finalized for event ${eventId}`);
+    throw new Error(
+      `Webhook shadow attempt is missing or already finalized for event ${eventId}`
+    );
   }
   if (status === "delivered") webhookShadowMetrics.finalizedDelivered += 1;
   else webhookShadowMetrics.finalizedDead += 1;
 }
 
-const defaultSleep = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds));
+const defaultSleep = (milliseconds: number) =>
+  new Promise<void>(resolve => setTimeout(resolve, milliseconds));
 
 export async function deliverWebhook(
   subscription: WebhookSubscription,
   event: WebhookEvent,
   attempt = 0,
-  dependencies: WebhookDeliveryDependencies = {},
-): Promise<boolean> {
+  dependencies: WebhookDeliveryDependencies = {}
+): Promise<WebhookDeliveryOutcome> {
+  if (!subscription.active) {
+    logger.warn(
+      { subscriptionId: subscription.id, eventId: event.id },
+      "[Webhook] Refusing inactive subscription"
+    );
+    return "failed";
+  }
   const payload = JSON.stringify(event);
   const signature = signPayload(payload, subscription.secret);
   const pool = dependencies.pool ?? getPool();
@@ -187,23 +233,46 @@ export async function deliverWebhook(
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const sleep = dependencies.sleep ?? defaultSleep;
 
-  if (queueMode === "shadow" && attempt === 0) {
+  if ((queueMode === "shadow" || queueMode === "active") && attempt === 0) {
     try {
-      await enqueueWebhookShadowAttempt(pool, subscription, event);
+      await enqueueWebhookAttempt(pool, subscription, event, queueMode);
     } catch (queueError) {
       webhookShadowMetrics.enqueueErrors += 1;
       logger.error(
-        { err: queueError instanceof Error ? queueError.message : String(queueError), subscriptionId: subscription.id, eventId: event.id },
-        "[Webhook] Shadow queue intent could not be persisted",
+        {
+          err:
+            queueError instanceof Error
+              ? queueError.message
+              : String(queueError),
+          subscriptionId: subscription.id,
+          eventId: event.id,
+        },
+        "[Webhook] Shadow queue intent could not be persisted"
       );
-      return false;
+      return "failed";
     }
   }
 
-  const finalizeShadow = async (status: "delivered" | "dead", responseCode: number | null, attempts: number) => {
+  if (queueMode === "active") {
+    // Queue acceptance is distinct from delivery. The active worker owns dispatch and terminal state.
+    return "queued";
+  }
+
+  const finalizeShadow = async (
+    status: "delivered" | "dead",
+    responseCode: number | null,
+    attempts: number
+  ) => {
     if (queueMode !== "shadow") return;
     try {
-      await finalizeWebhookShadowAttempt(pool, subscription.id, event.id, status, responseCode, attempts);
+      await finalizeWebhookShadowAttempt(
+        pool,
+        subscription.id,
+        event.id,
+        status,
+        responseCode,
+        attempts
+      );
     } catch (error) {
       webhookShadowMetrics.finalizationErrors += 1;
       throw error;
@@ -226,13 +295,27 @@ export async function deliverWebhook(
 
     const success = response.status >= 200 && response.status < 300;
     try {
-      await recordWebhookDeliveryAttempt(pool, subscription, event, response.status, success, attempt);
+      await recordWebhookDeliveryAttempt(
+        pool,
+        subscription,
+        event,
+        response.status,
+        success,
+        attempt
+      );
     } catch (ledgerError) {
       logger.error(
-        { err: ledgerError instanceof Error ? ledgerError.message : String(ledgerError), subscriptionId: subscription.id, eventId: event.id },
-        "[Webhook] Delivery response was received but durable audit logging failed",
+        {
+          err:
+            ledgerError instanceof Error
+              ? ledgerError.message
+              : String(ledgerError),
+          subscriptionId: subscription.id,
+          eventId: event.id,
+        },
+        "[Webhook] Delivery response was received but durable audit logging failed"
       );
-      return false;
+      return "failed";
     }
 
     if (success) {
@@ -240,18 +323,32 @@ export async function deliverWebhook(
         await finalizeShadow("delivered", response.status, attempt + 1);
       } catch (queueError) {
         logger.error(
-          { err: queueError instanceof Error ? queueError.message : String(queueError), subscriptionId: subscription.id, eventId: event.id },
-          "[Webhook] Canonical delivery was recorded but shadow finalization failed",
+          {
+            err:
+              queueError instanceof Error
+                ? queueError.message
+                : String(queueError),
+            subscriptionId: subscription.id,
+            eventId: event.id,
+          },
+          "[Webhook] Canonical delivery was recorded but shadow finalization failed"
         );
-        return false;
+        return "failed";
       }
-      logger.info({ subscriptionId: subscription.id, eventType: event.type }, "[Webhook] Delivered");
-      return true;
+      logger.info(
+        { subscriptionId: subscription.id, eventType: event.type },
+        "[Webhook] Delivered"
+      );
+      return "delivered";
     }
 
     if (response.status >= 500 && attempt < MAX_RETRIES - 1) {
       const delay = RETRY_DELAYS[attempt] ?? 30000;
-      logger.warn({ subscriptionId: subscription.id, status: response.status, attempt }, "[Webhook] Retrying in %dms", delay);
+      logger.warn(
+        { subscriptionId: subscription.id, status: response.status, attempt },
+        "[Webhook] Retrying in %dms",
+        delay
+      );
       await sleep(delay);
       return deliverWebhook(subscription, event, attempt + 1, dependencies);
     }
@@ -260,26 +357,54 @@ export async function deliverWebhook(
       await finalizeShadow("dead", response.status, attempt + 1);
     } catch (queueError) {
       logger.error(
-        { err: queueError instanceof Error ? queueError.message : String(queueError), subscriptionId: subscription.id, eventId: event.id },
-        "[Webhook] Canonical failure was recorded but shadow finalization failed",
+        {
+          err:
+            queueError instanceof Error
+              ? queueError.message
+              : String(queueError),
+          subscriptionId: subscription.id,
+          eventId: event.id,
+        },
+        "[Webhook] Canonical failure was recorded but shadow finalization failed"
       );
-      return false;
+      return "failed";
     }
-    logger.error({ subscriptionId: subscription.id, status: response.status }, "[Webhook] Delivery failed");
-    return false;
+    logger.error(
+      { subscriptionId: subscription.id, status: response.status },
+      "[Webhook] Delivery failed"
+    );
+    return "failed";
   } catch (err) {
     if (attempt >= MAX_RETRIES - 1) {
       try {
-        await recordWebhookDeliveryAttempt(pool, subscription, event, null, false, attempt);
+        await recordWebhookDeliveryAttempt(
+          pool,
+          subscription,
+          event,
+          null,
+          false,
+          attempt
+        );
         await finalizeShadow("dead", null, attempt + 1);
       } catch (ledgerError) {
         logger.error(
-          { err: ledgerError instanceof Error ? ledgerError.message : String(ledgerError), subscriptionId: subscription.id, eventId: event.id },
-          "[Webhook] Durable audit logging failed for terminal transport error",
+          {
+            err:
+              ledgerError instanceof Error
+                ? ledgerError.message
+                : String(ledgerError),
+            subscriptionId: subscription.id,
+            eventId: event.id,
+          },
+          "[Webhook] Durable audit logging failed for terminal transport error"
         );
       }
-      logger.error({ err, subscriptionId: subscription.id }, "[Webhook] Delivery failed after %d attempts", MAX_RETRIES);
-      return false;
+      logger.error(
+        { err, subscriptionId: subscription.id },
+        "[Webhook] Delivery failed after %d attempts",
+        MAX_RETRIES
+      );
+      return "failed";
     }
     const delay = RETRY_DELAYS[attempt] ?? 30000;
     await sleep(delay);
@@ -291,7 +416,7 @@ export async function dispatchEvent(
   eventType: string,
   data: Record<string, unknown>,
   orgId?: number
-): Promise<{ delivered: number; failed: number }> {
+): Promise<{ delivered: number; failed: number; queued: number }> {
   const pool = getPool();
   const event: WebhookEvent = {
     id: crypto.randomUUID(),
@@ -310,14 +435,20 @@ export async function dispatchEvent(
     [orgId ?? null, JSON.stringify([eventType])]
   );
 
+  const queueMode = getWebhookDeliveryQueueMode();
   let delivered = 0;
   let failed = 0;
+  let queued = 0;
 
   for (const sub of subscriptions) {
-    const success = await deliverWebhook(sub as WebhookSubscription, event);
-    if (success) delivered++;
+    const outcome = await deliverWebhook(sub as WebhookSubscription, event, 0, {
+      pool,
+      queueMode,
+    });
+    if (outcome === "delivered") delivered++;
+    else if (outcome === "queued") queued++;
     else failed++;
   }
 
-  return { delivered, failed };
+  return { delivered, failed, queued };
 }

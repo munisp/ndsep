@@ -44,15 +44,17 @@ jobs:
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
-        with: { version: "10.4.1" }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec drizzle-kit push --force
-        name: Apply database migrations
+      - run: pnpm exec drizzle-kit migrate
+        name: Apply root Drizzle migrations
       - run: pnpm exec tsc --noEmit
         name: TypeScript check
       - name: Create isolated PostgreSQL database for theme-preferences router integration
@@ -68,13 +70,10 @@ jobs:
           CREATE DATABASE ndsep_audit_chain_integration;
           CREATE DATABASE ndsep_webhook_shadow_integration;
           SQL
-      - name: Apply root schema and shadow queue migration to isolated webhook database
-        env:
-          PGPASSWORD: ndsep_test_pass
+      - name: Apply root Drizzle migrations to isolated webhook database
         run: |
           set -euo pipefail
-          DATABASE_URL="$WEBHOOK_SHADOW_QUEUE_TEST_DATABASE_URL" pnpm exec drizzle-kit push --force
-          psql --host=localhost --username=ndsep_user --dbname=ndsep_webhook_shadow_integration --set=ON_ERROR_STOP=1 --file=drizzle/0045_webhook_delivery_attempts_shadow_queue.sql
+          DATABASE_URL="$WEBHOOK_SHADOW_QUEUE_TEST_DATABASE_URL" pnpm exec drizzle-kit migrate
       - run: pnpm lint
         name: Lint the root web and API project
       - run: pnpm test --reporter=verbose
@@ -141,12 +140,46 @@ jobs:
   go-ci:
     name: Go CI (Build + Vet + Test)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ndsep_user
+          POSTGRES_PASSWORD: ndsep_test_pass
+          POSTGRES_DB: ndsep_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      WEBHOOK_QUEUE_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test_webhook_worker_cutover
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: workers/go/go.sum
+      - name: Prepare migration-owned webhook worker integration database
+        env:
+          PGPASSWORD: ndsep_test_pass
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --ignore-scripts
+          psql --host=localhost --username=ndsep_user --dbname=postgres --set=ON_ERROR_STOP=1 <<'SQL'
+          DROP DATABASE IF EXISTS ndsep_test_webhook_worker_cutover;
+          CREATE DATABASE ndsep_test_webhook_worker_cutover;
+          SQL
+          DATABASE_URL="$WEBHOOK_QUEUE_TEST_DATABASE_URL" pnpm exec drizzle-kit migrate
       - name: Download Go dependencies
         working-directory: workers/go
         run: go mod download

@@ -170,6 +170,66 @@ groups:
           summary: "Webhook shadow telemetry is unavailable"
           description: "Shadow mode is active but the API metrics scrape no longer exposes webhook shadow counters. Do not accept a canary window without observable queue evidence."
 
+  # ─── Webhook active queue worker ───────────────────────────────────────────
+  - name: ndsep-webhook-active-worker
+    interval: 30s
+    rules:
+      - alert: WebhookActiveQueueAdmissionFailure
+        expr: |
+          max(ndsep_webhook_queue_active_mode) == 1
+          and sum(increase(ndsep_webhook_shadow_enqueue_errors_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Webhook active queue cannot persist delivery intent"
+          description: "Active queue admission recorded persistence failures over five minutes. Hold cutover, investigate PostgreSQL durability, and reconcile queue intent before resuming worker processing."
+
+      - alert: WebhookActiveWorkerFinalizationFailure
+        expr: |
+          max(ndsep_webhook_queue_active_mode) == 1
+          and sum(increase(ndsep_webhook_queue_worker_finalization_errors_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Webhook active worker cannot atomically finalize delivery outcome"
+          description: "A worker finalization transaction failed. Inspect lease, canonical-ledger, and PostgreSQL error evidence before any rollout progression."
+
+      - alert: WebhookActiveWorkerMetricsUnavailable
+        expr: |
+          max_over_time(ndsep_webhook_queue_active_mode[2m]) == 1
+          and absent_over_time(ndsep_webhook_queue_worker_claimed_total[2m])
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Webhook active worker telemetry is unavailable"
+          description: "API active mode is enabled but the worker metrics endpoint has not been observed. Do not treat queue execution as healthy without worker telemetry."
+
+      - alert: WebhookActiveTerminalFailureRateHigh
+        expr: |
+          sum(increase(ndsep_webhook_queue_worker_dead_total[5m])) >= 5
+          and (
+            sum(increase(ndsep_webhook_queue_worker_dead_total[5m]))
+            /
+            clamp_min(
+              sum(increase(ndsep_webhook_queue_worker_dead_total[5m]))
+              + sum(increase(ndsep_webhook_queue_worker_delivered_total[5m])),
+              1
+            )
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Webhook active worker terminal failure rate exceeds 5%"
+          description: "At least five terminal webhook failures and a terminal dead-outcome ratio above 5% were observed over five minutes. Pause rollout advancement and investigate receiver, lease, and canonical-ledger evidence."
+
   # ─── Compliance SLA ────────────────────────────────────────────────────────
   - name: ndsep-compliance
     interval: 300s

@@ -112,6 +112,8 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   attempt: integer("attempt").default(1),
   deliveredAt: timestamp("delivered_at", { withTimezone: true }).defaultNow(),
   success: boolean("success").default(false),
+  // Foreign-key enforcement is owned by migration 0046; the queue table is declared below.
+  queueAttemptId: bigint("queue_attempt_id", { mode: "number" }),
 });
 
 export const webhookDeliveryAttempts = pgTable("webhook_delivery_attempts", {
@@ -126,8 +128,12 @@ export const webhookDeliveryAttempts = pgTable("webhook_delivery_attempts", {
   maxAttempts: integer("max_attempts").notNull().default(3),
   nextRetryAt: timestamp("next_retry_at", { withTimezone: true }).notNull().defaultNow(),
   claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  claimToken: uuid("claim_token"),
+  claimOwner: varchar("claim_owner", { length: 128 }),
+  claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
   deliveredAt: timestamp("delivered_at", { withTimezone: true }),
   lastResponseCode: integer("last_response_code"),
+  lastError: text("last_error"),
   idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

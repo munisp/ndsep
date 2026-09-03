@@ -238,6 +238,7 @@ jobs:
             server/security/themePreferencesDurableStorage.config.test.ts \
             server/security/threatProtection.test.ts \
             server/security/webhookShadowMonitoring.config.test.ts \
+            server/security/webhookWorkerCutover.config.test.ts \
             server/redisRateLimitStore.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only
@@ -270,6 +271,16 @@ jobs:
           ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0043_audit_log_hash_chain_durable.sql
           grep -Fq 'CREATE TRIGGER audit_logs_assign_hash_chain' drizzle/0043_audit_log_hash_chain_durable.sql
           grep -Fq 'pg_advisory_xact_lock' drizzle/0043_audit_log_hash_chain_durable.sql
+          test -f drizzle/0045_webhook_delivery_attempts_shadow_queue.sql
+          grep -Fq '"tag": "0045_webhook_delivery_attempts_shadow_queue"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0045_webhook_delivery_attempts_shadow_queue.sql
+          grep -Fq 'CREATE TABLE IF NOT EXISTS webhook_delivery_attempts' drizzle/0045_webhook_delivery_attempts_shadow_queue.sql
+          test -f drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq '"tag": "0046_webhook_delivery_attempt_claim_leases"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq 'webhook_delivery_attempt_processing_claim_check' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq 'webhook_deliveries_queue_attempt_id_fk' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq 'uq_webhook_deliveries_queue_attempt' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
       - name: Validate fixture-script syntax and explicit refusal paths
         shell: bash
         run: |

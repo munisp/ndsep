@@ -39,16 +39,16 @@ describe("webhook shadow monitoring contract", () => {
     expect(schema).toContain("idempotencyKey");
   });
 
-  it("keeps webhook delivery shadow-only and requires durable queue intent before dispatch", () => {
+  it("keeps shadow delivery durable and makes active admission explicitly asynchronous", () => {
     expect(delivery).toContain(
-      'export type WebhookDeliveryQueueMode = "disabled" | "shadow"'
-    );
-    expect(delivery).not.toContain('"active"');
-    expect(delivery).toContain(
-      "await enqueueWebhookShadowAttempt(pool, subscription, event)"
+      'export type WebhookDeliveryQueueMode = "disabled" | "shadow" | "active"'
     );
     expect(delivery).toContain(
-      "await recordWebhookDeliveryAttempt(pool, subscription, event, response.status, success, attempt)"
+      "await enqueueWebhookAttempt(pool, subscription, event, queueMode)"
+    );
+    expect(delivery).toContain('return "queued";');
+    expect(delivery).toMatch(
+      /await recordWebhookDeliveryAttempt\(\s*pool,\s*subscription,\s*event,\s*response\.status,\s*success,\s*attempt\s*\)/
     );
     expect(delivery).toContain(
       'await finalizeShadow("delivered", response.status, attempt + 1)'
@@ -102,6 +102,8 @@ describe("webhook shadow monitoring contract", () => {
       "./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro"
     );
     expect(ci).toContain("WEBHOOK_SHADOW_QUEUE_TEST_DATABASE_URL");
-    expect(ci).toContain("0045_webhook_delivery_attempts_shadow_queue.sql");
+    expect(ci).toContain(
+      'DATABASE_URL="$WEBHOOK_SHADOW_QUEUE_TEST_DATABASE_URL" pnpm exec drizzle-kit migrate'
+    );
   });
 });
