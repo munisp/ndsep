@@ -113,11 +113,12 @@ describe("Area 2: Inter-service HTTP wiring (retries + circuit breakers)", () =>
     expect(src).toContain("AbortSignal.timeout");
   });
 
-  it("Kafka event bus has retry queue", () => {
+  it("Kafka event bus persists retryable events in the PostgreSQL outbox", () => {
     const src = readFile("eventBus.ts");
-    expect(src).toContain("retryQueue");
-    expect(src).toContain("processRetryQueue");
-    expect(src).toContain("MAX_RETRY_QUEUE");
+    expect(src).toContain("domain_event_outbox");
+    expect(src).toContain("FOR UPDATE SKIP LOCKED");
+    expect(src).toContain("processDurableOutbox");
+    expect(src).not.toContain("retryQueue");
   });
 
   it("Redis reconnects with exponential backoff", () => {
@@ -331,9 +332,15 @@ describe("Area 6: Graceful degradation across the platform", () => {
     expect(src).toContain("return false");
   });
 
-  it("rate limiter falls back to in-memory when Redis unavailable", () => {
-    const src = readFile("rateLimiter.ts");
-    expect(src).toContain("Falls back to in-memory");
+  it("rate limiters use Redis outside explicit tests and fail closed on store errors", () => {
+    const limiter = readFile("rateLimiter.ts");
+    const store = readFile("redisRateLimitStore.ts");
+    expect(limiter).toContain("redisRateLimitStore");
+    expect(limiter).toContain("passOnStoreError: false");
+    expect(store).toContain('process.env.NODE_ENV === "test"');
+    expect(store).toContain("REDIS_URL is required for non-test rate limiting");
+    expect(store).toContain("rediss://");
+    expect(limiter).not.toContain("Falls back to in-memory");
   });
 
   it("orchestration service calls degrade gracefully on failure", () => {
@@ -348,10 +355,11 @@ describe("Area 6: Graceful degradation across the platform", () => {
     expect(src).toContain("backoff");
   });
 
-  it("Kafka event bus queues events when unavailable", () => {
+  it("Kafka event bus reschedules unavailable events from durable PostgreSQL state", () => {
     const src = readFile("eventBus.ts");
-    expect(src).toContain("Queued for retry");
-    expect(src).toContain("Kafka unavailable");
+    expect(src).toContain("durable outbox event rescheduled");
+    expect(src).toContain("next_attempt_at");
+    expect(src).toContain("lease_expires_at");
   });
 
   it("middlewareConnector circuit breaker opens after repeated failures", () => {

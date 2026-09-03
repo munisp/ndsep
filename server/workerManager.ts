@@ -53,6 +53,7 @@ export interface WorkerDef {
 const _rawDbUrl = getDatabaseUrl();
 const DB_URL = _rawDbUrl.includes("sslmode=") ? _rawDbUrl : _rawDbUrl + "?sslmode=disable";
 const RELAY_URL = process.env.WORKER_RELAY_URL ?? "http://localhost:3000/api/workers/event";
+const ENABLE_CANDIDATE_ML_FOUNDATION = process.env.NDSEP_ENABLE_CANDIDATE_ML_FOUNDATION === "true";
 
 export const WORKER_DEFS: WorkerDef[] = [
   {
@@ -124,6 +125,21 @@ export const WORKER_DEFS: WorkerDef[] = [
       "scikit-learn Random Forest risk classification + Isolation Forest anomaly detection. Runs predictions every 25 seconds.",
     technology: "Python · scikit-learn · numpy · Apache Sedona · Ray",
   },
+  ...(ENABLE_CANDIDATE_ML_FOUNDATION ? [{
+    id: "ml-foundation-candidate",
+    name: "CPU Candidate ML Foundation",
+    layer: "L6",
+    language: "Python" as const,
+    command: "python3",
+    args: [path.join(PYTHON_DIR, "ml_foundation", "service.py")],
+    port: 8251,
+    env: {
+      NDSEP_ML_PORT: "8251",
+      NDSEP_ML_MODEL_DIR: process.env.NDSEP_ML_MODEL_DIR ?? "/var/lib/ndsep-ml/models",
+    },
+    description: "Signed synthetic-only CPU MLP and GraphSAGE candidate inference. Returns human-review support only; no automated enforcement.",
+    technology: "Python · PyTorch CPU · PyTorch Geometric · signed artifacts",
+  }] : []),
   {
     id: "siem-correlator",
     name: "SIEM Alert Correlator",
@@ -548,39 +564,12 @@ export const WORKER_DEFS: WorkerDef[] = [
     technology: "Python · Apache Iceberg REST · PostgreSQL",
   },
   // ── Orchestration Services (Go + Python) ────────────────────────────────
-  {
-    id: "api-gateway",
-    name: "APISIX API Gateway Service",
-    language: "Go",
-    layer: "INFRA",
-    command: path.join(BIN_DIR, "api_gateway"),
-    args: [],
-    port: 8130,
-    env: {
-      APISIX_ADMIN_URL: process.env.APISIX_ADMIN_URL ?? "http://localhost:9180",
-      APISIX_ADMIN_KEY: process.env.APISIX_ADMIN_KEY ?? "",
-      APISIX_ENABLED: process.env.APISIX_ENABLED ?? "true",
-    },
-    description: "Syncs 30 NDSEP journey routes to APISIX Admin API v3. Graceful degradation to in-memory registry when APISIX is unreachable.",
-    technology: "Go · APISIX Admin API v3 · gorilla/mux",
-  },
-  {
-    id: "event-bus",
-    name: "Kafka + Fluvio Event Bus",
-    language: "Go",
-    layer: "INFRA",
-    command: path.join(BIN_DIR, "event_bus"),
-    args: [],
-    port: 8160,
-    env: {
-      KAFKA_BROKERS: process.env.KAFKA_BROKERS ?? "localhost:9092",
-      KAFKA_ENABLED: process.env.KAFKA_ENABLED ?? "true",
-      FLUVIO_HTTP_URL: process.env.FLUVIO_HTTP_URL ?? "http://localhost:9003",
-      FLUVIO_ENABLED: process.env.FLUVIO_ENABLED ?? "true",
-    },
-    description: "Produces events to 30 NDSEP Kafka topics via IBM/sarama SyncProducer. Publishes edge events to Fluvio via HTTP. Graceful degradation to stub mode.",
-    technology: "Go · Kafka (IBM/sarama) · Fluvio HTTP · gorilla/mux",
-  },
+  // The legacy `api_gateway` worker is intentionally not registered here: it
+  // carried a compiled APISIX route map and is superseded by `apisix-manager`,
+  // which loads the PostgreSQL-authoritative gateway_routes registry.
+  // The legacy `event_bus` worker is intentionally not registered here: it
+  // had no durable delivery ledger and declared stub fallback behavior. The
+  // application `eventBus.ts` PostgreSQL transactional outbox owns event state.
   {
     id: "iam-service",
     name: "Keycloak + Permify IAM Service",
@@ -590,15 +579,16 @@ export const WORKER_DEFS: WorkerDef[] = [
     args: [],
     port: 8150,
     env: {
-      KEYCLOAK_URL: process.env.KEYCLOAK_URL ?? "http://localhost:8080",
-      KEYCLOAK_REALM: process.env.KEYCLOAK_REALM ?? "ndsep",
-      KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID ?? "ndsep-platform",
+      KEYCLOAK_URL: process.env.KEYCLOAK_URL ?? "",
+      KEYCLOAK_REALM: process.env.KEYCLOAK_REALM ?? "",
+      KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID ?? "",
       KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
       KEYCLOAK_ENABLED: process.env.KEYCLOAK_ENABLED ?? "true",
-      PERMIFY_URL: process.env.PERMIFY_URL ?? "http://localhost:3476",
+      PERMIFY_URL: process.env.PERMIFY_URL ?? "",
+      PERMIFY_TENANT: process.env.PERMIFY_TENANT ?? "",
       PERMIFY_ENABLED: process.env.PERMIFY_ENABLED ?? "true",
     },
-    description: "Validates JWT bearer tokens via Keycloak token introspection. Checks permissions via Permify HTTP REST v1. Graceful degradation to local role-map fallback.",
+    description: "Validates JWT bearer tokens through Keycloak and delegates permission decisions to Permify; unavailable dependencies deny requests.",
     technology: "Go · Keycloak (gocloak v13) · Permify HTTP REST · gorilla/mux",
   },
   {
@@ -665,8 +655,9 @@ export const WORKER_DEFS: WorkerDef[] = [
       LAKEHOUSE_CATALOG_URL: process.env.LAKEHOUSE_CATALOG_URL ?? "http://localhost:8181",
       LAKEHOUSE_S3_ENDPOINT: process.env.LAKEHOUSE_S3_ENDPOINT ?? "http://localhost:9000",
       LAKEHOUSE_S3_BUCKET: process.env.LAKEHOUSE_S3_BUCKET ?? "ndsep-lakehouse",
-      LAKEHOUSE_S3_ACCESS_KEY: process.env.LAKEHOUSE_S3_ACCESS_KEY ?? "minioadmin",
-      LAKEHOUSE_S3_SECRET_KEY: process.env.LAKEHOUSE_S3_SECRET_KEY ?? "minioadmin",
+      LAKEHOUSE_S3_ACCESS_KEY: process.env.LAKEHOUSE_S3_ACCESS_KEY ?? "",
+      LAKEHOUSE_S3_SECRET_KEY: process.env.LAKEHOUSE_S3_SECRET_KEY ?? "",
+      LAKEHOUSE_ENABLED: process.env.LAKEHOUSE_ENABLED === "true" ? "true" : "false",
       LAKEHOUSE_PORT: "8140",
       WORKER_DATABASE_URL: DB_URL,
     },
@@ -758,7 +749,7 @@ export const WORKER_DEFS: WorkerDef[] = [
       WATCHLIST_PORT: "8133",
       WORKER_DATABASE_URL: DB_URL,
       RELAY_URL,
-      OFAC_API_KEY: process.env.OFAC_API_KEY ?? "demo-ofac-key",
+      OFAC_API_KEY: process.env.OFAC_API_KEY ?? "",
       UN_LIST_URL: process.env.UN_LIST_URL ?? "https://scsanctions.un.org/resources/xml/en/consolidated.xml",
       NFIU_API_ENDPOINT: process.env.NFIU_API_ENDPOINT ?? "https://api.nfiu.gov.ng/v1/watchlist",
     },
@@ -797,7 +788,7 @@ export const WORKER_DEFS: WorkerDef[] = [
       RELAY_URL,
       BVN_API_ENDPOINT: process.env.BVN_API_ENDPOINT ?? "https://api.nibss-plc.org.ng/v1/bvn",
       NIN_API_ENDPOINT: process.env.NIN_API_ENDPOINT ?? "https://api.nimc.gov.ng/v1/nin",
-      NIBSS_API_KEY: process.env.NIBSS_API_KEY ?? "demo-nibss-key",
+      NIBSS_API_KEY: process.env.NIBSS_API_KEY ?? "",
     },
     description: "Automated KYC document analysis: BVN/NIN verification via NIBSS/NIMC APIs, liveness detection, document OCR, PEP screening, adverse media checks. Implements CBN KYC Directive 2023.",
     technology: "Python · OpenCV · Tesseract OCR · FastAPI · NIBSS API · NIMC API",
@@ -815,7 +806,7 @@ export const WORKER_DEFS: WorkerDef[] = [
       WORKER_DATABASE_URL: DB_URL,
       RELAY_URL,
       CBN_PORTAL_ENDPOINT: process.env.CBN_PORTAL_ENDPOINT ?? "https://portal.cbn.gov.ng/api/v1",
-      CBN_API_KEY: process.env.CBN_API_KEY ?? "demo-cbn-key",
+      CBN_API_KEY: process.env.CBN_API_KEY ?? "",
       NFIU_GOAML_ENDPOINT: process.env.NFIU_GOAML_ENDPOINT ?? "https://goaml.nfiu.gov.ng/api/v1",
     },
     description: "Generates and submits CBN regulatory reports: STR (Suspicious Transaction Reports), CTR (Currency Transaction Reports), AML quarterly returns. Submits to CBN portal and NFIU goAML system.",
@@ -941,9 +932,16 @@ export const WORKER_DEFS: WorkerDef[] = [
     command: path.join(BIN_DIR, "apisix_manager"),
     args: [],
     port: 8201,
-    env: { APISIX_PORT: "8201", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, APISIX_ADMIN_URL: process.env.APISIX_ADMIN_URL ?? "http://localhost:9180" },
-    description: "Manages APISIX API gateway routes and plugins for NDSEP services.",
-    technology: "Go · APISIX · REST API",
+    env: {
+      APISIX_MANAGER_PORT: "8201",
+      WORKER_DATABASE_URL: DB_URL,
+      WORKER_RELAY_URL: RELAY_URL,
+      APISIX_ADMIN_URL: process.env.APISIX_ADMIN_URL ?? "",
+      APISIX_ADMIN_KEY: process.env.APISIX_ADMIN_KEY ?? "",
+      APISIX_MANAGER_INTERNAL_AUTH_TOKEN: process.env.APISIX_MANAGER_INTERNAL_AUTH_TOKEN ?? "",
+    },
+    description: "Synchronizes PostgreSQL-authoritative APISIX routes and durable synchronization evidence.",
+    technology: "Go · PostgreSQL · APISIX Admin API",
   },
   {
     id: "bgp-live-monitor",

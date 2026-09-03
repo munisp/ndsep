@@ -1,0 +1,40 @@
+services:
+  ndsep-ml-foundation:
+    build:
+      context: ../workers/python
+      dockerfile: Dockerfile.ml-foundation
+    environment:
+      NDSEP_ML_MODEL_DIR: /var/lib/ndsep-ml/models
+      NDSEP_ML_PORT: "8251"
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "127.0.0.1:8251:8251"
+    volumes:
+      - type: bind
+        source: ${NDSEP_SYNTHETIC_LAKEHOUSE_DIR:?set a synthetic-only Lakehouse directory}
+        target: /var/lib/ndsep-ml/lakehouse
+        read_only: true
+      - type: bind
+        source: ${NDSEP_CANDIDATE_MODEL_DIR:?set a signed candidate model artifact directory}
+        target: /var/lib/ndsep-ml/models
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    user: "10001:10001"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8251/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - ml_candidate
+
+networks:
+  ml_candidate:
+    internal: true

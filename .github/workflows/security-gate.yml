@@ -171,6 +171,146 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  evidence-contract-verification:
+    name: evidence-contract-verification
+    # Source-level verification only: this job has no deployment environment,
+    # no write token, no database target, and no access to production secrets.
+    # It verifies the code that will later reject malformed governance and
+    # release-evidence records; it cannot manufacture such evidence.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      NODE_VERSION: "22"
+      PNPM_VERSION: "10.34.4"
+      NODE_ENV: test
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up patched pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install locked dependency graph without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Type-check verifier and seed-control boundaries
+        run: pnpm exec tsc --noEmit
+      - name: Verify fixture, governance, and evidence anti-tampering controls
+        run: |
+          pnpm exec vitest run \
+            server/security/syntheticSeedSafety.test.ts \
+            server/security/syntheticFixturePlan.test.ts \
+            server/security/stagingReleaseEvidenceCollector.test.ts \
+            server/security/releaseEvidenceNormalizer.test.ts \
+            server/security/postMergeGovernanceVerifier.test.ts \
+            server/security/releaseArtifactHardening.config.test.ts \
+            server/security/breakGlassEmergencyRelease.test.ts \
+            server/security/breakGlassSiemPagerIntegration.test.ts \
+            server/security/durableAnalyticsPersistence.config.test.ts \
+            server/security/lakehouseDurablePersistence.config.test.ts \
+            server/security/paymentCommandLifecycle.config.test.ts \
+            server/security/apisixDurableRouteRegistry.config.test.ts \
+            server/security/permifyPostgresFailClosed.config.test.ts \
+            server/security/keycloakPostgresFailClosed.config.test.ts \
+            server/security/eventDeliveryDurability.config.test.ts \
+            server/security/mojaloopReceiptIntegrity.config.test.ts \
+            server/security/mobilePostgresPersistence.config.test.ts \
+            server/security/productionGoEvidenceVerifier.test.ts \
+            server/security/productionGoEvidenceWorkflow.config.test.ts \
+            server/security/stagingProductionGoAcceptanceWorkflow.config.test.ts \
+            server/security/stagingRollbackVerifier.config.test.ts \
+            server/security/prReadinessCollector.config.test.ts \
+            server/security/visualBaselineReviewVerifier.config.test.ts \
+            server/security/visualBaselineReminder.config.test.ts \
+            server/security/isolatedVisualRegressionRunner.config.test.ts \
+            server/security/runtimeSchemaOwnership.config.test.ts \
+            server/security/e2eMatrixArtifactsVerifier.test.ts \
+            server/security/extendedE2eMatrixWorkflow.config.test.ts \
+            server/security/themePreferencesDurableStorage.config.test.ts \
+            server/security/threatProtection.test.ts \
+            server/security/webhookShadowMonitoring.config.test.ts \
+            server/security/webhookWorkerCutover.config.test.ts \
+            server/redisRateLimitStore.test.ts \
+            --maxWorkers=1
+      - name: Verify schema-only reconciliation migration is DDL-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f drizzle/0035_digital_twin_noc_runtime_schema.sql
+          grep -Fq '"tag": "0035_digital_twin_noc_runtime_schema"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0035_digital_twin_noc_runtime_schema.sql
+          test "$(grep -Ec '^CREATE TABLE' drizzle/0035_digital_twin_noc_runtime_schema.sql)" -ge 17
+          test -f drizzle/0039_lakehouse_durable_postgres_storage.sql
+          grep -Fq '"tag": "0039_lakehouse_durable_postgres_storage"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0039_lakehouse_durable_postgres_storage.sql
+          test "$(grep -Ec '^CREATE TABLE' drizzle/0039_lakehouse_durable_postgres_storage.sql)" -eq 4
+          test -f drizzle/0040_payment_command_durable_lifecycle.sql
+          grep -Fq '"tag": "0040_payment_command_durable_lifecycle"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0040_payment_command_durable_lifecycle.sql
+          grep -Fq 'CREATE TABLE payment_commands' drizzle/0040_payment_command_durable_lifecycle.sql
+          test -f drizzle/0041_apisix_durable_route_registry.sql
+          grep -Fq '"tag": "0041_apisix_durable_route_registry"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0041_apisix_durable_route_registry.sql
+          grep -Fq 'CREATE TABLE gateway_routes' drizzle/0041_apisix_durable_route_registry.sql
+          grep -Fq 'CREATE TABLE gateway_route_sync_attempts' drizzle/0041_apisix_durable_route_registry.sql
+          test -f drizzle/0042_theme_preferences_durable_storage.sql
+          grep -Fq '"tag": "0042_theme_preferences_durable_storage"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\\b' drizzle/0042_theme_preferences_durable_storage.sql
+          grep -Fq 'CREATE TABLE "theme_preferences"' drizzle/0042_theme_preferences_durable_storage.sql
+          test -f drizzle/0043_audit_log_hash_chain_durable.sql
+          grep -Fq '"tag": "0043_audit_log_hash_chain_durable"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0043_audit_log_hash_chain_durable.sql
+          grep -Fq 'CREATE TRIGGER audit_logs_assign_hash_chain' drizzle/0043_audit_log_hash_chain_durable.sql
+          grep -Fq 'pg_advisory_xact_lock' drizzle/0043_audit_log_hash_chain_durable.sql
+          test -f drizzle/0045_webhook_delivery_attempts_shadow_queue.sql
+          grep -Fq '"tag": "0045_webhook_delivery_attempts_shadow_queue"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0045_webhook_delivery_attempts_shadow_queue.sql
+          grep -Fq 'CREATE TABLE IF NOT EXISTS webhook_delivery_attempts' drizzle/0045_webhook_delivery_attempts_shadow_queue.sql
+          test -f drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq '"tag": "0046_webhook_delivery_attempt_claim_leases"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq 'webhook_delivery_attempt_processing_claim_check' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq 'webhook_deliveries_queue_attempt_id_fk' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          grep -Fq 'uq_webhook_deliveries_queue_attempt' drizzle/0046_webhook_delivery_attempt_claim_leases.sql
+          test -f drizzle/0047_webhook_delivery_attempt_lease_window.sql
+          grep -Fq '"tag": "0047_webhook_delivery_attempt_lease_window"' drizzle/meta/_journal.json
+          ! grep -Eni '^(INSERT|UPDATE|DELETE|COPY)\b' drizzle/0047_webhook_delivery_attempt_lease_window.sql
+          grep -Fq 'webhook_delivery_attempt_processing_lease_window_check' drizzle/0047_webhook_delivery_attempt_lease_window.sql
+          grep -Fq 'claim_expires_at > claimed_at' drizzle/0047_webhook_delivery_attempt_lease_window.sql
+      - name: Validate fixture-script syntax and explicit refusal paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/seed-remaining-synthetic-fixtures.mjs
+          node --check scripts/verify-synthetic-fixture-scenario.mjs
+          node --check scripts/ci/verify-break-glass-authorization.mjs
+          node --check scripts/ci/generate-break-glass-evidence.mjs
+          node --check scripts/ci/verify-break-glass-evidence.mjs
+          node --check scripts/ci/publish-break-glass-alerts.mjs
+          set +e
+          env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test node scripts/seed-remaining-synthetic-fixtures.mjs > refusal.log 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -Fq 'SYNTHETIC_SEED_CONFIRMATION' refusal.log
+      - name: Upload source-control verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-contract-verification-${{ github.sha }}
+          path: refusal.log
+          if-no-files-found: warn
+          retention-days: 90
+
   security-gate:
     name: security-gate
     runs-on: ubuntu-24.04
@@ -178,6 +318,7 @@ jobs:
       - dependency-review
       - pnpm-audit-baseline
       - filesystem-vulnerability-scan
+      - evidence-contract-verification
     # Ensure the check is unambiguously failed if any required scanner failed.
     if: always()
     steps:
@@ -188,6 +329,7 @@ jobs:
           echo "dependency-review=${{ needs.dependency-review.result }}"
           echo "pnpm-audit-baseline=${{ needs.pnpm-audit-baseline.result }}"
           echo "filesystem-vulnerability-scan=${{ needs.filesystem-vulnerability-scan.result }}"
+          echo "evidence-contract-verification=${{ needs.evidence-contract-verification.result }}"
 
           # dependency-review is skipped only on non-PR events.
           if [[ "${{ github.event_name }}" == "pull_request" && "${{ needs.dependency-review.result }}" != "success" ]]; then
@@ -195,6 +337,7 @@ jobs:
           fi
           [[ "${{ needs.pnpm-audit-baseline.result }}" == "success" ]]
           [[ "${{ needs.filesystem-vulnerability-scan.result }}" == "success" ]]
+          [[ "${{ needs.evidence-contract-verification.result }}" == "success" ]]
 
           {
             echo "# Security Gate"

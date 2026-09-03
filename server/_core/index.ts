@@ -22,7 +22,6 @@ import helmet from "helmet";
 import compression from "compression";
 import { rateLimit, ipKeyGenerator } from "express-rate-limit";
 import Redis from "ioredis";
-import RedisStore, { type RedisReply } from "rate-limit-redis";
 import { randomBytes } from "node:crypto";
 import pinoHttp from "pino-http";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -66,12 +65,13 @@ import { verifyMigrations } from "../migrationVerifier";
 import { applyDatabaseMigrations } from "../dbMigrations";
 import { regenerateSession, generateSessionNonce } from "../sessionSecurity";
 import { traceMiddleware } from "../telemetry";
-import { initWebhookSystem, deliverWebhookEvent } from "../webhookSystem";
+import { initWebhookSystem } from "../webhookSystem";
 import { createVersionedEndpoints } from "../apiVersioning";
 import { registerMobileApi } from "../mobileApi";
 import { registerMojaloopCallbacks } from "../mojaloopCallback";
 import { sdk } from "./sdk";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { validateWorkerEventShape, verifyWorkerEventSignature, workerEventNonceKey, WORKER_EVENT_MAX_AGE_MS } from "../workerEventAuth";
 import { getSessionCookieOptions } from "./cookies";
 
 // ─── Startup time for uptime calculation ─────────────────────────────────────
@@ -81,6 +81,9 @@ const STARTUP_TIME = Date.now();
 import { captureError } from "../errorMonitoring";
 import { startHealthMonitor, stopHealthMonitor } from "../middlewareConnector";
 import { startKafkaConsumer, stopKafkaConsumer } from "../kafkaConsumer";
+import { startDurableOutbox, stopDurableOutbox } from "../eventBus";
+import { startPaymentCommandProcessor, stopPaymentCommandProcessor } from "../paymentCommandProcessor";
+import { redisRateLimitStore } from "../redisRateLimitStore";
 import { wafEnforcementMiddleware } from "../wafMiddleware";
 
 process.on("uncaughtException", (err) => {
@@ -114,31 +117,17 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 const safeIpKey = (req: import("express").Request) => ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? "unknown");
 
 // Redis-backed rate limit stores survive restarts and work across cluster instances.
-// Each limiter receives an independent store and prefix; express-rate-limit rejects
-// reuse of one store instance across multiple limiter configurations.
-let createRateLimitStore: ((prefix: string) => RedisStore) | undefined;
+// Only explicit test execution uses express-rate-limit's isolated memory store.
+// The shared factory throws during non-test startup when REDIS_URL is absent or
+// production TLS trust requirements are not satisfied; store errors fail closed.
+let createRateLimitStore: ((prefix: string) => ReturnType<typeof redisRateLimitStore>) | undefined;
 if (process.env.NODE_ENV === "test") {
   logger.info("[RateLimit] Test environment uses isolated in-memory stores");
 } else {
-  try {
-    const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
-    const redisClient = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false });
-    redisClient.on("error", (err) => {
-      logger.warn({ err }, "[RateLimit] Redis client error");
-    });
-    redisClient.connect().then(() => {
-      logger.info("[RateLimit] Redis-backed stores active");
-    }).catch(() => {
-      logger.warn("[RateLimit] Redis unavailable — rate limit stores may fall back to their configured error policy");
-    });
-    createRateLimitStore = (prefix: string) => new RedisStore({
-      prefix,
-      sendCommand: (command: string, ...args: string[]) =>
-        redisClient.call(command, ...args) as Promise<RedisReply>,
-    });
-  } catch {
-    logger.warn("[RateLimit] rate-limit-redis not available — using in-memory stores");
-  }
+  const configuredStore = redisRateLimitStore("ndsep:startup-check:");
+  if (!configuredStore) throw new Error("Redis rate-limit store is required outside test execution");
+  createRateLimitStore = (prefix: string) => redisRateLimitStore(prefix);
+  logger.info("[RateLimit] Redis-backed stores configured; store failures reject requests");
 }
 
 /** General API rate limit: configurable per IP */
@@ -150,7 +139,7 @@ const apiLimiter = rateLimit({
   message: { error: "Too many requests — please slow down." },
   keyGenerator: safeIpKey,
   skip: (req) => process.env.NODE_ENV === "development" && req.ip === "::1",
-  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:api:") } : {}),
+  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:api:"), passOnStoreError: false } : {}),
 });
 /** Strict auth rate limit: configurable per IP (brute-force protection) */
 const authLimiter = rateLimit({
@@ -160,16 +149,48 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many authentication attempts — please try again later." },
   keyGenerator: safeIpKey,
-  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:auth:") } : {}),
+  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:auth:"), passOnStoreError: false } : {}),
 });
 /** Worker event relay: configurable per minute (internal workers) */
+const workerNonceMemory = new Map<string, number>();
+let workerNonceRedis: Redis | undefined;
+
+async function claimWorkerEventNonce(workerId: string, nonce: string): Promise<boolean> {
+  const key = workerEventNonceKey(workerId, nonce);
+  const now = Date.now();
+  const ttlMs = WORKER_EVENT_MAX_AGE_MS;
+  if (process.env.NODE_ENV === "production") {
+    try {
+      if (!workerNonceRedis) {
+        workerNonceRedis = new Redis(process.env.REDIS_URL!, {
+          lazyConnect: true,
+          maxRetriesPerRequest: 1,
+          enableOfflineQueue: false,
+          tls: process.env.REDIS_URL?.startsWith("rediss:") ? {} : undefined,
+        });
+      }
+      if (workerNonceRedis.status === "wait") await workerNonceRedis.connect();
+      return await workerNonceRedis.set(key, "1", "PX", ttlMs, "NX") === "OK";
+    } catch (err) {
+      logger.error({ err, workerId }, "[WorkerEvent] nonce store unavailable; rejecting event");
+      return false;
+    }
+  }
+  workerNonceMemory.forEach((expiresAt, existing) => {
+    if (expiresAt <= now) workerNonceMemory.delete(existing);
+  });
+  if (workerNonceMemory.has(key)) return false;
+  workerNonceMemory.set(key, now + ttlMs);
+  return true;
+}
+
 const workerLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WORKER_WINDOW_MS ?? "60000", 10),
   max: parseInt(process.env.RATE_LIMIT_WORKER_MAX ?? "500", 10),
   standardHeaders: "draft-7",
   legacyHeaders: false,
   keyGenerator: safeIpKey,
-  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:worker:") } : {}),
+  ...(createRateLimitStore ? { store: createRateLimitStore("ndsep:worker:"), passOnStoreError: false } : {}),
 });
 
 async function startServer() {
@@ -277,7 +298,18 @@ async function startServer() {
   );
 
   // ── Body parsers ─────────────────────────────────────────────────────────
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({
+    limit: "2mb",
+    verify: (req, _res, buffer) => {
+      const path = req.url?.split("?", 1)[0];
+      if (path === "/api/workers/event") {
+        (req as express.Request & { rawWorkerEventBody?: Buffer }).rawWorkerEventBody = Buffer.from(buffer);
+      }
+      if (path?.startsWith("/api/mojaloop/transfers/")) {
+        (req as express.Request & { rawMojaloopCallbackBody?: Buffer }).rawMojaloopCallbackBody = Buffer.from(buffer);
+      }
+    },
+  }));
   app.use(express.urlencoded({ limit: "2mb", extended: true }));
 
   // ── WAF + API Gateway ────────────────────────────────────────────────────
@@ -463,7 +495,7 @@ async function startServer() {
     const runningWorkers = workers.filter(w => w.status === "running").length;
     const totalWorkers = workers.length;
 
-    const ready = dbOk;
+    const ready = dbOk && (!isProd || redisOk);
     res.status(ready ? 200 : 503).json({
       status: ready ? "ready" : "not_ready",
       checks: {
@@ -612,6 +644,42 @@ async function startServer() {
       );
     } catch (e) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Metrics] Kafka metrics unavailable"); }
 
+    // Webhook shadow queue telemetry: aggregate-only counters with no delivery identifiers.
+    try {
+      const { getWebhookDeliveryQueueMode, getWebhookShadowMetrics } = await import("../webhookDelivery");
+      const metrics = getWebhookShadowMetrics();
+      const mode = getWebhookDeliveryQueueMode();
+      lines.push(
+        "# HELP ndsep_webhook_shadow_mode Whether webhook shadow queue mode is enabled (1=shadow)",
+        "# TYPE ndsep_webhook_shadow_mode gauge",
+        `ndsep_webhook_shadow_mode ${mode === "shadow" ? 1 : 0}`,
+        "# HELP ndsep_webhook_queue_active_mode Whether asynchronous webhook queue mode is enabled (1=active)",
+        "# TYPE ndsep_webhook_queue_active_mode gauge",
+        `ndsep_webhook_queue_active_mode ${mode === "active" ? 1 : 0}`,
+        "# HELP ndsep_webhook_queue_active_enqueued_total Active queue intents durably accepted for worker dispatch",
+        "# TYPE ndsep_webhook_queue_active_enqueued_total counter",
+        `ndsep_webhook_queue_active_enqueued_total ${metrics.activeEnqueued}`,
+        "# HELP ndsep_webhook_shadow_enqueued_total Shadow queue intents durably inserted",
+        "# TYPE ndsep_webhook_shadow_enqueued_total counter",
+        `ndsep_webhook_shadow_enqueued_total ${metrics.enqueued}`,
+        "# HELP ndsep_webhook_shadow_enqueue_errors_total Shadow queue intent persistence failures",
+        "# TYPE ndsep_webhook_shadow_enqueue_errors_total counter",
+        `ndsep_webhook_shadow_enqueue_errors_total ${metrics.enqueueErrors}`,
+        "# HELP ndsep_webhook_shadow_finalizations_total Shadow queue terminal finalizations by outcome",
+        "# TYPE ndsep_webhook_shadow_finalizations_total counter",
+        `ndsep_webhook_shadow_finalizations_total{outcome="delivered"} ${metrics.finalizedDelivered}`,
+        `ndsep_webhook_shadow_finalizations_total{outcome="dead"} ${metrics.finalizedDead}`,
+        "# HELP ndsep_webhook_shadow_finalization_errors_total Shadow queue terminal finalization failures",
+        "# TYPE ndsep_webhook_shadow_finalization_errors_total counter",
+        `ndsep_webhook_shadow_finalization_errors_total ${metrics.finalizationErrors}`,
+        "# HELP ndsep_webhook_shadow_last_enqueued_unixtime Most recent successfully inserted shadow intent",
+        "# TYPE ndsep_webhook_shadow_last_enqueued_unixtime gauge",
+        `ndsep_webhook_shadow_last_enqueued_unixtime ${metrics.lastEnqueuedAtSeconds}`,
+      );
+    } catch (e) {
+      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[Metrics] Webhook shadow metrics unavailable");
+    }
+
     // Platform info
     lines.push(
       `# HELP ndsep_info Platform info`,
@@ -650,10 +718,40 @@ async function startServer() {
   );
 
   // ── Worker event relay endpoint ───────────────────────────────────────────
-  app.post("/api/workers/event", (req, res) => {
-    const { event, data } = req.body;
-    if (event && data) broadcast(event, data);
-    res.json({ ok: true });
+  // Every production event must be authenticated by a supervised worker using a
+  // shared secret injected at deployment time. The signed string includes a body
+  // hash, identity, timestamp and nonce; the nonce is claimed atomically in Redis.
+  app.post("/api/workers/event", async (req, res) => {
+    const workerId = String(req.header("x-ndsep-worker-id") ?? "");
+    const timestamp = String(req.header("x-ndsep-event-timestamp") ?? "");
+    const nonce = String(req.header("x-ndsep-event-nonce") ?? "");
+    const signature = String(req.header("x-ndsep-event-signature") ?? "");
+    const shapeError = validateWorkerEventShape(workerId, req.body?.event, req.body?.data);
+    if (shapeError) {
+      res.status(400).json({ error: "invalid_worker_event", detail: shapeError });
+      return;
+    }
+    const rawBody = (req as express.Request & { rawWorkerEventBody?: Buffer }).rawWorkerEventBody;
+    if (!rawBody) {
+      logger.error({ workerId }, "[WorkerEvent] exact request bytes unavailable; rejecting event");
+      res.status(503).json({ error: "worker_event_verification_unavailable" });
+      return;
+    }
+    const verificationError = verifyWorkerEventSignature(process.env.WORKER_EVENT_HMAC_SECRET ?? "", {
+      workerId, timestamp, nonce, signature, rawBody,
+    });
+    if (verificationError) {
+      logger.warn({ workerId, reason: verificationError }, "[WorkerEvent] rejected unauthenticated event");
+      res.status(401).json({ error: "worker_event_authentication_failed" });
+      return;
+    }
+    if (!(await claimWorkerEventNonce(workerId, nonce))) {
+      logger.warn({ workerId }, "[WorkerEvent] rejected replayed event or unavailable nonce store");
+      res.status(409).json({ error: "worker_event_replay_or_nonce_store_unavailable" });
+      return;
+    }
+    broadcast(req.body.event, { ...req.body.data, _worker_id: workerId, _event_timestamp: timestamp });
+    res.status(202).json({ accepted: true, workerId, timestamp });
   });
 
   // ── Worker status endpoint ────────────────────────────────────────────────
@@ -744,17 +842,19 @@ async function startServer() {
       const data = await generateAuditReturnData(year);
       const pdfBuffer = await generateAuditReturnPdf(data);
       let finalBuffer = pdfBuffer;
+      let cryptographicallySigned = false;
       try {
         finalBuffer = await signPdf(pdfBuffer);
+        cryptographicallySigned = true;
         const certInfo = getSigningCertInfo();
         logger.info({ year, certSubject: certInfo.subject }, "Audit return PDF signed");
       } catch (signErr: any) {
-        logger.warn({ msg: signErr.message }, "PDF signing failed — serving unsigned");
+        logger.error({ msg: signErr.message }, "PDF signing failed — refusing to label an unsigned audit return as signed");
       }
       const dateStr = new Date().toISOString().slice(0, 10);
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="NDSEP-Annual-Audit-Return-${year}-${dateStr}.pdf"`);
-      res.setHeader("X-NDSEP-Signed", "true");
+      res.setHeader("X-NDSEP-Signed", String(cryptographicallySigned));
       res.send(finalBuffer);
     } catch (err: unknown) {
       logger.error({ err }, "Audit return PDF generation failed");
@@ -1337,6 +1437,8 @@ async function startServer() {
     const database = await getDb();
     if (!database || !getPool()) throw new Error("Database initialization failed after migrations");
     logger.info("[DB] Migrations applied and pool initialized successfully");
+    startDurableOutbox();
+    startPaymentCommandProcessor();
   } else {
     logger.warn("[DB] Explicit test-only migration gate bypass enabled");
   }
@@ -1351,12 +1453,9 @@ async function startServer() {
 
   app.use(traceMiddleware());
 
-  try {
-    const pool = getPool();
-    if (pool) await initWebhookSystem(pool);
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Webhook system init failed — webhooks disabled");
-  }
+  const webhookPool = getPool();
+  if (!webhookPool) throw new Error("Webhook schema verification requires an initialized PostgreSQL pool");
+  await initWebhookSystem(webhookPool);
 
   if (!skipDatabaseGate) {
     const report = await verifyMigrations();
@@ -1384,27 +1483,15 @@ async function startServer() {
     logger.warn({ err }, "[Startup] CQRS projections init skipped");
   }
 
-  try {
-    const { enableRowLevelSecurity } = await import("../multiTenancy");
-    await enableRowLevelSecurity();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Multi-tenancy init skipped");
-  }
+  const { enableRowLevelSecurity } = await import("../multiTenancy");
+  await enableRowLevelSecurity();
 
-  try {
-    const { initMarketplace, mountDeveloperPortal } = await import("../marketplace");
-    await initMarketplace();
-    mountDeveloperPortal(app);
-  } catch (err) {
-    logger.warn({ err }, "[Startup] API marketplace init skipped");
-  }
+  const { initMarketplace, mountDeveloperPortal } = await import("../marketplace");
+  await initMarketplace();
+  mountDeveloperPortal(app);
 
-  try {
-    const { initFeatureFlags } = await import("../featureFlags/index");
-    await initFeatureFlags();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Feature flags init skipped");
-  }
+  const { initFeatureFlags } = await import("../featureFlags/index");
+  await initFeatureFlags();
 
   try {
     const { initRealtimeServer } = await import("../realtime");
@@ -1480,6 +1567,8 @@ async function startServer() {
     stopInvoiceOverdueScheduler();
     stopNationalReportScheduler();
     stopSlaBreachScheduler();
+    stopDurableOutbox();
+    stopPaymentCommandProcessor();
     try { const { stopSessionCleanup } = await import("../security/sessionHardening"); stopSessionCleanup(); } catch { /* ok */ }
     logger.info("[Shutdown] All schedulers and workers stopped");
 

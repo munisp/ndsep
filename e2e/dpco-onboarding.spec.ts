@@ -105,20 +105,20 @@ test.describe("DPCO Onboarding 2: Certificate verification", () => {
     expect(result.data.valid).toBe(false);
   });
 
-  test("verify.certificate returns valid=true for a known token (if available)", async ({ page }) => {
+  test("verify.certificate returns a valid public verification contract with or without seeded certificates", async ({ page }) => {
     await page.goto(BASE);
     const listResult = await trpcGet(page, "accreditation.publicListDpcos");
+    expect(listResult.status).toBe(200);
+    expect(Array.isArray(listResult.data)).toBe(true);
+
     const dpcos = listResult.data as Array<{ certificate_token?: string }>;
-    const withToken = dpcos?.find((d) => d.certificate_token);
-    if (withToken?.certificate_token) {
-      const result = await trpcGet(page, "verify.certificate", {
-        token: withToken.certificate_token,
-      });
-      expect(result.status).toBe(200);
-      expect(typeof result.data.valid).toBe("boolean");
-    } else {
-      test.skip(true, "No certified DPCO with certificate_token in demo data");
-    }
+    const token = dpcos.find((d) => d.certificate_token)?.certificate_token
+      ?? "NDPC-DPCO-NONEXISTENT-TOKEN";
+    const result = await trpcGet(page, "verify.certificate", { token });
+
+    expect(result.status).toBe(200);
+    expect(typeof result.data?.valid).toBe("boolean");
+    if (token === "NDPC-DPCO-NONEXISTENT-TOKEN") expect(result.data.valid).toBe(false);
   });
 });
 

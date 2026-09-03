@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 2,
+  "status": "PENDING_INDEPENDENT_HUMAN_REVIEW",
+  "captureCommit": "",
+  "pullRequest": {
+    "number": 18,
+    "captureCommit": ""
+  },
+  "matrix": {
+    "project": "chromium",
+    "workers": 1,
+    "retries": 0
+  },
+  "snapshots": [
+    {
+      "id": "login-page",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "dashboard-home",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "penalty-table",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "compliance-calendar",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    { "id": "aml-cases", "sha256": "", "decision": "pending", "rationale": "" },
+    {
+      "id": "kyc-records",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "organizations-list",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "audit-logs",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "siem-dashboard",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "breach-notifications",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "mobile-viewport-dashboard",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    },
+    {
+      "id": "tablet-viewport-compliance-calendar",
+      "sha256": "",
+      "decision": "pending",
+      "rationale": ""
+    }
+  ],
+  "approvals": [
+    {
+      "role": "product-ux-owner",
+      "actor": "",
+      "decision": "pending",
+      "reviewedAt": "",
+      "evidenceUri": ""
+    },
+    {
+      "role": "qa-lead",
+      "actor": "",
+      "decision": "pending",
+      "reviewedAt": "",
+      "evidenceUri": ""
+    },
+    {
+      "role": "accessibility-owner",
+      "actor": "",
+      "decision": "pending",
+      "reviewedAt": "",
+      "evidenceUri": ""
+    },
+    {
+      "role": "independent-engineering-reviewer",
+      "actor": "",
+      "decision": "pending",
+      "reviewedAt": "",
+      "evidenceUri": ""
+    }
+  ],
+  "prohibition": "This record is a pending review template. It does not approve visual baselines, alter screenshot tolerances, or authorize a merge or deployment."
+}

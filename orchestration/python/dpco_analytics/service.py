@@ -1,49 +1,32 @@
-#!/usr/bin/env python3
 """
-NDSEP DPCO Analytics Service (Python) — Port 8330
-==================================================
-Consumes DPCO events from Kafka and Fluvio, ingests into the Lakehouse (Apache
-Iceberg via MinIO/S3), and exposes compliance trend analytics via REST.
+NDSEP DPCO Analytics Service — durable PostgreSQL implementation.
 
-Middleware integrations:
-  - Kafka (kafka-python): consumes ndsep.dpco.* topics for audit, registry,
-    verification events; produces to ndsep.dpco.analytics.events
-  - Fluvio (HTTP proxy): publishes real-time DPCO compliance metrics to
-    Fluvio edge stream for low-latency dashboards
-  - Lakehouse / Apache Iceberg (REST catalog + MinIO S3): writes Parquet
-    partitioned by year/month/day to dpco_audit_events, dpco_registry_events,
-    dpco_compliance_scores tables
-  - Redis (requests HTTP): caches analytics query results with 5-min TTL
-  - Dapr (HTTP sidecar): subscribes to dpco.* pub/sub topics via Dapr
-    CloudEvents endpoint and publishes analytics results back
-  - Graceful degradation: all middleware failures are logged and skipped
-
-REST Endpoints:
-  GET  /health                          — service health + middleware status
-  GET  /api/dpco/analytics/trends       — DPCO compliance trend (6-month)
-  GET  /api/dpco/analytics/portfolio    — per-DPCO client portfolio stats
-  GET  /api/dpco/analytics/sla          — SLA breach rates by DPCO
-  GET  /api/dpco/analytics/heatmap      — audit frequency heatmap data
-  POST /api/dpco/analytics/ingest       — manual event ingestion endpoint
-  GET  /metrics                         — operational metrics
+Authoritative DPCO analytics events and aggregates are persisted to PostgreSQL.
+Kafka, Fluvio, Dapr, Redis, and Lakehouse are integrations around that source of
+truth; none is permitted to replace it with process-local state or demo data.
 """
-import os
+from __future__ import annotations
+
+import hashlib
+import hmac
 import io
 import json
-import uuid
-import time
 import logging
+import os
 import threading
-import collections
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+import time
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Iterator, Optional
 
 import requests
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 import uvicorn
-
-# ─── Logging ──────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,156 +35,336 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ─── Config ───────────────────────────────────────────────────────────────────
-
 PORT = int(os.getenv("PORT", "8330"))
+APP_ENV = os.getenv("APP_ENV", os.getenv("NODE_ENV", "development")).lower()
+DATABASE_URL = os.getenv("DPCO_ANALYTICS_DATABASE_URL") or os.getenv("DATABASE_URL")
+DATABASE_POOL_MIN = int(os.getenv("DPCO_ANALYTICS_DB_POOL_MIN", "1"))
+DATABASE_POOL_MAX = int(os.getenv("DPCO_ANALYTICS_DB_POOL_MAX", "10"))
+SERVICE_TOKEN = os.getenv("DPCO_ANALYTICS_SERVICE_TOKEN", "")
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
-KAFKA_ENABLED = os.getenv("KAFKA_ENABLED", "true").lower() == "true"
+KAFKA_ENABLED = os.getenv("KAFKA_ENABLED", "false").lower() == "true"
 KAFKA_CONSUME_TOPICS = [
     "ndsep.dpco.audit.events",
     "ndsep.dpco.registry.events",
     "ndsep.dpco.verification.events",
 ]
 KAFKA_PRODUCE_TOPIC = "ndsep.dpco.analytics.events"
-FLUVIO_HTTP_URL = os.getenv("FLUVIO_HTTP_URL", "http://localhost:9003")
-FLUVIO_ENABLED = os.getenv("FLUVIO_ENABLED", "true").lower() == "true"
-LAKEHOUSE_CATALOG_URL = os.getenv("LAKEHOUSE_CATALOG_URL", "http://localhost:8181")
-LAKEHOUSE_S3_ENDPOINT = os.getenv("LAKEHOUSE_S3_ENDPOINT", "http://localhost:9000")
-LAKEHOUSE_S3_BUCKET = os.getenv("LAKEHOUSE_S3_BUCKET", "ndsep-lakehouse")
-LAKEHOUSE_S3_ACCESS_KEY = os.getenv("LAKEHOUSE_S3_ACCESS_KEY", "minioadmin")
-LAKEHOUSE_S3_SECRET_KEY = os.getenv("LAKEHOUSE_S3_SECRET_KEY", "minioadmin")
-LAKEHOUSE_ENABLED = os.getenv("LAKEHOUSE_ENABLED", "true").lower() == "true"
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+FLUVIO_HTTP_URL = os.getenv("FLUVIO_HTTP_URL", "")
+FLUVIO_ENABLED = os.getenv("FLUVIO_ENABLED", "false").lower() == "true"
+LAKEHOUSE_S3_ENDPOINT = os.getenv("LAKEHOUSE_S3_ENDPOINT", "")
+LAKEHOUSE_S3_BUCKET = os.getenv("LAKEHOUSE_S3_BUCKET", "")
+LAKEHOUSE_S3_ACCESS_KEY = os.getenv("LAKEHOUSE_S3_ACCESS_KEY", "")
+LAKEHOUSE_S3_SECRET_KEY = os.getenv("LAKEHOUSE_S3_SECRET_KEY", "")
+LAKEHOUSE_ENABLED = os.getenv("LAKEHOUSE_ENABLED", "false").lower() == "true"
+REDIS_URL = os.getenv("REDIS_URL", "")
 DAPR_HTTP_PORT = os.getenv("DAPR_HTTP_PORT", "3500")
-DAPR_ENABLED = os.getenv("DAPR_ENABLED", "true").lower() == "true"
+DAPR_ENABLED = os.getenv("DAPR_ENABLED", "false").lower() == "true"
 DAPR_APP_ID = os.getenv("DAPR_APP_ID", "dpco-analytics")
 
-# ─── In-memory State ──────────────────────────────────────────────────────────
-
-_lock = threading.Lock()
-_events: List[Dict] = []           # all ingested events
-_dpco_stats: Dict[str, Dict] = {}  # per-DPCO aggregated stats
-_trend_cache: Optional[Dict] = None
-_trend_cache_ts: float = 0.0
-
-# Metrics
-_metrics = collections.defaultdict(int)
+_metrics: dict[str, int] = {}
 _start_time = time.time()
-
-# ─── Middleware Status ─────────────────────────────────────────────────────────
-
-_middleware_status = {
-    "kafka": False,
-    "fluvio": False,
-    "lakehouse": False,
-    "redis": False,
-    "dapr": False,
-}
-
-# ─── Kafka Consumer ───────────────────────────────────────────────────────────
+_middleware_status = {"kafka": False, "fluvio": False, "lakehouse": False, "redis": False, "dapr": False}
 
 
-def _kafka_consumer_thread():
-    if not KAFKA_ENABLED:
-        log.info("[Kafka] Consumer disabled")
-        return
-    try:
-        from kafka import KafkaConsumer
-        while True:
-            try:
-                consumer = KafkaConsumer(
-                    *KAFKA_CONSUME_TOPICS,
-                    bootstrap_servers=KAFKA_BROKERS.split(","),
-                    group_id="dpco-analytics-service",
-                    auto_offset_reset="latest",
-                    enable_auto_commit=True,
-                    value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-                    consumer_timeout_ms=5000,
+def metric_increment(name: str, amount: int = 1) -> None:
+    _metrics[name] = _metrics.get(name, 0) + amount
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def canonical_json(value: dict[str, Any]) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def parse_timestamp(value: Any) -> datetime:
+    if value is None:
+        return utc_now()
+    if not isinstance(value, str):
+        raise ValueError("event timestamp must be an ISO-8601 string")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("event timestamp must include a UTC offset")
+    return parsed.astimezone(timezone.utc)
+
+
+def finite_score(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    score = float(value)
+    if not 0 <= score <= 100:
+        raise ValueError("compliance_score must be between 0 and 100")
+    return score
+
+
+def require_configuration() -> None:
+    if not DATABASE_URL:
+        raise RuntimeError("DPCO_ANALYTICS_DATABASE_URL or DATABASE_URL is required; analytics has no in-memory fallback")
+    if DATABASE_POOL_MIN < 1 or DATABASE_POOL_MAX < DATABASE_POOL_MIN:
+        raise RuntimeError("DPCO analytics database pool bounds are invalid")
+    if APP_ENV == "production" and len(SERVICE_TOKEN) < 32:
+        raise RuntimeError("DPCO_ANALYTICS_SERVICE_TOKEN must be at least 32 characters in production")
+    if APP_ENV == "production" and not DATABASE_URL.startswith("postgresql"):
+        raise RuntimeError("DPCO analytics production database URL must be PostgreSQL")
+
+
+class DurableAnalyticsStore:
+    """PostgreSQL source of truth for DPCO analytics events and materialized stats."""
+
+    def __init__(self, dsn: str):
+        self.pool = ConnectionPool(
+            conninfo=dsn,
+            min_size=DATABASE_POOL_MIN,
+            max_size=DATABASE_POOL_MAX,
+            kwargs={"autocommit": False, "row_factory": dict_row},
+            open=True,
+        )
+
+    @contextmanager
+    def connection(self) -> Iterator[Any]:
+        with self.pool.connection() as connection:
+            yield connection
+
+    def close(self) -> None:
+        self.pool.close()
+
+    def ping(self) -> None:
+        with self.connection() as connection:
+            connection.execute("SELECT 1")
+
+    def ingest_event(self, event: dict[str, Any], source: str) -> bool:
+        if source not in {"api", "kafka", "dapr"}:
+            raise ValueError("event source is not permitted")
+        event_type = event.get("event_type")
+        if not isinstance(event_type, str) or not event_type or len(event_type) > 128:
+            raise ValueError("event_type is required and must be at most 128 characters")
+        dpco_id = event.get("dpco_id") or event.get("dpco_org_id")
+        if not isinstance(dpco_id, (str, int)) or not str(dpco_id).strip() or len(str(dpco_id)) > 128:
+            raise ValueError("dpco_id or dpco_org_id is required and must be at most 128 characters")
+
+        occurred_at = parse_timestamp(event.get("timestamp"))
+        score = finite_score(event.get("compliance_score"))
+        to_stage = event.get("to_stage")
+        if to_stage is not None and (not isinstance(to_stage, str) or len(to_stage) > 128):
+            raise ValueError("to_stage must be a string of at most 128 characters")
+
+        payload = dict(event)
+        payload_json = canonical_json(payload)
+        payload_sha256 = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        event_id = uuid.uuid5(uuid.NAMESPACE_URL, f"ndsep:dpco-analytics:{source}:{payload_sha256}")
+        audit_started = 1 if event_type == "dpco.audit.initiated" else 0
+        audit_completed = 1 if event_type == "dpco.audit.stage_advanced" and to_stage == "car_filed" else 0
+        statement_issued = 1 if event_type == "dpco.verification.issued" else 0
+        actual_sla_breach = 1 if event_type == "dpco.sla.breached" or payload.get("sla_breached") is True else 0
+        score_total = score if event_type == "dpco.audit.control_assessed" and score is not None else 0
+        score_count = 1 if event_type == "dpco.audit.control_assessed" and score is not None else 0
+
+        with self.connection() as connection:
+            with connection.transaction():
+                inserted = connection.execute(
+                    """
+                    INSERT INTO dpco_analytics_events
+                        (id, event_type, dpco_id, source, occurred_at, compliance_score, to_stage, payload, payload_sha256)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    ON CONFLICT (source, payload_sha256) DO NOTHING
+                    RETURNING id
+                    """,
+                    (str(event_id), event_type, str(dpco_id), source, occurred_at, score, to_stage, payload_json, payload_sha256),
+                ).fetchone()
+                if inserted is None:
+                    return False
+                connection.execute(
+                    """
+                    INSERT INTO dpco_analytics_dpco_stats
+                        (dpco_id, audits_initiated, audits_completed, statements_issued, score_total, score_count, sla_breaches, last_activity)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (dpco_id) DO UPDATE SET
+                        audits_initiated = dpco_analytics_dpco_stats.audits_initiated + EXCLUDED.audits_initiated,
+                        audits_completed = dpco_analytics_dpco_stats.audits_completed + EXCLUDED.audits_completed,
+                        statements_issued = dpco_analytics_dpco_stats.statements_issued + EXCLUDED.statements_issued,
+                        score_total = dpco_analytics_dpco_stats.score_total + EXCLUDED.score_total,
+                        score_count = dpco_analytics_dpco_stats.score_count + EXCLUDED.score_count,
+                        sla_breaches = dpco_analytics_dpco_stats.sla_breaches + EXCLUDED.sla_breaches,
+                        last_activity = GREATEST(dpco_analytics_dpco_stats.last_activity, EXCLUDED.last_activity),
+                        updated_at = NOW()
+                    """,
+                    (str(dpco_id), audit_started, audit_completed, statement_issued, score_total, score_count, actual_sla_breach, occurred_at),
                 )
-                _middleware_status["kafka"] = True
-                log.info("[Kafka] Consumer connected, topics: %s", KAFKA_CONSUME_TOPICS)
-                for msg in consumer:
-                    try:
-                        event = msg.value
-                        _ingest_event(event, source="kafka")
-                        _metrics["kafka_consumed"] += 1
-                    except Exception as e:
-                        log.warning("[Kafka] Message processing error: %s", e)
-            except Exception as e:
-                _middleware_status["kafka"] = False
-                log.warning("[Kafka] Consumer connect failed (%s), retry in 15s", e)
-                time.sleep(15)
-    except ImportError:
-        log.warning("[Kafka] kafka-python not installed, consumer disabled")
+        return True
+
+    def event_count(self) -> int:
+        with self.connection() as connection:
+            row = connection.execute("SELECT COUNT(*)::int AS count FROM dpco_analytics_events").fetchone()
+            return int(row["count"])
+
+    def dpco_count(self) -> int:
+        with self.connection() as connection:
+            row = connection.execute("SELECT COUNT(*)::int AS count FROM dpco_analytics_dpco_stats").fetchone()
+            return int(row["count"])
+
+    def trends(self) -> dict[str, Any]:
+        with self.connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    TO_CHAR(date_trunc('week', occurred_at), 'IYYY-"W"IW') AS week,
+                    COUNT(*) FILTER (WHERE event_type = 'dpco.audit.initiated')::int AS audits,
+                    COUNT(*) FILTER (WHERE event_type = 'dpco.verification.issued')::int AS statements,
+                    COALESCE(ROUND(AVG(compliance_score) FILTER (WHERE event_type = 'dpco.audit.control_assessed'), 1), 0)::float AS avg_score
+                FROM dpco_analytics_events
+                WHERE occurred_at >= NOW() - INTERVAL '180 days'
+                GROUP BY date_trunc('week', occurred_at)
+                ORDER BY date_trunc('week', occurred_at)
+                """
+            ).fetchall()
+        return {"weeks": rows, "total_weeks": len(rows), "generated_at": utc_now().isoformat(), "source": "postgresql"}
+
+    def portfolio(self) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            return connection.execute(
+                """
+                SELECT dpco_id, audits_initiated, audits_completed, statements_issued,
+                    CASE WHEN score_count = 0 THEN 0 ELSE ROUND(score_total / score_count, 1) END::float AS avg_compliance_score,
+                    sla_breaches, last_activity
+                FROM dpco_analytics_dpco_stats
+                ORDER BY last_activity DESC NULLS LAST, dpco_id
+                """
+            ).fetchall()
+
+    def sla(self) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            return connection.execute(
+                """
+                SELECT dpco_id,
+                    audits_initiated::int AS total_audits,
+                    sla_breaches::int AS breached,
+                    CASE WHEN audits_initiated = 0 THEN 0
+                         ELSE ROUND((sla_breaches::numeric / audits_initiated) * 100, 1)
+                    END::float AS rate
+                FROM dpco_analytics_dpco_stats
+                ORDER BY dpco_id
+                """
+            ).fetchall()
+
+    def heatmap(self) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            return connection.execute(
+                """
+                SELECT TO_CHAR(date_trunc('day', occurred_at), 'YYYY-MM-DD') AS date, COUNT(*)::int AS count
+                FROM dpco_analytics_events
+                WHERE occurred_at >= NOW() - INTERVAL '365 days'
+                GROUP BY date_trunc('day', occurred_at)
+                ORDER BY date_trunc('day', occurred_at)
+                """
+            ).fetchall()
 
 
-def _kafka_produce(topic: str, event: Dict):
+_store: Optional[DurableAnalyticsStore] = None
+_store_lock = threading.Lock()
+
+
+def get_store() -> DurableAnalyticsStore:
+    global _store
+    require_configuration()
+    with _store_lock:
+        if _store is None:
+            _store = DurableAnalyticsStore(DATABASE_URL or "")
+        return _store
+
+
+def _redis_client() -> Any:
+    if not REDIS_URL:
+        raise RuntimeError("REDIS_URL is not configured")
+    import redis
+    return redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
+
+
+def _redis_set(key: str, value: dict[str, Any], ttl: int = 300) -> None:
+    try:
+        _redis_client().setex(key, ttl, canonical_json(value))
+        _middleware_status["redis"] = True
+        metric_increment("redis_sets")
+    except Exception as error:
+        _middleware_status["redis"] = False
+        log.warning("[Redis] cache write failed: %s", error)
+
+
+def _redis_get(key: str) -> Optional[dict[str, Any]]:
+    try:
+        value = _redis_client().get(key)
+        if value:
+            _middleware_status["redis"] = True
+            metric_increment("redis_hits")
+            return json.loads(value)
+    except Exception as error:
+        _middleware_status["redis"] = False
+        log.warning("[Redis] cache read failed: %s", error)
+    return None
+
+
+def _invalidate_caches() -> None:
+    try:
+        _redis_client().delete("dpco:analytics:trends", "dpco:analytics:portfolio")
+        _middleware_status["redis"] = True
+    except Exception as error:
+        _middleware_status["redis"] = False
+        log.warning("[Redis] cache invalidation failed: %s", error)
+
+
+def _kafka_produce(topic: str, event: dict[str, Any]) -> bool:
+    if not KAFKA_ENABLED:
+        return False
     try:
         from kafka import KafkaProducer
-        p = KafkaProducer(
+        producer = KafkaProducer(
             bootstrap_servers=KAFKA_BROKERS.split(","),
-            value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
+            value_serializer=lambda value: canonical_json(value).encode("utf-8"),
         )
-        p.send(topic, event)
-        p.flush()
-        _metrics["kafka_produced"] += 1
-    except Exception as e:
-        log.warning("[Kafka] Produce error: %s", e)
+        producer.send(topic, event).get(timeout=10)
+        producer.flush(timeout=10)
+        producer.close(timeout=10)
+        metric_increment("kafka_produced")
+        return True
+    except Exception as error:
+        _middleware_status["kafka"] = False
+        log.warning("[Kafka] publish failed: %s", error)
+        return False
 
-# ─── Fluvio Publisher ─────────────────────────────────────────────────────────
 
-
-def _fluvio_publish(topic: str, data: Dict):
+def _fluvio_publish(topic: str, data: dict[str, Any]) -> None:
     if not FLUVIO_ENABLED:
         return
     try:
-        resp = requests.post(
-            f"{FLUVIO_HTTP_URL}/topics/{topic}/produce",
-            json={"value": json.dumps(data, default=str)},
+        response = requests.post(
+            f"{FLUVIO_HTTP_URL.rstrip('/')}/topics/{topic}/produce",
+            json={"value": canonical_json(data)},
             timeout=3,
         )
-        if resp.status_code < 300:
-            _middleware_status["fluvio"] = True
-            _metrics["fluvio_published"] += 1
-        else:
-            _middleware_status["fluvio"] = False
-    except Exception as e:
+        response.raise_for_status()
+        _middleware_status["fluvio"] = True
+        metric_increment("fluvio_published")
+    except Exception as error:
         _middleware_status["fluvio"] = False
-        log.debug("[Fluvio] Publish error: %s", e)
-
-# ─── Lakehouse Ingestion ──────────────────────────────────────────────────────
+        log.warning("[Fluvio] publish failed: %s", error)
 
 
-def _lakehouse_ingest(table: str, records: List[Dict]):
-    """Write records to Lakehouse via MinIO S3 as Parquet (snappy compressed)."""
+def _lakehouse_ingest(table: str, records: list[dict[str, Any]]) -> None:
     if not LAKEHOUSE_ENABLED:
         return
     try:
+        import boto3
         import pyarrow as pa
         import pyarrow.parquet as pq
-        import boto3
         from botocore.client import Config
 
-        now = datetime.now(timezone.utc)
-        partition = now.strftime("%Y/%m/%d")
-        file_key = f"dpco/{table}/{partition}/{uuid.uuid4()}.parquet"
-
-        # Build Arrow table
-        rows = []
-        for r in records:
-            row = dict(r)
-            row.setdefault("id", str(uuid.uuid4()))
-            row["ingested_at"] = now.isoformat()
-            rows.append(row)
-
-        # Flatten to string columns for generic schema
-        arrays = {k: [str(r.get(k, "")) for r in rows] for k in rows[0].keys()}
-        arrow_table = pa.table(arrays)
-
-        buf = io.BytesIO()
-        pq.write_table(arrow_table, buf, compression="snappy")
-        buf.seek(0)
-
+        if not all([LAKEHOUSE_S3_ENDPOINT, LAKEHOUSE_S3_BUCKET, LAKEHOUSE_S3_ACCESS_KEY, LAKEHOUSE_S3_SECRET_KEY]):
+            raise RuntimeError("lakehouse is enabled but S3 configuration is incomplete")
+        now = utc_now()
+        rows = [{**record, "ingested_at": now.isoformat()} for record in records]
+        columns = {key: [canonical_json(row[key]) if isinstance(row.get(key), (dict, list)) else str(row.get(key, "")) for row in rows] for key in rows[0]}
+        buffer = io.BytesIO()
+        pq.write_table(pa.table(columns), buffer, compression="snappy")
         s3 = boto3.client(
             "s3",
             endpoint_url=LAKEHOUSE_S3_ENDPOINT,
@@ -209,349 +372,214 @@ def _lakehouse_ingest(table: str, records: List[Dict]):
             aws_secret_access_key=LAKEHOUSE_S3_SECRET_KEY,
             config=Config(signature_version="s3v4"),
         )
-        s3.put_object(Bucket=LAKEHOUSE_S3_BUCKET, Key=file_key, Body=buf.getvalue())
+        key = f"dpco/{table}/{now.strftime('%Y/%m/%d')}/{uuid.uuid4()}.parquet"
+        s3.put_object(Bucket=LAKEHOUSE_S3_BUCKET, Key=key, Body=buffer.getvalue())
         _middleware_status["lakehouse"] = True
-        _metrics["lakehouse_ingested"] += len(records)
-        log.info("[Lakehouse] Ingested %d records to %s/%s", len(records), table, partition)
-    except ImportError:
-        log.debug("[Lakehouse] pyarrow/boto3 not installed, skipping")
-    except Exception as e:
+        metric_increment("lakehouse_ingested", len(records))
+    except Exception as error:
         _middleware_status["lakehouse"] = False
-        log.warning("[Lakehouse] Ingest error: %s", e)
-
-# ─── Redis Cache ──────────────────────────────────────────────────────────────
+        log.warning("[Lakehouse] ingest failed: %s", error)
 
 
-def _redis_set(key: str, value: Dict, ttl: int = 300):
-    try:
-        import redis
-        r = redis.from_url(REDIS_URL)
-        r.setex(key, ttl, json.dumps(value, default=str))
-        _middleware_status["redis"] = True
-        _metrics["redis_sets"] += 1
-    except Exception as e:
-        _middleware_status["redis"] = False
-        log.debug("[Redis] Set error: %s", e)
-
-
-def _redis_get(key: str) -> Optional[Dict]:
-    try:
-        import redis
-        r = redis.from_url(REDIS_URL)
-        val = r.get(key)
-        if val:
-            _middleware_status["redis"] = True
-            _metrics["redis_hits"] += 1
-            return json.loads(val)
-    except Exception as e:
-        log.debug("[Redis] Get error: %s", e)
-    return None
-
-# ─── Dapr Integration ─────────────────────────────────────────────────────────
-
-
-def _dapr_publish(topic: str, data: Dict):
+def _dapr_publish(topic: str, data: dict[str, Any]) -> None:
     if not DAPR_ENABLED:
         return
     try:
-        resp = requests.post(
+        response = requests.post(
             f"http://localhost:{DAPR_HTTP_PORT}/v1.0/publish/kafka-pubsub/{topic}",
-            json={"data": data},
+            json=data,
             timeout=3,
         )
-        if resp.status_code < 300:
-            _middleware_status["dapr"] = True
-            _metrics["dapr_published"] += 1
-    except Exception as e:
+        response.raise_for_status()
+        _middleware_status["dapr"] = True
+        metric_increment("dapr_published")
+    except Exception as error:
         _middleware_status["dapr"] = False
-        log.debug("[Dapr] Publish error: %s", e)
-
-# ─── Event Processing ─────────────────────────────────────────────────────────
+        log.warning("[Dapr] publish failed: %s", error)
 
 
-def _ingest_event(event: Dict, source: str = "api"):
-    """Process an incoming DPCO event and update aggregated stats."""
-    event_type = event.get("event_type", "unknown")
-    dpco_id = event.get("dpco_id") or event.get("dpco_org_id", "unknown")
-    now = datetime.now(timezone.utc)
-
-    with _lock:
-        _events.append({**event, "_source": source, "_ingested_at": now.isoformat()})
-        # Keep last 10,000 events in memory
-        if len(_events) > 10000:
-            _events.pop(0)
-
-        # Update per-DPCO stats
-        if dpco_id not in _dpco_stats:
-            _dpco_stats[dpco_id] = {
-                "dpco_id": dpco_id,
-                "audits_initiated": 0,
-                "audits_completed": 0,
-                "statements_issued": 0,
-                "avg_compliance_score": 0.0,
-                "sla_breaches": 0,
-                "last_activity": None,
-            }
-        stats = _dpco_stats[dpco_id]
-        stats["last_activity"] = now.isoformat()
-
-        if event_type == "dpco.audit.initiated":
-            stats["audits_initiated"] += 1
-        elif event_type == "dpco.audit.stage_advanced" and event.get("to_stage") == "car_filed":
-            stats["audits_completed"] += 1
-        elif event_type == "dpco.verification.issued":
-            stats["statements_issued"] += 1
-        elif event_type == "dpco.audit.control_assessed":
-            score = event.get("compliance_score", 0)
-            if score:
-                prev = stats["avg_compliance_score"]
-                n = stats["audits_initiated"] or 1
-                stats["avg_compliance_score"] = (prev * (n - 1) + score) / n
-
-    _metrics["events_ingested"] += 1
-
-    # Async lakehouse + Fluvio + Dapr (non-blocking)
-    threading.Thread(
-        target=_lakehouse_ingest,
-        args=("dpco_events", [event]),
-        daemon=True,
-    ).start()
-    _fluvio_publish("dpco.analytics.realtime", {
-        "event_type": event_type, "dpco_id": dpco_id,
-        "timestamp": now.isoformat(), "source": source,
-    })
-    _dapr_publish("dpco.analytics.processed", {
-        "event_type": event_type, "dpco_id": dpco_id, "processed_at": now.isoformat(),
-    })
-
-# ─── Analytics Queries ────────────────────────────────────────────────────────
+def _ingest_event(event: dict[str, Any], source: str) -> bool:
+    """Persist first. Downstream middleware cannot make domain analytics authoritative."""
+    inserted = get_store().ingest_event(event, source)
+    if not inserted:
+        metric_increment("duplicate_events")
+        return False
+    metric_increment("events_ingested")
+    _invalidate_caches()
+    persisted = {**event, "source": source, "persisted_at": utc_now().isoformat()}
+    threading.Thread(target=_lakehouse_ingest, args=("dpco_events", [persisted]), daemon=True).start()
+    _fluvio_publish("dpco.analytics.realtime", persisted)
+    _dapr_publish("dpco.analytics.processed", persisted)
+    return True
 
 
-def _compute_trends() -> Dict:
-    """Compute 6-month weekly compliance trend from in-memory events."""
-    global _trend_cache, _trend_cache_ts
-    now = time.time()
-    if _trend_cache and now - _trend_cache_ts < 300:
-        return _trend_cache
+def _kafka_consumer_thread() -> None:
+    if not KAFKA_ENABLED:
+        log.info("[Kafka] consumer disabled")
+        return
+    try:
+        from kafka import KafkaConsumer
+    except ImportError as error:
+        raise RuntimeError("kafka-python is required when KAFKA_ENABLED=true") from error
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=180)
-    weekly: Dict[str, Dict] = {}
-
-    with _lock:
-        for ev in _events:
-            ts_str = ev.get("timestamp") or ev.get("_ingested_at", "")
-            try:
-                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-            except Exception:
-                continue
-            if ts < cutoff:
-                continue
-            week = ts.strftime("%Y-W%W")
-            if week not in weekly:
-                weekly[week] = {"week": week, "audits": 0, "statements": 0, "avg_score": 0.0, "_scores": []}
-            et = ev.get("event_type", "")
-            if "audit.initiated" in et:
-                weekly[week]["audits"] += 1
-            if "verification.issued" in et:
-                weekly[week]["statements"] += 1
-            score = ev.get("compliance_score")
-            if score:
-                weekly[week]["_scores"].append(float(score))
-
-    result = []
-    for w, d in sorted(weekly.items()):
-        scores = d.pop("_scores", [])
-        d["avg_score"] = round(sum(scores) / len(scores), 1) if scores else 0.0
-        result.append(d)
-
-    _trend_cache = {"weeks": result, "total_weeks": len(result), "generated_at": datetime.now(timezone.utc).isoformat()}
-    _trend_cache_ts = now
-    return _trend_cache
+    while True:
+        consumer = None
+        try:
+            consumer = KafkaConsumer(
+                *KAFKA_CONSUME_TOPICS,
+                bootstrap_servers=KAFKA_BROKERS.split(","),
+                group_id="dpco-analytics-service",
+                auto_offset_reset="earliest",
+                enable_auto_commit=False,
+                value_deserializer=lambda message: json.loads(message.decode("utf-8")),
+                consumer_timeout_ms=5000,
+            )
+            _middleware_status["kafka"] = True
+            for message in consumer:
+                _ingest_event(message.value, source="kafka")
+                consumer.commit()
+                metric_increment("kafka_consumed")
+        except Exception as error:
+            _middleware_status["kafka"] = False
+            log.warning("[Kafka] consumer error; offset was not committed for failed persistence: %s", error)
+            time.sleep(15)
+        finally:
+            if consumer is not None:
+                consumer.close()
 
 
-def _compute_portfolio() -> List[Dict]:
-    with _lock:
-        return list(_dpco_stats.values())
+class IngestRequest(BaseModel):
+    events: list[dict[str, Any]] = Field(min_length=1, max_length=500)
 
 
-def _compute_sla() -> List[Dict]:
-    """Compute SLA breach rates per DPCO (72h NDPC notification window)."""
-    sla_data: Dict[str, Dict] = {}
-    with _lock:
-        for ev in _events:
-            dpco_id = ev.get("dpco_id") or ev.get("dpco_org_id", "unknown")
-            if dpco_id not in sla_data:
-                sla_data[dpco_id] = {"dpco_id": dpco_id, "total": 0, "breached": 0, "rate": 0.0}
-            if "audit" in ev.get("event_type", ""):
-                sla_data[dpco_id]["total"] += 1
-                # Simulate SLA breach: if compliance_score < 70, flag as breach
-                if float(ev.get("compliance_score", 100)) < 70:
-                    sla_data[dpco_id]["breached"] += 1
-    result = []
-    for d in sla_data.values():
-        t = d["total"]
-        d["rate"] = round(d["breached"] / t * 100, 1) if t > 0 else 0.0
-        result.append(d)
-    return result
+app = FastAPI(title="NDSEP DPCO Analytics Service", version="2.0.0")
 
 
-def _compute_heatmap() -> List[Dict]:
-    """Compute audit frequency heatmap (last 365 days, daily buckets)."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=365)
-    daily: Dict[str, int] = {}
-    with _lock:
-        for ev in _events:
-            ts_str = ev.get("timestamp") or ev.get("_ingested_at", "")
-            try:
-                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-            except Exception:
-                continue
-            if ts < cutoff:
-                continue
-            day = ts.strftime("%Y-%m-%d")
-            daily[day] = daily.get(day, 0) + 1
-    return [{"date": d, "count": c} for d, c in sorted(daily.items())]
-
-# ─── FastAPI App ──────────────────────────────────────────────────────────────
-
-
-app = FastAPI(title="NDSEP DPCO Analytics Service", version="1.0.0")
+def require_service_token(request: Request) -> None:
+    if not SERVICE_TOKEN:
+        if APP_ENV == "production":
+            raise HTTPException(status_code=503, detail="analytics service authentication is not configured")
+        return
+    supplied = request.headers.get("X-NDSEP-Service-Token", "")
+    if not hmac.compare_digest(supplied, SERVICE_TOKEN):
+        raise HTTPException(status_code=401, detail="invalid analytics service credential")
 
 
 @app.get("/health")
 def health():
-    with _lock:
-        total_events = len(_events)
-        total_dpcos = len(_dpco_stats)
-    return {
-        "service": "dpco-analytics-service",
-        "status": "healthy",
-        "port": PORT,
-        "uptime_s": round(time.time() - _start_time, 1),
-        "middleware": _middleware_status,
-        "total_events_ingested": total_events,
-        "total_dpcos_tracked": total_dpcos,
-        "metrics": dict(_metrics),
-        "consume_topics": KAFKA_CONSUME_TOPICS,
-        "produce_topic": KAFKA_PRODUCE_TOPIC,
-        "lakehouse_bucket": LAKEHOUSE_S3_BUCKET,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    try:
+        store = get_store()
+        store.ping()
+        return {
+            "service": "dpco-analytics-service",
+            "status": "healthy",
+            "persistence": "postgresql",
+            "port": PORT,
+            "uptime_s": round(time.time() - _start_time, 1),
+            "middleware": _middleware_status,
+            "total_events_ingested": store.event_count(),
+            "total_dpcos_tracked": store.dpco_count(),
+            "metrics": _metrics,
+            "consume_topics": KAFKA_CONSUME_TOPICS,
+            "produce_topic": KAFKA_PRODUCE_TOPIC,
+            "timestamp": utc_now().isoformat(),
+        }
+    except Exception as error:
+        return JSONResponse(status_code=503, content={"service": "dpco-analytics-service", "status": "not_ready", "persistence": "unavailable", "error": str(error)})
 
 
 @app.get("/metrics")
 def get_metrics():
-    return {
-        "metrics": dict(_metrics),
-        "middleware_status": _middleware_status,
-        "uptime_s": round(time.time() - _start_time, 1),
-    }
+    return {"metrics": _metrics, "middleware_status": _middleware_status, "uptime_s": round(time.time() - _start_time, 1)}
 
 
 @app.get("/api/dpco/analytics/trends")
-def get_trends():
+def get_trends(request: Request):
+    require_service_token(request)
     cached = _redis_get("dpco:analytics:trends")
     if cached:
         return {**cached, "cache": "hit"}
-    result = _compute_trends()
+    result = get_store().trends()
     _redis_set("dpco:analytics:trends", result, ttl=300)
     return {**result, "cache": "miss"}
 
 
 @app.get("/api/dpco/analytics/portfolio")
-def get_portfolio():
+def get_portfolio(request: Request):
+    require_service_token(request)
     cached = _redis_get("dpco:analytics:portfolio")
     if cached:
-        return {"dpcos": cached, "cache": "hit"}
-    data = _compute_portfolio()
+        return {"dpcos": cached, "total": len(cached), "cache": "hit", "source": "postgresql"}
+    data = get_store().portfolio()
     _redis_set("dpco:analytics:portfolio", data, ttl=120)
-    return {"dpcos": data, "total": len(data), "cache": "miss"}
+    return {"dpcos": data, "total": len(data), "cache": "miss", "source": "postgresql"}
 
 
 @app.get("/api/dpco/analytics/sla")
-def get_sla():
-    data = _compute_sla()
-    return {"sla_data": data, "total": len(data)}
+def get_sla(request: Request):
+    require_service_token(request)
+    data = get_store().sla()
+    return {"sla_data": data, "total": len(data), "source": "postgresql"}
 
 
 @app.get("/api/dpco/analytics/heatmap")
-def get_heatmap():
-    data = _compute_heatmap()
-    return {"heatmap": data, "days": len(data)}
-
-
-class IngestRequest(BaseModel):
-    events: List[Dict[str, Any]]
+def get_heatmap(request: Request):
+    require_service_token(request)
+    data = get_store().heatmap()
+    return {"heatmap": data, "days": len(data), "source": "postgresql"}
 
 
 @app.post("/api/dpco/analytics/ingest")
-def ingest_events(req: IngestRequest):
-    for ev in req.events:
-        _ingest_event(ev, source="api")
-    # Produce analytics event to Kafka
+def ingest_events(request: Request, body: IngestRequest):
+    require_service_token(request)
+    inserted = 0
+    duplicate = 0
+    try:
+        for event in body.events:
+            if _ingest_event(event, source="api"):
+                inserted += 1
+            else:
+                duplicate += 1
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        log.exception("[PostgreSQL] event persistence failed")
+        raise HTTPException(status_code=503, detail="durable analytics persistence is unavailable") from error
     _kafka_produce(KAFKA_PRODUCE_TOPIC, {
         "event_type": "dpco.analytics.batch_ingested",
-        "count": len(req.events),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "count": inserted,
+        "duplicates": duplicate,
+        "timestamp": utc_now().isoformat(),
         "source": "dpco-analytics-service",
     })
-    return {"ok": True, "ingested": len(req.events)}
-
-# Dapr pub/sub subscription endpoint
+    return {"ok": True, "ingested": inserted, "duplicates": duplicate, "source": "postgresql"}
 
 
 @app.get("/dapr/subscribe")
 def dapr_subscribe():
-    return [
-        {"pubsubname": "kafka-pubsub", "topic": t, "route": f"/dapr/events/{t.replace('.', '/')}"}
-        for t in KAFKA_CONSUME_TOPICS
-    ]
+    return [{"pubsubname": "kafka-pubsub", "topic": topic, "route": f"/dapr/events/{topic.replace('.', '/')}"} for topic in KAFKA_CONSUME_TOPICS]
 
 
 @app.post("/dapr/events/{path:path}")
 async def dapr_event(path: str, request: Request):
     body = await request.json()
     data = body.get("data", body)
-    _ingest_event(data, source="dapr")
-    return {"status": "SUCCESS"}
-
-# ─── Background Threads ───────────────────────────────────────────────────────
-
-
-def _seed_demo_events():
-    """Seed 90 days of demo DPCO events for analytics."""
-    import random
-    dpcos = [f"dpco-{i:03d}" for i in range(1, 21)]
-    audit_types = ["annual_compliance", "special_purpose", "data_breach_response"]
-    now = datetime.now(timezone.utc)
-    for day_offset in range(90):
-        ts = now - timedelta(days=90 - day_offset)
-        for _ in range(random.randint(1, 5)):
-            dpco_id = random.choice(dpcos)
-            _ingest_event({
-                "event_type": random.choice(["dpco.audit.initiated", "dpco.verification.issued", "dpco.audit.stage_advanced"]),
-                "dpco_id": dpco_id,
-                "org_id": f"org-{random.randint(1, 100):03d}",
-                "audit_type": random.choice(audit_types),
-                "compliance_score": round(random.uniform(55, 98), 1),
-                "timestamp": ts.isoformat(),
-                "to_stage": random.choice(["fieldwork", "car_filed", "report_issued"]),
-            }, source="seed")
-    log.info("[Seed] Seeded 90 days of demo DPCO analytics events")
-
-# ─── Main ─────────────────────────────────────────────────────────────────────
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Dapr event data must be an object")
+    try:
+        _ingest_event(data, source="dapr")
+        return {"status": "SUCCESS"}
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        log.exception("[Dapr] durable event persistence failed")
+        raise HTTPException(status_code=503, detail="durable analytics persistence is unavailable") from error
 
 
 if __name__ == "__main__":
-    log.info("DPCO Analytics Service starting on port %d", PORT)
-    log.info("Middleware: Kafka=%s Fluvio=%s Lakehouse=%s Redis=%s Dapr=%s",
-             KAFKA_ENABLED, FLUVIO_ENABLED, LAKEHOUSE_ENABLED, True, DAPR_ENABLED)
-    log.info("Consume topics: %s", KAFKA_CONSUME_TOPICS)
-    log.info("Lakehouse bucket: %s endpoint: %s", LAKEHOUSE_S3_BUCKET, LAKEHOUSE_S3_ENDPOINT)
-
-    # Seed demo data
-    threading.Thread(target=_seed_demo_events, daemon=True).start()
-    # Start Kafka consumer
-    threading.Thread(target=_kafka_consumer_thread, daemon=True).start()
-
+    require_configuration()
+    get_store().ping()
+    log.info("DPCO analytics service starting with PostgreSQL source of truth on port %d", PORT)
+    if KAFKA_ENABLED:
+        threading.Thread(target=_kafka_consumer_thread, daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

@@ -1,282 +1,187 @@
+import { randomUUID } from "node:crypto";
 import { logger } from "./logger";
-/**
- * NDSEP Kafka Integration Module (Node.js)
- * ==========================================
- * Provides a lightweight HTTP client for Kafka REST Proxy and direct
- * Kafka producer/consumer via kafkajs.
- *
- * Features:
- *   - Produce messages to Kafka topics
- *   - Consume messages from Kafka topics (polling)
- *   - Topic management (create, list, describe)
- *   - Graceful degradation when Kafka is unreachable
- *   - Metrics: produced, consumed, errors
- *
- * Environment variables:
- *   KAFKA_REST_URL           - Kafka REST Proxy URL (default: http://localhost:8082)
- *   KAFKA_BOOTSTRAP_SERVERS  - Kafka broker list (default: localhost:9092)
- *   KAFKA_ENABLED            - "true" | "false" (default: "true")
- *   KAFKA_CLIENT_ID          - Kafka client ID (default: ndsep-server)
- */
 
+/**
+ * Kafka REST producer integration.
+ *
+ * Regulatory and financial callers must use `kafkaProduceRequired`: it throws
+ * when delivery cannot be acknowledged. Boolean helpers remain for explicitly
+ * non-critical telemetry only. Production uses an HTTPS REST proxy with a
+ * dedicated bearer credential; local HTTP defaults are confined to non-prod.
+ */
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const KAFKA_REST_URL = process.env.KAFKA_REST_URL ?? "http://localhost:8082";
 const KAFKA_BOOTSTRAP = process.env.KAFKA_BOOTSTRAP_SERVERS ?? "localhost:9092";
-const KAFKA_ENABLED = (process.env.KAFKA_ENABLED ?? "true") === "true";
+const KAFKA_ENABLED = (process.env.KAFKA_ENABLED ?? (IS_PRODUCTION ? "false" : "true")) === "true";
 const KAFKA_CLIENT_ID = process.env.KAFKA_CLIENT_ID ?? "ndsep-server";
+const KAFKA_REST_TOKEN = process.env.KAFKA_REST_TOKEN;
 
 let kafkaConnected = false;
 let produced = 0;
 let consumed = 0;
 let errors = 0;
 
-// ─── Health Check ─────────────────────────────────────────────────────────────
+export class KafkaDeliveryError extends Error {
+  constructor(message: string) { super(message); this.name = "KafkaDeliveryError"; }
+}
+
+function assertKafkaConfiguration(): void {
+  if (!KAFKA_ENABLED) throw new KafkaDeliveryError("Kafka is disabled");
+  if (IS_PRODUCTION && !KAFKA_REST_URL.startsWith("https://")) throw new KafkaDeliveryError("Kafka REST endpoint must use HTTPS in production");
+  if (IS_PRODUCTION && (!KAFKA_REST_TOKEN || KAFKA_REST_TOKEN.length < 32)) throw new KafkaDeliveryError("Kafka REST credential is not configured securely");
+}
+
+function assertTopic(topic: string): void {
+  if (!/^[a-z0-9._-]{3,249}$/i.test(topic) || topic.includes("..")) throw new KafkaDeliveryError("Invalid Kafka topic");
+}
+
+function kafkaHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/vnd.kafka.json.v2+json",
+    Accept: "application/vnd.kafka.v2+json",
+    "X-NDSEP-Client-Id": KAFKA_CLIENT_ID,
+    ...(KAFKA_REST_TOKEN ? { Authorization: `Bearer ${KAFKA_REST_TOKEN}` } : {}),
+  };
+}
 
 async function checkKafkaHealth(): Promise<boolean> {
   if (!KAFKA_ENABLED) return false;
   try {
-    const res = await fetch(`${KAFKA_REST_URL}/brokers`, {
-      signal: AbortSignal.timeout(3000),
-    });
+    assertKafkaConfiguration();
+    const res = await fetch(`${KAFKA_REST_URL}/brokers`, { headers: kafkaHeaders(), signal: AbortSignal.timeout(3_000) });
     const ok = res.ok;
-    if (ok && !kafkaConnected) logger.info(`[Kafka] Connected via REST Proxy at ${KAFKA_REST_URL}`);
-    if (!ok && kafkaConnected) logger.warn(`[Kafka] REST Proxy unhealthy`);
+    if (ok && !kafkaConnected) logger.info({ endpoint: KAFKA_REST_URL }, "[Kafka] Connected via REST proxy");
+    if (!ok && kafkaConnected) logger.error({ status: res.status }, "[Kafka] REST proxy unhealthy");
     kafkaConnected = ok;
     return ok;
-  } catch {
-    if (kafkaConnected) logger.warn(`[Kafka] REST Proxy unreachable — degrading gracefully`);
+  } catch (error) {
+    errors++;
+    if (kafkaConnected) logger.error({ err: error instanceof Error ? error.message : String(error) }, "[Kafka] REST proxy unavailable or untrusted");
     kafkaConnected = false;
     return false;
   }
 }
 
 if (KAFKA_ENABLED) {
-  checkKafkaHealth().catch(() => {
-    logger.warn(`[Kafka] Could not connect — event streaming disabled (graceful degradation)`);
-  });
-  setInterval(checkKafkaHealth, 30_000);
+  checkKafkaHealth().catch(() => undefined);
+  setInterval(() => { checkKafkaHealth().catch(() => undefined); }, 30_000).unref();
 }
-
-// ─── Produce ──────────────────────────────────────────────────────────────────
 
 export async function kafkaProduce(
   topic: string,
   key: string | null,
   value: Record<string, unknown>,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
 ): Promise<boolean> {
-  if (!KAFKA_ENABLED || !kafkaConnected) return false;
   try {
+    assertKafkaConfiguration();
+    assertTopic(topic);
+    if (!kafkaConnected) return false;
+    const correlationId = typeof value.event_id === "string" ? value.event_id : randomUUID();
     const records = {
       records: [{
-        key: key ?? undefined,
-        value,
-        headers: headers ? Object.entries(headers).map(([k, v]) => ({ [k]: v })) : undefined,
+        key: key ?? correlationId,
+        value: { ...value, event_id: correlationId, emitted_at: new Date().toISOString() },
+        headers: {
+          "ndsep-correlation-id": correlationId,
+          ...(headers ?? {}),
+        },
       }],
     };
     const res = await fetch(`${KAFKA_REST_URL}/topics/${encodeURIComponent(topic)}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/vnd.kafka.json.v2+json",
-        Accept: "application/vnd.kafka.v2+json",
-      },
-      body: JSON.stringify(records),
-      signal: AbortSignal.timeout(5000),
+      method: "POST", headers: kafkaHeaders(), body: JSON.stringify(records), signal: AbortSignal.timeout(5_000),
     });
-    if (res.ok) { produced++; return true; }
+    if (!res.ok) {
+      errors++;
+      logger.error({ topic, status: res.status, correlationId }, "[Kafka] Produce request rejected");
+      return false;
+    }
+    produced++;
+    return true;
+  } catch (error) {
     errors++;
-    return false;
-  } catch {
-    errors++;
+    logger.error({ topic, err: error instanceof Error ? error.message : String(error) }, "[Kafka] Produce failed");
     return false;
   }
 }
 
-// ─── Produce Batch ────────────────────────────────────────────────────────────
-
-export async function kafkaProduceBatch(
+export async function kafkaProduceRequired(
   topic: string,
-  messages: Array<{ key?: string; value: Record<string, unknown> }>
-): Promise<boolean> {
-  if (!KAFKA_ENABLED || !kafkaConnected) return false;
+  key: string | null,
+  value: Record<string, unknown>,
+  headers?: Record<string, string>,
+): Promise<void> {
+  const delivered = await kafkaProduce(topic, key, value, headers);
+  if (!delivered) throw new KafkaDeliveryError(`Kafka delivery was not acknowledged for topic ${topic}`);
+}
+
+export async function kafkaProduceBatch(topic: string, messages: Array<{ key?: string; value: Record<string, unknown> }>): Promise<boolean> {
   try {
-    const records = {
-      records: messages.map(m => ({
-        key: m.key ?? undefined,
-        value: m.value,
-      })),
-    };
-    const res = await fetch(`${KAFKA_REST_URL}/topics/${encodeURIComponent(topic)}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/vnd.kafka.json.v2+json",
-        Accept: "application/vnd.kafka.v2+json",
-      },
-      body: JSON.stringify(records),
-      signal: AbortSignal.timeout(10_000),
+    assertKafkaConfiguration();
+    assertTopic(topic);
+    if (!kafkaConnected || messages.length === 0 || messages.length > 500) return false;
+    const records = messages.map((message) => {
+      const correlationId = typeof message.value.event_id === "string" ? message.value.event_id : randomUUID();
+      return { key: message.key ?? correlationId, value: { ...message.value, event_id: correlationId, emitted_at: new Date().toISOString() }, headers: { "ndsep-correlation-id": correlationId } };
     });
-    if (res.ok) { produced += messages.length; return true; }
+    const res = await fetch(`${KAFKA_REST_URL}/topics/${encodeURIComponent(topic)}`, {
+      method: "POST", headers: kafkaHeaders(), body: JSON.stringify({ records }), signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) { errors++; return false; }
+    produced += messages.length;
+    return true;
+  } catch (error) {
     errors++;
-    return false;
-  } catch {
-    errors++;
+    logger.error({ topic, err: error instanceof Error ? error.message : String(error) }, "[Kafka] Batch produce failed");
     return false;
   }
 }
-
-// ─── Topic Management ─────────────────────────────────────────────────────────
 
 export async function kafkaListTopics(): Promise<string[]> {
-  if (!KAFKA_ENABLED || !kafkaConnected) return [];
+  if (!await checkKafkaHealth()) return [];
   try {
-    const res = await fetch(`${KAFKA_REST_URL}/topics`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return [];
-    return await res.json() as string[];
-  } catch {
-    errors++;
-    return [];
-  }
+    const res = await fetch(`${KAFKA_REST_URL}/topics`, { headers: kafkaHeaders(), signal: AbortSignal.timeout(5_000) });
+    return res.ok ? await res.json() as string[] : [];
+  } catch { errors++; return []; }
 }
 
 export async function kafkaDescribeTopic(topic: string): Promise<Record<string, unknown> | null> {
-  if (!KAFKA_ENABLED || !kafkaConnected) return null;
+  if (!await checkKafkaHealth()) return null;
   try {
-    const res = await fetch(`${KAFKA_REST_URL}/topics/${encodeURIComponent(topic)}`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return null;
-    return await res.json() as Record<string, unknown>;
-  } catch {
-    errors++;
-    return null;
-  }
+    assertTopic(topic);
+    const res = await fetch(`${KAFKA_REST_URL}/topics/${encodeURIComponent(topic)}`, { headers: kafkaHeaders(), signal: AbortSignal.timeout(5_000) });
+    return res.ok ? await res.json() as Record<string, unknown> : null;
+  } catch { errors++; return null; }
 }
-
-// ─── Consumer Group ───────────────────────────────────────────────────────────
-
-export async function kafkaCreateConsumer(
-  groupId: string,
-  instanceId: string,
-  autoOffsetReset: "earliest" | "latest" = "latest"
-): Promise<string | null> {
-  if (!KAFKA_ENABLED || !kafkaConnected) return null;
-  try {
-    const body = {
-      name: instanceId,
-      format: "json",
-      "auto.offset.reset": autoOffsetReset,
-      "auto.commit.enable": "true",
-    };
-    const res = await fetch(
-      `${KAFKA_REST_URL}/consumers/${encodeURIComponent(groupId)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/vnd.kafka.v2+json" },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(5000),
-      }
-    );
-    if (!res.ok) return null;
-    const data = await res.json() as { base_uri: string };
-    return data.base_uri;
-  } catch {
-    errors++;
-    return null;
-  }
-}
-
-export async function kafkaSubscribe(
-  consumerBaseUri: string,
-  topics: string[]
-): Promise<boolean> {
-  if (!KAFKA_ENABLED || !kafkaConnected) return false;
-  try {
-    const res = await fetch(`${consumerBaseUri}/subscription`, {
-      method: "POST",
-      headers: { "Content-Type": "application/vnd.kafka.v2+json" },
-      body: JSON.stringify({ topics }),
-      signal: AbortSignal.timeout(5000),
-    });
-    return res.ok;
-  } catch {
-    errors++;
-    return false;
-  }
-}
-
-export async function kafkaPoll(
-  consumerBaseUri: string,
-  maxBytes = 300000
-): Promise<Array<{ topic: string; key: string; value: unknown; partition: number; offset: number }>> {
-  if (!KAFKA_ENABLED || !kafkaConnected) return [];
-  try {
-    const res = await fetch(`${consumerBaseUri}/records?max_bytes=${maxBytes}`, {
-      headers: { Accept: "application/vnd.kafka.json.v2+json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return [];
-    const records = await res.json() as Array<{ topic: string; key: string; value: unknown; partition: number; offset: number }>;
-    consumed += records.length;
-    return records;
-  } catch {
-    errors++;
-    return [];
-  }
-}
-
-// ─── Metrics ──────────────────────────────────────────────────────────────────
 
 export function kafkaMetrics() {
-  return {
-    connected: kafkaConnected,
-    enabled: KAFKA_ENABLED,
-    restUrl: KAFKA_REST_URL,
-    bootstrap: KAFKA_BOOTSTRAP,
-    clientId: KAFKA_CLIENT_ID,
-    produced,
-    consumed,
-    errors,
-  };
+  return { connected: kafkaConnected, enabled: KAFKA_ENABLED, restUrl: KAFKA_REST_URL, bootstrap: KAFKA_BOOTSTRAP, clientId: KAFKA_CLIENT_ID, ssl: KAFKA_REST_URL.startsWith("https://"), saslEnabled: Boolean(KAFKA_REST_TOKEN), produced, consumed, errors };
 }
 
 export { kafkaConnected, checkKafkaHealth };
 
-// ── Backward-compatible publish helpers (used by routers.ts) ──────────────────
-
+// Backward-compatible event helpers retain non-blocking semantics for UI activity.
+// Compliance-critical paths must use kafkaProduceRequired together with a DB outbox.
 export async function publishPenaltyIssued(data: { penaltyId: string | number; orgId: string | number; amount: number; currency: string; reason: string; issuedBy: string }): Promise<void> {
-  await kafkaProduce("ndsep.penalties.issued", String(data.penaltyId), { event: "penalty.issued", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await kafkaProduce("ndsep.penalties.issued", String(data.penaltyId), { event: "penalty.issued", ...data });
 }
 export async function publishEnforcementCaseOpened(data: { caseId: string | number; orgId: string | number; caseType: string; severity: string; openedBy: string }): Promise<void> {
-  await kafkaProduce("ndsep.enforcement.cases", String(data.caseId), { event: "case.opened", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await kafkaProduce("ndsep.enforcement.cases", String(data.caseId), { event: "case.opened", ...data });
 }
 export async function publishCitizenRightsRequest(data: { requestId: string | number; citizenId: string; requestType: string; status: string; orgId: string | number }): Promise<void> {
-  await kafkaProduce("ndsep.citizen.rights", String(data.requestId), { event: "rights.request.updated", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await kafkaProduce("ndsep.citizen.rights", String(data.requestId), { event: "rights.request.updated", ...data });
 }
 export async function publishComplianceViolation(data: { violationId: string | number; orgId: string | number; violationType: string; severity: string }): Promise<void> {
-  await kafkaProduce("ndsep.compliance.violations", String(data.violationId), { event: "violation.detected", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await kafkaProduce("ndsep.compliance.violations", String(data.violationId), { event: "violation.detected", ...data });
 }
 export async function publishAuditEvent(data: { userId: string; action: string; resource: string; resourceId: string | number; orgId?: string | number }): Promise<void> {
-  await kafkaProduce("ndsep.audit.events", String(data.resourceId), { event: "audit.action", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await kafkaProduce("ndsep.audit.events", String(data.resourceId), { event: "audit.action", ...data });
 }
-export function isKafkaConnected(): boolean {
-  return kafkaConnected;
-}
-export function getKafkaProducerStatus(): { connected: boolean; enabled: boolean; brokers: string[]; clientId: string; ssl: boolean; saslEnabled: boolean; produced: number; errors: number } {
-  return { connected: kafkaConnected, enabled: KAFKA_ENABLED, brokers: [KAFKA_BOOTSTRAP], clientId: KAFKA_CLIENT_ID, ssl: false, saslEnabled: false, produced, errors };
-}
+export function isKafkaConnected(): boolean { return kafkaConnected; }
+export function getKafkaProducerStatus() { return kafkaMetrics(); }
 export async function kafkaSmokeTest(): Promise<{ ok: boolean; topic: string; message: string; latencyMs: number }> {
-  const t0 = Date.now();
-  try {
-    const ok = await kafkaProduce("ndsep.smoke.test", `smoke-${Date.now()}`, { event: "smoke.test", ts: new Date().toISOString() });
-    return { ok, topic: "ndsep.smoke.test", message: ok ? "Smoke test message produced" : "Kafka not connected (graceful degradation)", latencyMs: Date.now() - t0 };
-  } catch (e: unknown) {
-    return { ok: false, topic: "ndsep.smoke.test", message: e instanceof Error ? e.message : "Unknown error", latencyMs: Date.now() - t0 };
-  }
+  const start = Date.now();
+  const ok = await kafkaProduce("ndsep.smoke.test", `smoke-${Date.now()}`, { event: "smoke.test" });
+  return { ok, topic: "ndsep.smoke.test", message: ok ? "Smoke test message produced" : "Kafka delivery not acknowledged", latencyMs: Date.now() - start };
 }
-
-export async function disconnectKafka(): Promise<void> {
-  // No-op for REST Proxy based implementation — connections are stateless HTTP
-  kafkaConnected = false;
-}
-
+export async function disconnectKafka(): Promise<void> { kafkaConnected = false; }

@@ -34,22 +34,47 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
+      WEBHOOK_LEDGER_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
+      PAYMENT_COMMAND_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
+      THEME_PREFERENCES_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_theme_preferences_integration
+      AUDIT_HASH_CHAIN_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_audit_chain_integration
+      WEBHOOK_SHADOW_QUEUE_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_webhook_shadow_integration
+      MULTITENANCY_RLS_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
       JWT_SECRET: test-jwt-secret-for-ci-only
       FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
-        with: { version: "10.4.1" }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec drizzle-kit push --force
-        name: Apply database migrations
+      - run: pnpm exec drizzle-kit migrate
+        name: Apply root Drizzle migrations
       - run: pnpm exec tsc --noEmit
         name: TypeScript check
+      - name: Create isolated PostgreSQL database for theme-preferences router integration
+        env:
+          PGPASSWORD: ndsep_test_pass
+        run: |
+          set -euo pipefail
+          psql --host=localhost --username=ndsep_user --dbname=postgres --set=ON_ERROR_STOP=1 <<'SQL'
+          DROP DATABASE IF EXISTS ndsep_theme_preferences_integration;
+          DROP DATABASE IF EXISTS ndsep_audit_chain_integration;
+          DROP DATABASE IF EXISTS ndsep_webhook_shadow_integration;
+          CREATE DATABASE ndsep_theme_preferences_integration;
+          CREATE DATABASE ndsep_audit_chain_integration;
+          CREATE DATABASE ndsep_webhook_shadow_integration;
+          SQL
+      - name: Apply root Drizzle migrations to isolated webhook database
+        run: |
+          set -euo pipefail
+          DATABASE_URL="$WEBHOOK_SHADOW_QUEUE_TEST_DATABASE_URL" pnpm exec drizzle-kit migrate
       - run: pnpm lint
         name: Lint the root web and API project
       - run: pnpm test --reporter=verbose
@@ -83,6 +108,7 @@ jobs:
           --health-retries 5
     env:
       PAYMENT_AUDIT_POSTGRES_URL: postgresql://ndsep_payment_test:ndsep_payment_test_pass@localhost:5432/idlr_payment_test
+      MOBILE_POSTGRES_TEST_DATABASE_URL: postgresql://ndsep_payment_test:ndsep_payment_test_pass@localhost:5432/idlr_payment_test
     defaults:
       run:
         working-directory: mobile
@@ -98,6 +124,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: mobile/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec drizzle-kit migrate
+        name: Apply mobile PostgreSQL migrations to disposable CI database
+        env:
+          DATABASE_URL: ${{ env.MOBILE_POSTGRES_TEST_DATABASE_URL }}
       - run: pnpm check
         name: Mobile TypeScript check
       - run: pnpm lint
@@ -111,12 +141,47 @@ jobs:
   go-ci:
     name: Go CI (Build + Vet + Test)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ndsep_user
+          POSTGRES_PASSWORD: ndsep_test_pass
+          POSTGRES_DB: ndsep_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # GitHub Actions' disposable postgres service has no TLS listener; this URL is test-only.
+      WEBHOOK_QUEUE_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test_webhook_worker_cutover?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: workers/go/go.sum
+      - name: Prepare migration-owned webhook worker integration database
+        env:
+          PGPASSWORD: ndsep_test_pass
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --ignore-scripts
+          psql --host=localhost --username=ndsep_user --dbname=postgres --set=ON_ERROR_STOP=1 <<'SQL'
+          DROP DATABASE IF EXISTS ndsep_test_webhook_worker_cutover;
+          CREATE DATABASE ndsep_test_webhook_worker_cutover;
+          SQL
+          DATABASE_URL="$WEBHOOK_QUEUE_TEST_DATABASE_URL" pnpm exec drizzle-kit migrate
       - name: Download Go dependencies
         working-directory: workers/go
         run: go mod download
@@ -172,6 +237,22 @@ jobs:
   python-ci:
     name: Python CI (Lint + Test)
     runs-on: ubuntu-latest
+    env:
+      DPCO_ANALYTICS_DATABASE_URL: postgresql://ndsep_ci:ndsep_ci_local_only@127.0.0.1:5432/ndsep_ci?sslmode=disable
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: ndsep_ci
+          POSTGRES_PASSWORD: ndsep_ci_local_only
+          POSTGRES_DB: ndsep_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ndsep_ci -d ndsep_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -181,7 +262,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install flake8 pytest pytest-asyncio
+          pip install flake8 pytest pytest-asyncio fastapi uvicorn pydantic requests "psycopg[binary,pool]"
           find orchestration services/python -name requirements.txt -exec pip install -r {} \;
       - name: Lint with flake8
         run: flake8 orchestration/ workers/python/ --max-line-length=120 --ignore=E501,W503,W504
@@ -206,6 +287,22 @@ jobs:
     name: Rust CI (Check + Test)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ndsep_rust_ci
+          POSTGRES_PASSWORD: ndsep_rust_ci_local_only
+          POSTGRES_DB: ndsep_rust_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      LAKEHOUSE_INGEST_TEST_DATABASE_URL: postgresql://ndsep_rust_ci:ndsep_rust_ci_local_only@127.0.0.1:5432/ndsep_rust_ci
+      LAKEHOUSE_WRITER_TEST_DATABASE_URL: postgresql://ndsep_rust_ci:ndsep_rust_ci_local_only@127.0.0.1:5432/ndsep_rust_ci
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -307,15 +404,17 @@ jobs:
       SKIP_DATABASE_MIGRATIONS: "true"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
-        with: { version: "10.4.1" }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Apply database migrations
-        run: pnpm exec drizzle-kit push --force
+      - name: Apply root Drizzle migrations
+        run: pnpm exec drizzle-kit migrate
       - run: pnpm exec playwright install --with-deps chromium
       - name: Start server and verify readiness
         run: |
@@ -339,16 +438,79 @@ jobs:
           path: test-results/
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Docker build + push (on main branch only)
+  # Schema drift verification — protected, read-only staging comparison
+  # ─────────────────────────────────────────────────────────────────────────────
+  schema-drift-verification:
+    name: Protected Staging Schema Drift Verification
+    runs-on: ubuntu-latest
+    # Reuse the intended production release boundary. Authorized administrators
+    # must configure required reviewers, prevent bypass, and load read-only
+    # baseline/staging URLs before this gate can execute.
+    environment:
+      name: production-release
+    if: github.ref == 'refs/heads/production'
+    permissions:
+      contents: read
+    env:
+      SCHEMA_DRIFT_BASELINE_DATABASE_URL: ${{ secrets.SCHEMA_DRIFT_BASELINE_DATABASE_URL }}
+      SCHEMA_DRIFT_STAGING_DATABASE_URL: ${{ secrets.SCHEMA_DRIFT_STAGING_DATABASE_URL }}
+      # Optional PEM bundle for a private staging PostgreSQL CA. Verification
+      # remains mandatory whether this secret is supplied or the runner trust store is used.
+      SCHEMA_DRIFT_DB_SSL_CA_PEM: ${{ secrets.SCHEMA_DRIFT_DB_SSL_CA_PEM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install locked dependency graph
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Compare protected staging schema with clean baseline
+        run: node scripts/ci/verify-staging-schema-drift.mjs > schema-drift-verification.json
+      - name: Upload sanitized schema-drift result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-drift-verification-${{ github.sha }}
+          path: schema-drift-verification.json
+          if-no-files-found: warn
+          retention-days: 365
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Docker candidate build + signed digest evidence (protected production push)
   # ─────────────────────────────────────────────────────────────────────────────
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: [node-ci, go-ci, python-ci, security]
+    # This environment must be created and protected by an authorized GitHub
+    # administrator. Its reviewers gate registry publication after all CI passes.
+    environment:
+      name: production-release
+    needs:
+      [
+        node-ci,
+        go-ci,
+        go-orchestration-ci,
+        python-ci,
+        rust-ci,
+        security,
+        integration,
+        schema-drift-verification,
+      ]
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     if: github.ref == 'refs/heads/production'
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository }}
+      COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+      COSIGN_CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@refs/heads/production
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -357,15 +519,109 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v5
+      - name: Build and publish immutable candidate
+        id: build_image
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          tags: ${{ env.IMAGE_NAME }}:candidate-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             BUILD_SHA=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
+      - name: Resolve immutable image reference
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest='${{ steps.build_image.outputs.digest }}'
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "ref=${IMAGE_NAME}@${digest}" >> "$GITHUB_OUTPUT"
+      - name: Direct candidate image scan (HIGH/CRITICAL gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: json
+          output: release-evidence/trivy-image.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          vuln-type: os,library
+      - name: Generate candidate CycloneDX SBOM
+        if: success()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: cyclonedx
+          output: release-evidence/image-sbom.cdx.json
+          vuln-type: os,library
+      - name: Verify digest-bound scan and SBOM evidence
+        if: success()
+        run: |
+          bash scripts/security/verify-release-image-evidence.sh \
+            "$IMAGE_NAME" \
+            "${{ steps.image.outputs.digest }}" \
+            "${{ github.sha }}" \
+            release-evidence/trivy-image.json \
+            release-evidence/image-sbom.cdx.json \
+            release-evidence/release-evidence.json
+      - name: Attest build provenance to GHCR
+        if: success()
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Install Cosign
+        if: success()
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+      - name: Keylessly sign verified image digest
+        if: success()
+        run: cosign sign --yes "${{ steps.image.outputs.ref }}"
+      - name: Verify keyless signature and GitHub provenance
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
+            --output json \
+            "${{ steps.image.outputs.ref }}" > release-evidence/cosign-verify.json
+          gh attestation verify \
+            "oci://${{ steps.image.outputs.ref }}" \
+            --repo "$GITHUB_REPOSITORY" > release-evidence/github-provenance-verify.txt
+      - name: Normalize verified candidate evidence for readiness gate
+        if: success()
+        env:
+          EVIDENCE_URI_PREFIX: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/release-evidence-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/ci/normalize-release-evidence.mjs \
+            --image "${{ steps.image.outputs.ref }}" \
+            --source-commit "${{ github.sha }}" \
+            --built-at "${{ github.event.head_commit.timestamp }}" \
+            --trivy release-evidence/trivy-image.json \
+            --trivy-uri "$EVIDENCE_URI_PREFIX/trivy-image.json" \
+            --sbom release-evidence/image-sbom.cdx.json \
+            --sbom-uri "$EVIDENCE_URI_PREFIX/image-sbom.cdx.json" \
+            --provenance release-evidence/github-provenance-verify.txt \
+            --provenance-uri "$EVIDENCE_URI_PREFIX/github-provenance-verify.txt" \
+            --cosign release-evidence/cosign-verify.json \
+            --cosign-uri "$EVIDENCE_URI_PREFIX/cosign-verify.json" \
+            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --out-dir release-evidence
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.sha }}
+          path: release-evidence/
+          if-no-files-found: warn
+          retention-days: 365

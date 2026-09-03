@@ -12,13 +12,15 @@ interface EnvRule {
   name: string;
   insecureDefaults: string[];
   description: string;
+  minimumLength?: number;
 }
 
 const SECURITY_SENSITIVE_VARS: EnvRule[] = [
   {
     name: "JWT_SECRET",
     insecureDefaults: ["", "dev-test-secret-key-at-least-32-chars-long"],
-    description: "Session signing key — unsigned tokens if missing",
+    minimumLength: 32,
+    description: "Session signing key — unsigned tokens if missing or predictable",
   },
   {
     name: "FIELD_ENCRYPTION_KEY",
@@ -38,22 +40,40 @@ const SECURITY_SENSITIVE_VARS: EnvRule[] = [
   {
     name: "API_KEY_SALT",
     insecureDefaults: ["ndsep_api_key_salt_2026_production_default", ""],
+    minimumLength: 32,
     description: "API key hashing salt — predictable hashes if using default",
   },
   {
     name: "WEBHOOK_SIGNING_SECRET",
     insecureDefaults: ["ndsep_webhook_signing_secret_2026_default", ""],
+    minimumLength: 32,
     description: "Webhook signature key — signatures forgeable with default",
   },
   {
     name: "APISIX_ADMIN_KEY",
     insecureDefaults: ["CHANGE_ME_IN_PRODUCTION", ""],
+    minimumLength: 32,
     description: "APISIX admin API key — gateway admin accessible with known key",
   },
   {
     name: "DATABASE_URL",
     insecureDefaults: [""],
     description: "PostgreSQL connection string — server cannot function without DB",
+  },
+  {
+    name: "REDIS_URL",
+    insecureDefaults: ["", "redis://localhost:6379"],
+    description: "Redis transport — production rate limiting and replay protection require a non-default TLS endpoint",
+  },
+  {
+    name: "WORKER_EVENT_HMAC_SECRET",
+    insecureDefaults: [""],
+    description: "Worker-event authentication secret — unsigned worker events must not be accepted",
+  },
+  {
+    name: "CORS_ORIGINS",
+    insecureDefaults: ["", "*"],
+    description: "CORS origin allow-list — wildcard origins are not permitted in production",
   },
 ];
 
@@ -66,6 +86,48 @@ const SECTOR_API_KEYS: EnvRule[] = [
   { name: "CBN_FINTECH_API_KEY", insecureDefaults: ["cbn-fintech-api-key-placeholder", ""], description: "CBN (fintech) regulator API key" },
 ];
 
+function isPlaceholderValue(value: string): boolean {
+  return /(?:CHANGE_ME|PLACEHOLDER|_DEFAULT(?:_|$)|example\.)/i.test(value);
+}
+
+function invalidProductionCorsOrigins(value: string): string[] {
+  const origins = value.split(",").map((origin) => origin.trim()).filter(Boolean);
+  if (origins.length === 0) return ["CORS_ORIGINS must contain at least one explicit HTTPS origin"];
+
+  const errors: string[] = [];
+  for (const origin of origins) {
+    try {
+      const url = new URL(origin);
+      if (
+        url.protocol !== "https:" ||
+        url.origin !== origin ||
+        url.username ||
+        url.password ||
+        ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+      ) {
+        errors.push(origin);
+      }
+    } catch {
+      errors.push(origin);
+    }
+  }
+  return errors;
+}
+
+function invalidProductionServiceUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol !== "https:" ||
+      Boolean(url.username) ||
+      Boolean(url.password) ||
+      ["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+    );
+  } catch {
+    return true;
+  }
+}
+
 const INFRASTRUCTURE_VARS: EnvRule[] = [
   { name: "LAKEHOUSE_S3_ACCESS_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 access key — using MinIO dev default" },
   { name: "LAKEHOUSE_S3_SECRET_KEY", insecureDefaults: ["minioadmin"], description: "Lakehouse S3 secret key — using MinIO dev default" },
@@ -77,13 +139,17 @@ const INFRASTRUCTURE_VARS: EnvRule[] = [
  * In development: logs warnings for missing variables.
  */
 export function validateEnvironment(): void {
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
   const errors: string[] = [];
   const warnings: string[] = [];
 
   for (const rule of SECURITY_SENSITIVE_VARS) {
     const value = process.env[rule.name] ?? "";
-    if (rule.insecureDefaults.includes(value)) {
+    if (
+      rule.insecureDefaults.includes(value) ||
+      isPlaceholderValue(value) ||
+      (rule.minimumLength !== undefined && value.length < rule.minimumLength)
+    ) {
       if (isProduction) {
         errors.push(`  ${rule.name}: ${rule.description}`);
       } else {
@@ -92,9 +158,73 @@ export function validateEnvironment(): void {
     }
   }
 
+  if (isProduction) {
+    if (!/^rediss:\/\//.test(process.env.REDIS_URL ?? "")) {
+      errors.push("  REDIS_URL: production replay protection requires a rediss:// endpoint with a private CA/identity policy");
+    }
+    const invalidCorsOrigins = invalidProductionCorsOrigins(process.env.CORS_ORIGINS ?? "");
+    if (invalidCorsOrigins.length > 0) {
+      errors.push(`  CORS_ORIGINS: production origins must be explicit HTTPS origins without paths, credentials, or localhost values (${invalidCorsOrigins.join(", ")})`);
+    }
+    if ((process.env.WORKER_EVENT_HMAC_SECRET ?? "").length < 32) {
+      errors.push("  WORKER_EVENT_HMAC_SECRET: must be a high-entropy secret of at least 32 characters");
+    }
+    if (!/^[a-f0-9]{64}$/i.test(process.env.FIELD_ENCRYPTION_KEY ?? "")) {
+      errors.push("  FIELD_ENCRYPTION_KEY: must be exactly 32 random bytes encoded as 64 hexadecimal characters");
+    }
+    if ((process.env.LAKEHOUSE_ENABLED ?? "false") === "true") {
+      if (!/^https:\/\//.test(process.env.LAKEHOUSE_CATALOG_URL ?? "")) {
+        errors.push("  LAKEHOUSE_CATALOG_URL: enabled production lakehouse requires an https:// catalog endpoint");
+      }
+      for (const key of ["LAKEHOUSE_S3_ACCESS_KEY", "LAKEHOUSE_S3_SECRET_KEY"]) {
+        const value = process.env[key] ?? "";
+        if (value.length < 16 || value === "minioadmin") {
+          errors.push(`  ${key}: enabled production lakehouse requires a non-default credential of at least 16 characters`);
+        }
+      }
+    }
+    if ((process.env.PERMIFY_ENABLED ?? "false") === "true") {
+      if (!/^https:\/\//.test(process.env.PERMIFY_URL ?? "")) {
+        errors.push("  PERMIFY_URL: enabled production authorization requires an https:// endpoint");
+      }
+      if ((process.env.PERMIFY_AUTH_TOKEN ?? "").length < 32) {
+        errors.push("  PERMIFY_AUTH_TOKEN: enabled production authorization requires a high-entropy bearer credential");
+      }
+    }
+    const keycloakEnabled = process.env.KEYCLOAK_ENABLED;
+    if (keycloakEnabled !== "true") {
+      errors.push("  KEYCLOAK_ENABLED: production requires real Keycloak IAM and cannot use local-session or demo authentication");
+    }
+    const keycloakUrl = process.env.KEYCLOAK_URL ?? "";
+    const issuerUrl = process.env.KEYCLOAK_ISSUER_URL ?? keycloakUrl;
+    if (invalidProductionServiceUrl(keycloakUrl)) {
+      errors.push("  KEYCLOAK_URL: production IAM requires a non-local https:// endpoint without inline credentials");
+    }
+    if (invalidProductionServiceUrl(issuerUrl)) {
+      errors.push("  KEYCLOAK_ISSUER_URL: production IAM requires a non-local https:// issuer endpoint without inline credentials");
+    }
+    for (const name of ["KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID"]) {
+      const value = process.env[name] ?? "";
+      if (value.length < 2 || isPlaceholderValue(value)) {
+        errors.push(`  ${name}: production IAM requires a non-placeholder configured value`);
+      }
+    }
+    const analyticsUrl = process.env.DPCO_ANALYTICS_URL ?? "";
+    if (invalidProductionServiceUrl(analyticsUrl)) {
+      errors.push("  DPCO_ANALYTICS_URL: production analytics gateway requires a non-local https:// endpoint without inline credentials");
+    }
+    if ((process.env.DPCO_ANALYTICS_SERVICE_TOKEN ?? "").length < 32) {
+      errors.push("  DPCO_ANALYTICS_SERVICE_TOKEN: production analytics gateway requires a high-entropy service credential of at least 32 characters");
+    }
+  }
+
   for (const rule of SECTOR_API_KEYS) {
     const value = process.env[rule.name] ?? "";
-    if (rule.insecureDefaults.includes(value)) {
+    if (
+      rule.insecureDefaults.includes(value) ||
+      isPlaceholderValue(value) ||
+      (rule.minimumLength !== undefined && value.length < rule.minimumLength)
+    ) {
       if (isProduction) {
         warnings.push(`  ${rule.name}: ${rule.description} — sector monitor will fail API calls`);
       }
@@ -103,7 +233,11 @@ export function validateEnvironment(): void {
 
   for (const rule of INFRASTRUCTURE_VARS) {
     const value = process.env[rule.name] ?? "";
-    if (rule.insecureDefaults.includes(value)) {
+    if (
+      rule.insecureDefaults.includes(value) ||
+      isPlaceholderValue(value) ||
+      (rule.minimumLength !== undefined && value.length < rule.minimumLength)
+    ) {
       if (isProduction) {
         warnings.push(`  ${rule.name}: ${rule.description}`);
       }

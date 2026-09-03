@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "project": "chromium",
+  "matrix": {
+    "workers": 1,
+    "retries": 0
+  },
+  "snapshots": [
+    {
+      "id": "login-page",
+      "path": "/",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "h1, .hero, [data-testid='login']",
+      "snapshot": "login-page.png",
+      "fullPage": true
+    },
+    {
+      "id": "dashboard-home",
+      "path": "/dashboard",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": ".dashboard-stats, [data-testid='stats'], h1",
+      "snapshot": "dashboard-home.png",
+      "fullPage": true
+    },
+    {
+      "id": "penalty-table",
+      "path": "/financial-enforcement/penalties",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "table, [data-testid='penalty-table'], h1",
+      "snapshot": "penalty-table.png",
+      "fullPage": true
+    },
+    {
+      "id": "compliance-calendar",
+      "path": "/compliance/calendar",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": ".calendar, [data-testid='calendar'], h1",
+      "snapshot": "compliance-calendar.png",
+      "fullPage": true
+    },
+    {
+      "id": "aml-cases",
+      "path": "/banking/aml",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "table, [data-testid='aml-table'], h1",
+      "snapshot": "aml-cases.png",
+      "fullPage": true
+    },
+    {
+      "id": "kyc-records",
+      "path": "/banking/kyc",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "table, [data-testid='kyc-table'], h1",
+      "snapshot": "kyc-records.png",
+      "fullPage": true
+    },
+    {
+      "id": "organizations-list",
+      "path": "/organizations",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "table, [data-testid='org-table'], h1",
+      "snapshot": "organizations-list.png",
+      "fullPage": true
+    },
+    {
+      "id": "audit-logs",
+      "path": "/audit-logs",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "table, [data-testid='audit-table'], h1",
+      "snapshot": "audit-logs.png",
+      "fullPage": true
+    },
+    {
+      "id": "siem-dashboard",
+      "path": "/siem",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "[data-testid='siem'], h1, .siem",
+      "snapshot": "siem-dashboard.png",
+      "fullPage": true
+    },
+    {
+      "id": "breach-notifications",
+      "path": "/breach-notifications",
+      "viewport": { "width": 1440, "height": 900 },
+      "waitFor": "table, [data-testid='breach-table'], h1",
+      "snapshot": "breach-notifications.png",
+      "fullPage": true
+    },
+    {
+      "id": "mobile-viewport-dashboard",
+      "path": "/dashboard",
+      "viewport": { "width": 390, "height": 844 },
+      "waitFor": null,
+      "snapshot": "dashboard-mobile.png",
+      "fullPage": false
+    },
+    {
+      "id": "tablet-viewport-compliance-calendar",
+      "path": "/compliance/calendar",
+      "viewport": { "width": 768, "height": 1024 },
+      "waitFor": null,
+      "snapshot": "compliance-calendar-tablet.png",
+      "fullPage": false
+    }
+  ]
+}

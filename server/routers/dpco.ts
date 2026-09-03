@@ -423,6 +423,53 @@ const trainingSessionInput = z.object({
   cpeCredits: z.number().optional(),
 });
 
+function isProductionRuntime(): boolean {
+  return process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+}
+
+function getAnalyticsServiceBaseUrl(): URL {
+  const configured = process.env.DPCO_ANALYTICS_URL;
+  const fallback = `http://127.0.0.1:${process.env.DPCO_ANALYTICS_PORT ?? 8330}`;
+  const url = new URL(configured ?? fallback);
+  if (isProductionRuntime()) {
+    if (!configured || url.protocol !== "https:" || ["localhost", "127.0.0.1", "::1"].includes(url.hostname)) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "DPCO analytics requires a configured non-local HTTPS service URL in production" });
+    }
+    if ((process.env.DPCO_ANALYTICS_SERVICE_TOKEN ?? "").length < 32) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "DPCO analytics service credential is not configured" });
+    }
+  }
+  return url;
+}
+
+async function requestAnalyticsService(path: string): Promise<Record<string, unknown>> {
+  const baseUrl = getAnalyticsServiceBaseUrl();
+  const target = new URL(path, baseUrl);
+  if (target.origin !== baseUrl.origin) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid DPCO analytics service path" });
+  }
+  try {
+    const token = process.env.DPCO_ANALYTICS_SERVICE_TOKEN;
+    const response = await fetch(target, {
+      headers: token ? { "X-NDSEP-Service-Token": token } : {},
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) {
+      logger.warn({ status: response.status, path }, "DPCO analytics service request failed");
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "DPCO analytics persistence service is unavailable" });
+    }
+    const data: unknown = await response.json();
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DPCO analytics service returned an invalid response" });
+    }
+    return data as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    logger.warn({ err: error, path }, "DPCO analytics service request failed");
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "DPCO analytics persistence service is unavailable" });
+  }
+}
+
 const policyDraftInput = z.object({
   id: z.number().int().optional(),
   dpcoId: z.number().int().optional(),
@@ -537,38 +584,17 @@ export const dpcoRouter = router({
       return row;
     }),
 
-  // ── Microservice Bridge Procedures ──────────────────────────────────────────────────
-  // Proxy to Go/Python DPCO microservices; fallback to DB when services are not reachable.
-
+  // ── Durable Analytics Microservice Bridge ───────────────────────────────────────────
+  // These routes expose only the Python service's PostgreSQL-backed contract. They do not
+  // synthesize alternate response shapes or present stale fallback data as live analytics.
   analyticsComplianceTrends: protectedProcedure
-    .query(async () => {
-      try {
-        const res = await fetch(`http://localhost:${process.env.DPCO_ANALYTICS_PORT ?? 8330}/api/dpco/analytics/trends`, { signal: AbortSignal.timeout(5000) });
-        if (res.ok) return res.json();
-      } catch (e: unknown) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "DPCO analytics trends service unavailable, falling back to DB"); }
-      const rows = await q("SELECT TO_CHAR(snapshot_date, 'IYYY-IW') as week, ROUND(AVG(composite_score)::numeric,1) as avg_score, COUNT(*) as audits FROM ndpa_compliance_snapshots GROUP BY week ORDER BY week DESC LIMIT 26", []);
-      return { weeks: rows, total_weeks: rows.length, source: "db-fallback" };
-    }),
+    .query(() => requestAnalyticsService("/api/dpco/analytics/trends")),
 
   analyticsPortfolio: protectedProcedure
-    .query(async () => {
-      try {
-        const res = await fetch(`http://localhost:${process.env.DPCO_ANALYTICS_PORT ?? 8330}/api/dpco/analytics/portfolio`, { signal: AbortSignal.timeout(5000) });
-        if (res.ok) return res.json();
-      } catch (e: unknown) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "DPCO analytics portfolio service unavailable, falling back to DB"); }
-      const rows = await q("SELECT dpco_org_id, COUNT(*) as total_clients, SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) as active_clients FROM dpco_clients GROUP BY dpco_org_id", []);
-      return { dpcos: rows, source: "db-fallback" };
-    }),
+    .query(() => requestAnalyticsService("/api/dpco/analytics/portfolio")),
 
   analyticsHeatmap: protectedProcedure
-    .query(async () => {
-      try {
-        const res = await fetch(`http://localhost:${process.env.DPCO_ANALYTICS_PORT ?? 8330}/api/dpco/analytics/heatmap`, { signal: AbortSignal.timeout(5000) });
-        if (res.ok) return res.json();
-      } catch (e: unknown) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "DPCO analytics heatmap service unavailable, falling back to DB"); }
-      const rows = await q("SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as date, COUNT(*) as count FROM dpco_audit_engagements WHERE created_at >= NOW() - INTERVAL '365 days' GROUP BY date ORDER BY date", []);
-      return { heatmap: rows, days: rows.length, source: "db-fallback" };
-    }),
+    .query(() => requestAnalyticsService("/api/dpco/analytics/heatmap")),
 
   listNotifications: protectedProcedure
     .input(z.object({ limit: z.number().int().min(1).max(200).default(50), severity: z.string().optional() }).optional())
@@ -1042,10 +1068,14 @@ export const dpcoRouter = router({
           `INSERT INTO dpco_audit_control_ratings
              (engagement_id, dpco_org_id, control_id, control_ref, control_title, rating, notes, rated_by, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
-           ON DUPLICATE KEY UPDATE
-             rating = VALUES(rating),
-             notes = VALUES(notes),
-             rated_by = VALUES(rated_by),
+           ON CONFLICT (engagement_id, control_id)
+           DO UPDATE SET
+             dpco_org_id = EXCLUDED.dpco_org_id,
+             control_ref = EXCLUDED.control_ref,
+             control_title = EXCLUDED.control_title,
+             rating = EXCLUDED.rating,
+             notes = EXCLUDED.notes,
+             rated_by = EXCLUDED.rated_by,
              updated_at = NOW()`,
           [
             input.engagementId,
@@ -1088,7 +1118,7 @@ export const dpcoRouter = router({
          FROM dpco_client_policies p
          LEFT JOIN dpco_clients c ON c.id = p.client_id
          WHERE ${conditions.join(" AND ")}
-         ORDER BY p.assigned_at DESC`,
+         ORDER BY p.created_at DESC`,
         params
       );
       return { policies: rows };
@@ -1103,11 +1133,16 @@ export const dpcoRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      const assignedBy = ctx.user?.name?.trim();
+      if (!assignedBy) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "A persisted authenticated user is required to assign a client policy" });
+      }
       await q(
-        `INSERT INTO dpco_client_policies (dpco_org_id, client_id, template_id, template_title, notes, assigned_by, assigned_at)
-         VALUES (?, ?, ?, ?, ?, ?, NOW())
-         ON DUPLICATE KEY UPDATE template_title = VALUES(template_title), notes = VALUES(notes), updated_at = NOW()`,
-        [input.dpcoOrgId, input.clientId, input.templateId, input.templateTitle, input.notes ?? null, ctx.user?.name ?? "DPCO User"]
+        `INSERT INTO dpco_client_policies (dpco_org_id, client_id, template_id, template_name, notes, assigned_by)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (dpco_org_id, client_id, template_id)
+         DO UPDATE SET template_name = EXCLUDED.template_name, notes = EXCLUDED.notes, assigned_by = EXCLUDED.assigned_by, updated_at = NOW()`,
+        [input.dpcoOrgId, input.clientId, input.templateId, input.templateTitle, input.notes ?? null, assignedBy]
       );
       const [row] = await q<any>(`SELECT * FROM dpco_client_policies WHERE dpco_org_id = ? AND client_id = ? AND template_id = ?`, [input.dpcoOrgId, input.clientId, input.templateId]);
       emitMutationEvent("ndsep.dpco.mutation", { action: "dpco", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
@@ -1117,7 +1152,7 @@ export const dpcoRouter = router({
   updateClientPolicyStatus: protectedProcedure
     .input(z.object({
       id: z.number().int(),
-      status: z.enum(["draft", "customised", "reviewed", "signed", "delivered"]),
+      status: z.enum(["draft", "customised", "reviewed", "signed", "delivered", "expired"]),
       notes: z.string().optional(),
     }))
     .mutation(async ({ input }) => {

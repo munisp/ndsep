@@ -37,73 +37,24 @@ export type WebhookEvent =
   | "certificate.issued"
   | "certificate.revoked";
 
-// ── Schema ──────────────────────────────────────────────────────────────────
+// ── Migration readiness ─────────────────────────────────────────────────────
 
-const MARKETPLACE_DDL = `
-CREATE TABLE IF NOT EXISTS api_keys (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id INTEGER NOT NULL,
-  name VARCHAR(128) NOT NULL,
-  key_hash VARCHAR(64) NOT NULL UNIQUE,
-  key_prefix VARCHAR(12) NOT NULL,
-  scopes TEXT[] NOT NULL DEFAULT '{read}',
-  rate_limit_rpm INTEGER NOT NULL DEFAULT 60,
-  expires_at TIMESTAMPTZ,
-  last_used_at TIMESTAMPTZ,
-  total_requests INTEGER DEFAULT 0,
-  status VARCHAR(16) NOT NULL DEFAULT 'active',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS webhook_subscriptions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id INTEGER NOT NULL,
-  url TEXT NOT NULL,
-  events TEXT[] NOT NULL,
-  secret VARCHAR(64) NOT NULL,
-  status VARCHAR(16) NOT NULL DEFAULT 'active',
-  failure_count INTEGER DEFAULT 0,
-  last_triggered_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS marketplace_plugins (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(128) NOT NULL UNIQUE,
-  description TEXT,
-  author VARCHAR(128),
-  version VARCHAR(16) NOT NULL DEFAULT '1.0.0',
-  sector VARCHAR(64),
-  category VARCHAR(64),
-  install_count INTEGER DEFAULT 0,
-  status VARCHAR(16) NOT NULL DEFAULT 'published',
-  manifest JSONB NOT NULL DEFAULT '{}',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS api_usage_log (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  api_key_id UUID REFERENCES api_keys(id),
-  endpoint VARCHAR(256) NOT NULL,
-  method VARCHAR(8) NOT NULL,
-  status_code INTEGER,
-  response_time_ms INTEGER,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_api_usage_created ON api_usage_log (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_api_usage_log_api_key_id_fk ON api_usage_log (api_key_id);
-`;
+const REQUIRED_MARKETPLACE_TABLES = ["api_keys", "api_usage_log", "marketplace_plugins", "webhook_subscriptions"] as const;
 
 export async function initMarketplace(): Promise<void> {
-  const db = (await getDb())!;
-  try {
-    await db.execute(sql.raw(MARKETPLACE_DDL));
-    await seedPlugins();
-    logger.info("API Marketplace initialized");
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logger.warn({ err: msg }, "Marketplace init (tables may already exist)");
-  }
+  if (process.env.NODE_ENV === "test") return;
+  const db = await getDb();
+  if (!db) throw new Error("Marketplace database is unavailable");
+  const result = await db.execute(sql`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name IN ('api_keys', 'api_usage_log', 'marketplace_plugins', 'webhook_subscriptions')
+  `);
+  const found = new Set(result.rows.map((row) => String((row as { table_name: string }).table_name)));
+  const missing = REQUIRED_MARKETPLACE_TABLES.filter((table) => !found.has(table));
+  if (missing.length) throw new Error(`Marketplace migration 0029 is incomplete; missing tables: ${missing.join(", ")}`);
+  await seedPlugins();
+  logger.info("API Marketplace initialized from migration-owned schema");
 }
 
 async function seedPlugins(): Promise<void> {
@@ -185,11 +136,11 @@ export async function triggerWebhooks(event: WebhookEvent, payload: unknown): Pr
   const db = (await getDb())!;
   const subs = await db.execute(sql`
     SELECT id, url, secret FROM webhook_subscriptions
-    WHERE ${event} = ANY(events) AND status = 'active'
+    WHERE ${event} = ANY(events) AND active = true
   `);
 
   let delivered = 0;
-  for (const row of subs.rows as { id: string; url: string; secret: string }[]) {
+  for (const row of subs.rows as { id: number; url: string; secret: string }[]) {
     const body = JSON.stringify({ event, payload, timestamp: new Date().toISOString() });
     const signature = crypto.createHmac("sha256", row.secret).update(body).digest("hex");
 
@@ -208,16 +159,16 @@ export async function triggerWebhooks(event: WebhookEvent, payload: unknown): Pr
       if (res.ok) {
         delivered++;
         await db.execute(sql`
-          UPDATE webhook_subscriptions SET last_triggered_at = NOW(), failure_count = 0 WHERE id = ${row.id}::uuid
+          UPDATE webhook_subscriptions SET last_delivery_at = NOW(), failure_count = 0 WHERE id = ${row.id}
         `);
       } else {
         await db.execute(sql`
-          UPDATE webhook_subscriptions SET failure_count = failure_count + 1 WHERE id = ${row.id}::uuid
+          UPDATE webhook_subscriptions SET failure_count = failure_count + 1 WHERE id = ${row.id}
         `);
       }
     } catch {
       await db.execute(sql`
-        UPDATE webhook_subscriptions SET failure_count = failure_count + 1 WHERE id = ${row.id}::uuid
+        UPDATE webhook_subscriptions SET failure_count = failure_count + 1 WHERE id = ${row.id}
       `);
     }
   }

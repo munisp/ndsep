@@ -248,24 +248,29 @@ func initTigerBeetle() {
 	}()
 }
 
-func recordFeeEntry(dpcoID, feeType string, amountNGN float64) (string, error) {
+func recordFeeEntry(dpcoID, feeType string, amountNGN json.Number) (string, error) {
 	mu.RLock()
 	ok := tigerbeetleOK
 	mu.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("TigerBeetle ledger is unavailable for %s fee", feeType)
 	}
+	if strings.TrimSpace(amountNGN.String()) == "" {
+		return "", fmt.Errorf("NGN fee amount is required")
+	}
 	body := map[string]interface{}{
-		"org_id":       dpcoID,
-		"violation_id": fmt.Sprintf("dpco-%s-%s", feeType, dpcoID),
-		"amount_usd":   amountNGN / 1500.0,
-		"currency":     "NGN",
+		"org_id":      dpcoID,
+		"penalty_id":  fmt.Sprintf("dpco:%s:%s", feeType, dpcoID),
+		"amount":      amountNGN,
+		"currency":    "NGN",
+		"type":        "fine",
+		"description": fmt.Sprintf("DPCO %s fee", feeType),
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
 		return "", fmt.Errorf("encode TigerBeetle fee entry: %w", err)
 	}
-	resp, err := http.Post(fmt.Sprintf("%s/penalty/issue", tigerbeetleURL), "application/json", bytes.NewReader(b))
+	resp, err := http.Post(fmt.Sprintf("%s/transaction", tigerbeetleURL), "application/json", bytes.NewReader(b))
 	if err != nil {
 		return "", fmt.Errorf("post TigerBeetle fee entry: %w", err)
 	}
@@ -397,16 +402,18 @@ func requireLifecycleString(record map[string]interface{}, key string) (string, 
 
 func registerDpco(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name          string  `json:"name"`
-		LicenceNumber string  `json:"licence_number"`
-		Type          string  `json:"type"`
-		State         string  `json:"state"`
-		Email         string  `json:"email"`
-		Phone         string  `json:"phone"`
-		Address       string  `json:"address"`
-		FeeNGN        float64 `json:"fee_ngn"`
+		Name          string      `json:"name"`
+		LicenceNumber string      `json:"licence_number"`
+		Type          string      `json:"type"`
+		State         string      `json:"state"`
+		Email         string      `json:"email"`
+		Phone         string      `json:"phone"`
+		Address       string      `json:"address"`
+		FeeNGN        json.Number `json:"fee_ngn"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
@@ -414,8 +421,9 @@ func registerDpco(w http.ResponseWriter, r *http.Request) {
 	if req.LicenceNumber == "" {
 		req.LicenceNumber = fmt.Sprintf("NDPC/DPCO/%04d/%d", time.Now().Year(), time.Now().UnixNano()%10000)
 	}
-	if req.FeeNGN == 0 {
-		req.FeeNGN = 500000 // ₦500,000 default DPCO registration fee
+	if strings.TrimSpace(req.FeeNGN.String()) == "" {
+		http.Error(w, `{"error":"fee_ngn is required before durable registration"}`, http.StatusBadRequest)
+		return
 	}
 	dpco := map[string]interface{}{
 		"id": id, "name": req.Name, "licence_number": req.LicenceNumber,
@@ -473,11 +481,17 @@ func renewLicence(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 	var req struct {
-		FeeNGN float64 `json:"fee_ngn"`
+		FeeNGN json.Number `json:"fee_ngn"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
-	if req.FeeNGN == 0 {
-		req.FeeNGN = 500000
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid renewal request"}`, http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.FeeNGN.String()) == "" {
+		http.Error(w, `{"error":"fee_ngn is required before durable renewal"}`, http.StatusBadRequest)
+		return
 	}
 	dpco, err := loadRegistryRecord(r.Context(), id)
 	if err != nil {

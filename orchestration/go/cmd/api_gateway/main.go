@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,7 +34,7 @@ func getenv(key, fallback string) string {
 
 var (
 	apisixAdminURL  = getenv("APISIX_ADMIN_URL", "http://localhost:9180")
-	apisixAdminKey  = getenv("APISIX_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
+	apisixAdminKey  = os.Getenv("APISIX_ADMIN_KEY")
 	apisixEnabled   = getenv("APISIX_ENABLED", "true") == "true"
 )
 
@@ -225,6 +226,14 @@ func metricsHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func main() {
+	if apisixEnabled {
+		if len(apisixAdminKey) < 32 {
+			logger.Fatal("APISIX_ADMIN_KEY must be a high-entropy secret of at least 32 characters when APISIX is enabled")
+		}
+		if os.Getenv("NODE_ENV") == "production" && !strings.HasPrefix(apisixAdminURL, "https://") {
+			logger.Fatal("APISIX_ADMIN_URL must use https:// in production")
+		}
+	}
 	port := getenv("PORT", "8130")
 	initApisix()
 

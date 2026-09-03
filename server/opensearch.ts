@@ -21,11 +21,13 @@
 
 import { logger } from "./logger";
 import { captureError } from "./errorMonitoring";
+import { assertOpenSearchIndex, getOpenSearchConfig } from "./opensearchConfig";
 
-const OPENSEARCH_URL = process.env.OPENSEARCH_URL ?? "http://localhost:9200";
-const OPENSEARCH_USERNAME = process.env.OPENSEARCH_USERNAME;
-const OPENSEARCH_PASSWORD = process.env.OPENSEARCH_PASSWORD;
-const OPENSEARCH_ENABLED = (process.env.OPENSEARCH_ENABLED ?? "true") === "true";
+const openSearchConfig = getOpenSearchConfig();
+const OPENSEARCH_URL = openSearchConfig.url;
+const OPENSEARCH_USERNAME = openSearchConfig.username;
+const OPENSEARCH_PASSWORD = openSearchConfig.password;
+const OPENSEARCH_ENABLED = openSearchConfig.enabled;
 
 let connected = false;
 let indexed = 0;
@@ -148,6 +150,8 @@ const NDSEP_INDICES = [
   },
 ];
 
+const NDSEP_INDEX_NAMES = NDSEP_INDICES.map((index) => index.name);
+
 export async function ensureIndices(): Promise<{ created: string[]; existing: string[] }> {
   const created: string[] = [];
   const existing: string[] = [];
@@ -175,6 +179,7 @@ export async function ensureIndices(): Promise<{ created: string[]; existing: st
 // ─── Document Operations ─────────────────────────────────────────────────────
 
 export async function indexDocument(index: string, id: string, doc: Record<string, unknown>): Promise<boolean> {
+  assertOpenSearchIndex(index, NDSEP_INDEX_NAMES);
   const { ok, status, data } = await osRequest("PUT", `/${index}/_doc/${id}`, doc);
   if (!ok) {
     throw new Error(`OpenSearch document index failed for ${index}/${id}: ${status || "connection unavailable"} ${JSON.stringify(data)}`);
@@ -184,6 +189,7 @@ export async function indexDocument(index: string, id: string, doc: Record<strin
 }
 
 export async function bulkIndex(index: string, docs: Array<{ id: string; doc: Record<string, unknown> }>): Promise<number> {
+  assertOpenSearchIndex(index, NDSEP_INDEX_NAMES);
   if (docs.length === 0) return 0;
   if (!OPENSEARCH_ENABLED) throw new Error("OpenSearch is disabled; bulk indexing cannot be acknowledged");
   const lines: string[] = [];
@@ -219,6 +225,7 @@ export async function search(
   query: Record<string, unknown>,
   options?: { size?: number; from?: number; sort?: unknown; highlight?: unknown },
 ): Promise<{ hits: unknown[]; total: number; took: number }> {
+  assertOpenSearchIndex(index, NDSEP_INDEX_NAMES);
   const body: Record<string, unknown> = {
     query,
     size: options?.size ?? 20,

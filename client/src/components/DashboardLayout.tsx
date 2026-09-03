@@ -560,7 +560,7 @@ function NotificationsHeader({ isMobile, activeMenuLabel }: { isMobile: boolean;
 export default function DashboardLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode | (() => React.ReactNode);
 }) {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem(SIDEBAR_WIDTH_KEY);
@@ -653,7 +653,7 @@ export default function DashboardLayout({
       }
     >
       <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
-        {children}
+        {typeof children === "function" ? children() : children}
       </DashboardLayoutContent>
     </SidebarProvider>
   );
@@ -999,8 +999,8 @@ function DashboardLayoutContent({
         <FloatingChatBubble />
         <WhatsNewModal />
         <PwaInstallPrompt />
-        <main id="main-content" role="main" className="flex-1 min-h-0 overflow-hidden gradient-mesh">
-          <div className="relative z-10 h-full">
+        <main id="main-content" role="main" className="flex-1 min-h-0 overflow-y-auto overscroll-contain gradient-mesh">
+          <div className="relative z-10 min-h-full">
             <PageTransition>{children}</PageTransition>
           </div>
         </main>

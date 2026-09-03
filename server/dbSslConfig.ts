@@ -23,14 +23,17 @@ export interface PgSslConfig {
  * - In production: SSL enabled with certificate verification (if CA is provided)
  * - In development: SSL disabled unless DATABASE_URL contains sslmode=require
  */
-export function getPgSslConfig(): PgSslConfig | false {
+export function getPgSslConfig(databaseUrl: string = process.env.DATABASE_URL ?? ""): PgSslConfig | false {
   const isProduction = process.env.NODE_ENV === "production";
-  const dbUrl = process.env.DATABASE_URL ?? "";
-  const requiresSsl = dbUrl.includes("sslmode=require") || isProduction;
+  const dbUrl = databaseUrl;
+  const requiresSsl = /(?:[?&]|^)sslmode=(?:require|verify-ca|verify-full)(?:&|$)/i.test(dbUrl) || isProduction;
 
   if (!requiresSsl) return false;
 
   const caPath = process.env.DB_SSL_CA ?? "";
+  if (isProduction && process.env.DB_SSL_REJECT_UNAUTHORIZED === "false") {
+    throw new Error("DB_SSL_REJECT_UNAUTHORIZED=false is prohibited in production");
+  }
   const rejectUnauthorized = process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false";
 
   const config: PgSslConfig = {
@@ -42,6 +45,9 @@ export function getPgSslConfig(): PgSslConfig | false {
     try {
       config.ca = fs.readFileSync(caPath, "utf8");
     } catch (err) {
+      if (isProduction) {
+        throw new Error(`DB_SSL_CA could not be read in production: ${caPath}`, { cause: err });
+      }
       logger.warn({ data: err }, `[DB SSL] Failed to read CA certificate from ${caPath}:`);
     }
   }

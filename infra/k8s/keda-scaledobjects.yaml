@@ -812,3 +812,56 @@ spec:
         offsetResetPolicy: latest
       authenticationRef:
         name: kafka-trigger-auth
+
+---
+# ─── Webhook Delivery Queue Worker: PostgreSQL claimable queue depth ───────────
+# This object requires the KEDA PostgreSQL scaler CRD and uses the Deployment's
+# NDSEP_PG_SCALER_URL secret-derived environment variable. It is not active until
+# the digest-bound worker Deployment has been rendered and applied by an approved
+# GitOps release process.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: webhook-delivery-worker-keda
+  namespace: ndsep
+  labels:
+    app: webhook-delivery-worker
+    domain: platform
+    scaler: keda
+spec:
+  scaleTargetRef:
+    name: webhook-delivery-worker
+    envSourceContainerName: webhook-delivery-worker
+  pollingInterval: 15
+  cooldownPeriod: 300
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  fallback:
+    failureThreshold: 3
+    replicas: 2
+  triggers:
+    - type: postgresql
+      metadata:
+        connectionFromEnv: NDSEP_PG_SCALER_URL
+        query: |
+          SELECT COALESCE(count(*), 0)::numeric
+          FROM webhook_delivery_attempts
+          WHERE status IN ('pending', 'retrying')
+            AND next_retry_at <= now()
+        targetQueryValue: "50"
+        activationTargetQueryValue: "1"
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 4
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "ndsep.break-glass-authorization-policy.v1",
+  "policyId": "ndsep-production-break-glass",
+  "repository": "munisp/ndsep",
+  "environment": "production-release",
+  "enabled": false,
+  "maximumAuthorizationMinutes": 60,
+  "requiredIssueLabels": [
+    "incident",
+    "break-glass"
+  ],
+  "roles": {
+    "incident_commander": {
+      "allowedLogins": []
+    },
+    "release_authority": {
+      "allowedLogins": []
+    },
+    "database_authority": {
+      "allowedLogins": []
+    }
+  }
+}

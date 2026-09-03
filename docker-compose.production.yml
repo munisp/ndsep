@@ -30,7 +30,6 @@ x-resource-defaults: &resource-defaults
         cpus: "0.1"
         memory: 128m
 
-
 x-healthcheck-defaults: &hc-defaults
   interval: 30s
   timeout: 10s
@@ -38,7 +37,6 @@ x-healthcheck-defaults: &hc-defaults
   start_period: 30s
 
 services:
-
   # ─── NDSEP API (Node.js/Express/tRPC) ───────────────────────────────────────
   ndsep-api:
     <<: [*resource-defaults, *default-restart]
@@ -237,7 +235,11 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions --bootstrap-server localhost:9092",
+        ]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -263,7 +265,8 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       LOG_LEVEL: warn
     healthcheck:
-      test: ["CMD", "temporal", "workflow", "list", "--address", "temporal:7233"]
+      test:
+        ["CMD", "temporal", "workflow", "list", "--address", "temporal:7233"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -295,7 +298,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 5
@@ -427,7 +431,16 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "opa", "eval", "--format=raw", "--data", "/policies", "data.ndsep.authz.allow"]
+      test:
+        [
+          "CMD",
+          "opa",
+          "eval",
+          "--format=raw",
+          "--data",
+          "/policies",
+          "data.ndsep.authz.allow",
+        ]
       <<: *hc-defaults
     logging: *default-logging
     networks:
@@ -466,7 +479,7 @@ services:
       - "--web.external-url=http://alertmanager:9093"
       - "--log.level=warn"
     volumes:
-      - ./infra/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./.ndsep-runtime/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./infra/prometheus/templates:/etc/alertmanager/templates:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]
@@ -475,12 +488,12 @@ services:
     networks:
       - ndsep-internal
     environment:
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/PLACEHOLDER}
-      PAGERDUTY_INTEGRATION_KEY: ${PAGERDUTY_INTEGRATION_KEY:-PLACEHOLDER_KEY}
-      NITDA_COMPLIANCE_EMAIL: ${NITDA_COMPLIANCE_EMAIL:-compliance@nitda.gov.ng}
-      PLATFORM_URL: ${PLATFORM_URL:-https://ndsep.nitda.gov.ng}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com:587}
-      SMTP_FROM: ${SMTP_FROM:-ndsep-alerts@nitda.gov.ng}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:?SLACK_WEBHOOK_URL is required}
+      PAGERDUTY_INTEGRATION_KEY: ${PAGERDUTY_INTEGRATION_KEY:?PAGERDUTY_INTEGRATION_KEY is required}
+      NITDA_COMPLIANCE_EMAIL: ${NITDA_COMPLIANCE_EMAIL:?NITDA_COMPLIANCE_EMAIL is required}
+      PLATFORM_URL: ${PLATFORM_URL:?PLATFORM_URL is required}
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST is required}
+      SMTP_FROM: ${SMTP_FROM:?SMTP_FROM is required}
 
   # ─── Grafana ──────────────────────────────────────────────────────────────────
   grafana:
@@ -495,6 +508,7 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
     healthcheck:
@@ -862,7 +876,7 @@ services:
       - ndsep-public
       - ndsep-internal
 
-# ─── Additional Go Workers ────────────────────────────────────────────────────
+  # ─── Additional Go Workers ────────────────────────────────────────────────────
   anomaly-alert-dispatcher:
     <<: [*resource-defaults, *default-restart]
     build:
@@ -898,9 +912,10 @@ services:
     container_name: ndsep-apisix-manager
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:-http://apisix:9180}
-      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}
-      PORT: "8141"
+      APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:?APISIX_ADMIN_URL is required}
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY is required}
+      APISIX_MANAGER_INTERNAL_AUTH_TOKEN: ${APISIX_MANAGER_INTERNAL_AUTH_TOKEN:?APISIX_MANAGER_INTERNAL_AUTH_TOKEN is required}
+      APISIX_MANAGER_PORT: "8141"
     depends_on:
       postgres:
         condition: service_healthy
@@ -1309,7 +1324,7 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       NETBOX_URL: ${NETBOX_URL:-http://netbox:8080}
-      NETBOX_TOKEN: ${NETBOX_TOKEN:-0123456789abcdef0123456789abcdef01234567}
+      NETBOX_TOKEN: ${NETBOX_TOKEN:?NETBOX_TOKEN is required}
       PORT: "8159"
     depends_on:
       postgres:
@@ -1420,9 +1435,9 @@ services:
     container_name: ndsep-ranger-policy
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      RANGER_URL: ${RANGER_URL:-http://ranger:6080}
-      RANGER_ADMIN_USER: ${RANGER_ADMIN_USER:-admin}
-      RANGER_ADMIN_PASS: ${RANGER_ADMIN_PASS:-rangerR0cks!}
+      RANGER_URL: ${RANGER_URL:?RANGER_URL is required}
+      RANGER_ADMIN_USER: ${RANGER_ADMIN_USER:?RANGER_ADMIN_USER is required}
+      RANGER_ADMIN_PASS: ${RANGER_ADMIN_PASS:?RANGER_ADMIN_PASS is required}
       PORT: "8164"
     depends_on:
       postgres:
@@ -1478,7 +1493,7 @@ services:
     networks:
       - ndsep-internal
 
-# ─── Orchestration Go Services ────────────────────────────────────────────────
+  # ─── Orchestration Go Services ────────────────────────────────────────────────
   dpco-api-gateway:
     <<: [*resource-defaults, *default-restart]
     build:
@@ -1490,7 +1505,7 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-ndsep-jwt-secret-change-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       PORT: "8200"
     depends_on:
       postgres:
@@ -1658,7 +1673,7 @@ services:
     networks:
       - ndsep-internal
 
-# ─── Rust Workers ─────────────────────────────────────────────────────────────
+  # ─── Rust Workers ─────────────────────────────────────────────────────────────
   bgp-validator:
     <<: [*resource-defaults, *default-restart]
     build:
@@ -1687,7 +1702,7 @@ services:
     container_name: ndsep-evidence-signer
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      SIGNING_KEY: ${EVIDENCE_SIGNING_KEY:-ndsep-evidence-signing-key-change-in-prod}
+      SIGNING_KEY: ${EVIDENCE_SIGNING_KEY:?EVIDENCE_SIGNING_KEY is required}
       PORT: "8301"
     depends_on:
       postgres:
@@ -1747,11 +1762,13 @@ services:
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-ingest
     environment:
+      NODE_ENV: production
+      LAKEHOUSE_INGEST_PORT: "8304"
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      KAFKA_BROKERS: kafka:9092
-      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
-      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
-      PORT: "8304"
+      POSTGRES_TLS_CA_FILE: /etc/ndsep/postgres-ca.crt
+      LAKEHOUSE_URL: ${LAKEHOUSE_INGEST_URL:?LAKEHOUSE_INGEST_URL is required}
+    volumes:
+      - ./infra/postgres/server.crt:/etc/ndsep/postgres-ca.crt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -1769,10 +1786,12 @@ services:
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-writer
     environment:
+      NODE_ENV: production
+      LAKEHOUSE_WRITER_PORT: "8305"
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
-      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
-      PORT: "8305"
+      POSTGRES_TLS_CA_FILE: /etc/ndsep/postgres-ca.crt
+    volumes:
+      - ./infra/postgres/server.crt:/etc/ndsep/postgres-ca.crt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -1978,6 +1997,6 @@ volumes:
 networks:
   ndsep-internal:
     driver: bridge
-    internal: true   # No external access to internal services
+    internal: true # No external access to internal services
   ndsep-public:
-    driver: bridge   # Only the Caddy edge connects this network to the internal service mesh
+    driver: bridge # Only the Caddy edge connects this network to the internal service mesh

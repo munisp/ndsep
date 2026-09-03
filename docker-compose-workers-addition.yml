@@ -60,9 +60,10 @@ services:
     container_name: ndsep-apisix-manager
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:-http://apisix:9180}
-      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}
-      PORT: "8141"
+      APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:?APISIX_ADMIN_URL is required}
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY is required}
+      APISIX_MANAGER_INTERNAL_AUTH_TOKEN: ${APISIX_MANAGER_INTERNAL_AUTH_TOKEN:?APISIX_MANAGER_INTERNAL_AUTH_TOKEN is required}
+      APISIX_MANAGER_PORT: "8141"
     depends_on:
       postgres:
         condition: service_healthy
@@ -931,10 +932,8 @@ services:
       dockerfile: Dockerfile
     container_name: ndsep-lakehouse-writer
     environment:
+      LAKEHOUSE_WRITER_PORT: "8305"
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.amazonaws.com}
-      S3_BUCKET: ${S3_BUCKET:-ndsep-lakehouse}
-      PORT: "8305"
     depends_on:
       postgres:
         condition: service_healthy

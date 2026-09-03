@@ -7,7 +7,7 @@ This checklist is intended for teams deploying the permitting platform outside t
 | Area | Minimum action |
 | --- | --- |
 | Backend API | Run the Express and tRPC backend behind Caddy, Nginx, or Traefik with TLS enabled. |
-| Database | Provision a managed MySQL instance or migrate the schema to the target production database before launch. |
+| Database | Provision managed PostgreSQL, apply the reviewed PostgreSQL migrations, enforce TLS and least-privilege credentials, and complete backup/restore acceptance before launch. |
 | Storage | Replace local uploads with MinIO or another S3-compatible object store for durable evidence retention. |
 | AI runtime | Pin the configured `AI_MODEL` and verify extraction latency for permit uploads under production load. |
 | Mobile and PWA config | Set `EXPO_PUBLIC_API_BASE_URL`, `EXPO_PUBLIC_APP_SCHEME`, and `APP_BUNDLE_ID` explicitly for each environment. |

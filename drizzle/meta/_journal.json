@@ -245,6 +245,97 @@
       "when": 1786640400000,
       "tag": "0034_dpco_final_lifecycle_identifier_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1788219175186,
+      "tag": "0035_digital_twin_noc_runtime_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788277860687,
+      "tag": "0036_dpco_analytics_durable_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1788278000000,
+      "tag": "0037_dpco_client_policy_postgres_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788278100000,
+      "tag": "0038_dpco_audit_control_rating_postgres_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788282893000,
+      "tag": "0039_lakehouse_durable_postgres_storage",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788289577146,
+      "tag": "0040_payment_command_durable_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788291472264,
+      "tag": "0041_apisix_durable_route_registry",
+      "breakpoints": true
+    },
+        {
+      "idx": 42,
+      "version": "7",
+      "when": 1788315554964,
+      "tag": "0042_theme_preferences_durable_storage",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788348294858,
+      "tag": "0043_audit_log_hash_chain_durable",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788389839397,
+      "tag": "0044_runtime_schema_ownership_and_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788422400000,
+      "tag": "0045_webhook_delivery_attempts_shadow_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788433770654,
+      "tag": "0046_webhook_delivery_attempt_claim_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788441709235,
+      "tag": "0047_webhook_delivery_attempt_lease_window",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import {
   createTigerBeetleTransaction,
   getTigerBeetleBalance,
   tigerBeetleSmokeTest,
+  __test__,
 } from "./tigerbeetle";
 
 describe("TigerBeetle fail-closed contract", () => {
@@ -15,7 +16,7 @@ describe("TigerBeetle fail-closed contract", () => {
     await expect(createTigerBeetleTransaction({
       orgId: "org-1",
       penaltyId: "penalty-1",
-      amountUsd: 10,
+      amount: 10,
       type: "penalty",
     })).rejects.toThrow("TigerBeetle proxy rejected transaction");
   });
@@ -25,9 +26,33 @@ describe("TigerBeetle fail-closed contract", () => {
     await expect(createTigerBeetleTransaction({
       orgId: "org-1",
       penaltyId: "penalty-2",
-      amountUsd: 10,
+      amount: 10,
       type: "penalty",
     })).rejects.toThrow("ECONNREFUSED");
+  });
+
+  it("binds a transfer idempotency key to both participant accounts", () => {
+    const base = {
+      orgId: "bank-1",
+      penaltyId: "nip-1",
+      amount: 10,
+      currency: "NGN" as const,
+      type: "transfer" as const,
+      debitAccountId: "bank-1",
+      creditAccountId: "bank-2",
+    };
+    expect(__test__.idempotencyKey(base)).not.toBe(__test__.idempotencyKey({ ...base, creditAccountId: "bank-3" }));
+  });
+
+  it("rejects an interbank transfer without both durable account identifiers", async () => {
+    await expect(createTigerBeetleTransaction({
+      orgId: "bank-1",
+      penaltyId: "nip-1",
+      amount: 10,
+      currency: "NGN",
+      type: "transfer",
+      debitAccountId: "bank-1",
+    })).rejects.toThrow("creditAccountId");
   });
 
   it("does not convert an unavailable balance lookup into a null balance", async () => {

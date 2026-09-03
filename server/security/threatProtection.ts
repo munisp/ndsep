@@ -17,7 +17,23 @@ import { RateLimiterMemory, RateLimiterRes } from "rate-limiter-flexible";
 
 // ── 1. Progressive DDoS slow-down ────────────────────────────────────────
 /**
- * After 50 requests/15s, add 500ms delay per request (up to 20s max).
+ * PWA asset and service-worker precache requests can legitimately exceed the
+ * threshold during a single initial page load. They are immutable static
+ * content and must be rate-limited at the CDN/WAF layer, not charged against
+ * application API throttling. Keep the application-layer delay on dynamic API
+ * and OAuth traffic where it protects database, session, and worker capacity.
+ */
+export function shouldSkipDdosSlowDown(req: Pick<Request, "path" | "ip">): boolean {
+  if (process.env.NODE_ENV === "development" && req.ip === "::1") return true;
+  return !(
+    req.path.startsWith("/api/") ||
+    req.path.startsWith("/oauth") ||
+    req.path === "/login"
+  );
+}
+
+/**
+ * After 50 dynamic requests/15s, add 500ms delay per request (up to 20s max).
  * This degrades the attacker's throughput without hard-blocking legitimate users.
  */
 export const ddosSlowDown = slowDown({
@@ -25,7 +41,7 @@ export const ddosSlowDown = slowDown({
   delayAfter: 50,              // Start slowing after 50 req/window
   delayMs: (hits) => hits * 500, // 500ms × (hits - delayAfter)
   maxDelayMs: 20_000,          // Cap at 20s
-  skip: (req) => process.env.NODE_ENV === "development" && req.ip === "::1",
+  skip: shouldSkipDdosSlowDown,
 });
 
 // ── 2. Brute-force / credential stuffing protection ──────────────────────

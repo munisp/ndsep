@@ -1,0 +1,127 @@
+name: Staging Rollback Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full SHA of the deployed production candidate being verified
+        required: true
+        type: string
+      drill_id:
+        description: Approved staging-only rollback drill identifier
+        required: true
+        type: string
+      candidate_digest:
+        description: Immutable candidate image digest that was rolled back
+        required: true
+        type: string
+      rollback_digest:
+        description: Prior approved immutable image digest now serving traffic
+        required: true
+        type: string
+      confirm:
+        description: Type EXECUTE_STAGING_ROLLBACK_VERIFICATION to collect real staging evidence
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-rollback-verification-${{ inputs.drill_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Post-Rollback Traffic and Data Integrity
+    if: >-
+      github.ref == 'refs/heads/production' &&
+      inputs.confirm == 'EXECUTE_STAGING_ROLLBACK_VERIFICATION'
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    environment:
+      name: staging
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      STAGING_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      STAGING_ROLLBACK_DRILL_ID: ${{ inputs.drill_id }}
+      STAGING_CANDIDATE_IMAGE_DIGEST: ${{ inputs.candidate_digest }}
+      STAGING_ROLLBACK_IMAGE_DIGEST: ${{ inputs.rollback_digest }}
+      STAGING_TEST_BASE_URL: ${{ secrets.STAGING_TEST_BASE_URL }}
+      STAGING_READONLY_DATABASE_URL: ${{ secrets.STAGING_READONLY_DATABASE_URL }}
+      STAGING_READONLY_DATABASE_USER: ${{ vars.STAGING_READONLY_DATABASE_USER }}
+      STAGING_READONLY_DB_HOSTS: ${{ vars.STAGING_READONLY_DB_HOSTS }}
+      STAGING_AUDIT_CHAIN_START_ID: ${{ vars.STAGING_AUDIT_CHAIN_START_ID }}
+      STAGING_AUTHORIZATION_PROBE_PATH: ${{ vars.STAGING_AUTHORIZATION_PROBE_PATH }}
+      STAGING_AUTHORIZATION_PROBE_EXPECTED_STATUS: ${{ vars.STAGING_AUTHORIZATION_PROBE_EXPECTED_STATUS }}
+      STAGING_MFA_TOKEN: ${{ secrets.STAGING_MFA_TOKEN }}
+      STAGING_ROLLBACK_EVIDENCE_DIR: staging-rollback-evidence
+      STAGING_ROLLBACK_STATE_FILE: /var/lib/ndsep-staging-rollback/${{ inputs.drill_id }}/rollback-state.json
+      STAGING_ASYNC_RECONCILIATION_FILE: /var/lib/ndsep-staging-rollback/${{ inputs.drill_id }}/async-reconciliation.json
+      STAGING_OBSERVABILITY_EVIDENCE_FILE: /var/lib/ndsep-staging-rollback/${{ inputs.drill_id }}/observability.json
+      STAGING_RELEASE_SMOKE_RESULT_FILE: staging-rollback-evidence/release-smoke.json
+    steps:
+      - name: Check out current protected production commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Bind verification to current protected production candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$STAGING_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$STAGING_SOURCE_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$STAGING_ROLLBACK_DRILL_ID" =~ ^staging-rollback-[a-z0-9-]{8,80}$ ]]
+          [[ "$STAGING_CANDIDATE_IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$STAGING_ROLLBACK_IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$STAGING_CANDIDATE_IMAGE_DIGEST" != "$STAGING_ROLLBACK_IMAGE_DIGEST" ]]
+          [[ -f "$STAGING_ROLLBACK_STATE_FILE" ]]
+          [[ -f "$STAGING_ASYNC_RECONCILIATION_FILE" ]]
+          [[ -f "$STAGING_OBSERVABILITY_EVIDENCE_FILE" ]]
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install locked verifier and browser-test dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Install locked Chromium browser runtime
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run browser/API release smoke with zero retries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$STAGING_ROLLBACK_EVIDENCE_DIR"
+          set +e
+          BASE_URL="$STAGING_TEST_BASE_URL" \
+            pnpm exec playwright test e2e/release-smoke.spec.ts \
+              --project=chromium --workers=1 --retries=0 --reporter=json \
+              > "$STAGING_RELEASE_SMOKE_RESULT_FILE"
+          smoke_status=$?
+          set -e
+          echo "$smoke_status" > "$STAGING_ROLLBACK_EVIDENCE_DIR/release-smoke.exit-code"
+
+      - name: Verify traffic, durable state, and reconciliation evidence
+        run: pnpm exec tsx scripts/security/verify-staging-rollback.ts
+
+      - name: Upload sanitized rollback verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-rollback-verification-${{ inputs.drill_id }}-${{ github.sha }}
+          path: staging-rollback-evidence/
+          if-no-files-found: error
+          retention-days: 365

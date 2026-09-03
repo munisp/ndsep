@@ -250,6 +250,7 @@ import {
 import { phase12Router } from "./routers/phase12Features";
 import { phase13Router } from "./routers/phase13Features";
 import { productionReadinessRouter } from "./routers/productionReadiness";
+import { mlFoundationRouter } from "./routers/mlFoundation";
 import { temporalRouter, searchRouter as opensearchRouter, wafRouter, gatewayRouter, authzRouter, kafkaMetricsRouter, ledgerRouter } from "./routers/middlewareWiring";
 import { osirisIntelRouter } from "./routers/osirisIntel";
 import { socintRouter } from "./routers/socint";
@@ -316,8 +317,12 @@ export const appRouter = router({
   insurance: insuranceRouter,
   fintech: fintechRouter,
   workflows: workflowRouter,
+  mlFoundation: mlFoundationRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    // tRPC must receive an explicit null for an unauthenticated request. Returning
+    // undefined serializes to an empty HTTP 200 response, which leaves client
+    // query consumers in an indeterminate loading state.
+    me: publicProcedure.query(opts => opts.ctx.user ?? null),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       // Blacklist the JWT token so it cannot be reused even before expiry
@@ -816,7 +821,7 @@ export const appRouter = router({
         createTigerBeetleTransaction({
           orgId: String(input.organizationId),
           penaltyId: String(penalty?.id ?? 0),
-          amountUsd: input.amount,
+          amount: input.amount,
           currency: input.currency,
           type: "penalty",
           description: input.description,
@@ -914,7 +919,7 @@ export const appRouter = router({
           createTigerBeetleTransaction({
             orgId: String(resRec.organizationId ?? 0),
             penaltyId: String(resRec.penaltyId),
-            amountUsd: Number(resRec.amount ?? 0),
+            amount: Number(resRec.amount ?? 0),
             currency: String(resRec.currency ?? "USD"),
             type: "settlement",
             description: `Appeal ${input.appealId} upheld — penalty settled`,
@@ -1002,7 +1007,7 @@ export const appRouter = router({
           createTigerBeetleTransaction({
             orgId: String(r.orgId),
             penaltyId: String(r.penaltyId),
-            amountUsd: input.amount,
+            amount: input.amount,
             currency: input.currency,
             type: "penalty",
             description: input.description,

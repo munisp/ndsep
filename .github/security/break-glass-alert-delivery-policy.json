@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "ndsep.break-glass-alert-delivery-policy.v1",
+  "policyId": "ndsep-production-break-glass-alert-delivery",
+  "repository": "munisp/ndsep",
+  "environment": "production-release",
+  "enabled": false,
+  "allowedSiemModes": [
+    "splunk-hec",
+    "elastic"
+  ],
+  "pagerDutyEndpoint": "https://events.pagerduty.com/v2/enqueue",
+  "attestationRequired": true,
+  "externalImmutableRetentionRequired": true,
+  "noReadinessCredit": true
+}

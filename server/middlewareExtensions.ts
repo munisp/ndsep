@@ -5,6 +5,7 @@
  */
 
 import { permifyCheck as checkPermifyPermission } from "./permify";
+import { createTigerBeetleTransaction } from "./tigerbeetle";
 
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
@@ -12,7 +13,6 @@ const DAPR_BRIDGE_URL = process.env.DAPR_BRIDGE_URL || "http://localhost:8150";
 const FLUVIO_RELAY_URL = process.env.FLUVIO_RELAY_URL || "http://localhost:8151";
 const MOJALOOP_ADAPTER_URL = process.env.MOJALOOP_ADAPTER_URL || "http://localhost:8152";
 const APISIX_MANAGER_URL = process.env.APISIX_MANAGER_URL || "http://localhost:8153";
-const TIGERBEETLE_LEDGER_URL = process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8160";
 const OPENSEARCH_INDEXER_URL = process.env.OPENSEARCH_INDEXER_URL || "http://localhost:8161";
 const KEYCLOAK_VALIDATOR_URL = process.env.KEYCLOAK_VALIDATOR_URL || "http://localhost:8162";
 const LAKEHOUSE_INGEST_URL = process.env.LAKEHOUSE_INGEST_URL || "http://localhost:8163";
@@ -23,7 +23,26 @@ const DAPR_STATE_URL = process.env.DAPR_STATE_URL || "http://localhost:8167";
 
 // ─── Shared fetch helper ─────────────────────────────────────────────────────
 
+const IS_PRODUCTION = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+
+function trustedEndpoint(url: string): URL {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(url);
+  } catch {
+    throw new Error("Required integration endpoint is not a valid absolute URL");
+  }
+  if (IS_PRODUCTION && endpoint.protocol !== "https:") {
+    throw new Error(`Required production integration endpoint must use HTTPS: ${endpoint.origin}`);
+  }
+  if (endpoint.username || endpoint.password) {
+    throw new Error(`Required integration endpoint must not contain inline credentials: ${endpoint.origin}`);
+  }
+  return endpoint;
+}
+
 async function postJSON(url: string, body: object): Promise<void> {
+  const endpoint = trustedEndpoint(url);
   let response: Response;
   try {
     response = await fetch(url, {
@@ -33,11 +52,11 @@ async function postJSON(url: string, body: object): Promise<void> {
       signal: AbortSignal.timeout(3000),
     });
   } catch (err) {
-    throw new Error(`Required integration POST ${url} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(`Required integration POST ${endpoint.origin} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`Required integration POST ${url} failed with HTTP ${response.status}: ${detail}`);
+    throw new Error(`Required integration POST ${endpoint.origin} failed with HTTP ${response.status}: ${detail}`);
   }
 }
 
@@ -55,16 +74,18 @@ export async function daprStateSet(key: string, value: unknown): Promise<void> {
 
 /** Get a value from the Dapr state store */
 export async function daprStateGet(key: string): Promise<unknown> {
+  const url = `${DAPR_STATE_URL}/state/get`;
+  const endpoint = trustedEndpoint(url);
   let resp: Response;
   try {
-    resp = await fetch(`${DAPR_STATE_URL}/state/get`, {
+    resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key }),
       signal: AbortSignal.timeout(2000),
     });
   } catch (err) {
-    throw new Error(`Dapr state lookup for ${key} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+    throw new Error(`Dapr state lookup for ${key} at ${endpoint.origin} is unavailable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (!resp.ok) throw new Error(`Dapr state lookup for ${key} failed with HTTP ${resp.status}`);
   const data = await resp.json() as { value: unknown };
@@ -75,7 +96,7 @@ export async function daprStateGet(key: string): Promise<unknown> {
 
 /** Relay an event to Fluvio (high-throughput streaming) */
 export async function fluvioPublish(topic: string, event: object): Promise<void> {
-  await postJSON(`${FLUVIO_RELAY_URL}/publish`, { topic, event });
+  await postJSON(`${FLUVIO_RELAY_URL}/publish`, { topic, payload: event });
   // Also push to consumer for routing
   await postJSON(`${FLUVIO_CONSUMER_URL}/publish`, {
     topic: `ndsep.${topic.replace(/-/g, ".")}`,
@@ -92,7 +113,9 @@ export async function opensearchIndex(index: string, doc: object): Promise<void>
 
 /** Search OpenSearch (returns results or empty array on error) */
 export async function opensearchSearch(index: string, params: object): Promise<unknown[]> {
-  const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search`, {
+  const url = `${OPENSEARCH_QUERY_URL}/search`;
+  trustedEndpoint(url);
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ index, ...params }),
@@ -105,7 +128,9 @@ export async function opensearchSearch(index: string, params: object): Promise<u
 
 /** Global search across all NDSEP indices */
 export async function opensearchGlobalSearch(q: string, sectors?: string[]): Promise<unknown[]> {
-  const resp = await fetch(`${OPENSEARCH_QUERY_URL}/search/global`, {
+  const url = `${OPENSEARCH_QUERY_URL}/search/global`;
+  trustedEndpoint(url);
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q, sectors }),
@@ -129,7 +154,7 @@ export async function lakehouseIngest(table: string, records: object[]): Promise
 
 // ─── TigerBeetle ─────────────────────────────────────────────────────────────
 
-/** Record a financial transaction in TigerBeetle */
+/** Record a financial transaction through the TigerBeetle-backed Go ledger proxy. */
 export async function tigerbeetleTransfer(params: {
   debitAccountId: string;
   creditAccountId: string;
@@ -138,13 +163,15 @@ export async function tigerbeetleTransfer(params: {
   reference: string;
   transferType?: string;
 }): Promise<void> {
-  await postJSON(`${TIGERBEETLE_LEDGER_URL}/transfers`, {
-    debit_account_id: params.debitAccountId,
-    credit_account_id: params.creditAccountId,
+  await createTigerBeetleTransaction({
+    orgId: params.debitAccountId,
+    penaltyId: params.reference,
     amount: params.amount,
     currency: params.currency,
-    user_data: params.reference,
-    transfer_type: params.transferType || "REGULATORY_FINE",
+    type: "transfer",
+    debitAccountId: params.debitAccountId,
+    creditAccountId: params.creditAccountId,
+    description: params.transferType ?? "REGULATORY_TRANSFER",
   });
 }
 
@@ -178,13 +205,18 @@ export async function keycloakValidate(token: string, requiredRoles?: string[]):
   username?: string;
 }> {
   try {
-    const resp = await fetch(`${KEYCLOAK_VALIDATOR_URL}/validate`, {
+    const url = `${KEYCLOAK_VALIDATOR_URL}/validate`;
+    trustedEndpoint(url);
+    const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, required_roles: requiredRoles }),
       signal: AbortSignal.timeout(3000),
     });
-    return await resp.json() as { valid: boolean; roles: string[]; sub?: string; username?: string };
+    if (!resp.ok) return { valid: false, roles: [] };
+    const result = await resp.json() as { valid?: boolean; roles?: string[]; sub?: string; username?: string };
+    if (!result.valid || !Array.isArray(result.roles)) return { valid: false, roles: [] };
+    return { valid: true, roles: result.roles, sub: result.sub, username: result.username };
   } catch (err) {
     return { valid: false, roles: [] };
   }
@@ -223,6 +255,7 @@ export async function apisixRegisterRoute(params: {
   upstreamUrl: string;
   plugins?: object;
 }): Promise<void> {
+  trustedEndpoint(params.upstreamUrl);
   await postJSON(`${APISIX_MANAGER_URL}/routes`, {
     route_id: params.routeId,
     uri: params.uri,

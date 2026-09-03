@@ -3,6 +3,7 @@ import { and, desc, eq, gte, ilike, isNotNull, lt, lte, or, sql, SQL } from "dri
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { getPgSslConfig } from "./dbSslConfig";
+import { getPrimaryDatabasePoolOptions } from "./dbPoolConfig";
 import { encryptField } from "./encryption";
 import {
   assets,
@@ -72,13 +73,7 @@ export async function getDb() {
     _db = null;
     _pool = null;
     try {
-      _pool = new Pool({
-        connectionString: PG_URL,
-        ssl: getPgSslConfig(),
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
-      });
+      _pool = new Pool(getPrimaryDatabasePoolOptions(PG_URL, getPgSslConfig()));
       _db = drizzle(_pool);
     } catch (error) {
       logger.warn({ data: error }, "[Database] Failed to connect:");

@@ -72,14 +72,19 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:23.0
-    command: start-dev --import-realm
+    command: start --import-realm
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: ndsep_admin_2026
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:?KEYCLOAK_ADMIN_USER is required}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep
-      KC_DB_USERNAME: ndsep
-      KC_DB_PASSWORD: ndsep_secure_2026
+      KC_DB_URL: ${KEYCLOAK_DB_URL:?KEYCLOAK_DB_URL is required}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+      KC_HOSTNAME_STRICT: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
     ports: ["8080:8080"]
     depends_on: [postgres]
     networks: [ndsep-net]
@@ -234,6 +239,19 @@ services:
     depends_on: [kafka]
     networks: [ndsep-net]
 
+  lakehouse-ingest:
+    build:
+      context: ../workers/rust
+      dockerfile: Dockerfile
+      args: {WORKER: lakehouse_ingest}
+    ports: ["8163:8163"]
+    environment:
+      LAKEHOUSE_INGEST_PORT: "8163"
+      LAKEHOUSE_DATABASE_URL: ${LAKEHOUSE_INGEST_DATABASE_URL:?LAKEHOUSE_INGEST_DATABASE_URL is required}
+      LAKEHOUSE_URL: ${LAKEHOUSE_INGEST_URL:?LAKEHOUSE_INGEST_URL is required}
+    depends_on: [postgres, lakehouse]
+    networks: [ndsep-net]
+
   dapr-bindings:
     build:
       context: ./python/dapr_bindings
@@ -354,6 +372,8 @@ services:
     ports: ["8330:8330"]
     environment:
       PORT: "8330"
+      DPCO_ANALYTICS_DATABASE_URL: ${DPCO_ANALYTICS_DATABASE_URL:?DPCO_ANALYTICS_DATABASE_URL is required}
+      DPCO_ANALYTICS_SERVICE_TOKEN: ${DPCO_ANALYTICS_SERVICE_TOKEN:?DPCO_ANALYTICS_SERVICE_TOKEN is required}
       KAFKA_BROKERS: kafka:29092
       KAFKA_ENABLED: "true"
       FLUVIO_HTTP_URL: http://fluvio:9003
@@ -367,7 +387,7 @@ services:
       DAPR_HTTP_PORT: "3500"
       DAPR_APP_ID: dpco-analytics
       DAPR_ENABLED: "true"
-    depends_on: [kafka, redis]
+    depends_on: [postgres, kafka, redis]
     networks: [ndsep-net]
     restart: unless-stopped
     healthcheck:

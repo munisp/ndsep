@@ -1,0 +1,124 @@
+name: Production GO Evidence Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full SHA of the currently protected production commit
+        required: true
+        type: string
+      staging_run_id:
+        description: Successful Staging Production GO Acceptance workflow run ID
+        required: true
+        type: string
+      confirm:
+        description: Type VERIFY_PRODUCTION_GO_EVIDENCE to verify an existing evidence artifact
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: production-go-evidence-${{ inputs.source_commit }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Digest-Bound Production GO Evidence
+    if: >-
+      github.ref == 'refs/heads/production' &&
+      inputs.confirm == 'VERIFY_PRODUCTION_GO_EVIDENCE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production-release
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Bind request to the current protected production commit
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$REQUESTED_SOURCE_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install locked verifier dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Verify staging workflow provenance and commit binding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$STAGING_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh run view "$STAGING_RUN_ID" --repo "$REPOSITORY" \
+            --json headSha,headBranch,status,conclusion,workflowName \
+            > staging-workflow.json
+          jq -e \
+            --arg sha "$SOURCE_COMMIT" \
+            '(.headSha == $sha) and
+             (.headBranch == "production") and
+             (.status == "completed") and
+             (.conclusion == "success") and
+             (.workflowName == "Staging Production GO Acceptance")' \
+            staging-workflow.json > /dev/null
+
+      - name: Download the named protected staging evidence artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p upstream-evidence
+          gh run download "$STAGING_RUN_ID" --repo "$REPOSITORY" \
+            --name "staging-go-evidence-$SOURCE_COMMIT" \
+            --dir upstream-evidence
+          test -f upstream-evidence/candidate.json
+
+      - name: Collect validated staging evidence without mutation
+        run: |
+          set -euo pipefail
+          node scripts/ci/collect-staging-release-evidence.mjs \
+            --source-dir upstream-evidence \
+            --out-dir verified-go-evidence \
+            --write \
+            --confirm COLLECT_REAL_EVIDENCE
+
+      - name: Enforce the 95-point production GO threshold
+        run: |
+          set -euo pipefail
+          node scripts/ci/verify-production-go-evidence.mjs \
+            --evidence-dir verified-go-evidence \
+            > production-go-verification.json
+
+      - name: Upload sanitized production GO verification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-go-verification-${{ github.sha }}
+          path: |
+            staging-workflow.json
+            production-go-verification.json
+          if-no-files-found: warn
+          retention-days: 365

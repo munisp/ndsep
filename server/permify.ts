@@ -23,6 +23,21 @@ import { logger } from "./logger";
 
 const PERMIFY_URL = process.env.PERMIFY_URL ?? "http://localhost:3476";
 const PERMIFY_TENANT = process.env.PERMIFY_TENANT ?? "ndsep";
+const PERMIFY_AUTH_TOKEN = process.env.PERMIFY_AUTH_TOKEN ?? "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+
+function permifyConfigurationError(): string | undefined {
+  if (!IS_PRODUCTION) return undefined;
+  if (!/^https:\/\//.test(PERMIFY_URL)) return "production Permify requires an https:// PERMIFY_URL";
+  if (PERMIFY_AUTH_TOKEN.length < 32) return "production Permify requires a high-entropy PERMIFY_AUTH_TOKEN";
+  return undefined;
+}
+
+function permifyHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (PERMIFY_AUTH_TOKEN) headers.Authorization = `Bearer ${PERMIFY_AUTH_TOKEN}`;
+  return headers;
+}
 
 export type PermifyAction = string;
 
@@ -41,6 +56,11 @@ export async function permifyCheck(
   resourceType: string,
   resourceId: string | number
 ): Promise<boolean> {
+  const configurationError = permifyConfigurationError();
+  if (configurationError) {
+    logger.error({ configurationError }, "[permify] Refusing insecure production authorization check");
+    return false;
+  }
   try {
     const body = {
       metadata: { schema_version: "", snap_token: "", depth: 20 },
@@ -53,7 +73,7 @@ export async function permifyCheck(
       `${PERMIFY_URL}/v1/tenants/${PERMIFY_TENANT}/permissions/check`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: permifyHeaders(),
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(2000),
       }
@@ -104,6 +124,8 @@ export async function permifyWriteRelationship(
   subjectType: string,
   subjectId: string | number
 ): Promise<void> {
+  const configurationError = permifyConfigurationError();
+  if (configurationError) throw new Error(configurationError);
   try {
     const body = {
       metadata: { schema_version: "" },
@@ -120,7 +142,7 @@ export async function permifyWriteRelationship(
       `${PERMIFY_URL}/v1/tenants/${PERMIFY_TENANT}/relationships/write`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: permifyHeaders(),
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(2000),
       }
@@ -142,6 +164,10 @@ export async function permifyHealthCheck(): Promise<{
   latencyMs: number;
 }> {
   const start = Date.now();
+  const configurationError = permifyConfigurationError();
+  if (configurationError) {
+    return { connected: false, url: PERMIFY_URL, tenant: PERMIFY_TENANT, latencyMs: 0 };
+  }
   try {
     const res = await fetch(`${PERMIFY_URL}/healthz`, {
       signal: AbortSignal.timeout(2000),
@@ -157,6 +183,7 @@ export async function permifyHealthCheck(): Promise<{
  * Idempotent — safe to call on every startup.
  */
 export async function permifyBootstrapSchema(): Promise<boolean> {
+  if (permifyConfigurationError()) return false;
   const NDSEP_SCHEMA = `
 entity user {}
 
@@ -187,7 +214,7 @@ entity sector {
       `${PERMIFY_URL}/v1/tenants/${PERMIFY_TENANT}/schemas/write`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: permifyHeaders(),
         body: JSON.stringify({ schema: NDSEP_SCHEMA }),
         signal: AbortSignal.timeout(5000),
       }

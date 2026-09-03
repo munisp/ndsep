@@ -1,0 +1,144 @@
+# Render only through scripts/ci/render-webhook-delivery-worker-manifest.sh.
+# The renderer rejects unset or mutable image references. Do not apply this template directly.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: webhook-delivery-worker
+  namespace: ndsep
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-delivery-worker
+  namespace: ndsep
+  labels:
+    app: webhook-delivery-worker
+    tier: worker
+    delivery-mode: active
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: webhook-delivery-worker
+  template:
+    metadata:
+      labels:
+        app: webhook-delivery-worker
+        tier: worker
+        delivery-mode: active
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8094"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: webhook-delivery-worker
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: webhook-delivery-worker
+          image: ${NDSEP_WEBHOOK_DELIVERY_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: ["/app/webhook_delivery"]
+          env:
+            - name: WEBHOOK_DELIVERY_QUEUE_MODE
+              value: "active"
+            - name: WEBHOOK_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: WEBHOOK_WORKER_BATCH_SIZE
+              value: "50"
+            - name: WEBHOOK_WORKER_POLL_INTERVAL
+              value: "5s"
+            - name: WEBHOOK_WORKER_LEASE_DURATION
+              value: "90s"
+            - name: WEBHOOK_WORKER_HTTP_TIMEOUT
+              value: "10s"
+            - name: WEBHOOK_WORKER_METRICS_ADDRESS
+              value: ":8094"
+            - name: NDSEP_PG_URL
+              valueFrom:
+                secretKeyRef:
+                  name: webhook-delivery-worker-db
+                  key: url
+            - name: NDSEP_PG_SCALER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: webhook-delivery-worker-scaler-db
+                  key: url
+          ports:
+            - name: metrics
+              containerPort: 8094
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-delivery-worker
+  namespace: ndsep
+  labels:
+    app: webhook-delivery-worker
+spec:
+  selector:
+    app: webhook-delivery-worker
+  ports:
+    - name: metrics
+      port: 8094
+      targetPort: metrics
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: webhook-delivery-worker
+  namespace: ndsep
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: webhook-delivery-worker

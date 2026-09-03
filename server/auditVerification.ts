@@ -78,16 +78,30 @@ export async function verifyAuditLogIntegrity(
   const maxEntries = options?.limit ?? Infinity;
 
   try {
-    // Check if hash_chain column exists
     const colCheck = await pool.query(
       `SELECT column_name FROM information_schema.columns
-       WHERE table_name = 'audit_logs' AND column_name = 'hash_chain'`
+       WHERE table_schema = 'public'
+         AND table_name = 'audit_logs'
+         AND column_name IN ('previous_hash', 'hash_chain')`
     );
+    if (colCheck.rows.length !== 2) {
+      throw new Error("audit_logs hash-chain columns are missing; apply the authoritative migration before verification");
+    }
 
-    if (colCheck.rows.length === 0) {
-      // hash_chain column doesn't exist yet — add it
-      await pool.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS hash_chain TEXT`);
-      logger.info("[AuditVerify] Added hash_chain column to audit_logs");
+    if (lastId > 0) {
+      const predecessor = await pool.query(
+        `SELECT hash_chain
+           FROM audit_logs
+          WHERE id <= $1
+          ORDER BY id DESC
+          LIMIT 1`,
+        [lastId]
+      );
+      const predecessorHash = predecessor.rows[0]?.hash_chain;
+      if (!predecessorHash) {
+        throw new Error("cannot begin partial audit verification without a predecessor hash");
+      }
+      previousHash = predecessorHash;
     }
 
     while (totalEntries < maxEntries) {
@@ -95,7 +109,7 @@ export async function verifyAuditLogIntegrity(
         `SELECT id, action, resource_type, resource_id, user_id,
                 COALESCE(details::text, '{}') AS details,
                 created_at::text AS created_at,
-                hash_chain
+                previous_hash, hash_chain
          FROM audit_logs
          WHERE id > $1
          ORDER BY id ASC
@@ -109,22 +123,16 @@ export async function verifyAuditLogIntegrity(
         totalEntries++;
         const expected = computeEntryHash(row, previousHash);
 
-        if (row.hash_chain && row.hash_chain !== expected) {
+        if (!row.hash_chain || row.previous_hash !== (previousHash === "GENESIS" ? null : previousHash) || row.hash_chain !== expected) {
           breaks.push({
             entryId: row.id,
             position: totalEntries,
             expectedHash: expected,
-            storedHash: row.hash_chain,
+            storedHash: row.hash_chain ?? "[MISSING]",
           });
-        } else if (!row.hash_chain) {
-          // Backfill missing hashes
-          await pool.query(
-            `UPDATE audit_logs SET hash_chain = $1 WHERE id = $2`,
-            [expected, row.id]
-          );
         }
 
-        previousHash = expected;
+        previousHash = row.hash_chain ?? expected;
         verifiedEntries++;
         lastId = row.id;
 
@@ -159,27 +167,5 @@ export async function verifyAuditLogIntegrity(
     );
   }
 
-  return result;
-}
-
-/**
- * Middleware helper to add hash chain to new audit log entries.
- * Call this before inserting a new audit log row.
- */
-export async function computeNextAuditHash(
-  pool: Pool,
-  entry: {
-    action: string;
-    resource_type: string;
-    resource_id: string;
-    user_id: string;
-    details: string;
-    created_at: string;
-  }
-): Promise<string> {
-  const { rows } = await pool.query(
-    `SELECT hash_chain FROM audit_logs ORDER BY id DESC LIMIT 1`
-  );
-  const previousHash = rows[0]?.hash_chain ?? "GENESIS";
-  return computeEntryHash(entry, previousHash);
+    return result;
 }

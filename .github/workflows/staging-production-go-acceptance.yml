@@ -1,0 +1,117 @@
+name: Staging Production GO Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full SHA of the reviewed production candidate
+        required: true
+        type: string
+      upstream_run_id:
+        description: Successful Staging Integration Acceptance run ID that produced real upstream evidence
+        required: true
+        type: string
+      confirm:
+        description: Type COLLECT_PROTECTED_STAGING_GO_EVIDENCE to collect existing evidence only
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: staging-production-go-acceptance-${{ inputs.source_commit }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect Protected Staging GO Evidence
+    if: >-
+      github.ref == 'refs/heads/production' &&
+      inputs.confirm == 'COLLECT_PROTECTED_STAGING_GO_EVIDENCE'
+    runs-on: [self-hosted, linux, ndsep-staging-internal]
+    timeout-minutes: 20
+    environment:
+      name: staging
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Bind collection request to the current protected production commit
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$REQUESTED_SOURCE_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "10.34.4"
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install locked evidence collector dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Verify upstream staging acceptance provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_RUN_ID: ${{ inputs.upstream_run_id }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$UPSTREAM_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh run view "$UPSTREAM_RUN_ID" --repo "$REPOSITORY" \
+            --json headSha,headBranch,status,conclusion,workflowName \
+            > upstream-staging-workflow.json
+          jq -e \
+            --arg sha "$SOURCE_COMMIT" \
+            '(.headSha == $sha) and
+             (.headBranch == "production") and
+             (.status == "completed") and
+             (.conclusion == "success") and
+             (.workflowName == "Staging Integration Acceptance")' \
+            upstream-staging-workflow.json > /dev/null
+
+      - name: Download immutable upstream evidence without execution
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_RUN_ID: ${{ inputs.upstream_run_id }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p upstream-evidence
+          gh run download "$UPSTREAM_RUN_ID" --repo "$REPOSITORY" \
+            --name "staging-upstream-evidence-$SOURCE_COMMIT" \
+            --dir upstream-evidence
+          test -f upstream-evidence/candidate.json
+
+      - name: Validate and collect immutable staging evidence
+        run: |
+          set -euo pipefail
+          node scripts/ci/collect-staging-release-evidence.mjs \
+            --source-dir upstream-evidence \
+            --out-dir staging-go-evidence \
+            --write \
+            --confirm COLLECT_REAL_EVIDENCE
+
+      - name: Upload sanitized staging GO evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-go-evidence-${{ github.sha }}
+          path: |
+            staging-go-evidence/
+            upstream-staging-workflow.json
+          if-no-files-found: warn
+          retention-days: 365

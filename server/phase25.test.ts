@@ -247,8 +247,11 @@ describe("middlewareExtensions — lakehouseIngest", () => {
 describe("middlewareExtensions — tigerbeetleTransfer", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("posts to /transfers with debit/credit accounts", async () => {
-    mockFetch.mockResolvedValue(mockOk());
+  it("posts an account-bound transfer to the durable TigerBeetle transaction endpoint", async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({
+      transaction_id: "tb-transfer-001",
+      ledger_entry_id: "tb-transfer-001",
+    }), { status: 201, headers: { "Content-Type": "application/json" } }));
     const { tigerbeetleTransfer } = await import("./middlewareExtensions");
     await tigerbeetleTransfer({
       debitAccountId: "ACC-001",
@@ -259,9 +262,12 @@ describe("middlewareExtensions — tigerbeetleTransfer", () => {
     });
     const call = mockFetch.mock.calls[0];
     const body = JSON.parse(call[1].body);
+    expect(String(call[0])).toContain("/transaction");
     expect(body.debit_account_id).toBe("ACC-001");
+    expect(body.credit_account_id).toBe("ACC-002");
     expect(body.amount).toBe(500000);
-    expect(body.transfer_type).toBe("REGULATORY_FINE");
+    expect(body.type).toBe("transfer");
+    expect(call[1].headers["Idempotency-Key"]).toMatch(/^[a-f0-9]{64}$/);
   });
 });
 

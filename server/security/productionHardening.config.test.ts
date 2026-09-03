@@ -3,10 +3,16 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "../..");
-const read = (relativePath: string) => readFileSync(resolve(root, relativePath), "utf8");
+const read = (relativePath: string) =>
+  readFileSync(resolve(root, relativePath), "utf8");
 
 function composeServiceBlock(compose: string, service: string): string {
-  const match = compose.match(new RegExp(`^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^# ─── Volumes|\\Z)`, "m"));
+  const match = compose.match(
+    new RegExp(
+      `^  ${service}:\\n([\\s\\S]*?)(?=^  [A-Za-z0-9_-]+:|^# ─── Volumes|\\Z)`,
+      "m"
+    )
+  );
   if (!match) throw new Error(`Missing Compose service '${service}'`);
   return match[0];
 }
@@ -14,7 +20,9 @@ function composeServiceBlock(compose: string, service: string): string {
 describe("production security configuration", () => {
   it("keeps Caddy as the only host-published production service", () => {
     const compose = read("docker-compose.production.yml");
-    const allPortBlocks = [...compose.matchAll(/^ {4}ports:\n((?: {6}- .*\n)+)/gm)];
+    const allPortBlocks = [
+      ...compose.matchAll(/^ {4}ports:\n((?: {6}- .*\n)+)/gm),
+    ];
     expect(allPortBlocks).toHaveLength(1);
     const caddy = composeServiceBlock(compose, "caddy");
     expect(caddy).toContain('"80:80"');
@@ -26,13 +34,19 @@ describe("production security configuration", () => {
 
   it("requires a Caddy edge, OpenAppSec APISIX attachment, and internal OPA service", () => {
     const compose = read("docker-compose.production.yml");
-    expect(composeServiceBlock(compose, "caddy")).toContain("no-new-privileges:true");
+    expect(composeServiceBlock(compose, "caddy")).toContain(
+      "no-new-privileges:true"
+    );
     const apisix = composeServiceBlock(compose, "apisix");
     expect(apisix).toContain("ghcr.io/openappsec/apisix-attachment");
     expect(apisix).toContain("ipc: service:openappsec-agent");
     expect(apisix).toContain("APISIX_STAND_ALONE");
-    expect(composeServiceBlock(compose, "opa")).toContain("openpolicyagent/opa");
-    expect(composeServiceBlock(compose, "ndsep-api")).toContain('OPA_ENABLED: "true"');
+    expect(composeServiceBlock(compose, "opa")).toContain(
+      "openpolicyagent/opa"
+    );
+    expect(composeServiceBlock(compose, "ndsep-api")).toContain(
+      'OPA_ENABLED: "true"'
+    );
   });
 
   it("requires OIDC and trusted-forwarded-client limits at APISIX", () => {
@@ -49,7 +63,9 @@ describe("production security configuration", () => {
   });
 
   it("retains Keycloak MFA enrollment, PKCE, short sessions, and non-wildcard redirects", () => {
-    const realm = JSON.parse(read("orchestration/keycloak/ndsep-realm.json")) as {
+    const realm = JSON.parse(
+      read("orchestration/keycloak/ndsep-realm.json")
+    ) as {
       accessTokenLifespan: number;
       ssoSessionIdleTimeout: number;
       requiredActions: Array<{ alias: string; defaultAction: boolean }>;
@@ -57,23 +73,59 @@ describe("production security configuration", () => {
         redirectUris: string[];
         directAccessGrantsEnabled: boolean;
         attributes: Record<string, string>;
-        protocolMappers: Array<{ name: string; protocolMapper: string; config: Record<string, string> }>;
+        protocolMappers: Array<{
+          name: string;
+          protocolMapper: string;
+          config: Record<string, string>;
+        }>;
       }>;
     };
     expect(realm.accessTokenLifespan).toBeLessThanOrEqual(600);
     expect(realm.ssoSessionIdleTimeout).toBeLessThanOrEqual(900);
-    expect(realm.requiredActions).toContainEqual(expect.objectContaining({ alias: "CONFIGURE_TOTP", defaultAction: true }));
+    expect(realm.requiredActions).toContainEqual(
+      expect.objectContaining({ alias: "CONFIGURE_TOTP", defaultAction: true })
+    );
     expect(realm.clients[0].directAccessGrantsEnabled).toBe(false);
-    expect(realm.clients[0].attributes["pkce.code.challenge.method"]).toBe("S256");
+    expect(realm.clients[0].attributes["pkce.code.challenge.method"]).toBe(
+      "S256"
+    );
     expect(realm.clients[0].protocolMappers).toContainEqual(
       expect.objectContaining({
         name: "ndsep-access-token-amr",
         protocolMapper: "oidc-amr-mapper",
         config: expect.objectContaining({ "access.token.claim": "true" }),
-      }),
+      })
     );
     expect(realm.clients[0].redirectUris.join("\n")).not.toContain("localhost");
     expect(realm.clients[0].redirectUris.join("\n")).not.toContain("*.manus");
+  });
+
+  it("keeps the production template aligned with explicit IAM and OpenSearch startup gates", () => {
+    const environment = read(".env.production.example");
+    expect(environment).toContain("KEYCLOAK_ENABLED=true");
+    expect(environment).toContain("KEYCLOAK_URL=https://");
+    expect(environment).toContain("KEYCLOAK_ISSUER_URL=https://");
+    expect(environment).toContain("OPENSEARCH_ENABLED=true");
+    expect(environment).toContain("OPENSEARCH_URL=https://");
+  });
+
+  it("requires explicit production values for privileged credentials and alert routes", () => {
+    const compose = read("docker-compose.production.yml");
+    for (const requiredSetting of [
+      "SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:?SLACK_WEBHOOK_URL is required}",
+      "PAGERDUTY_INTEGRATION_KEY: ${PAGERDUTY_INTEGRATION_KEY:?PAGERDUTY_INTEGRATION_KEY is required}",
+      "APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY is required}",
+      "NETBOX_TOKEN: ${NETBOX_TOKEN:?NETBOX_TOKEN is required}",
+      "RANGER_ADMIN_USER: ${RANGER_ADMIN_USER:?RANGER_ADMIN_USER is required}",
+      "RANGER_ADMIN_PASS: ${RANGER_ADMIN_PASS:?RANGER_ADMIN_PASS is required}",
+      "JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}",
+      "SIGNING_KEY: ${EVIDENCE_SIGNING_KEY:?EVIDENCE_SIGNING_KEY is required}",
+    ]) {
+      expect(compose).toContain(requiredSetting);
+    }
+    expect(compose).not.toMatch(
+      /PLACEHOLDER|rangerR0cks!|ndsep-evidence-signing-key-change-in-prod|edd1c9f034335f136f87ad84b625c8f1/
+    );
   });
 
   it("requires OPA MFA assurance for privileged production decisions", () => {

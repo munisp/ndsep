@@ -39,12 +39,12 @@ func getenv(key, fallback string) string {
 }
 
 var (
-	keycloakURL      = getenv("KEYCLOAK_URL", "http://localhost:8080")
-	keycloakRealm    = getenv("KEYCLOAK_REALM", "ndsep")
-	keycloakClientID = getenv("KEYCLOAK_CLIENT_ID", "ndsep-platform")
-	keycloakSecret   = getenv("KEYCLOAK_CLIENT_SECRET", "")
-	permifyURL       = getenv("PERMIFY_URL", "http://localhost:3476")
-	permifyTenant    = getenv("PERMIFY_TENANT", "ndsep")
+	keycloakURL      = strings.TrimRight(strings.TrimSpace(os.Getenv("KEYCLOAK_URL")), "/")
+	keycloakRealm    = strings.TrimSpace(os.Getenv("KEYCLOAK_REALM"))
+	keycloakClientID = strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID"))
+	keycloakSecret   = strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_SECRET"))
+	permifyURL       = strings.TrimRight(strings.TrimSpace(os.Getenv("PERMIFY_URL")), "/")
+	permifyTenant    = strings.TrimSpace(os.Getenv("PERMIFY_TENANT"))
 	keycloakEnabled  = getenv("KEYCLOAK_ENABLED", "true") == "true"
 	permifyEnabled   = getenv("PERMIFY_ENABLED", "true") == "true"
 )
@@ -58,6 +58,24 @@ var (
 	tokenErrors     int64
 	permChecks      int64
 )
+
+func validateIAMConfiguration() error {
+	if keycloakEnabled {
+		if keycloakURL == "" || keycloakRealm == "" || keycloakClientID == "" || keycloakSecret == "" {
+			return fmt.Errorf("KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, and KEYCLOAK_CLIENT_SECRET are required when Keycloak is enabled")
+		}
+		if os.Getenv("NODE_ENV") == "production" && !strings.HasPrefix(keycloakURL, "https://") {
+			return fmt.Errorf("KEYCLOAK_URL must use https:// in production")
+		}
+	}
+	if permifyEnabled && (permifyURL == "" || permifyTenant == "") {
+		return fmt.Errorf("PERMIFY_URL and PERMIFY_TENANT are required when Permify is enabled")
+	}
+	if os.Getenv("NODE_ENV") == "production" && (!keycloakEnabled || !permifyEnabled) {
+		return fmt.Errorf("Keycloak and Permify must remain enabled in production")
+	}
+	return nil
+}
 
 // ─── Keycloak Init ────────────────────────────────────────────────────────────
 
@@ -99,7 +117,13 @@ func initPermify() {
 	}
 	go func() {
 		for {
-			resp, err := http.Get(permifyURL + "/healthz")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, permifyURL+"/healthz", nil)
+			var resp *http.Response
+			if err == nil {
+				resp, err = (&http.Client{Timeout: 5 * time.Second}).Do(req)
+			}
+			cancel()
 			mu.Lock()
 			if err == nil && resp.StatusCode == 200 {
 				if !permifyOK {
@@ -209,8 +233,8 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	pOK := permifyOK
 	mu.RUnlock()
 	status := "healthy"
-	if !kOK {
-		status = "degraded"
+	if !kOK || !pOK {
+		status = "unavailable"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -292,6 +316,9 @@ func metricsHandler(w http.ResponseWriter, _ *http.Request) {
 }
 
 func main() {
+	if err := validateIAMConfiguration(); err != nil {
+		logger.Fatal(err)
+	}
 	port := getenv("PORT", "8150")
 	initKeycloak()
 	initPermify()

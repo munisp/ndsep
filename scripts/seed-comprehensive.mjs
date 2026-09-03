@@ -1,49 +1,49 @@
 #!/usr/bin/env node
 /**
  * NDSEP Comprehensive Seed Script
- * Creates all tables and seeds the entire platform with realistic Nigerian data.
+ * Seeds the maintained synthetic scenario set, then verifies every deployed public table has data.
  * 
- * Usage:
- *   node scripts/seed-comprehensive.mjs          # Skip if data exists
- *   FORCE_SEED=1 node scripts/seed-comprehensive.mjs  # Re-seed everything
- *   npm run seed:all                              # Via npm script
- *   npm run seed:all:force                        # Force re-seed
+ * Usage (synthetic, non-production databases only):
+ *   SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY \
+ *     DATABASE_URL=postgresql://.../ndsep_synthetic node scripts/seed-comprehensive.mjs
+ *   SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY \
+ *     DATABASE_URL=postgresql://.../ndsep_synthetic FORCE_SEED=1 node scripts/seed-comprehensive.mjs
+ *
+ * Non-loopback database targets additionally require the same explicit
+ * SYNTHETIC_SEED_ALLOW_REMOTE confirmation. Production-labelled database
+ * names and NODE_ENV=production are always refused.
  * 
  * This script:
  *   1. Runs the core seed (organizations, assets, compliance, etc.)
  *   2. Creates banking tables if they don't exist
  *   3. Seeds banking module (institutions, KYC, AML, watchlist, payments, etc.)
- *   4. Seeds any empty tables across the platform
- *   5. Verifies all tables have data
+ *   4. Performs an authoritative public-table coverage check
+ *   5. Exits nonzero and lists every remaining empty table
  * 
  * Environment variables:
- *   DATABASE_URL or POSTGRES_URL — PostgreSQL connection string
- *   FORCE_SEED=1 — Force re-seed even if data exists
+ *   DATABASE_URL or POSTGRES_URL — explicitly supplied PostgreSQL connection string
+ *   SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY — required for every run
+ *   SYNTHETIC_SEED_ALLOW_REMOTE=NDSEP_SYNTHETIC_DATA_ONLY — additionally required for non-loopback targets
+ *   FORCE_SEED=1 — permits re-seeding an explicitly confirmed synthetic target
  */
 import pg from "pg";
 import { readFileSync, existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import {
+  getSyntheticSeedPoolOptions,
+  inspectPublicTableCoverage,
+  requireCompleteSyntheticSeed,
+  summarizePublicTableCoverage,
+} from "./lib/synthetic-seed-safety.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const envPath = join(__dir, "..", ".env");
-if (existsSync(envPath)) {
-  const lines = readFileSync(envPath, "utf8").split("\n");
-  for (const line of lines) {
-    const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-    if (m) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-  }
-}
 
 const { Pool } = pg;
-const DB_URL =
-  process.env.POSTGRES_URL ||
-  process.env.DATABASE_URL ||
-  "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db";
 const FORCE = process.env.FORCE_SEED === "1";
-const pool = new Pool({ connectionString: DB_URL, ssl: false });
 
 async function seedAll() {
+  const pool = new Pool(getSyntheticSeedPoolOptions(process.env));
   const client = await pool.connect();
   try {
     console.log("=== NDSEP Comprehensive Seed Script ===\n");
@@ -110,43 +110,22 @@ async function seedAll() {
     }
 
     // =====================================================================
-    // STEP 2: Verify all tables have data
+    // STEP 2: Verify all currently deployed public tables have data.
+    // A successful process result is forbidden if any table remains empty.
     // =====================================================================
-    console.log("Step 2: Verifying all tables...");
-    const { rows: tables } = await client.query(
-      "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
-    );
-    
-    let totalTables = 0;
-    let seededTables = 0;
-    let emptyTables = [];
-    let totalRows = 0;
-    
-    for (const { tablename } of tables) {
-      totalTables++;
-      const { rows } = await client.query(`SELECT COUNT(*) as c FROM "${tablename}"`);
-      const count = parseInt(rows[0].c);
-      totalRows += count;
-      if (count > 0) {
-        seededTables++;
-      } else {
-        emptyTables.push(tablename);
-      }
+    console.log("Step 2: Verifying all public tables...");
+    const coverage = await inspectPublicTableCoverage(client);
+    const coverageSummary = summarizePublicTableCoverage(coverage);
+    console.log("\n=== Seed Verification ===");
+    console.log(`Total tables: ${coverageSummary.totalTables}`);
+    console.log(`Populated tables: ${coverageSummary.populatedTables}`);
+    console.log(`Total rows: ${coverageSummary.totalRows}`);
+    if (coverageSummary.emptyTables.length > 0) {
+      console.log(`\nEmpty tables (${coverageSummary.emptyTables.length}):`);
+      for (const table of coverageSummary.emptyTables) console.log(`  - ${table}`);
     }
-    
-    console.log(`\n=== Seed Verification ===`);
-    console.log(`Total tables: ${totalTables}`);
-    console.log(`Seeded tables: ${seededTables}`);
-    console.log(`Total rows: ${totalRows}`);
-    
-    if (emptyTables.length > 0) {
-      console.log(`\nEmpty tables (${emptyTables.length}):`);
-      for (const t of emptyTables) {
-        console.log(`  - ${t}`);
-      }
-    } else {
-      console.log(`\nAll ${totalTables} tables have data!`);
-    }
+    requireCompleteSyntheticSeed(coverageSummary);
+    console.log(`\nAll ${coverageSummary.totalTables} public tables have synthetic data.`);
 
     // =====================================================================
     // STEP 3: Print banking stats

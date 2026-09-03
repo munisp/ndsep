@@ -1,27 +1,27 @@
 // NDSEP Fluvio Event Relay — Go Worker
 // Port 8151 | Bridges tRPC events to Fluvio streaming platform
 // Fluvio is a Rust-native, Kafka-compatible streaming platform
-// Falls back to Kafka when Fluvio is unavailable
+// Production delivery is fail closed when Fluvio is unavailable or unauthenticated.
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
 var (
-	PORT             = getEnv("FLUVIO_RELAY_PORT", "8151")
-	FLUVIO_ENDPOINT  = getEnv("FLUVIO_ENDPOINT", "localhost:9003")
-	FLUVIO_SC_HOST   = getEnv("FLUVIO_SC_HOST", "localhost")
-	FLUVIO_SC_PORT   = getEnv("FLUVIO_SC_PORT", "9003")
-	KAFKA_BROKER     = getEnv("KAFKA_BROKER", "localhost:9092")
-	KAFKA_FALLBACK   = getEnv("KAFKA_FALLBACK_ENABLED", "true")
+	PORT            = getEnv("FLUVIO_RELAY_PORT", "8151")
+	FLUVIO_ENDPOINT = strings.TrimSpace(os.Getenv("FLUVIO_ENDPOINT"))
 )
 
 func getEnv(key, fallback string) string {
@@ -32,12 +32,11 @@ func getEnv(key, fallback string) string {
 }
 
 var (
-	produceCount  int64
-	consumeCount  int64
-	topicCount    int64
-	fallbackCount int64
-	errorCount    int64
-	startTime     = time.Now()
+	produceCount int64
+	consumeCount int64
+	topicCount   int64
+	errorCount   int64
+	startTime    = time.Now()
 )
 
 // NDSEP Fluvio topics — one per compliance domain
@@ -68,10 +67,10 @@ type ProduceRequest struct {
 }
 
 type ConsumeRequest struct {
-	Topic     string `json:"topic"`
-	Partition int    `json:"partition,omitempty"`
-	Offset    int64  `json:"offset,omitempty"`
-	MaxRecords int   `json:"maxRecords,omitempty"`
+	Topic      string `json:"topic"`
+	Partition  int    `json:"partition,omitempty"`
+	Offset     int64  `json:"offset,omitempty"`
+	MaxRecords int    `json:"maxRecords,omitempty"`
 }
 
 type TopicCreateRequest struct {
@@ -81,47 +80,88 @@ type TopicCreateRequest struct {
 	RetentionMs       int64  `json:"retentionMs,omitempty"`
 }
 
-// fluvioProduce attempts to produce to Fluvio via HTTP API
-// Falls back to logging when Fluvio is not running
-func fluvioProduce(topic, key string, payload interface{}) error {
-	body, _ := json.Marshal(payload)
-	// Fluvio HTTP API endpoint
-	url := fmt.Sprintf("http://%s/api/v1/produce/%s", FLUVIO_ENDPOINT, topic)
-	client := &http.Client{Timeout: 3 * time.Second}
-	req, _ := http.NewRequest("POST", url, &bytesReader{data: body})
-	req.Header.Set("Content-Type", "application/json")
-	if key != "" {
-		req.Header.Set("X-Fluvio-Key", key)
+func isProduction() bool {
+	return strings.EqualFold(os.Getenv("APP_ENV"), "production") || strings.EqualFold(os.Getenv("NODE_ENV"), "production")
+}
+
+func validateFluvioConfiguration() error {
+	produceURL := strings.TrimRight(strings.TrimSpace(os.Getenv("FLUVIO_PRODUCE_URL")), "/")
+	if FLUVIO_ENDPOINT == "" && produceURL == "" {
+		return errors.New("FLUVIO_ENDPOINT or FLUVIO_PRODUCE_URL is required")
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		// Fluvio not running — graceful degradation
-		atomic.AddInt64(&fallbackCount, 1)
-		log.Printf("[FluvioRelay] Fluvio degraded, event logged: topic=%s key=%s", topic, key)
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("fluvio produce failed: status=%d", resp.StatusCode)
+	if isProduction() {
+		if produceURL == "" {
+			return errors.New("production Fluvio relay requires FLUVIO_PRODUCE_URL")
+		}
+		parsed, err := url.ParseRequestURI(produceURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			return errors.New("production FLUVIO_PRODUCE_URL must be an absolute HTTPS endpoint")
+		}
+		if len(strings.TrimSpace(os.Getenv("FLUVIO_AUTH_TOKEN"))) < 32 {
+			return errors.New("production Fluvio relay requires a non-placeholder FLUVIO_AUTH_TOKEN of at least 32 characters")
+		}
 	}
 	return nil
 }
 
-type bytesReader struct {
-	data []byte
-	pos  int
-}
-
-func (r *bytesReader) Read(p []byte) (n int, err error) {
-	if r.pos >= len(r.data) {
-		return 0, fmt.Errorf("EOF")
+func isApprovedTopic(topic string) bool {
+	for _, approved := range NdsepTopics {
+		if topic == approved {
+			return true
+		}
 	}
-	n = copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
+	return false
 }
 
-func (r *bytesReader) Close() error { return nil }
+func fluvioProduce(topic, key string, payload interface{}) error {
+	if !isApprovedTopic(topic) {
+		return fmt.Errorf("Fluvio topic is not allow-listed: %s", topic)
+	}
+	if isProduction() && !strings.EqualFold(os.Getenv("FLUVIO_ENABLED"), "true") {
+		return errors.New("Fluvio is disabled in production; set FLUVIO_ENABLED=true only after approved cluster validation")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal Fluvio payload: %w", err)
+	}
+	endpoint := fmt.Sprintf("http://%s/api/v1/produce/%s", FLUVIO_ENDPOINT, topic)
+	if raw := os.Getenv("FLUVIO_PRODUCE_URL"); raw != "" {
+		endpoint = fmt.Sprintf("%s/%s", strings.TrimRight(raw, "/"), topic)
+	}
+	parsed, err := url.ParseRequestURI(endpoint)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errors.New("FLUVIO_PRODUCE_URL must be an absolute endpoint")
+	}
+	if isProduction() && parsed.Scheme != "https" {
+		return errors.New("production Fluvio endpoint must use HTTPS")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create Fluvio request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("X-Fluvio-Key", key)
+	}
+	if token := os.Getenv("FLUVIO_AUTH_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else if isProduction() {
+		return errors.New("production Fluvio requires FLUVIO_AUTH_TOKEN")
+	}
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Fluvio required delivery failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("Fluvio required delivery failed with HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
 
 func handleProduce(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -133,8 +173,8 @@ func handleProduce(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if req.Topic == "" {
-		http.Error(w, "topic required", http.StatusBadRequest)
+	if !isApprovedTopic(req.Topic) {
+		http.Error(w, "allow-listed topic required", http.StatusBadRequest)
 		return
 	}
 
@@ -178,24 +218,11 @@ func handleTopicCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if req.Partitions == 0 {
-		req.Partitions = 3
+	if !isApprovedTopic(req.Name) {
+		http.Error(w, "allow-listed topic required", http.StatusBadRequest)
+		return
 	}
-	if req.ReplicationFactor == 0 {
-		req.ReplicationFactor = 1
-	}
-	if req.RetentionMs == 0 {
-		req.RetentionMs = 604800000 // 7 days
-	}
-	atomic.AddInt64(&topicCount, 1)
-	log.Printf("[FluvioRelay] Topic create requested: name=%s partitions=%d", req.Name, req.Partitions)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":    true,
-		"topic":      req.Name,
-		"partitions": req.Partitions,
-		"retention":  req.RetentionMs,
-	})
+	http.Error(w, "topic provisioning is disabled; use the authenticated Fluvio control plane", http.StatusNotImplemented)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -203,12 +230,10 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "healthy",
 		"service": "ndsep-fluvio-relay",
-		"version": "1.0.0",
+		"version": "1.1.0",
 		"uptime":  time.Since(startTime).Seconds(),
 		"config": map[string]string{
 			"fluvio_endpoint": FLUVIO_ENDPOINT,
-			"kafka_broker":    KAFKA_BROKER,
-			"kafka_fallback":  KAFKA_FALLBACK,
 		},
 		"topics": len(NdsepTopics),
 	})
@@ -219,9 +244,6 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP ndsep_fluvio_produce_total Total Fluvio produce calls\n")
 	fmt.Fprintf(w, "# TYPE ndsep_fluvio_produce_total counter\n")
 	fmt.Fprintf(w, "ndsep_fluvio_produce_total %d\n", atomic.LoadInt64(&produceCount))
-	fmt.Fprintf(w, "# HELP ndsep_fluvio_fallback_total Kafka fallback activations\n")
-	fmt.Fprintf(w, "# TYPE ndsep_fluvio_fallback_total counter\n")
-	fmt.Fprintf(w, "ndsep_fluvio_fallback_total %d\n", atomic.LoadInt64(&fallbackCount))
 	fmt.Fprintf(w, "# HELP ndsep_fluvio_errors_total Total errors\n")
 	fmt.Fprintf(w, "# TYPE ndsep_fluvio_errors_total counter\n")
 	fmt.Fprintf(w, "ndsep_fluvio_errors_total %d\n", atomic.LoadInt64(&errorCount))
@@ -231,15 +253,19 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	if err := validateFluvioConfiguration(); err != nil {
+		log.Fatal("[FluvioRelay] ", err)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/produce", handleProduce)
+	mux.HandleFunc("/publish", handleProduce)
 	mux.HandleFunc("/topics", handleTopics)
 	mux.HandleFunc("/topics/create", handleTopicCreate)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/metrics", handleMetrics)
 
 	log.Printf("[FluvioRelay] Starting NDSEP Fluvio Event Relay on port %s", PORT)
-	log.Printf("[FluvioRelay] Fluvio endpoint: %s | Kafka fallback: %s", FLUVIO_ENDPOINT, KAFKA_FALLBACK)
+	log.Printf("[FluvioRelay] Fluvio endpoint: %s", FLUVIO_ENDPOINT)
 	log.Printf("[FluvioRelay] Managing %d NDSEP topics", len(NdsepTopics))
 
 	ctx, cancel := context.WithCancel(context.Background())

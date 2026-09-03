@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -12,6 +13,7 @@ import {
   serial,
   text,
   timestamp,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 
@@ -46,6 +48,19 @@ export const users = pgTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
+// ─── Per-user UI preferences ─────────────────────────────────────────────────
+
+export const themePreferences = pgTable("theme_preferences", {
+  userId: varchar("user_id", { length: 64 }).primaryKey(),
+  theme: varchar("theme", { length: 16 }).notNull().default("light"),
+  lastSeenChangelogVersion: varchar("last_seen_changelog_version", { length: 128 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ThemePreference = typeof themePreferences.$inferSelect;
+export type InsertThemePreference = typeof themePreferences.$inferInsert;
+
 // ─── Organizations ────────────────────────────────────────────────────────────
 
 export const organizations = pgTable("organizations", {
@@ -72,6 +87,118 @@ export const organizations = pgTable("organizations", {
 
 export type Organization = typeof organizations.$inferSelect;
 export type InsertOrganization = typeof organizations.$inferInsert;
+
+// ─── Webhook subscriptions and durable delivery ledger ───────────────────────
+
+export const webhookSubscriptions = pgTable("webhook_subscriptions", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull(),
+  url: text("url").notNull(),
+  events: text("events").array().notNull().default(sql`'{}'`),
+  secret: text("secret").notNull(),
+  active: boolean("active").default(true),
+  failureCount: integer("failure_count").default(0),
+  lastDeliveryAt: timestamp("last_delivery_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+});
+
+export const webhookDeliveries = pgTable("webhook_deliveries", {
+  id: serial("id").primaryKey(),
+  subscriptionId: integer("subscription_id").references(() => webhookSubscriptions.id),
+  event: text("event").notNull(),
+  payload: jsonb("payload").notNull(),
+  responseStatus: integer("response_status"),
+  responseBody: text("response_body"),
+  attempt: integer("attempt").default(1),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }).defaultNow(),
+  success: boolean("success").default(false),
+  // Foreign-key enforcement is owned by migration 0046; the queue table is declared below.
+  queueAttemptId: bigint("queue_attempt_id", { mode: "number" }),
+});
+
+export const webhookDeliveryAttempts = pgTable("webhook_delivery_attempts", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  subscriptionId: integer("subscription_id").notNull().references(() => webhookSubscriptions.id),
+  eventId: uuid("event_id").notNull(),
+  eventType: varchar("event_type", { length: 128 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  destinationUrl: text("destination_url").notNull(),
+  status: varchar("status", { length: 16 }).notNull().default("shadow"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  nextRetryAt: timestamp("next_retry_at", { withTimezone: true }).notNull().defaultNow(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  claimToken: uuid("claim_token"),
+  claimOwner: varchar("claim_owner", { length: 128 }),
+  claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  lastResponseCode: integer("last_response_code"),
+  lastError: text("last_error"),
+  idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type WebhookSubscriptionRecord = typeof webhookSubscriptions.$inferSelect;
+export type WebhookDeliveryRecord = typeof webhookDeliveries.$inferSelect;
+export type WebhookDeliveryAttemptRecord = typeof webhookDeliveryAttempts.$inferSelect;
+
+// ─── Durable Lakehouse ingestion and feature store ───────────────────────────
+
+export const lakehouseIngestRecords = pgTable("lakehouse_ingest_records", {
+  id: uuid("id").primaryKey(),
+  tableName: text("table_name").notNull(),
+  partitionKey: text("partition_key").notNull(),
+  data: jsonb("data").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  sourceSystem: text("source_system").notNull(),
+  recordHash: varchar("record_hash", { length: 64 }).notNull().unique(),
+  deliveryStatus: varchar("delivery_status", { length: 16 }).notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  leasedAt: timestamp("leased_at", { withTimezone: true }),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const mlFeatureStore = pgTable("ml_feature_store", {
+  id: uuid("id").primaryKey(),
+  featureGroup: text("feature_group").notNull(),
+  entityId: text("entity_id").notNull(),
+  entityType: text("entity_type").notNull().default("organization"),
+  features: jsonb("features").notNull().default(sql`'{}'::jsonb`),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const mlPredictionLog = pgTable("ml_prediction_log", {
+  id: uuid("id").primaryKey(),
+  modelName: text("model_name").notNull(),
+  modelVersion: text("model_version").notNull(),
+  entityId: text("entity_id").notNull(),
+  inputFeatures: jsonb("input_features").notNull().default(sql`'{}'::jsonb`),
+  prediction: jsonb("prediction").notNull(),
+  confidence: real("confidence").notNull().default(0),
+  latencyMs: bigint("latency_ms", { mode: "number" }).notNull().default(0),
+  predictedAt: timestamp("predicted_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const mlLineage = pgTable("ml_lineage", {
+  id: uuid("id").primaryKey(),
+  sourceTable: text("source_table").notNull(),
+  targetTable: text("target_table").notNull(),
+  transformation: text("transformation").notNull(),
+  recordCount: bigint("record_count", { mode: "number" }).notNull().default(0),
+  pipelineRunId: text("pipeline_run_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type LakehouseIngestRecord = typeof lakehouseIngestRecords.$inferSelect;
+export type MlFeatureStoreRecord = typeof mlFeatureStore.$inferSelect;
+export type MlPredictionLogRecord = typeof mlPredictionLog.$inferSelect;
+export type MlLineageRecord = typeof mlLineage.$inferSelect;
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
 
@@ -293,12 +420,14 @@ export const auditLogs = pgTable("audit_logs", {
   resourceId: integer("resource_id"),
   details: text("details"),
   ipAddress: varchar("ip_address", { length: 64 }),
-  userAgent: text("user_agent"),
+    userAgent: text("user_agent"),
   metadata: jsonb("metadata"),
+  previousHash: text("previous_hash"),
+  hashChain: text("hash_chain"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
-
 export type AuditLog = typeof auditLogs.$inferSelect;
+
 
 // ─── Streaming Events ─────────────────────────────────────────────────────────
 
@@ -1512,7 +1641,10 @@ export const controlRatingEnum = pgEnum("control_rating", ["compliant", "partial
 export const dpcoAuditControlRatings = pgTable("dpco_audit_control_ratings", {
   id: serial("id").primaryKey(),
   engagementId: integer("engagement_id").notNull(),
+  dpcoOrgId: integer("dpco_org_id"),
   controlId: varchar("control_id", { length: 20 }).notNull(),
+  controlRef: varchar("control_ref", { length: 255 }),
+  controlTitle: varchar("control_title", { length: 255 }),
   rating: controlRatingEnum("rating").notNull(),
   notes: text("notes"),
   ratedBy: varchar("rated_by", { length: 255 }),
@@ -1574,7 +1706,7 @@ export const dpcoTrainingSessions = pgTable("dpco_training_sessions", {
 export type DpcoTrainingSession = typeof dpcoTrainingSessions.$inferSelect;
 
 // ── DPCO Client Policies ──────────────────────────────────────────────────────
-export const dpcoClientPolicyStatusEnum = pgEnum("dpco_client_policy_status", ["draft", "reviewed", "signed", "expired"]);
+export const dpcoClientPolicyStatusEnum = pgEnum("dpco_client_policy_status", ["draft", "customised", "reviewed", "signed", "delivered", "expired"]);
 
 export const dpcoClientPolicies = pgTable("dpco_client_policies", {
   id: serial("id").primaryKey(),
@@ -1924,7 +2056,7 @@ export type NipTransaction = typeof nipTransactions.$inferSelect;
 export type InsertNipTransaction = typeof nipTransactions.$inferInsert;
 
 export const rtgsStatusEnum = pgEnum("rtgs_status", [
-  "queued", "processing", "settled", "rejected", "cancelled", "pending_funds"
+  "queued", "processing", "settled", "rejected", "cancelled", "pending_funds", "pending_confirmation"
 ]);
 
 export const rtgsTransactions = pgTable("rtgs_transactions", {
@@ -1950,6 +2082,36 @@ export const rtgsTransactions = pgTable("rtgs_transactions", {
 });
 export type RtgsTransaction = typeof rtgsTransactions.$inferSelect;
 export type InsertRtgsTransaction = typeof rtgsTransactions.$inferInsert;
+
+export const paymentCommandKindEnum = pgEnum("payment_command_kind", ["nip", "rtgs"]);
+export const paymentCommandStatusEnum = pgEnum("payment_command_status", [
+  "pending_ledger", "processing_ledger", "pending_settlement", "processing_settlement",
+  "pending_confirmation", "completed", "failed",
+]);
+
+export const paymentCommands = pgTable("payment_commands", {
+  id: uuid("id").primaryKey().notNull(),
+  paymentKind: paymentCommandKindEnum("payment_kind").notNull(),
+  paymentReference: varchar("payment_reference", { length: 64 }).unique().notNull(),
+  nipTransactionId: integer("nip_transaction_id").references(() => nipTransactions.id, { onDelete: "restrict" }),
+  rtgsTransactionId: integer("rtgs_transaction_id").references(() => rtgsTransactions.id, { onDelete: "restrict" }),
+  status: paymentCommandStatusEnum("status").default("pending_ledger").notNull(),
+  amount: bigint("amount", { mode: "number" }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  debitAccount: varchar("debit_account", { length: 128 }).notNull(),
+  creditAccount: varchar("credit_account", { length: 128 }).notNull(),
+  tigerbeetleTransactionId: varchar("tigerbeetle_transaction_id", { length: 128 }),
+  mojaloopReference: varchar("mojaloop_reference", { length: 128 }),
+  attempts: integer("attempts").default(0).notNull(),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type PaymentCommand = typeof paymentCommands.$inferSelect;
+export type InsertPaymentCommand = typeof paymentCommands.$inferInsert;
 
 export const swiftStatusEnum = pgEnum("swift_status", [
   "draft", "sent", "acknowledged", "processed", "rejected", "recalled"
@@ -3078,4 +3240,34 @@ export const penaltyCalculations = pgTable("penalty_calculations", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+
+// ─── APISIX Durable Gateway Route Registry ───────────────────────────────────
+export const gatewayRouteSyncStatusEnum = pgEnum("gateway_route_sync_status", ["succeeded", "failed"]);
+
+export const gatewayRoutes = pgTable("gateway_routes", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 160 }).notNull(),
+  uri: varchar("uri", { length: 512 }).notNull().unique(),
+  methods: text("methods").array().notNull(),
+  upstream: varchar("upstream", { length: 512 }).notNull(),
+  plugins: jsonb("plugins").$type<Record<string, unknown>>().notNull().default({}),
+  journeyId: varchar("journey_id", { length: 32 }),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const gatewayRouteSyncAttempts = pgTable("gateway_route_sync_attempts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  routeId: varchar("route_id", { length: 64 }).notNull().references(() => gatewayRoutes.id, { onDelete: "cascade" }),
+  routeVersion: integer("route_version").notNull(),
+  status: gatewayRouteSyncStatusEnum("status").notNull(),
+  httpStatus: integer("http_status"),
+  errorMessage: text("error_message"),
+  attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
 });

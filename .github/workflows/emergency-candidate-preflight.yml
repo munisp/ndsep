@@ -1,0 +1,184 @@
+name: Emergency Candidate Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      incident_issue:
+        description: "GitHub incident issue number; records the candidate’s emergency context"
+        required: true
+        type: string
+      source_commit:
+        description: "Full SHA of the current reviewed production commit to build"
+        required: true
+        type: string
+      confirm:
+        description: "Type PREPARE_SIGNED_EMERGENCY_CANDIDATE to build a non-deployed candidate"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: emergency-candidate-preflight-${{ inputs.source_commit }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Build Signed Emergency Candidate Without Deployment
+    if: >-
+      github.ref == 'refs/heads/production' &&
+      inputs.confirm == 'PREPARE_SIGNED_EMERGENCY_CANDIDATE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production-release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository }}
+      COSIGN_OIDC_ISSUER: https://token.actions.githubusercontent.com
+      COSIGN_CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/emergency-candidate-preflight.yml@refs/heads/production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Bind dispatch to the current protected production commit
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$REQUESTED_SOURCE_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Validate incident identifier shape
+        env:
+          INCIDENT_ISSUE: ${{ inputs.incident_issue }}
+        run: |
+          set -euo pipefail
+          [[ "$INCIDENT_ISSUE" =~ ^[1-9][0-9]*$ ]]
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build an immutable emergency candidate
+        id: build_image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:emergency-candidate-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+
+      - name: Resolve immutable candidate reference
+        id: image
+        run: |
+          set -euo pipefail
+          digest='${{ steps.build_image.outputs.digest }}'
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "ref=${IMAGE_NAME}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Direct candidate image scan (HIGH/CRITICAL gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: json
+          output: emergency-preflight/trivy-image.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          vuln-type: os,library
+
+      - name: Generate candidate CycloneDX SBOM
+        if: success()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: cyclonedx
+          output: emergency-preflight/image-sbom.cdx.json
+          vuln-type: os,library
+
+      - name: Bind direct-scan and SBOM evidence to the candidate digest
+        if: success()
+        run: |
+          set -euo pipefail
+          bash scripts/security/verify-release-image-evidence.sh \
+            "$IMAGE_NAME" \
+            "${{ steps.image.outputs.digest }}" \
+            "${{ github.sha }}" \
+            emergency-preflight/trivy-image.json \
+            emergency-preflight/image-sbom.cdx.json \
+            emergency-preflight/release-evidence.json
+
+      - name: Attest candidate build provenance
+        if: success()
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Install Cosign
+        if: success()
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Keylessly sign verified candidate digest
+        if: success()
+        run: cosign sign --yes "${{ steps.image.outputs.ref }}"
+
+      - name: Verify preflight candidate signature and provenance
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity "$COSIGN_CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "$COSIGN_OIDC_ISSUER" \
+            --output json \
+            "${{ steps.image.outputs.ref }}" > emergency-preflight/cosign-verify.json
+          gh attestation verify \
+            "oci://${{ steps.image.outputs.ref }}" \
+            --repo "$GITHUB_REPOSITORY" > emergency-preflight/github-provenance-verify.txt
+
+      - name: Write sanitized candidate summary
+        if: always()
+        env:
+          CANDIDATE_DIGEST: ${{ steps.image.outputs.digest }}
+          INCIDENT_ISSUE: ${{ inputs.incident_issue }}
+        run: |
+          set -euo pipefail
+          mkdir -p emergency-preflight
+          jq -n \
+            --arg incident_issue "$INCIDENT_ISSUE" \
+            --arg source_commit "$GITHUB_SHA" \
+            --arg candidate_digest "$CANDIDATE_DIGEST" \
+            --arg workflow_run_id "$GITHUB_RUN_ID" \
+            '{schemaVersion:"ndsep.emergency-candidate-preflight.v1", incidentIssue:($incident_issue|tonumber), sourceCommit:$source_commit, candidateDigest:$candidate_digest, workflowRunId:($workflow_run_id|tonumber), deploymentPerformed:false, readinessCredit:false}' \
+            > emergency-preflight/candidate-summary.json
+
+      - name: Upload preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emergency-candidate-preflight-${{ github.sha }}
+          path: emergency-preflight/
+          if-no-files-found: warn
+          retention-days: 365

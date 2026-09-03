@@ -27,49 +27,37 @@ export type FeatureFlag = {
   updatedAt: Date;
 };
 
-// ── Schema ──────────────────────────────────────────────────────────────────
+// ── Migration readiness ─────────────────────────────────────────────────────
 
-const FLAGS_DDL = `
-CREATE TABLE IF NOT EXISTS feature_flags (
-  key TEXT PRIMARY KEY,
-  enabled BOOLEAN NOT NULL DEFAULT false,
-  rollout_percentage INTEGER NOT NULL DEFAULT 0 CHECK (rollout_percentage BETWEEN 0 AND 100),
-  target_orgs INTEGER[] DEFAULT '{}',
-  target_roles TEXT[] DEFAULT '{}',
-  environment TEXT[] DEFAULT '{production,staging,development}',
-  description TEXT DEFAULT '',
-  strategy VARCHAR(32) NOT NULL DEFAULT 'off',
-  parameters JSONB NOT NULL DEFAULT '{}',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+const REQUIRED_FEATURE_FLAG_COLUMNS = ["key", "enabled", "strategy", "parameters"] as const;
 
--- The initial migration establishes the key-based contract. These additive columns
--- preserve the existing strategy evaluator for installations upgraded in place.
-ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS strategy VARCHAR(32) NOT NULL DEFAULT 'off';
-ALTER TABLE feature_flags ADD COLUMN IF NOT EXISTS parameters JSONB NOT NULL DEFAULT '{}';
+async function assertFeatureFlagSchema(): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Feature flag database is unavailable");
 
-CREATE TABLE IF NOT EXISTS feature_flag_audit (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  flag_name VARCHAR(128) NOT NULL,
-  action VARCHAR(16) NOT NULL,
-  old_value JSONB,
-  new_value JSONB,
-  changed_by INTEGER,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-`;
+  const result = await db.execute(sql`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'feature_flags'
+      AND column_name IN ('key', 'enabled', 'strategy', 'parameters')
+  `);
+  const found = new Set(result.rows.map((row) => String((row as { column_name: string }).column_name)));
+  const missing = REQUIRED_FEATURE_FLAG_COLUMNS.filter((column) => !found.has(column));
+  if (missing.length > 0) {
+    throw new Error(`Feature flag migration 0044 is incomplete; missing columns: ${missing.join(", ")}`);
+  }
+}
 
 export async function initFeatureFlags(): Promise<void> {
-  const db = (await getDb())!;
-  try {
-    await db.execute(sql.raw(FLAGS_DDL));
-    await seedDefaultFlags();
-    logger.info("Feature flags initialized");
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logger.warn({ err: msg }, "Feature flags init (tables may already exist)");
+  if (process.env.NODE_ENV === "test") {
+    logger.info("Feature flag migration verification skipped in explicit test mode");
+    return;
   }
+
+  await assertFeatureFlagSchema();
+  await seedDefaultFlags();
+  logger.info("Feature flags initialized from migration-owned schema");
 }
 
 async function seedDefaultFlags(): Promise<void> {
@@ -105,6 +93,18 @@ async function seedDefaultFlags(): Promise<void> {
 
 // ── Flag Evaluation ─────────────────────────────────────────────────────────
 
+function stableRolloutBucket(
+  flagName: string,
+  context?: { orgId?: number; sector?: string; userId?: number },
+): number {
+  const subject = context?.orgId ?? context?.userId ?? context?.sector ?? "anonymous";
+  let hash = 0;
+  for (const character of `${flagName}:${subject}`) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+  return hash % 100;
+}
+
 export async function isEnabled(
   flagName: string,
   context?: { orgId?: number; sector?: string; userId?: number },
@@ -126,8 +126,7 @@ export async function isEnabled(
       return false;
     case "percentage": {
       const pct = Number(row.parameters.percentage) || 0;
-      const hash = context?.orgId ?? context?.userId ?? Math.random() * 100;
-      return (hash % 100) < pct;
+      return stableRolloutBucket(flagName, context) < pct;
     }
     case "org_list": {
       const orgIds = (row.parameters.org_ids as number[]) ?? [];
@@ -139,8 +138,7 @@ export async function isEnabled(
     }
     case "gradual": {
       const current = Number(row.parameters.current_percentage) || 0;
-      const hash = context?.orgId ?? Math.random() * 100;
-      return (hash % 100) < current;
+      return stableRolloutBucket(flagName, context) < current;
     }
     default:
       return row.enabled;

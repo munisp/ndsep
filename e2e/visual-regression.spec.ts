@@ -11,7 +11,10 @@
 
 import { test, expect } from "@playwright/test";
 
-const BASE_URL = "http://localhost:3000";
+// The release-grade E2E matrix supplies an isolated base URL for every shard.
+// Retain a local default for direct developer invocation, but never hard-code a
+// host that bypasses the shard's explicitly provisioned application instance.
+const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
 
 // Pages to snapshot — covers the most visually complex and business-critical pages
 const SNAPSHOT_PAGES = [

@@ -89,6 +89,13 @@ interface OrchestrationResult<T = unknown> {
   latencyMs?: number;
 }
 
+function integrationOutcome(
+  result: PromiseSettledResult<OrchestrationResult>,
+  completedLabel: string,
+): string {
+  return result.status === "fulfilled" && result.value.ok ? completedLabel : "degraded";
+}
+
 async function callService<T = unknown>(
   serviceUrl: string,
   path: string,
@@ -157,7 +164,11 @@ export async function j01_orgRegistered(params: {
       journey_id: "J01",
     }),
   ]);
-  return { journey: "J01", eventBus: eventResult.status, lakehouse: lhResult.status };
+  return {
+    journey: "J01",
+    eventBus: integrationOutcome(eventResult, "published"),
+    lakehouse: integrationOutcome(lhResult, "ingested"),
+  };
 }
 
 export async function j02_complianceAssessed(params: {
@@ -174,7 +185,11 @@ export async function j02_complianceAssessed(params: {
       journey_id: "J02",
     }),
   ]);
-  return { journey: "J02", eventBus: eventResult.status, lakehouse: lhResult.status };
+  return {
+    journey: "J02",
+    eventBus: integrationOutcome(eventResult, "published"),
+    lakehouse: integrationOutcome(lhResult, "ingested"),
+  };
 }
 
 export async function j03_violationDetected(params: {
@@ -196,7 +211,12 @@ export async function j03_violationDetected(params: {
       journey_id: "J03",
     }),
   ]);
-  return { journey: "J03", eventBus: eventResult.status, workflow: wfResult.status, lakehouse: lhResult.status };
+  return {
+    journey: "J03",
+    eventBus: integrationOutcome(eventResult, "published"),
+    workflow: integrationOutcome(wfResult, "started"),
+    lakehouse: integrationOutcome(lhResult, "ingested"),
+  };
 }
 
 export async function j04_penaltyIssued(params: {
@@ -304,7 +324,11 @@ export async function j17_certificateIssued(params: {
       journey_id: "J17",
     }),
   ]);
-  return { journey: "J17", eventBus: eventResult.status, lakehouse: lhResult.status };
+  return {
+    journey: "J17",
+    eventBus: integrationOutcome(eventResult, "published"),
+    lakehouse: integrationOutcome(lhResult, "ingested"),
+  };
 }
 
 export async function j18_revenueDistribution(params: {

@@ -147,12 +147,19 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:24.0.1
     networks: [ndsep-net]
-    command: start-dev --import-realm
+    command: start --import-realm
     ports: ["8180:8080"]
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: ndsep_admin_2026
-      KC_DB: dev-mem
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER:?KEYCLOAK_ADMIN_USER is required}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      KC_DB: postgres
+      KC_DB_URL: ${KEYCLOAK_DB_URL:?KEYCLOAK_DB_URL is required}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+      KC_HOSTNAME_STRICT: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
@@ -167,7 +174,8 @@ services:
     ports: ["3476:3476", "3478:3478"]
     command: serve
     environment:
-      PERMIFY_DATABASE_ENGINE: memory
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: ${PERMIFY_DATABASE_URI:?PERMIFY_DATABASE_URI is required}
       PERMIFY_LOG_LEVEL: warn
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3476/healthz"]
@@ -328,8 +336,11 @@ services:
     networks: [ndsep-net]
     ports: ["8153:8153"]
     environment:
-      PORT: "8153"
-      APISIX_ADMIN_URL: http://apisix:9180
+      APISIX_MANAGER_PORT: "8153"
+      WORKER_DATABASE_URL: ${WORKER_DATABASE_URL:?WORKER_DATABASE_URL is required}
+      APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:?APISIX_ADMIN_URL is required}
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY is required}
+      APISIX_MANAGER_INTERNAL_AUTH_TOKEN: ${APISIX_MANAGER_INTERNAL_AUTH_TOKEN:?APISIX_MANAGER_INTERNAL_AUTH_TOKEN is required}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8153/health"]

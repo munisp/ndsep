@@ -1,13 +1,13 @@
 /**
  * Seed Sector Entities - NDSEP Platform
  * Seeds: fintech_companies, energy_companies, insurance_companies, telecom_operators
- * Usage: node scripts/seed-sector-entities.mjs
+ * Synthetic non-production usage only. Requires DATABASE_URL or POSTGRES_URL and
+ * SYNTHETIC_SEED_CONFIRMATION=NDSEP_SYNTHETIC_DATA_ONLY.
  */
 import pg from "pg";
-import { config } from "dotenv";
-config();
+import { getSyntheticSeedPoolOptions } from "./lib/synthetic-seed-safety.mjs";
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool(getSyntheticSeedPoolOptions(process.env));
 async function q(sql, params = []) {
   const client = await pool.connect();
   try { const res = await client.query(sql, params); return res.rows; } finally { client.release(); }
