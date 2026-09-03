@@ -62,8 +62,8 @@ export async function enableRowLevelSecurity(): Promise<void> {
       const policyName = `${table}_org_isolation`;
       const state = await pool.query<{ rls_enabled: boolean; policy_exists: boolean }>(
         `SELECT
-           COALESCE((SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass(format('public.%I', $1))), false) AS rls_enabled,
-           EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = $1 AND policyname = $2) AS policy_exists`,
+           COALESCE((SELECT relrowsecurity FROM pg_class WHERE oid = to_regclass(format('public.%I', $1::text))), false) AS rls_enabled,
+           EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = $1::text AND policyname = $2::text) AS policy_exists`,
         [table, policyName]
       );
       if (!state.rows[0]?.rls_enabled || !state.rows[0]?.policy_exists) {

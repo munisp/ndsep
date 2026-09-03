@@ -39,6 +39,7 @@ jobs:
       THEME_PREFERENCES_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_theme_preferences_integration
       AUDIT_HASH_CHAIN_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_audit_chain_integration
       WEBHOOK_SHADOW_QUEUE_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_webhook_shadow_integration
+      MULTITENANCY_RLS_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test
       JWT_SECRET: test-jwt-secret-for-ci-only
       FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
       NODE_ENV: test
