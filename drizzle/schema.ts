@@ -114,10 +114,30 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   success: boolean("success").default(false),
 });
 
+export const webhookDeliveryAttempts = pgTable("webhook_delivery_attempts", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  subscriptionId: integer("subscription_id").notNull().references(() => webhookSubscriptions.id),
+  eventId: uuid("event_id").notNull(),
+  eventType: varchar("event_type", { length: 128 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  destinationUrl: text("destination_url").notNull(),
+  status: varchar("status", { length: 16 }).notNull().default("shadow"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  nextRetryAt: timestamp("next_retry_at", { withTimezone: true }).notNull().defaultNow(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  lastResponseCode: integer("last_response_code"),
+  idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type WebhookSubscriptionRecord = typeof webhookSubscriptions.$inferSelect;
 export type WebhookDeliveryRecord = typeof webhookDeliveries.$inferSelect;
+export type WebhookDeliveryAttemptRecord = typeof webhookDeliveryAttempts.$inferSelect;
 
-// ─── Durable Lakehouse ingestion and feature store ────────────────────────────
+// ─── Durable Lakehouse ingestion and feature store ───────────────────────────
 
 export const lakehouseIngestRecords = pgTable("lakehouse_ingest_records", {
   id: uuid("id").primaryKey(),

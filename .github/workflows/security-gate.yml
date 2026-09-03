@@ -237,6 +237,7 @@ jobs:
             server/security/extendedE2eMatrixWorkflow.config.test.ts \
             server/security/themePreferencesDurableStorage.config.test.ts \
             server/security/threatProtection.test.ts \
+            server/security/webhookShadowMonitoring.config.test.ts \
             server/redisRateLimitStore.test.ts \
             --maxWorkers=1
       - name: Verify schema-only reconciliation migration is DDL-only

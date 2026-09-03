@@ -38,6 +38,28 @@ export interface WebhookSubscription {
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 5000, 30000]; // 1s, 5s, 30s
 
+type WebhookShadowMetrics = {
+  enqueued: number;
+  enqueueErrors: number;
+  finalizedDelivered: number;
+  finalizedDead: number;
+  finalizationErrors: number;
+  lastEnqueuedAtSeconds: number;
+};
+
+const webhookShadowMetrics: WebhookShadowMetrics = {
+  enqueued: 0,
+  enqueueErrors: 0,
+  finalizedDelivered: 0,
+  finalizedDead: 0,
+  finalizationErrors: 0,
+  lastEnqueuedAtSeconds: 0,
+};
+
+export function getWebhookShadowMetrics(): Readonly<WebhookShadowMetrics> {
+  return { ...webhookShadowMetrics };
+}
+
 let _pool: Pool | null = null;
 function getPool(): Pool {
   if (!_pool) {
@@ -72,16 +94,124 @@ export async function recordWebhookDeliveryAttempt(
   );
 }
 
-async function deliverWebhook(
+export type WebhookDeliveryQueueMode = "disabled" | "shadow";
+
+type WebhookQueryable = Pick<Pool, "query">;
+
+type WebhookDeliveryDependencies = {
+  pool?: WebhookQueryable;
+  fetchImpl?: typeof fetch;
+  sleep?: (milliseconds: number) => Promise<void>;
+  queueMode?: WebhookDeliveryQueueMode;
+};
+
+export function getWebhookDeliveryQueueMode(value = process.env.WEBHOOK_DELIVERY_QUEUE_MODE): WebhookDeliveryQueueMode {
+  const mode = value ?? "disabled";
+  if (mode === "disabled" || mode === "shadow") return mode;
+  throw new Error("WEBHOOK_DELIVERY_QUEUE_MODE must be disabled or shadow");
+}
+
+export function webhookDeliveryAttemptKey(subscriptionId: number, eventId: string): string {
+  return crypto.createHash("sha256").update(`${subscriptionId}:${eventId}`).digest("hex");
+}
+
+export async function enqueueWebhookShadowAttempt(
+  pool: WebhookQueryable,
+  subscription: Pick<WebhookSubscription, "id" | "url">,
+  event: WebhookEvent,
+): Promise<void> {
+  const result = await pool.query(
+    `INSERT INTO webhook_delivery_attempts
+       (subscription_id, event_id, event_type, payload, destination_url, status, idempotency_key)
+     VALUES ($1, $2::uuid, $3, $4::jsonb, $5, 'shadow', $6)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      subscription.id,
+      event.id,
+      event.type,
+      JSON.stringify(event),
+      subscription.url,
+      webhookDeliveryAttemptKey(subscription.id, event.id),
+    ],
+  );
+  if (result.rowCount === 1) {
+    webhookShadowMetrics.enqueued += 1;
+    webhookShadowMetrics.lastEnqueuedAtSeconds = Math.floor(Date.now() / 1000);
+  }
+}
+
+export async function finalizeWebhookShadowAttempt(
+  pool: WebhookQueryable,
+  subscriptionId: number,
+  eventId: string,
+  status: "delivered" | "dead",
+  responseCode: number | null,
+  attemptCount: number,
+): Promise<void> {
+  const result = await pool.query(
+    `UPDATE webhook_delivery_attempts
+     SET status = $1::varchar,
+         attempt_count = GREATEST(attempt_count, $2),
+         last_response_code = $3,
+         delivered_at = CASE WHEN $1::varchar = 'delivered' THEN now() ELSE delivered_at END,
+         updated_at = now()
+     WHERE idempotency_key = $4
+       AND status = 'shadow'
+     RETURNING id`,
+    [
+      status,
+      attemptCount,
+      responseCode,
+      webhookDeliveryAttemptKey(subscriptionId, eventId),
+    ],
+  );
+  if (result.rowCount !== 1) {
+    throw new Error(`Webhook shadow attempt is missing or already finalized for event ${eventId}`);
+  }
+  if (status === "delivered") webhookShadowMetrics.finalizedDelivered += 1;
+  else webhookShadowMetrics.finalizedDead += 1;
+}
+
+const defaultSleep = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds));
+
+export async function deliverWebhook(
   subscription: WebhookSubscription,
   event: WebhookEvent,
-  attempt: number = 0
+  attempt = 0,
+  dependencies: WebhookDeliveryDependencies = {},
 ): Promise<boolean> {
   const payload = JSON.stringify(event);
   const signature = signPayload(payload, subscription.secret);
+  const pool = dependencies.pool ?? getPool();
+  const queueMode = dependencies.queueMode ?? getWebhookDeliveryQueueMode();
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const sleep = dependencies.sleep ?? defaultSleep;
+
+  if (queueMode === "shadow" && attempt === 0) {
+    try {
+      await enqueueWebhookShadowAttempt(pool, subscription, event);
+    } catch (queueError) {
+      webhookShadowMetrics.enqueueErrors += 1;
+      logger.error(
+        { err: queueError instanceof Error ? queueError.message : String(queueError), subscriptionId: subscription.id, eventId: event.id },
+        "[Webhook] Shadow queue intent could not be persisted",
+      );
+      return false;
+    }
+  }
+
+  const finalizeShadow = async (status: "delivered" | "dead", responseCode: number | null, attempts: number) => {
+    if (queueMode !== "shadow") return;
+    try {
+      await finalizeWebhookShadowAttempt(pool, subscription.id, event.id, status, responseCode, attempts);
+    } catch (error) {
+      webhookShadowMetrics.finalizationErrors += 1;
+      throw error;
+    }
+  };
 
   try {
-    const response = await fetch(subscription.url, {
+    const response = await fetchImpl(subscription.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -95,55 +225,65 @@ async function deliverWebhook(
     });
 
     const success = response.status >= 200 && response.status < 300;
-
-    // The audit record is authoritative. Do not report remote delivery as a
-    // success when the canonical PostgreSQL ledger cannot record the attempt.
     try {
-      await recordWebhookDeliveryAttempt(getPool(), subscription, event, response.status, success, attempt);
+      await recordWebhookDeliveryAttempt(pool, subscription, event, response.status, success, attempt);
     } catch (ledgerError) {
       logger.error(
         { err: ledgerError instanceof Error ? ledgerError.message : String(ledgerError), subscriptionId: subscription.id, eventId: event.id },
-        "[Webhook] Delivery response was received but durable audit logging failed"
+        "[Webhook] Delivery response was received but durable audit logging failed",
       );
       return false;
     }
 
     if (success) {
+      try {
+        await finalizeShadow("delivered", response.status, attempt + 1);
+      } catch (queueError) {
+        logger.error(
+          { err: queueError instanceof Error ? queueError.message : String(queueError), subscriptionId: subscription.id, eventId: event.id },
+          "[Webhook] Canonical delivery was recorded but shadow finalization failed",
+        );
+        return false;
+      }
       logger.info({ subscriptionId: subscription.id, eventType: event.type }, "[Webhook] Delivered");
       return true;
     }
 
-    // Retry on server errors
     if (response.status >= 500 && attempt < MAX_RETRIES - 1) {
       const delay = RETRY_DELAYS[attempt] ?? 30000;
       logger.warn({ subscriptionId: subscription.id, status: response.status, attempt }, "[Webhook] Retrying in %dms", delay);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return deliverWebhook(subscription, event, attempt + 1);
+      await sleep(delay);
+      return deliverWebhook(subscription, event, attempt + 1, dependencies);
     }
 
+    try {
+      await finalizeShadow("dead", response.status, attempt + 1);
+    } catch (queueError) {
+      logger.error(
+        { err: queueError instanceof Error ? queueError.message : String(queueError), subscriptionId: subscription.id, eventId: event.id },
+        "[Webhook] Canonical failure was recorded but shadow finalization failed",
+      );
+      return false;
+    }
     logger.error({ subscriptionId: subscription.id, status: response.status }, "[Webhook] Delivery failed");
     return false;
   } catch (err) {
-    // Record terminal transport failure when PostgreSQL is available. The
-    // record itself is best-effort only because there is no durable ledger if
-    // the database is unreachable; the function still reports failure.
     if (attempt >= MAX_RETRIES - 1) {
       try {
-        await recordWebhookDeliveryAttempt(getPool(), subscription, event, null, false, attempt);
+        await recordWebhookDeliveryAttempt(pool, subscription, event, null, false, attempt);
+        await finalizeShadow("dead", null, attempt + 1);
       } catch (ledgerError) {
         logger.error(
           { err: ledgerError instanceof Error ? ledgerError.message : String(ledgerError), subscriptionId: subscription.id, eventId: event.id },
-          "[Webhook] Durable audit logging failed for terminal transport error"
+          "[Webhook] Durable audit logging failed for terminal transport error",
         );
       }
+      logger.error({ err, subscriptionId: subscription.id }, "[Webhook] Delivery failed after %d attempts", MAX_RETRIES);
+      return false;
     }
-    if (attempt < MAX_RETRIES - 1) {
-      const delay = RETRY_DELAYS[attempt] ?? 30000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return deliverWebhook(subscription, event, attempt + 1);
-    }
-    logger.error({ err, subscriptionId: subscription.id }, "[Webhook] Delivery failed after %d attempts", MAX_RETRIES);
-    return false;
+    const delay = RETRY_DELAYS[attempt] ?? 30000;
+    await sleep(delay);
+    return deliverWebhook(subscription, event, attempt + 1, dependencies);
   }
 }
 

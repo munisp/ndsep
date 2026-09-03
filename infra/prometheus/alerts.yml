@@ -4,12 +4,10 @@
 ###############################################################################
 
 groups:
-
   # ─── API / Application ─────────────────────────────────────────────────────
   - name: ndsep-api
     interval: 30s
     rules:
-
       - alert: APIDown
         expr: up{job="ndsep-api"} == 0
         for: 1m
@@ -49,7 +47,6 @@ groups:
   - name: ndsep-database
     interval: 30s
     rules:
-
       - alert: PostgresDown
         expr: up{job="postgres"} == 0
         for: 1m
@@ -96,7 +93,6 @@ groups:
   - name: ndsep-workers
     interval: 60s
     rules:
-
       - alert: WorkerDown
         expr: up{job=~"ndsep-worker-.*"} == 0
         for: 5m
@@ -117,11 +113,67 @@ groups:
           summary: "Kafka consumer lag is high"
           description: "Consumer group {{ $labels.consumergroup }} lag: {{ $value }} messages."
 
+  # ─── Webhook shadow queue ──────────────────────────────────────────────────
+  - name: ndsep-webhook-shadow
+    interval: 30s
+    rules:
+      - alert: WebhookShadowQueueIntentFailure
+        expr: |
+          max(ndsep_webhook_shadow_mode) == 1
+          and sum(increase(ndsep_webhook_shadow_enqueue_errors_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Webhook shadow queue cannot persist delivery intent"
+          description: "One or more shadow queue intents failed to persist over 5 minutes while shadow mode is enabled. Keep worker claiming disabled, investigate PostgreSQL availability/constraints, and reconcile the canonical ledger before any cutover."
+
+      - alert: WebhookShadowQueueFinalizationFailure
+        expr: |
+          max(ndsep_webhook_shadow_mode) == 1
+          and sum(increase(ndsep_webhook_shadow_finalization_errors_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Webhook shadow queue finalization diverged from the canonical ledger"
+          description: "A canonical webhook outcome was recorded but its shadow queue row could not be finalized. Keep worker claiming disabled and run the read-only reconciliation check for the approved canary window."
+
+      - alert: WebhookShadowTerminalErrorRateHigh
+        expr: |
+          max(ndsep_webhook_shadow_mode) == 1
+          and sum(increase(ndsep_webhook_shadow_finalizations_total{outcome="dead"}[5m])) >= 5
+          and (
+            sum(increase(ndsep_webhook_shadow_finalizations_total{outcome="dead"}[5m]))
+            /
+            clamp_min(sum(increase(ndsep_webhook_shadow_finalizations_total[5m])), 1)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Webhook shadow terminal error rate exceeds 5%"
+          description: "More than 5% of finalized shadow delivery rows are dead over 5 minutes, with at least five terminal failures. Pause canary advancement and inspect remote delivery failures plus canonical-ledger reconciliation."
+
+      - alert: WebhookShadowMetricsUnavailable
+        expr: |
+          max_over_time(ndsep_webhook_shadow_mode[2m]) == 1
+          and absent_over_time(ndsep_webhook_shadow_enqueued_total[2m])
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Webhook shadow telemetry is unavailable"
+          description: "Shadow mode is active but the API metrics scrape no longer exposes webhook shadow counters. Do not accept a canary window without observable queue evidence."
+
   # ─── Compliance SLA ────────────────────────────────────────────────────────
   - name: ndsep-compliance
     interval: 300s
     rules:
-
       - alert: CitizenRequestSLAMetricUnavailable
         expr: ndsep_citizen_request_sla_metric_available != 1
         for: 2m
@@ -157,7 +209,6 @@ groups:
   - name: ndsep-security
     interval: 60s
     rules:
-
       - alert: HighAuthFailureRate
         expr: |
           rate(ndsep_auth_failures_total[5m]) > 0.5
@@ -263,7 +314,6 @@ groups:
   - name: ndsep-infra
     interval: 60s
     rules:
-
       - alert: HighCPUUsage
         expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
         for: 10m

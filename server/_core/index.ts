@@ -644,6 +644,36 @@ async function startServer() {
       );
     } catch (e) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Metrics] Kafka metrics unavailable"); }
 
+    // Webhook shadow queue telemetry: aggregate-only counters with no delivery identifiers.
+    try {
+      const { getWebhookDeliveryQueueMode, getWebhookShadowMetrics } = await import("../webhookDelivery");
+      const metrics = getWebhookShadowMetrics();
+      const mode = getWebhookDeliveryQueueMode();
+      lines.push(
+        "# HELP ndsep_webhook_shadow_mode Whether webhook shadow queue mode is enabled (1=shadow)",
+        "# TYPE ndsep_webhook_shadow_mode gauge",
+        `ndsep_webhook_shadow_mode ${mode === "shadow" ? 1 : 0}`,
+        "# HELP ndsep_webhook_shadow_enqueued_total Shadow queue intents durably inserted",
+        "# TYPE ndsep_webhook_shadow_enqueued_total counter",
+        `ndsep_webhook_shadow_enqueued_total ${metrics.enqueued}`,
+        "# HELP ndsep_webhook_shadow_enqueue_errors_total Shadow queue intent persistence failures",
+        "# TYPE ndsep_webhook_shadow_enqueue_errors_total counter",
+        `ndsep_webhook_shadow_enqueue_errors_total ${metrics.enqueueErrors}`,
+        "# HELP ndsep_webhook_shadow_finalizations_total Shadow queue terminal finalizations by outcome",
+        "# TYPE ndsep_webhook_shadow_finalizations_total counter",
+        `ndsep_webhook_shadow_finalizations_total{outcome="delivered"} ${metrics.finalizedDelivered}`,
+        `ndsep_webhook_shadow_finalizations_total{outcome="dead"} ${metrics.finalizedDead}`,
+        "# HELP ndsep_webhook_shadow_finalization_errors_total Shadow queue terminal finalization failures",
+        "# TYPE ndsep_webhook_shadow_finalization_errors_total counter",
+        `ndsep_webhook_shadow_finalization_errors_total ${metrics.finalizationErrors}`,
+        "# HELP ndsep_webhook_shadow_last_enqueued_unixtime Most recent successfully inserted shadow intent",
+        "# TYPE ndsep_webhook_shadow_last_enqueued_unixtime gauge",
+        `ndsep_webhook_shadow_last_enqueued_unixtime ${metrics.lastEnqueuedAtSeconds}`,
+      );
+    } catch (e) {
+      logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[Metrics] Webhook shadow metrics unavailable");
+    }
+
     // Platform info
     lines.push(
       `# HELP ndsep_info Platform info`,

@@ -13,7 +13,7 @@ describe("runtime schema ownership and RLS source contract", () => {
       entries: Array<{ idx: number; tag: string }>;
     };
 
-    expect(journal.entries.at(-1)).toEqual({
+    expect(journal.entries).toContainEqual({
       idx: 44,
       version: "7",
       when: 1788389839397,
