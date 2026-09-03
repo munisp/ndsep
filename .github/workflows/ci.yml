@@ -154,7 +154,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      WEBHOOK_QUEUE_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test_webhook_worker_cutover
+      # GitHub Actions' disposable postgres service has no TLS listener; this URL is test-only.
+      WEBHOOK_QUEUE_TEST_DATABASE_URL: postgresql://ndsep_user:ndsep_test_pass@localhost:5432/ndsep_test_webhook_worker_cutover?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
