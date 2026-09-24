@@ -157,6 +157,112 @@ func falkorRebuildHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ── /graph/* route contract (server/routers/aimlRouter.ts knowledgeGraphRouter)
+// These handlers expose the FalkorDB adapter over the GET/POST routes the API
+// server calls. Embeddings are intentionally not served here — they belong to
+// the GNN engine (ray_ml_engine) — so /graph/embedding is an honest 501.
+
+// falkorGraphBuildHandler maps /graph/build onto the same guarded rebuild logic
+// as /rebuild (requires FALKORDB_REBUILD_ENABLED=true).
+func falkorGraphBuildHandler(w http.ResponseWriter, r *http.Request) {
+	falkorRebuildHandler(w, r)
+}
+
+func falkorGraphStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeFalkorJSONError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+	if falkorAdapter == nil {
+		writeFalkorJSONError(w, http.StatusServiceUnavailable, "FalkorDB adapter unavailable")
+		return
+	}
+	stats, err := falkorAdapter.stats()
+	if err != nil {
+		writeFalkorQueryError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_count":    stats.Nodes,
+		"edge_count":    stats.Relationships,
+		"nodes":         stats.Nodes,
+		"relationships": stats.Relationships,
+		"last_build":    lastBuildTime,
+		"queries_run":   atomic.LoadInt64(&queriesRun),
+		"errors":        atomic.LoadInt64(&errors),
+	})
+}
+
+func falkorGraphNeighborsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeFalkorJSONError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+	if falkorAdapter == nil {
+		writeFalkorJSONError(w, http.StatusServiceUnavailable, "FalkorDB adapter unavailable")
+		return
+	}
+	atomic.AddInt64(&queriesRun, 1)
+	nodeID := r.URL.Query().Get("node_id")
+	relation := r.URL.Query().Get("relation")
+	neighbors, err := falkorAdapter.neighbors(nodeID, relation)
+	if err != nil {
+		writeFalkorQueryError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"node_id":   nodeID,
+		"relation":  relation,
+		"neighbors": neighbors,
+		"count":     len(neighbors),
+	})
+}
+
+func falkorGraphPathHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeFalkorJSONError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+	if falkorAdapter == nil {
+		writeFalkorJSONError(w, http.StatusServiceUnavailable, "FalkorDB adapter unavailable")
+		return
+	}
+	atomic.AddInt64(&queriesRun, 1)
+	fromID := r.URL.Query().Get("from")
+	toID := r.URL.Query().Get("to")
+	depth := 5
+	if raw := r.URL.Query().Get("depth"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			writeFalkorJSONError(w, http.StatusBadRequest, "depth must be an integer")
+			return
+		}
+		depth = parsed
+	}
+	path, err := falkorAdapter.boundedPath(fromID, toID, depth)
+	if err != nil {
+		writeFalkorQueryError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"from":   fromID,
+		"to":     toID,
+		"path":   path,
+		"length": len(path),
+	})
+}
+
+// falkorGraphEmbeddingHandler is an honest not-implemented: node embeddings are
+// produced by the GNN engine (RAY_ML_URL / ray_ml_engine), not by the FalkorDB
+// graph worker.
+func falkorGraphEmbeddingHandler(w http.ResponseWriter, r *http.Request) {
+	writeFalkorJSONError(w, http.StatusNotImplemented,
+		"graph embeddings are not served by the FalkorDB worker; use the GNN engine (ray_ml_engine) for node embeddings")
+}
+
 func atomicAddError() {
 	atomic.AddInt64(&errors, 1)
 }
