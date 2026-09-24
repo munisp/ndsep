@@ -51,6 +51,13 @@ const PYTHON_WORKER_URL = process.env.PYTHON_WORKER_URL || "http://localhost:830
 const LAKEHOUSE_ANALYTICS_URL = process.env.LAKEHOUSE_ANALYTICS_URL || "http://localhost:8140";
 const ML_PRODUCTION_URL = process.env.ML_PRODUCTION_URL || "http://localhost:8085";
 const GNN_ENGINE_URL = process.env.GNN_ENGINE_URL || "http://localhost:8216";
+// Dedicated workers (docker-compose-workers-addition.yml / workerManager):
+// CocoIndex ETL (workers/python/cocoindex_etl_worker.py, port 8201),
+// EPR-KGQA (workers/python/epr_kgqa_worker.py, port 8202),
+// ART adversarial robustness (workers/python/art_adversarial_worker.py, port 8213).
+const COCOINDEX_WORKER_URL = process.env.COCOINDEX_WORKER_URL || "http://localhost:8201";
+const EPR_KGQA_URL = process.env.EPR_KGQA_URL || "http://localhost:8202";
+const ART_WORKER_URL = process.env.ART_WORKER_URL || "http://localhost:8213";
 // Ray ML engine (workers/python/ray_ml_engine.py) hosts the real PyTorch GraphSAGE GNN
 // plus drift detection; prefer it over the frozen-weight numpy GNN where endpoints exist.
 const RAY_ML_URL = process.env.RAY_ML_URL || "http://localhost:8250";
@@ -215,7 +222,26 @@ export const knowledgeGraphRouter = router({
       question: z.string().min(5).max(500),
     }))
     .query(async ({ input }) => {
-      // EPR-KGQA: answer questions using the knowledge graph
+      // Preferred path: dedicated EPR-KGQA worker (entity extraction + semantic
+      // retrieval + graph traversal + LLM answer generation).
+      const kgqaResult = await safeFetch(`${EPR_KGQA_URL}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: input.question }),
+      }, 30000);
+
+      if (!kgqaResult.error && kgqaResult.answer) {
+        return {
+          answer: kgqaResult.answer,
+          entities: kgqaResult.entities,
+          paths: kgqaResult.graph_results,
+          context_sources: kgqaResult.context_sources,
+          source: "epr_kgqa_worker",
+          question: input.question,
+        };
+      }
+
+      // Fallback: FalkorDB KG worker /graph/query
       const kgResult = await safeFetch(`${FALKORDB_WORKER_URL}/graph/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -390,7 +416,7 @@ ${context ? `\nRelevant context from compliance documents:\n${context}` : ""}`;
 // ── ART Adversarial Robustness Router ─────────────────────────────────────────
 export const artRouter = router({
   health: protectedProcedure.query(async () => {
-    return await safeFetch(`${PYTHON_WORKER_URL}/art/health`);
+    return await safeFetch(`${ART_WORKER_URL}/health`);
   }),
 
   runTest: protectedProcedure
@@ -401,10 +427,15 @@ export const artRouter = router({
       iterations: z.number().min(1).max(100).default(20),
     }))
     .mutation(async ({ input }) => {
-      const result = await safeFetch(`${PYTHON_WORKER_URL}/art/test`, {
+      const result = await safeFetch(`${ART_WORKER_URL}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          model_type: input.modelName,
+          attack_type: input.attackType,
+          epsilon: input.epsilon,
+          iterations: input.iterations,
+        }),
       }, 60000);
 
       if (result.error) {
@@ -447,7 +478,8 @@ export const artRouter = router({
   modelVulnerabilities: protectedProcedure
     .input(z.object({ modelName: z.string() }))
     .query(async ({ input }) => {
-      return await safeFetch(`${PYTHON_WORKER_URL}/art/vulnerabilities?model=${encodeURIComponent(input.modelName)}`);
+      // The worker exposes its per-test vulnerability assessment on /results.
+      return await safeFetch(`${ART_WORKER_URL}/results`);
     }),
 });
 
@@ -683,11 +715,13 @@ export const anomalyAlertsRouter = router({
 // ── CocoIndex ETL Router ───────────────────────────────────────────────────────
 export const cocoIndexRouter = router({
   health: protectedProcedure.query(async () => {
-    return await safeFetch(`${PYTHON_WORKER_URL}/cocoindex/health`);
+    return await safeFetch(`${COCOINDEX_WORKER_URL}/health`);
   }),
 
   getStatus: protectedProcedure.query(async () => {
-    const result = await safeFetch(`${PYTHON_WORKER_URL}/cocoindex/status`);
+    // The worker exposes its full status (chunks indexed, runs, watermarks)
+    // on /health — there is no separate /status endpoint.
+    const result = await safeFetch(`${COCOINDEX_WORKER_URL}/health`);
     if (result.error) {
       return {
         status: "worker_unavailable",
@@ -697,12 +731,20 @@ export const cocoIndexRouter = router({
         available: false,
       };
     }
-    return result;
+    return {
+      status: result.status ?? "unknown",
+      last_run: result.last_etl_time ?? null,
+      documents_indexed: result.total_chunks_indexed ?? 0,
+      collections: ["ndsep_policies", "ndsep_violations", "ndsep_enforcement_actions", "ndsep_audit_logs", "ndsep_organizations"],
+      watermarks: result.watermarks ?? {},
+      etl_runs: result.etl_runs ?? 0,
+      available: true,
+    };
   }),
 
   triggerRun: protectedProcedure.mutation(async () => {
     emitMutationEvent("ndsep.ai.mutation", { action: "aimlRouter", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${PYTHON_WORKER_URL}/cocoindex/run`, {
+    return await safeFetch(`${COCOINDEX_WORKER_URL}/etl`, {
       method: "POST",
     }, 30000);
   }),
