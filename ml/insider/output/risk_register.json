@@ -1,0 +1,2478 @@
+{
+  "generated_at": "2026-09-24T09:35:18.135401+00:00",
+  "seed": 42,
+  "window_days": 30,
+  "sources": {
+    "subjects": "compliance_graph",
+    "features": "synthetic",
+    "action_ledger": "synthetic",
+    "gnn": "synthetic:n_orgs=800,seed=42"
+  },
+  "weights": {
+    "gnn_structural": 0.25,
+    "bayesian_rate": 0.25,
+    "behavioral": 0.3,
+    "process": 0.2
+  },
+  "bayesian_population": {
+    "gamma_a": 0.1757484941587586,
+    "gamma_b": 0.3320606283716109,
+    "mean_rate": 0.5292662819455894,
+    "bound_99pct": 6.254333769625499
+  },
+  "n_subjects": 60,
+  "n_bayesian_flagged": 0,
+  "action_counts": {
+    "monitor": 52,
+    "require_dual_approval": 8
+  },
+  "violations": [
+    {
+      "rule": "maker_checker:fine_settlement",
+      "severity": "medium",
+      "subjects": {
+        "actor_id": "OFF-000003",
+        "scope_ref": "settlement:7777"
+      },
+      "evidence": {
+        "action_type": "fine_settlement",
+        "requester": "OFF-000003",
+        "approver_ids": [],
+        "problems": [
+          "only 0 distinct approver(s), need 2"
+        ]
+      },
+      "description": "fine_settlement on settlement:7777 by OFF-000003: only 0 distinct approver(s), need 2"
+    },
+    {
+      "rule": "maker_checker:vault_sealing_override",
+      "severity": "high",
+      "subjects": {
+        "actor_id": "OFF-000030",
+        "scope_ref": "vault:sector-7"
+      },
+      "evidence": {
+        "action_type": "vault_sealing_override",
+        "requester": "OFF-000030",
+        "approver_ids": [
+          "OFF-000030"
+        ],
+        "problems": [
+          "self-approval attempt",
+          "only 0 distinct approver(s), need 2"
+        ]
+      },
+      "description": "vault_sealing_override on vault:sector-7 by OFF-000030: self-approval attempt; only 0 distinct approver(s), need 2"
+    },
+    {
+      "rule": "sod:appeals",
+      "severity": "high",
+      "subjects": {
+        "actor_id": "OFF-000030",
+        "roles": [
+          "original_decision_maker",
+          "appeal_reviewer"
+        ],
+        "scope": "case",
+        "scope_ref": "case:8888"
+      },
+      "evidence": {
+        "process": "appeals",
+        "scope_ref": "case:8888",
+        "conflicting_roles": [
+          "original_decision_maker",
+          "appeal_reviewer"
+        ],
+        "action_types": [
+          [
+            "issue_penalty",
+            "decide_case",
+            "reject_dsar",
+            "deny_request"
+          ],
+          [
+            "review_appeal",
+            "decide_appeal"
+          ]
+        ]
+      },
+      "description": "OFF-000030 performed both 'original_decision_maker' and 'appeal_reviewer' on case case:8888"
+    },
+    {
+      "rule": "sod:penalty_lifecycle",
+      "severity": "high",
+      "subjects": {
+        "actor_id": "OFF-000030",
+        "roles": [
+          "penalty_issuer",
+          "penalty_approver"
+        ],
+        "scope": "penalty",
+        "scope_ref": "penalty:9999"
+      },
+      "evidence": {
+        "process": "penalty_lifecycle",
+        "scope_ref": "penalty:9999",
+        "conflicting_roles": [
+          "penalty_issuer",
+          "penalty_approver"
+        ],
+        "action_types": [
+          [
+            "issue_penalty",
+            "create_financial_penalty"
+          ],
+          [
+            "approve_penalty",
+            "confirm_penalty"
+          ]
+        ]
+      },
+      "description": "OFF-000030 performed both 'penalty_issuer' and 'penalty_approver' on penalty penalty:9999"
+    },
+    {
+      "rule": "watch:dormant_reactivation",
+      "severity": "medium",
+      "subjects": {
+        "actor_id": "OFF-000017"
+      },
+      "evidence": {
+        "user_id": "OFF-000017",
+        "last_active_at": "2026-01-01T00:00:00+00:00",
+        "reactivated_at": "2026-06-30T00:00:00+00:00",
+        "dormant_days": 180,
+        "reactivated_by": null,
+        "threshold_days": 90
+      },
+      "description": "account OFF-000017 reactivated after 180 dormant days (threshold 90)"
+    },
+    {
+      "rule": "watch:privilege_escalation",
+      "severity": "high",
+      "subjects": {
+        "actor_id": "OFF-000034",
+        "target_user_id": "OFF-000027"
+      },
+      "evidence": {
+        "user_id": "OFF-000027",
+        "old_role": "user",
+        "new_role": "admin",
+        "changed_by": "OFF-000034",
+        "approved_by": null
+      },
+      "description": "role grant to 'admin' for OFF-000027 by OFF-000034 without a distinct second approver"
+    }
+  ],
+  "register": [
+    {
+      "subject_id": "OFF-000058",
+      "subject_type": "officer",
+      "fused_score": 0.4745,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0044,
+        "bayesian_rate": 0.6935,
+        "behavioral": 1.0,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.3,
+          "detail": "IsolationForest anomaly percentile (batch): 1.000"
+        },
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.3,
+          "detail": "export_volume=29.000 is 18.9 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.3,
+          "detail": "failed_auth_ratio=0.336 is 6.8 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.1734,
+          "detail": "shrunk event-rate posterior 0.694 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0011,
+          "detail": "GNN compliance-graph neighbourhood score: 0.004"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000051",
+      "subject_type": "officer",
+      "fused_score": 0.4558,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0051,
+        "bayesian_rate": 0.8301,
+        "behavioral": 0.8235,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.3,
+          "detail": "export_volume=17.000 is 10.8 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.3,
+          "detail": "failed_auth_ratio=0.466 is 9.8 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.247,
+          "detail": "IsolationForest anomaly percentile (batch): 0.824"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.2075,
+          "detail": "shrunk event-rate posterior 0.830 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0013,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000037",
+      "subject_type": "officer",
+      "fused_score": 0.4535,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0054,
+        "bayesian_rate": 0.7965,
+        "behavioral": 0.8436,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:approval_velocity",
+          "contribution": 0.3,
+          "detail": "approval_velocity=10.407 is 8.0 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.3,
+          "detail": "export_volume=16.000 is 10.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.2531,
+          "detail": "IsolationForest anomaly percentile (batch): 0.844"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.1991,
+          "detail": "shrunk event-rate posterior 0.796 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0014,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000025",
+      "subject_type": "officer",
+      "fused_score": 0.4156,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0067,
+        "bayesian_rate": 0.7346,
+        "behavioral": 0.7676,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.3,
+          "detail": "export_volume=12.000 is 7.4 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.3,
+          "detail": "failed_auth_ratio=0.327 is 6.6 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.2303,
+          "detail": "IsolationForest anomaly percentile (batch): 0.768"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.1837,
+          "detail": "shrunk event-rate posterior 0.735 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0017,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000039",
+      "subject_type": "officer",
+      "fused_score": 0.4088,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.8762,
+        "bayesian_rate": 0.0286,
+        "behavioral": 0.6085,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.219,
+          "detail": "GNN compliance-graph neighbourhood score: 0.876"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1826,
+          "detail": "IsolationForest anomaly percentile (batch): 0.609"
+        },
+        {
+          "signal": "feature:sensitive_access_ratio",
+          "contribution": 0.1282,
+          "detail": "sensitive_access_ratio=0.429 is 2.1 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:role_change_count",
+          "contribution": 0.125,
+          "detail": "role_change_count=1.000 is 2.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0072,
+          "detail": "shrunk event-rate posterior 0.029 of the 99% population bound"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000004",
+      "subject_type": "officer",
+      "fused_score": 0.3885,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0083,
+        "bayesian_rate": 0.414,
+        "behavioral": 0.9433,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.3,
+          "detail": "export_volume=14.000 is 8.8 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.3,
+          "detail": "failed_auth_ratio=0.345 is 7.0 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.283,
+          "detail": "IsolationForest anomaly percentile (batch): 0.943"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.1035,
+          "detail": "shrunk event-rate posterior 0.414 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0021,
+          "detail": "GNN compliance-graph neighbourhood score: 0.008"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000040",
+      "subject_type": "officer",
+      "fused_score": 0.3808,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.9388,
+        "bayesian_rate": 0.0016,
+        "behavioral": 0.4858,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.2347,
+          "detail": "GNN compliance-graph neighbourhood score: 0.939"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1457,
+          "detail": "IsolationForest anomaly percentile (batch): 0.486"
+        },
+        {
+          "signal": "feature:role_change_count",
+          "contribution": 0.125,
+          "detail": "role_change_count=1.000 is 2.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0004,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000043",
+      "subject_type": "officer",
+      "fused_score": 0.3641,
+      "recommended_action": "require_dual_approval",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0058,
+        "bayesian_rate": 0.469,
+        "behavioral": 0.818,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.3,
+          "detail": "after_hours_ratio=0.629 is 6.2 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.3,
+          "detail": "export_volume=16.000 is 10.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.2454,
+          "detail": "IsolationForest anomaly percentile (batch): 0.818"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.1172,
+          "detail": "shrunk event-rate posterior 0.469 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0014,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000041",
+      "subject_type": "officer",
+      "fused_score": 0.3002,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.9518,
+        "bayesian_rate": 0.0354,
+        "behavioral": 0.1779,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.2379,
+          "detail": "GNN compliance-graph neighbourhood score: 0.952"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.1296,
+          "detail": "failed_auth_ratio=0.132 is 2.2 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0534,
+          "detail": "IsolationForest anomaly percentile (batch): 0.178"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0089,
+          "detail": "shrunk event-rate posterior 0.035 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000042",
+      "subject_type": "officer",
+      "fused_score": 0.283,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.9666,
+        "bayesian_rate": 0.0017,
+        "behavioral": 0.1365,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.2417,
+          "detail": "GNN compliance-graph neighbourhood score: 0.967"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.041,
+          "detail": "IsolationForest anomaly percentile (batch): 0.137"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0004,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000030",
+      "subject_type": "officer",
+      "fused_score": 0.2453,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0067,
+        "bayesian_rate": 0.0313,
+        "behavioral": 0.1193,
+        "process": 1.0
+      },
+      "explanation": [
+        {
+          "signal": "component:process",
+          "contribution": 0.2,
+          "detail": "severity-weighted process-control violations: 1.000"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.1022,
+          "detail": "failed_auth_ratio=0.112 is 1.7 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0358,
+          "detail": "IsolationForest anomaly percentile (batch): 0.119"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0078,
+          "detail": "shrunk event-rate posterior 0.031 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0017,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000034",
+      "subject_type": "officer",
+      "fused_score": 0.1839,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0048,
+        "bayesian_rate": 0.0018,
+        "behavioral": 0.1409,
+        "process": 0.7
+      },
+      "explanation": [
+        {
+          "signal": "component:process",
+          "contribution": 0.14,
+          "detail": "severity-weighted process-control violations: 0.700"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0423,
+          "detail": "IsolationForest anomaly percentile (batch): 0.141"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0012,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0004,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000027",
+      "subject_type": "officer",
+      "fused_score": 0.1636,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0069,
+        "bayesian_rate": 0.0132,
+        "behavioral": 0.062,
+        "process": 0.7
+      },
+      "explanation": [
+        {
+          "signal": "component:process",
+          "contribution": 0.14,
+          "detail": "severity-weighted process-control violations: 0.700"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0186,
+          "detail": "IsolationForest anomaly percentile (batch): 0.062"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0033,
+          "detail": "shrunk event-rate posterior 0.013 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0017,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000022",
+      "subject_type": "officer",
+      "fused_score": 0.1598,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0223,
+        "bayesian_rate": 0.0463,
+        "behavioral": 0.4755,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.1937,
+          "detail": "failed_auth_ratio=0.179 is 3.2 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1426,
+          "detail": "IsolationForest anomaly percentile (batch): 0.475"
+        },
+        {
+          "signal": "feature:sensitive_access_ratio",
+          "contribution": 0.1112,
+          "detail": "sensitive_access_ratio=0.392 is 1.9 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0116,
+          "detail": "shrunk event-rate posterior 0.046 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0056,
+          "detail": "GNN compliance-graph neighbourhood score: 0.022"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000017",
+      "subject_type": "officer",
+      "fused_score": 0.1481,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0052,
+        "bayesian_rate": 0.0381,
+        "behavioral": 0.191,
+        "process": 0.4
+      },
+      "explanation": [
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.0809,
+          "detail": "export_volume=3.000 is 1.3 robust-z above the staff median"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.08,
+          "detail": "severity-weighted process-control violations: 0.400"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0573,
+          "detail": "IsolationForest anomaly percentile (batch): 0.191"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0095,
+          "detail": "shrunk event-rate posterior 0.038 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0013,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000059",
+      "subject_type": "officer",
+      "fused_score": 0.1334,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0042,
+        "bayesian_rate": 0.0492,
+        "behavioral": 0.4002,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:role_change_count",
+          "contribution": 0.125,
+          "detail": "role_change_count=1.000 is 2.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1201,
+          "detail": "IsolationForest anomaly percentile (batch): 0.400"
+        },
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.0894,
+          "detail": "after_hours_ratio=0.220 is 1.5 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0123,
+          "detail": "shrunk event-rate posterior 0.049 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.001,
+          "detail": "GNN compliance-graph neighbourhood score: 0.004"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000057",
+      "subject_type": "officer",
+      "fused_score": 0.1271,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0045,
+        "bayesian_rate": 0.0412,
+        "behavioral": 0.3858,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1157,
+          "detail": "IsolationForest anomaly percentile (batch): 0.386"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0103,
+          "detail": "shrunk event-rate posterior 0.041 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0011,
+          "detail": "GNN compliance-graph neighbourhood score: 0.004"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000013",
+      "subject_type": "officer",
+      "fused_score": 0.1238,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0061,
+        "bayesian_rate": 0.0442,
+        "behavioral": 0.3708,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1112,
+          "detail": "IsolationForest anomaly percentile (batch): 0.371"
+        },
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.0676,
+          "detail": "after_hours_ratio=0.188 is 1.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0111,
+          "detail": "shrunk event-rate posterior 0.044 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0015,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000033",
+      "subject_type": "officer",
+      "fused_score": 0.1234,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0065,
+        "bayesian_rate": 0.0435,
+        "behavioral": 0.3695,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:role_change_count",
+          "contribution": 0.125,
+          "detail": "role_change_count=1.000 is 2.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1108,
+          "detail": "IsolationForest anomaly percentile (batch): 0.369"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.0756,
+          "detail": "failed_auth_ratio=0.093 is 1.3 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0109,
+          "detail": "shrunk event-rate posterior 0.043 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0016,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000015",
+      "subject_type": "officer",
+      "fused_score": 0.1204,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0066,
+        "bayesian_rate": 0.0103,
+        "behavioral": 0.3873,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:sensitive_access_ratio",
+          "contribution": 0.1515,
+          "detail": "sensitive_access_ratio=0.480 is 2.5 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.1162,
+          "detail": "IsolationForest anomaly percentile (batch): 0.387"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.0893,
+          "detail": "failed_auth_ratio=0.103 is 1.5 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0026,
+          "detail": "shrunk event-rate posterior 0.010 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0016,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000035",
+      "subject_type": "officer",
+      "fused_score": 0.1047,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0048,
+        "bayesian_rate": 0.0388,
+        "behavioral": 0.3126,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.1173,
+          "detail": "after_hours_ratio=0.261 is 2.0 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0938,
+          "detail": "IsolationForest anomaly percentile (batch): 0.313"
+        },
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.0809,
+          "detail": "export_volume=3.000 is 1.3 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0097,
+          "detail": "shrunk event-rate posterior 0.039 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0012,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000003",
+      "subject_type": "officer",
+      "fused_score": 0.0998,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0081,
+        "bayesian_rate": 0.0018,
+        "behavioral": 0.0576,
+        "process": 0.4
+      },
+      "explanation": [
+        {
+          "signal": "component:process",
+          "contribution": 0.08,
+          "detail": "severity-weighted process-control violations: 0.400"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0173,
+          "detail": "IsolationForest anomaly percentile (batch): 0.058"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.002,
+          "detail": "GNN compliance-graph neighbourhood score: 0.008"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0004,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000046",
+      "subject_type": "officer",
+      "fused_score": 0.0982,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0057,
+        "bayesian_rate": 0.0391,
+        "behavioral": 0.29,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.1689,
+          "detail": "after_hours_ratio=0.336 is 2.8 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.087,
+          "detail": "IsolationForest anomaly percentile (batch): 0.290"
+        },
+        {
+          "signal": "feature:approval_velocity",
+          "contribution": 0.063,
+          "detail": "approval_velocity=2.957 is 1.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0098,
+          "detail": "shrunk event-rate posterior 0.039 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0014,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000045",
+      "subject_type": "officer",
+      "fused_score": 0.0911,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0061,
+        "bayesian_rate": 0.0227,
+        "behavioral": 0.2798,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.1293,
+          "detail": "failed_auth_ratio=0.132 is 2.2 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0839,
+          "detail": "IsolationForest anomaly percentile (batch): 0.280"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0057,
+          "detail": "shrunk event-rate posterior 0.023 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0015,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000032",
+      "subject_type": "officer",
+      "fused_score": 0.0892,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0101,
+        "bayesian_rate": 0.0115,
+        "behavioral": 0.2794,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:sensitive_access_ratio",
+          "contribution": 0.1222,
+          "detail": "sensitive_access_ratio=0.416 is 2.0 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.1015,
+          "detail": "failed_auth_ratio=0.112 is 1.7 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0838,
+          "detail": "IsolationForest anomaly percentile (batch): 0.279"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0029,
+          "detail": "shrunk event-rate posterior 0.011 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0025,
+          "detail": "GNN compliance-graph neighbourhood score: 0.010"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000054",
+      "subject_type": "officer",
+      "fused_score": 0.0798,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0046,
+        "bayesian_rate": 0.0263,
+        "behavioral": 0.2401,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:export_volume",
+          "contribution": 0.0809,
+          "detail": "export_volume=3.000 is 1.3 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.072,
+          "detail": "IsolationForest anomaly percentile (batch): 0.240"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0066,
+          "detail": "shrunk event-rate posterior 0.026 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0011,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000005",
+      "subject_type": "officer",
+      "fused_score": 0.0614,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.18,
+        "bayesian_rate": 0.0149,
+        "behavioral": 0.0421,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.045,
+          "detail": "GNN compliance-graph neighbourhood score: 0.180"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0126,
+          "detail": "IsolationForest anomaly percentile (batch): 0.042"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0037,
+          "detail": "shrunk event-rate posterior 0.015 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000009",
+      "subject_type": "officer",
+      "fused_score": 0.0595,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0073,
+        "bayesian_rate": 0.0152,
+        "behavioral": 0.1794,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.0685,
+          "detail": "failed_auth_ratio=0.088 is 1.1 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0538,
+          "detail": "IsolationForest anomaly percentile (batch): 0.179"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0038,
+          "detail": "shrunk event-rate posterior 0.015 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0018,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000029",
+      "subject_type": "officer",
+      "fused_score": 0.0579,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0097,
+        "bayesian_rate": 0.0385,
+        "behavioral": 0.1528,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.1312,
+          "detail": "failed_auth_ratio=0.134 is 2.2 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0458,
+          "detail": "IsolationForest anomaly percentile (batch): 0.153"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0096,
+          "detail": "shrunk event-rate posterior 0.038 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0024,
+          "detail": "GNN compliance-graph neighbourhood score: 0.010"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000024",
+      "subject_type": "officer",
+      "fused_score": 0.0554,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0067,
+        "bayesian_rate": 0.0077,
+        "behavioral": 0.1726,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0518,
+          "detail": "IsolationForest anomaly percentile (batch): 0.173"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0019,
+          "detail": "shrunk event-rate posterior 0.008 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0017,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000021",
+      "subject_type": "officer",
+      "fused_score": 0.0541,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0056,
+        "bayesian_rate": 0.0282,
+        "behavioral": 0.1521,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.1112,
+          "detail": "after_hours_ratio=0.252 is 1.9 robust-z above the staff median"
+        },
+        {
+          "signal": "feature:failed_auth_ratio",
+          "contribution": 0.073,
+          "detail": "failed_auth_ratio=0.091 is 1.2 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0456,
+          "detail": "IsolationForest anomaly percentile (batch): 0.152"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.007,
+          "detail": "shrunk event-rate posterior 0.028 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0014,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000036",
+      "subject_type": "officer",
+      "fused_score": 0.0536,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0049,
+        "bayesian_rate": 0.0149,
+        "behavioral": 0.1622,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0487,
+          "detail": "IsolationForest anomaly percentile (batch): 0.162"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0037,
+          "detail": "shrunk event-rate posterior 0.015 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0012,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000047",
+      "subject_type": "officer",
+      "fused_score": 0.0533,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0061,
+        "bayesian_rate": 0.0012,
+        "behavioral": 0.1715,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0515,
+          "detail": "IsolationForest anomaly percentile (batch): 0.172"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0015,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0003,
+          "detail": "shrunk event-rate posterior 0.001 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000020",
+      "subject_type": "officer",
+      "fused_score": 0.0528,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0059,
+        "bayesian_rate": 0.0014,
+        "behavioral": 0.17,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.051,
+          "detail": "IsolationForest anomaly percentile (batch): 0.170"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0015,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0003,
+          "detail": "shrunk event-rate posterior 0.001 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000023",
+      "subject_type": "officer",
+      "fused_score": 0.0501,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0083,
+        "bayesian_rate": 0.0213,
+        "behavioral": 0.1422,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0427,
+          "detail": "IsolationForest anomaly percentile (batch): 0.142"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0053,
+          "detail": "shrunk event-rate posterior 0.021 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0021,
+          "detail": "GNN compliance-graph neighbourhood score: 0.008"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000012",
+      "subject_type": "officer",
+      "fused_score": 0.0494,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0063,
+        "bayesian_rate": 0.0201,
+        "behavioral": 0.1427,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.0865,
+          "detail": "after_hours_ratio=0.216 is 1.4 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0428,
+          "detail": "IsolationForest anomaly percentile (batch): 0.143"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.005,
+          "detail": "shrunk event-rate posterior 0.020 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0016,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000002",
+      "subject_type": "officer",
+      "fused_score": 0.0483,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0149,
+        "bayesian_rate": 0.0062,
+        "behavioral": 0.1436,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.1012,
+          "detail": "after_hours_ratio=0.237 is 1.7 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0431,
+          "detail": "IsolationForest anomaly percentile (batch): 0.144"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0037,
+          "detail": "GNN compliance-graph neighbourhood score: 0.015"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0015,
+          "detail": "shrunk event-rate posterior 0.006 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000014",
+      "subject_type": "officer",
+      "fused_score": 0.0472,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0063,
+        "bayesian_rate": 0.02,
+        "behavioral": 0.1354,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:sensitive_access_ratio",
+          "contribution": 0.0853,
+          "detail": "sensitive_access_ratio=0.335 is 1.4 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0406,
+          "detail": "IsolationForest anomaly percentile (batch): 0.135"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.005,
+          "detail": "shrunk event-rate posterior 0.020 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0016,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000049",
+      "subject_type": "officer",
+      "fused_score": 0.0427,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0067,
+        "bayesian_rate": 0.0141,
+        "behavioral": 0.1248,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.0796,
+          "detail": "after_hours_ratio=0.206 is 1.3 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0374,
+          "detail": "IsolationForest anomaly percentile (batch): 0.125"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0035,
+          "detail": "shrunk event-rate posterior 0.014 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0017,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000006",
+      "subject_type": "officer",
+      "fused_score": 0.0415,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0078,
+        "bayesian_rate": 0.0077,
+        "behavioral": 0.1255,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0376,
+          "detail": "IsolationForest anomaly percentile (batch): 0.126"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0019,
+          "detail": "shrunk event-rate posterior 0.008 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0019,
+          "detail": "GNN compliance-graph neighbourhood score: 0.008"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000008",
+      "subject_type": "officer",
+      "fused_score": 0.0409,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0078,
+        "bayesian_rate": 0.0143,
+        "behavioral": 0.118,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:sensitive_access_ratio",
+          "contribution": 0.078,
+          "detail": "sensitive_access_ratio=0.318 is 1.3 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0354,
+          "detail": "IsolationForest anomaly percentile (batch): 0.118"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0036,
+          "detail": "shrunk event-rate posterior 0.014 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0019,
+          "detail": "GNN compliance-graph neighbourhood score: 0.008"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000001",
+      "subject_type": "officer",
+      "fused_score": 0.0408,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.1385,
+        "bayesian_rate": 0.0025,
+        "behavioral": 0.0186,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0346,
+          "detail": "GNN compliance-graph neighbourhood score: 0.139"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0056,
+          "detail": "IsolationForest anomaly percentile (batch): 0.019"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0006,
+          "detail": "shrunk event-rate posterior 0.003 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000044",
+      "subject_type": "officer",
+      "fused_score": 0.0389,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0064,
+        "bayesian_rate": 0.0015,
+        "behavioral": 0.1229,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0369,
+          "detail": "IsolationForest anomaly percentile (batch): 0.123"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0016,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0004,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000019",
+      "subject_type": "officer",
+      "fused_score": 0.0357,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0057,
+        "bayesian_rate": 0.0236,
+        "behavioral": 0.0946,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0284,
+          "detail": "IsolationForest anomaly percentile (batch): 0.095"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0059,
+          "detail": "shrunk event-rate posterior 0.024 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0014,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000056",
+      "subject_type": "officer",
+      "fused_score": 0.0296,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0046,
+        "bayesian_rate": 0.0015,
+        "behavioral": 0.0936,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0281,
+          "detail": "IsolationForest anomaly percentile (batch): 0.094"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0011,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0004,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000010",
+      "subject_type": "officer",
+      "fused_score": 0.0281,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0088,
+        "bayesian_rate": 0.0156,
+        "behavioral": 0.0734,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.022,
+          "detail": "IsolationForest anomaly percentile (batch): 0.073"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0039,
+          "detail": "shrunk event-rate posterior 0.016 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0022,
+          "detail": "GNN compliance-graph neighbourhood score: 0.009"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000048",
+      "subject_type": "officer",
+      "fused_score": 0.0272,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0051,
+        "bayesian_rate": 0.0017,
+        "behavioral": 0.0849,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0255,
+          "detail": "IsolationForest anomaly percentile (batch): 0.085"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0013,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0004,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000028",
+      "subject_type": "officer",
+      "fused_score": 0.0262,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0084,
+        "bayesian_rate": 0.0021,
+        "behavioral": 0.0784,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0235,
+          "detail": "IsolationForest anomaly percentile (batch): 0.078"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0021,
+          "detail": "GNN compliance-graph neighbourhood score: 0.008"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0005,
+          "detail": "shrunk event-rate posterior 0.002 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000007",
+      "subject_type": "officer",
+      "fused_score": 0.0252,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0118,
+        "bayesian_rate": 0.0012,
+        "behavioral": 0.0733,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "feature:after_hours_ratio",
+          "contribution": 0.0615,
+          "detail": "after_hours_ratio=0.179 is 1.0 robust-z above the staff median"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.022,
+          "detail": "IsolationForest anomaly percentile (batch): 0.073"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0029,
+          "detail": "GNN compliance-graph neighbourhood score: 0.012"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0003,
+          "detail": "shrunk event-rate posterior 0.001 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000050",
+      "subject_type": "officer",
+      "fused_score": 0.0251,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0078,
+        "bayesian_rate": 0.0182,
+        "behavioral": 0.0619,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0186,
+          "detail": "IsolationForest anomaly percentile (batch): 0.062"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0046,
+          "detail": "shrunk event-rate posterior 0.018 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0019,
+          "detail": "GNN compliance-graph neighbourhood score: 0.008"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000055",
+      "subject_type": "officer",
+      "fused_score": 0.0245,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0049,
+        "bayesian_rate": 0.0123,
+        "behavioral": 0.0672,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0202,
+          "detail": "IsolationForest anomaly percentile (batch): 0.067"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0031,
+          "detail": "shrunk event-rate posterior 0.012 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0012,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000038",
+      "subject_type": "officer",
+      "fused_score": 0.0244,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0048,
+        "bayesian_rate": 0.0152,
+        "behavioral": 0.0646,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0194,
+          "detail": "IsolationForest anomaly percentile (batch): 0.065"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0038,
+          "detail": "shrunk event-rate posterior 0.015 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0012,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000053",
+      "subject_type": "officer",
+      "fused_score": 0.0229,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0044,
+        "bayesian_rate": 0.0066,
+        "behavioral": 0.0672,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0202,
+          "detail": "IsolationForest anomaly percentile (batch): 0.067"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0016,
+          "detail": "shrunk event-rate posterior 0.007 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0011,
+          "detail": "GNN compliance-graph neighbourhood score: 0.004"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000052",
+      "subject_type": "officer",
+      "fused_score": 0.0209,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0051,
+        "bayesian_rate": 0.0143,
+        "behavioral": 0.0534,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.016,
+          "detail": "IsolationForest anomaly percentile (batch): 0.053"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0036,
+          "detail": "shrunk event-rate posterior 0.014 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0013,
+          "detail": "GNN compliance-graph neighbourhood score: 0.005"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000031",
+      "subject_type": "officer",
+      "fused_score": 0.0178,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0066,
+        "bayesian_rate": 0.0092,
+        "behavioral": 0.046,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0138,
+          "detail": "IsolationForest anomaly percentile (batch): 0.046"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0023,
+          "detail": "shrunk event-rate posterior 0.009 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0016,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000018",
+      "subject_type": "officer",
+      "fused_score": 0.0172,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0059,
+        "bayesian_rate": 0.0009,
+        "behavioral": 0.0515,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0154,
+          "detail": "IsolationForest anomaly percentile (batch): 0.051"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0015,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0002,
+          "detail": "shrunk event-rate posterior 0.001 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000000",
+      "subject_type": "officer",
+      "fused_score": 0.0163,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0237,
+        "bayesian_rate": 0.0062,
+        "behavioral": 0.0296,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0089,
+          "detail": "IsolationForest anomaly percentile (batch): 0.030"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0059,
+          "detail": "GNN compliance-graph neighbourhood score: 0.024"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0015,
+          "detail": "shrunk event-rate posterior 0.006 of the 99% population bound"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000026",
+      "subject_type": "officer",
+      "fused_score": 0.016,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0092,
+        "bayesian_rate": 0.0152,
+        "behavioral": 0.033,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0099,
+          "detail": "IsolationForest anomaly percentile (batch): 0.033"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0038,
+          "detail": "shrunk event-rate posterior 0.015 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0023,
+          "detail": "GNN compliance-graph neighbourhood score: 0.009"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000016",
+      "subject_type": "officer",
+      "fused_score": 0.0155,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0071,
+        "bayesian_rate": 0.0084,
+        "behavioral": 0.0386,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0116,
+          "detail": "IsolationForest anomaly percentile (batch): 0.039"
+        },
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.0021,
+          "detail": "shrunk event-rate posterior 0.008 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0018,
+          "detail": "GNN compliance-graph neighbourhood score: 0.007"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    },
+    {
+      "subject_id": "OFF-000011",
+      "subject_type": "officer",
+      "fused_score": 0.0045,
+      "recommended_action": "monitor",
+      "bayesian_flagged": false,
+      "gnn_origin": "gnn",
+      "components": {
+        "gnn_structural": 0.0061,
+        "bayesian_rate": 0.0119,
+        "behavioral": 0.0,
+        "process": 0.0
+      },
+      "explanation": [
+        {
+          "signal": "component:bayesian_rate",
+          "contribution": 0.003,
+          "detail": "shrunk event-rate posterior 0.012 of the 99% population bound"
+        },
+        {
+          "signal": "component:gnn_structural",
+          "contribution": 0.0015,
+          "detail": "GNN compliance-graph neighbourhood score: 0.006"
+        },
+        {
+          "signal": "component:behavioral",
+          "contribution": 0.0,
+          "detail": "IsolationForest anomaly percentile (batch): 0.000"
+        },
+        {
+          "signal": "component:process",
+          "contribution": 0.0,
+          "detail": "severity-weighted process-control violations: 0.000"
+        }
+      ]
+    }
+  ]
+}
