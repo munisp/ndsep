@@ -39,7 +39,8 @@ DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-PORT = int(os.environ.get("KGQA_PORT", "8202"))
+# workerManager sets EPR_KGQA_PORT; KGQA_PORT is the legacy/standalone name.
+PORT = int(os.environ.get("EPR_KGQA_PORT", os.environ.get("KGQA_PORT", "8202")))
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
 LLM_MODEL = os.environ.get("OLLAMA_MODEL", "mistral")
 
