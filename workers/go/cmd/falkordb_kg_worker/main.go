@@ -41,7 +41,9 @@ var (
 	falkorURL       = os.Getenv("FALKORDB_URL")
 	falkorGraphName = getEnv("FALKORDB_GRAPH_NAME", "ndsep_compliance")
 	relayURL        = getEnv("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-	port            = getEnv("FALKORDB_PORT", "8210")
+	// FALKORDB_PORT is canonical (8210); PORT is accepted as a fallback for
+	// compose deployments that inject the generic PORT variable.
+	port            = getEnv("FALKORDB_PORT", getEnv("PORT", "8210"))
 	workerStart     = time.Now()
 	falkorAdapter   *FalkorAdapter
 )
@@ -406,6 +408,13 @@ func main() {
 	mux.HandleFunc("/health", realFalkorHealthHandler)
 	mux.HandleFunc("/query", falkorQueryHandler)
 	mux.HandleFunc("/rebuild", falkorRebuildHandler)
+	// Route contract consumed by server/routers/aimlRouter.ts
+	// (knowledgeGraphRouter): /graph/* endpoints backed by the FalkorDB adapter.
+	mux.HandleFunc("/graph/build", falkorGraphBuildHandler)
+	mux.HandleFunc("/graph/stats", falkorGraphStatsHandler)
+	mux.HandleFunc("/graph/neighbors", falkorGraphNeighborsHandler)
+	mux.HandleFunc("/graph/path", falkorGraphPathHandler)
+	mux.HandleFunc("/graph/embedding", falkorGraphEmbeddingHandler)
 
 	log.Printf("[KG] FalkorDB Knowledge Graph Worker listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
