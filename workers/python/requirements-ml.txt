@@ -22,3 +22,15 @@ duckdb>=0.10.0
 # Postgres access for fine_tune.py / registry.py (continuous training +
 # model-registry inserts against the NDSEP platform database)
 psycopg2-binary>=2.9.9
+
+# OPTIONAL: MLflow tracking client for ml/tracking.py. The MLflow SERVER
+# runs via docker-compose (service `mlflow` in
+# docker-compose-workers-addition.yml) — only the client library is needed
+# here. Without it (or without MLFLOW_TRACKING_URI set) tracking is a
+# graceful no-op. Uncomment to enable:
+# mlflow>=2.16,<3
+
+# NOTE: pyarrow is the preferred parquet engine; fastparquet is an
+# equivalent alternative if pyarrow wheels are unavailable for your
+# platform (ml/training/lakehouse.py auto-detects either).
+# fastparquet>=2024.2.0

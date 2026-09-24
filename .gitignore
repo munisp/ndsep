@@ -127,3 +127,6 @@ workers/python/vendor/
 workers/python/models/
 workers/go/bin/
 workers/rust/target/
+
+# NDSEP ml/ stack: transient fine-tune batch dirs (regenerated per run)
+ml/data/output/_ft_*/

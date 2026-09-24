@@ -474,15 +474,17 @@ def gen_graph(rng: np.random.Generator, orgs: pd.DataFrame,
 # Persistence (parquet with CSV fallback)
 # --------------------------------------------------------------------------- #
 def _write(df: pd.DataFrame, path_base: str) -> str:
-    try:
-        import pyarrow  # noqa: F401
-        out = path_base + ".parquet"
-        df.to_parquet(out, index=False)
-        return out
-    except Exception:
-        out = path_base + ".csv"
-        df.to_csv(out, index=False)
-        return out
+    for engine in ("pyarrow", "fastparquet"):
+        try:
+            __import__(engine)
+            out = path_base + ".parquet"
+            df.to_parquet(out, index=False, engine=engine)
+            return out
+        except Exception:
+            continue
+    out = path_base + ".csv"
+    df.to_csv(out, index=False)
+    return out
 
 
 def generate(output_dir: str, n_transactions: int = 120_000,

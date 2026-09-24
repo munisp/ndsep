@@ -45,11 +45,47 @@ from ml.models.credit_net import CreditNet
 from ml.models.fraud_net import FraudNet
 from ml.models.gnn_net import GNNNet, build_adjacency
 from ml.registry import register_run
+from ml.tracking import track_run
 from ml.training import lakehouse
 from ml.training.train import (DEFAULT_DATA_DIR, WEIGHTS_DIR, _metrics,
                                _split, ensure_data, get_dataset)
 
 SEED = 42
+
+# Confirmed real fraud cases (ml/validation/real_case_ingest.py, lakehouse
+# dataset 'real_cases') are up-weighted relative to synthetic rows during
+# fine-tuning: real labels are scarcer and more informative.
+REAL_CASE_WEIGHT = 3.0
+
+
+def _merge_real_cases(tx: pd.DataFrame) -> pd.DataFrame:
+    """Merge ingested real fraud cases into a training batch.
+
+    Adds a `sample_weight` column: REAL_CASE_WEIGHT for real cases, 1.0
+    for the rest. No-op (weight 1.0 everywhere) when no real cases have
+    been ingested yet."""
+    tx = tx.copy()
+    tx["sample_weight"] = 1.0
+    try:
+        from ml.validation.real_case_ingest import load_real_cases
+        real = load_real_cases()
+    except Exception as e:
+        print(f"[fine_tune] real-case load skipped: {e}")
+        return tx
+    if real is None or not len(real):
+        return tx
+    keep = [c for c in ["timestamp", "is_fraud", *FRAUD_FEATURES]
+            if c in real.columns]
+    real = real[keep].copy()
+    real["sample_weight"] = REAL_CASE_WEIGHT
+    for col in ["timestamp", "is_fraud", *FRAUD_FEATURES]:
+        if col not in tx.columns:
+            tx[col] = np.nan
+    merged = pd.concat([tx[["timestamp", "is_fraud", *FRAUD_FEATURES,
+                            "sample_weight"]], real], ignore_index=True)
+    print(f"[fine_tune] merged {len(real)} REAL fraud cases "
+          f"(weight={REAL_CASE_WEIGHT}x) into the training batch")
+    return merged
 
 
 # --------------------------------------------------------------------------- #
@@ -135,6 +171,8 @@ def get_new_batch(model: str, data_dir: str, batch_seed: int) -> tuple[dict, str
         out[name] = pd.read_parquet(os.path.join(tmp_dir, f"{name}.parquet")) \
             if os.path.exists(os.path.join(tmp_dir, f"{name}.parquet")) \
             else pd.read_csv(os.path.join(tmp_dir, f"{name}.csv"))
+    if model == "fraud" and "transactions" in out:
+        out["transactions"] = _merge_real_cases(out["transactions"])
     return out, f"synthetic_batch_seed_{batch_seed}"
 
 
@@ -155,13 +193,24 @@ def _log_drift(model: str, stats_path: str, df: pd.DataFrame,
     return rep
 
 
-def fine_tune_tabular(model, X, y, epochs, lr, pos_weight, batch_size=256):
-    X_tr, X_va, y_tr, y_va = train_test_split_safe(X, y)
+def fine_tune_tabular(model, X, y, epochs, lr, pos_weight, batch_size=256,
+                      sample_weight=None):
+    if sample_weight is not None:
+        idx = np.arange(len(y))
+        X_tr, X_va, y_tr, y_va, w_tr, _w_va = train_test_split_safe(
+            X, y, idx)
+        w_tr = np.asarray(sample_weight, dtype=float)[w_tr]
+    else:
+        X_tr, X_va, y_tr, y_va = train_test_split_safe(X, y)
+        w_tr = None
     mean, std = X_tr.mean(0), X_tr.std(0) + 1e-9
     X_tr_t = torch.tensor((X_tr - mean) / std, dtype=torch.float32)
     y_tr_t = torch.tensor(y_tr, dtype=torch.float32)
+    w_tr_t = (torch.tensor(w_tr, dtype=torch.float32)
+              if w_tr is not None else None)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
-    crit = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(float(pos_weight)))
+    crit = nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor(float(pos_weight)), reduction="none")
     model.train()
     for epoch in range(1, epochs + 1):
         perm = torch.randperm(len(X_tr_t))
@@ -172,6 +221,9 @@ def fine_tune_tabular(model, X, y, epochs, lr, pos_weight, batch_size=256):
                 continue
             opt.zero_grad()
             loss = crit(model(X_tr_t[idx]), y_tr_t[idx])
+            if w_tr_t is not None:
+                loss = loss * w_tr_t[idx]
+            loss = loss.mean()
             loss.backward()
             opt.step()
             tot += loss.item() * len(idx)
@@ -183,13 +235,15 @@ def fine_tune_tabular(model, X, y, epochs, lr, pos_weight, batch_size=256):
     return _metrics(np.asarray(y_va), prob)
 
 
-def train_test_split_safe(X, y, test_size=0.25):
+def train_test_split_safe(X, y, *arrays, test_size=0.25):
+    """Stratified split when possible; extra arrays are split alongside X/y."""
     from sklearn.model_selection import train_test_split
     try:
-        return train_test_split(X, y, test_size=test_size, random_state=SEED,
-                                stratify=y)
+        return train_test_split(X, y, *arrays, test_size=test_size,
+                                random_state=SEED, stratify=y)
     except ValueError:
-        return train_test_split(X, y, test_size=test_size, random_state=SEED)
+        return train_test_split(X, y, *arrays, test_size=test_size,
+                                random_state=SEED)
 
 
 def fine_tune_fraud(batch: dict, source: str, epochs: int, lr: float,
@@ -201,7 +255,10 @@ def fine_tune_fraud(batch: dict, source: str, epochs: int, lr: float,
     X = tx[FRAUD_FEATURES].to_numpy(dtype=float)
     y = tx["is_fraud"].to_numpy(dtype=float)
     pos_weight = max((len(y) - y.sum()) / max(y.sum(), 1), 1.0)
-    metrics = fine_tune_tabular(model, X, y, epochs, lr, pos_weight)
+    sw = (tx["sample_weight"].to_numpy(dtype=float)
+          if "sample_weight" in tx.columns else None)
+    metrics = fine_tune_tabular(model, X, y, epochs, lr, pos_weight,
+                                sample_weight=sw)
     return _save_versioned(model, "fraud", metrics, source, drift, weights_dir)
 
 
@@ -307,7 +364,14 @@ def main():
                   f"`python -m ml.training.train --model {m}` first; skipping")
             continue
         batch, source = get_new_batch(m, args.data_dir, args.batch_seed)
-        FINE_TUNERS[m](batch, source, args.epochs, args.lr, args.weights_dir)
+        # MLflow tracking: no-op unless mlflow installed + MLFLOW_TRACKING_URI
+        with track_run(m, params={"mode": "fine_tune", "epochs": args.epochs,
+                                  "lr": args.lr, "data_source": source},
+                       tags={"mode": "fine_tune"}) as run:
+            payload = FINE_TUNERS[m](batch, source, args.epochs, args.lr,
+                                     args.weights_dir)
+            run.log_metrics(payload["metrics"])
+            run.log_artifact(payload["weights_path"])
 
 
 if __name__ == "__main__":

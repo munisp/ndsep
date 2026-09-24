@@ -90,6 +90,60 @@
         ],
         "created_at": "2026-09-24T03:08:47.718993Z",
         "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20260924T072410",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_fraud/v20260924T072410.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:24:11.007562Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20260924T072542",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_fraud/v20260924T072542.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:25:43.017705Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20260924T072657",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_fraud/v20260924T072657.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:26:57.811657Z",
+        "meta": {}
       }
     ],
     "training_metrics_credit": [
@@ -182,6 +236,60 @@
         ],
         "created_at": "2026-09-24T03:09:10.595313Z",
         "meta": {}
+      },
+      {
+        "dataset": "training_metrics_credit",
+        "snapshot_id": "v20260924T071734",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_credit/v20260924T071734.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:17:34.378525Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_credit",
+        "snapshot_id": "v20260924T072543",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_credit/v20260924T072543.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:25:43.915046Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_credit",
+        "snapshot_id": "v20260924T072700",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_credit/v20260924T072700.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:27:00.749380Z",
+        "meta": {}
       }
     ],
     "training_metrics_gnn": [
@@ -255,6 +363,42 @@
           "roc_auc"
         ],
         "created_at": "2026-09-24T03:08:47.858872Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_gnn",
+        "snapshot_id": "v20260924T072547",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_gnn/v20260924T072547.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:25:47.078978Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_gnn",
+        "snapshot_id": "v20260924T072703",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_metrics_gnn/v20260924T072703.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-09-24T07:27:03.937184Z",
         "meta": {}
       }
     ],
@@ -410,6 +554,80 @@
         ],
         "created_at": "2026-09-24T03:10:02.477733Z",
         "meta": {}
+      }
+    ],
+    "training_runs": [
+      {
+        "dataset": "training_runs",
+        "snapshot_id": "v20260924T072657",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_runs/v20260924T072657.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "cycle_at",
+          "action",
+          "reason",
+          "version",
+          "status",
+          "drift",
+          "data_source",
+          "weights_age_hours",
+          "metrics"
+        ],
+        "created_at": "2026-09-24T07:26:57.883484Z",
+        "meta": {
+          "model": "fraud",
+          "action": "fine_tuned"
+        }
+      },
+      {
+        "dataset": "training_runs",
+        "snapshot_id": "v20260924T072700",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_runs/v20260924T072700.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "cycle_at",
+          "action",
+          "reason",
+          "version",
+          "status",
+          "drift",
+          "data_source",
+          "weights_age_hours",
+          "metrics"
+        ],
+        "created_at": "2026-09-24T07:27:00.814657Z",
+        "meta": {
+          "model": "credit",
+          "action": "fine_tuned"
+        }
+      },
+      {
+        "dataset": "training_runs",
+        "snapshot_id": "v20260924T072703",
+        "path": "/mnt/agents/ndsep/ml/lakehouse/training_runs/v20260924T072703.parquet",
+        "format": "parquet",
+        "rows": 1,
+        "columns": [
+          "model",
+          "cycle_at",
+          "action",
+          "reason",
+          "version",
+          "status",
+          "drift",
+          "data_source",
+          "weights_age_hours",
+          "metrics"
+        ],
+        "created_at": "2026-09-24T07:27:03.972657Z",
+        "meta": {
+          "model": "gnn",
+          "action": "fine_tuned"
+        }
       }
     ]
   }

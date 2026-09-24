@@ -41,6 +41,7 @@ from ml.models.credit_net import CreditNet
 from ml.models.fraud_net import FraudNet
 from ml.models.gnn_net import GNNNet, build_adjacency
 from ml.registry import register_run
+from ml.tracking import track_run
 from ml.training import lakehouse
 
 DEVICE = "cpu"
@@ -401,7 +402,14 @@ def main():
             print("[train] Ray not installed — falling back to sequential local training")
     if not results:
         for m in models:
-            results[m] = TRAINERS[m](**_kwargs(m))
+            # MLflow tracking is a no-op unless the mlflow package is
+            # installed AND MLFLOW_TRACKING_URI is set (ml/tracking.py).
+            # (The --use-ray path above runs remotely and is not tracked.)
+            with track_run(m, params=_kwargs(m), tags={"mode": "train"}) as run:
+                results[m] = TRAINERS[m](**_kwargs(m))
+                run.log_metrics(results[m])
+                run.log_artifact(results[m]["weights_path"])
+                run.log_artifact(results[m]["feature_stats_path"])
 
     print("\n================ TEST METRICS ================")
     for m, r in results.items():

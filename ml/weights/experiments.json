@@ -1,0 +1,13 @@
+{
+  "experiments": [
+    {
+      "name": "fraud-ft-rollout",
+      "model": "fraud",
+      "champion_version": "20260924T072542Z",
+      "challenger_version": "20260924T072657Z",
+      "traffic_split": 0.5,
+      "started_at": "2026-09-24T07:31:39.144818Z",
+      "status": "running"
+    }
+  ]
+}

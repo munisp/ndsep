@@ -14,6 +14,18 @@ Each returns {"probability": float in [0,1], "model_version": str,
 saved in ml/weights/<model>_net_feature_stats.json, so scoring matches
 training exactly.
 
+Optional keyword arguments on every score_* function:
+
+    experiment="name", subject_id="..."   champion/challenger A/B routing
+        (ml/ab_testing.py): the subject is deterministically assigned to a
+        variant, scored with that variant's weight version, and the result
+        (prediction + latency) is logged to ml/lakehouse/ab_results/.
+        The returned dict gains "variant" and "experiment" keys.
+
+Performance monitoring (ml/monitoring/performance_monitor.py) logs every
+score (distribution, latency, volume) to the lakehouse unless
+NDSEP_ML_MONITOR=0. Logging is failure-safe: it can never break scoring.
+
     python -m ml.inference        # smoke test
 """
 
@@ -21,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from functools import lru_cache
 
 import numpy as np
@@ -45,14 +58,24 @@ def _version(weights_dir: str, name: str) -> str:
     return "unknown"
 
 
-@lru_cache(maxsize=4)
-def _load(name: str, weights_dir: str = WEIGHTS_DIR):
-    path = os.path.join(weights_dir, f"{name}_net.pt")
+@lru_cache(maxsize=16)
+def _load(name: str, weights_dir: str = WEIGHTS_DIR,
+          version: str | None = None):
+    """Load model + feature stats. `version` selects a versioned weights
+    file (<name>_net_<version>.pt, e.g. a challenger); None = canonical."""
+    if version:
+        path = os.path.join(weights_dir, f"{name}_net_{version}.pt")
+        if not os.path.exists(path):  # fall back to canonical weights
+            path = os.path.join(weights_dir, f"{name}_net.pt")
+            version = _version(weights_dir, name)
+    else:
+        path = os.path.join(weights_dir, f"{name}_net.pt")
+        version = _version(weights_dir, name)
     cls = {"fraud": FraudNet, "credit": CreditNet, "gnn": GNNNet}[name]
     model = cls.load(path, device=DEVICE)
     stats_path = os.path.join(weights_dir, f"{name}_net_feature_stats.json")
     stats = json.load(open(stats_path)) if os.path.exists(stats_path) else {}
-    return model, stats, _version(weights_dir, name)
+    return model, stats, version
 
 
 def _standardize(values: np.ndarray, features: list[str], stats: dict) -> np.ndarray:
@@ -63,46 +86,117 @@ def _standardize(values: np.ndarray, features: list[str], stats: dict) -> np.nda
     return (values - means) / np.where(stds == 0, 1.0, stds)
 
 
+# --------------------------------------------------------------------------- #
+# A/B routing + performance logging hooks (both failure-safe)
+# --------------------------------------------------------------------------- #
+def _resolve_variant(name: str, weights_dir: str,
+                     experiment: str | None, subject_id: str | None):
+    """Return (version_override, variant) for an A/B experiment, else (None, None)."""
+    if not experiment:
+        return None, None
+    from ml import ab_testing
+    exp = ab_testing.get_experiment(
+        experiment, path=os.path.join(weights_dir, "experiments.json"))
+    if exp is None or exp.get("model") != name:
+        return None, None
+    variant = ab_testing.assign_variant(exp, str(subject_id or "anonymous"))
+    return ab_testing.version_for_variant(exp, variant), variant
+
+
+def _observe(name: str, result: dict, latency_ms: float,
+             weights_dir: str, experiment: str | None,
+             subject_id: str | None) -> None:
+    """Log the scored request to A/B results and the performance monitor.
+    Never raises — observability must not break scoring."""
+    try:
+        if experiment and result.get("variant"):
+            from ml import ab_testing
+            ab_testing.log_result(experiment, {
+                "experiment": experiment,
+                "subject_id": str(subject_id or "anonymous"),
+                "model": name,
+                "variant": result["variant"],
+                "model_version": result["model_version"],
+                "probability": result["probability"],
+                "latency_ms": round(latency_ms, 3)})
+    except Exception:
+        pass
+    try:
+        if os.environ.get("NDSEP_ML_MONITOR", "1") != "0":
+            from ml.monitoring import performance_monitor
+            performance_monitor.log_inference(
+                name, result["model_version"], result["probability"],
+                latency_ms, subject_id=subject_id,
+                variant=result.get("variant"),
+                weights_dir=weights_dir)
+    except Exception:
+        pass
+
+
 def score_transaction(features: dict | list[float],
-                      weights_dir: str = WEIGHTS_DIR) -> dict:
+                      weights_dir: str = WEIGHTS_DIR,
+                      experiment: str | None = None,
+                      subject_id: str | None = None) -> dict:
     """Score one NIP transaction for fraud.
 
     `features` may be a dict keyed by FRAUD_FEATURES names or an ordered
     list/np.ndarray of len(FRAUD_FEATURES).
     """
-    model, stats, version = _load("fraud", weights_dir)
+    t0 = time.perf_counter()
+    ver, variant = _resolve_variant("fraud", weights_dir, experiment, subject_id)
+    model, stats, version = _load("fraud", weights_dir, ver)
     x = _as_vector(features, FRAUD_FEATURES)
     x = _standardize(x, FRAUD_FEATURES, stats)
     with torch.no_grad():
         logit = model(torch.tensor(x[None, :], dtype=torch.float32))
         prob = float(torch.sigmoid(logit).item())
-    return {"model": "fraud_net", "model_version": version,
-            "probability": prob, "score": prob}
+    latency_ms = (time.perf_counter() - t0) * 1000
+    result = {"model": "fraud_net", "model_version": version,
+              "probability": prob, "score": prob}
+    if variant:
+        result["variant"] = variant
+        result["experiment"] = experiment
+    _observe("fraud", result, latency_ms, weights_dir, experiment, subject_id)
+    return result
 
 
 def score_credit(features: dict | list[float],
-                 weights_dir: str = WEIGHTS_DIR) -> dict:
+                 weights_dir: str = WEIGHTS_DIR,
+                 experiment: str | None = None,
+                 subject_id: str | None = None) -> dict:
     """Score one organization for 24-month credit/compliance default risk."""
-    model, stats, version = _load("credit", weights_dir)
+    t0 = time.perf_counter()
+    ver, variant = _resolve_variant("credit", weights_dir, experiment, subject_id)
+    model, stats, version = _load("credit", weights_dir, ver)
     x = _as_vector(features, CREDIT_FEATURES)
     x = _standardize(x, CREDIT_FEATURES, stats)
     with torch.no_grad():
         logit = model(torch.tensor(x[None, :], dtype=torch.float32))
         prob = float(torch.sigmoid(logit).item())
-    return {"model": "credit_net", "model_version": version,
-            "probability": prob, "score": prob}
+    latency_ms = (time.perf_counter() - t0) * 1000
+    result = {"model": "credit_net", "model_version": version,
+              "probability": prob, "score": prob}
+    if variant:
+        result["variant"] = variant
+        result["experiment"] = experiment
+    _observe("credit", result, latency_ms, weights_dir, experiment, subject_id)
+    return result
 
 
 def score_graph_node(node_features: dict | list[float],
                      neighbor_features: list[dict | list[float]] | None = None,
-                     weights_dir: str = WEIGHTS_DIR) -> dict:
+                     weights_dir: str = WEIGHTS_DIR,
+                     experiment: str | None = None,
+                     subject_id: str | None = None) -> dict:
     """Score one compliance-graph node (e.g. an organization) for high risk.
 
     Builds a local star graph (the node + its 1-hop neighbours) and runs
     the trained GraphSAGE GNN. With no neighbours supplied, the node's
     self-features still flow through (self-loop via W_self).
     """
-    model, stats, version = _load("gnn", weights_dir)
+    t0 = time.perf_counter()
+    ver, variant = _resolve_variant("gnn", weights_dir, experiment, subject_id)
+    model, stats, version = _load("gnn", weights_dir, ver)
     feat_cols = [f"f{i}" for i in range(NODE_FEATURE_DIM)]
     x0 = _as_vector(node_features, feat_cols)
     rows = [x0]
@@ -115,8 +209,50 @@ def score_graph_node(node_features: dict | list[float],
     with torch.no_grad():
         logit = model(X, adj)[0]
         prob = float(torch.sigmoid(logit).item())
-    return {"model": "gnn_net", "model_version": version,
-            "probability": prob, "score": prob}
+    latency_ms = (time.perf_counter() - t0) * 1000
+    result = {"model": "gnn_net", "model_version": version,
+              "probability": prob, "score": prob}
+    if variant:
+        result["variant"] = variant
+        result["experiment"] = experiment
+    _observe("gnn", result, latency_ms, weights_dir, experiment, subject_id)
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# Batch scoring (used by A/B evaluation and the validation harness)
+# --------------------------------------------------------------------------- #
+def score_batch(name: str, df, weights_dir: str = WEIGHTS_DIR,
+                version: str | None = None) -> np.ndarray:
+    """Vectorised scoring of a lakehouse-style DataFrame.
+
+    fraud  — df needs the FRAUD_FEATURES columns (engineered transactions)
+    credit — df needs the CREDIT_FEATURES columns
+    gnn    — ignored `df`; loads latest graph_nodes/edges/labels snapshots
+             and returns probabilities for nodes in graph_labels order
+    """
+    import pandas as pd  # noqa: F401  (df is a DataFrame)
+    model, stats, _ver = _load(name, weights_dir, version)
+    if name in ("fraud", "credit"):
+        feats = FRAUD_FEATURES if name == "fraud" else CREDIT_FEATURES
+        X = df[feats].to_numpy(dtype=float)
+        X = _standardize(X, feats, stats)
+        with torch.no_grad():
+            return torch.sigmoid(
+                model(torch.tensor(X, dtype=torch.float32))).numpy()
+    if name == "gnn":
+        from ml.training import lakehouse
+        nodes = lakehouse.load_latest("graph_nodes")
+        edges = lakehouse.load_latest("graph_edges")
+        labels = lakehouse.load_latest("graph_labels")
+        feat_cols = [f"f{i}" for i in range(NODE_FEATURE_DIM)]
+        X = torch.tensor(nodes[feat_cols].to_numpy(dtype=np.float32))
+        adj = build_adjacency(len(nodes), list(zip(edges["src"].astype(int),
+                                                   edges["dst"].astype(int))))
+        org_idx = np.sort(labels["node_id"].to_numpy())
+        with torch.no_grad():
+            return torch.sigmoid(model(X, adj)[torch.tensor(org_idx)]).numpy()
+    raise ValueError(f"unknown model '{name}'")
 
 
 def _as_vector(features, names: list[str]) -> np.ndarray:

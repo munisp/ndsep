@@ -1,0 +1,10 @@
+{
+  "model": "fraud_net",
+  "input_dim": 16,
+  "hidden_dims": [
+    128,
+    64,
+    32
+  ],
+  "dropout": 0.3
+}

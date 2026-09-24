@@ -1543,6 +1543,43 @@ services:
     networks:
       - ndsep-internal
 
+  # ─── MLflow tracking server for the ml/ stack ──────────────────────────────
+  # Serves the MLflow UI/API on :5000. Backend store = the platform Postgres
+  # (dedicated `mlflow` database), artifacts on the mlflow-artifacts volume.
+  # ONE-TIME SETUP: create the database before first start:
+  #   docker exec -it <postgres-container> \
+  #     psql -U ndsep_user -d ndsep_db -c "CREATE DATABASE mlflow;"
+  # Client side: ml/tracking.py is a no-op unless MLFLOW_TRACKING_URI is set
+  # (e.g. MLFLOW_TRACKING_URI=http://mlflow:5000 inside the network, or
+  # http://localhost:5000 from the host).
+  mlflow:
+    <<: *resource-defaults
+    image: ghcr.io/mlflow/mlflow:v2.16.2
+    container_name: ndsep-mlflow
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      --default-artifact-root /mlruns
+      --host 0.0.0.0 --port 5000
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+    volumes:
+      - mlflow-artifacts:/mlruns
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:5000/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
 networks:
   ndsep-internal:
     name: ndsep-internal
+
+volumes:
+  mlflow-artifacts:

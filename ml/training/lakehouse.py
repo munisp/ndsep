@@ -32,7 +32,11 @@ try:
     import pyarrow  # noqa: F401
     HAS_PARQUET = True
 except Exception:
-    HAS_PARQUET = False
+    try:
+        import fastparquet  # noqa: F401  (alternative parquet engine)
+        HAS_PARQUET = True
+    except Exception:
+        HAS_PARQUET = False
 
 try:
     import duckdb  # noqa: F401
