@@ -20,10 +20,16 @@ Reports:
   - Model accuracy under attack
   - Recommended defences
 
-Technology: Python · adversarial-robustness-toolbox · scikit-learn · numpy
-Port: 8204
+Primary target: the REAL trained fraud_net weights (ml/weights/fraud_net.pt)
+attacked via ART's PyTorchClassifier (FGSM/PGD). When torch, the weights, or
+the evaluation data are unavailable — or when started with --demo — the worker
+falls back to the synthetic sklearn demo model.
+
+Technology: Python · adversarial-robustness-toolbox · torch · scikit-learn · numpy
+Port: 8213
 """
 import os
+import sys
 import time
 import json
 import logging
@@ -39,8 +45,25 @@ import numpy as np
 DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
     "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-PORT = int(os.environ.get("ART_PORT", "8204"))
+PORT = int(os.environ.get("ART_PORT", "8213"))
 MODEL_PATH = os.environ.get("ML_MODEL_PATH", "./workers/python/models/")
+# Real trained model under test (ml/weights/fraud_net.pt + fraud_net_config.json)
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+ART_MODEL_WEIGHTS = os.environ.get(
+    "ART_MODEL_WEIGHTS", os.path.join(_REPO_ROOT, "ml", "weights", "fraud_net.pt"))
+ART_FRAUD_DATA = os.environ.get(
+    "ART_FRAUD_DATA", os.path.join(_REPO_ROOT, "ml", "data", "output", "transactions.parquet"))
+# Force the synthetic sklearn demo path (e.g. `--demo` CLI flag or ART_DEMO=1).
+DEMO_MODE = "--demo" in sys.argv or os.environ.get("ART_DEMO") == "1"
+
+# Feature order must match ml/data/generate_synthetic.py FRAUD_FEATURES.
+FRAUD_FEATURES = [
+    "amount_log", "hour_of_day", "is_night", "is_weekend",
+    "day_of_month", "salary_window", "channel_code",
+    "sender_tx_count_1h", "sender_amount_ratio", "receiver_fan_in_24h",
+    "new_device", "new_location", "just_below_threshold",
+    "is_round_amount", "mule_hop", "is_insider_ring",
+]
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [NDSEP-ART] %(levelname)s %(message)s",
@@ -116,8 +139,8 @@ def normalize_features(X: np.ndarray) -> np.ndarray:
 # ── ART test suite ─────────────────────────────────────────────────────────────
 
 
-def run_art_tests(model_type: str = "random_forest") -> Dict[str, Any]:
-    """Run full ART adversarial robustness test suite."""
+def run_sklearn_demo_tests(model_type: str = "random_forest") -> Dict[str, Any]:
+    """Synthetic sklearn demo suite (fallback when real weights are unavailable)."""
     global _total_tests_run, _last_test_time, _errors
     log.info(f"Starting ART test suite for model: {model_type}")
     start_time = time.time()
@@ -305,6 +328,251 @@ def run_art_tests(model_type: str = "random_forest") -> Dict[str, Any]:
 
     return results
 
+
+# ── Real trained model (fraud_net) ART path ───────────────────────────────────
+
+
+def load_fraud_net():
+    """Load the trained fraud_net weights (ml/weights/fraud_net.pt).
+
+    The architecture mirrors ml/models/fraud_net.py (MLP with BatchNorm +
+    Dropout); dims come from the sibling *_config.json. Returns a 2-class
+    logit wrapper suitable for ART's PyTorchClassifier.
+    """
+    import torch
+    import torch.nn as nn
+
+    config_path = ART_MODEL_WEIGHTS.replace(".pt", "_config.json")
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    class FraudNet(nn.Module):
+        def __init__(self, input_dim, hidden_dims, dropout):
+            super().__init__()
+            layers, prev = [], input_dim
+            for h in hidden_dims:
+                layers += [nn.Linear(prev, h), nn.BatchNorm1d(h), nn.ReLU(),
+                           nn.Dropout(dropout)]
+                prev = h
+            layers.append(nn.Linear(prev, 1))
+            self.net = nn.Sequential(*layers)
+
+        def forward(self, x):
+            return self.net(x).squeeze(-1)
+
+    class TwoClassLogits(nn.Module):
+        """Wrap the binary logit as [neg, pos] class logits for ART."""
+
+        def __init__(self, base):
+            super().__init__()
+            self.base = base
+
+        def forward(self, x):
+            logit = self.base(x)
+            return torch.stack([-logit, logit], dim=1)
+
+    base = FraudNet(cfg["input_dim"], tuple(cfg["hidden_dims"]), cfg["dropout"])
+    base.load_state_dict(torch.load(ART_MODEL_WEIGHTS, map_location="cpu",
+                                    weights_only=True))
+    base.eval()
+    model = TwoClassLogits(base)
+    model.eval()
+    return model, cfg
+
+
+def load_fraud_eval_data(max_rows: int = 2000) -> Tuple[np.ndarray, np.ndarray]:
+    """Load real transaction features + labels from the training parquet,
+    normalized with the training feature statistics."""
+    import pandas as pd
+    stats_path = os.path.join(os.path.dirname(ART_MODEL_WEIGHTS),
+                              "fraud_net_feature_stats.json")
+    with open(stats_path, "r", encoding="utf-8") as f:
+        stats = json.load(f)["features"]
+    df = pd.read_parquet(ART_FRAUD_DATA, columns=FRAUD_FEATURES + ["is_fraud"])
+    df = df.dropna(subset=FRAUD_FEATURES + ["is_fraud"])
+    # Balanced sample so accuracy-under-attack is meaningful.
+    fraud = df[df["is_fraud"] == 1]
+    legit = df[df["is_fraud"] == 0]
+    n_each = min(max_rows // 2, len(fraud), len(legit))
+    if n_each < 50:
+        raise RuntimeError(
+            f"insufficient labelled fraud data ({len(fraud)} fraud / {len(legit)} legit rows)")
+    sample = pd.concat([fraud.sample(n=n_each, random_state=42),
+                        legit.sample(n=n_each, random_state=42)])
+    X = sample[FRAUD_FEATURES].to_numpy(dtype=np.float64)
+    y = sample["is_fraud"].to_numpy(dtype=np.int64)
+    mean = np.array([stats[f]["mean"] for f in FRAUD_FEATURES])
+    std = np.array([stats[f]["std"] for f in FRAUD_FEATURES]) + 1e-9
+    return ((X - mean) / std).astype(np.float32), y
+
+
+def run_fraud_net_tests(attack_type: str = None, epsilon: float = 0.1,
+                        iterations: int = 20) -> Dict[str, Any]:
+    """Run FGSM/PGD against the REAL trained fraud_net via ART PyTorchClassifier."""
+    import torch
+    import torch.nn as nn
+    from art.estimators.classification import PyTorchClassifier
+
+    start_time = time.time()
+    log.info(f"ART: loading trained model from {ART_MODEL_WEIGHTS}")
+    model, cfg = load_fraud_net()
+    X, y = load_fraud_eval_data()
+    clip = (float(X.min()), float(X.max()))
+
+    classifier = PyTorchClassifier(
+        model=model,
+        loss=nn.CrossEntropyLoss(),
+        optimizer=torch.optim.Adam(model.parameters(), lr=1e-3),
+        input_shape=(cfg["input_dim"],),
+        nb_classes=2,
+        clip_values=clip,
+    )
+
+    clean_acc = float(np.mean(np.argmax(classifier.predict(X), axis=1) == y))
+    results = {
+        "model_type": "fraud_net",
+        "model_source": ART_MODEL_WEIGHTS,
+        "data_source": ART_FRAUD_DATA,
+        "eval_samples": int(len(y)),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "baseline_accuracy": round(clean_acc, 4),
+        "tests": {},
+        "robustness_score": 0,
+        "summary": {},
+    }
+    log.info(f"fraud_net clean accuracy on real data: {clean_acc:.4f}")
+
+    wanted = {attack_type} if attack_type else {"fgsm", "pgd"}
+
+    if "fgsm" in wanted:
+        try:
+            from art.attacks.evasion import FastGradientMethod
+            fgsm = FastGradientMethod(estimator=classifier, eps=epsilon)
+            X_adv = fgsm.generate(x=X)
+            adv_acc = float(np.mean(np.argmax(classifier.predict(X_adv), axis=1) == y))
+            success = 1.0 - adv_acc
+            results["tests"]["fgsm"] = {
+                "name": "Fast Gradient Sign Method (FGSM)",
+                "type": "evasion",
+                "target_model": "fraud_net (trained weights)",
+                "baseline_accuracy": round(clean_acc, 4),
+                "accuracy_under_attack": round(adv_acc, 4),
+                "attack_success_rate": round(success, 4),
+                "epsilon": epsilon,
+                "status": "vulnerable" if success > 0.3 else "robust",
+                "recommendation": "Apply adversarial training or feature squeezing" if success > 0.3 else "Model is robust to FGSM",
+            }
+            log.info(f"FGSM(eps={epsilon}): accuracy under attack = {adv_acc:.4f}")
+        except Exception as e:
+            results["tests"]["fgsm"] = {"error": str(e), "status": "error"}
+            log.error(f"FGSM test failed: {e}")
+
+    if "pgd" in wanted:
+        try:
+            from art.attacks.evasion import ProjectedGradientDescent
+            pgd = ProjectedGradientDescent(estimator=classifier, eps=epsilon,
+                                           max_iter=iterations)
+            X_adv = pgd.generate(x=X)
+            adv_acc = float(np.mean(np.argmax(classifier.predict(X_adv), axis=1) == y))
+            success = 1.0 - adv_acc
+            results["tests"]["pgd"] = {
+                "name": "Projected Gradient Descent (PGD)",
+                "type": "evasion",
+                "target_model": "fraud_net (trained weights)",
+                "baseline_accuracy": round(clean_acc, 4),
+                "accuracy_under_attack": round(adv_acc, 4),
+                "attack_success_rate": round(success, 4),
+                "epsilon": epsilon,
+                "max_iter": iterations,
+                "status": "vulnerable" if success > 0.4 else "robust",
+                "recommendation": "Apply adversarial training with PGD augmentation" if success > 0.4 else "Model is robust to PGD",
+            }
+            log.info(f"PGD(eps={epsilon}, iter={iterations}): accuracy under attack = {adv_acc:.4f}")
+        except Exception as e:
+            results["tests"]["pgd"] = {"error": str(e), "status": "error"}
+            log.error(f"PGD test failed: {e}")
+
+    # Overall robustness score (same rubric as the demo suite)
+    scores = []
+    for test_result in results["tests"].values():
+        if "error" in test_result:
+            continue
+        if test_result.get("status") == "robust":
+            scores.append(90)
+        elif test_result.get("status") == "vulnerable":
+            scores.append(max(0, int((1 - test_result.get("attack_success_rate", 0.5)) * 100)))
+        else:
+            scores.append(70)
+    robustness_score = int(np.mean(scores)) if scores else 50
+    results["robustness_score"] = robustness_score
+    results["robustness_grade"] = ("A" if robustness_score >= 90 else
+                                   "B" if robustness_score >= 75 else
+                                   "C" if robustness_score >= 60 else "D")
+    results["elapsed_seconds"] = round(time.time() - start_time, 2)
+    results["summary"] = {
+        "total_tests": len(results["tests"]),
+        "passed": sum(1 for t in results["tests"].values() if t.get("status") == "robust"),
+        "failed": sum(1 for t in results["tests"].values() if t.get("status") == "vulnerable"),
+        "errors": sum(1 for t in results["tests"].values() if "error" in t),
+        "robustness_score": robustness_score,
+        "grade": results["robustness_grade"],
+    }
+    log.info(f"ART (fraud_net) complete. Robustness score: "
+             f"{robustness_score}/100 (Grade {results['robustness_grade']})")
+    return results
+
+
+def _record_results(results: Dict[str, Any]) -> None:
+    """Bookkeep a completed suite and notify the relay."""
+    global _total_tests_run, _last_test_time
+    _total_tests_run += 1
+    _last_test_time = datetime.now(timezone.utc).isoformat()
+    _test_results.append(results)
+    if len(_test_results) > 10:
+        _test_results.pop(0)
+    try:
+        import requests as req
+        req.post(RELAY_URL, json={
+            "workerId": "art_adversarial_worker",
+            "event": "test_complete",
+            "robustness_score": results.get("robustness_score"),
+            "grade": results.get("robustness_grade"),
+            "timestamp": _last_test_time
+        }, timeout=3)
+    except Exception:
+        pass
+
+
+def run_art_tests(model_type: str = "fraud_net", attack_type: str = None,
+                  epsilon: float = 0.1, iterations: int = 20) -> Dict[str, Any]:
+    """Dispatch: real trained fraud_net by default; sklearn demo as fallback.
+
+    The synthetic sklearn suite runs only when DEMO_MODE is set, when the
+    caller explicitly requests model_type "demo"/"random_forest"/
+    "gradient_boosting", or when the real weights/torch/data are unavailable.
+    """
+    global _errors
+    demo_names = {"demo", "random_forest", "gradient_boosting"}
+    wants_demo = DEMO_MODE or str(model_type).lower() in demo_names
+    if not wants_demo:
+        try:
+            results = run_fraud_net_tests(attack_type=attack_type,
+                                          epsilon=epsilon,
+                                          iterations=iterations)
+            _record_results(results)
+            return results
+        except Exception as e:
+            _errors += 1
+            log.warning(f"Real-model ART path unavailable ({e}); "
+                        "falling back to sklearn demo suite")
+            demo = run_sklearn_demo_tests("random_forest")
+            demo["note"] = (f"fraud_net weights/torch/data unavailable ({e}); "
+                            "showing synthetic sklearn demo results")
+            return demo
+    return run_sklearn_demo_tests(
+        model_type if model_type in demo_names else "random_forest")
+
+
 # ── HTTP Server ────────────────────────────────────────────────────────────────
 
 
@@ -345,22 +613,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/test":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            model_type = body.get("model_type", "random_forest")
+            kwargs = _test_kwargs(body)
 
             def run_async():
-                run_art_tests(model_type)
+                run_art_tests(**kwargs)
 
             threading.Thread(target=run_async, daemon=True).start()
-            self.send_json({"status": "test_started", "model_type": model_type})
+            self.send_json({"status": "test_started", **kwargs})
         elif self.path == "/test/sync":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            model_type = body.get("model_type", "random_forest")
-            result = run_art_tests(model_type)
+            result = run_art_tests(**_test_kwargs(body))
             self.send_json(result)
         else:
             self.send_response(404)
             self.end_headers()
+
+
+def _test_kwargs(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a /test request body into run_art_tests kwargs."""
+    return {
+        "model_type": body.get("model_type", "fraud_net"),
+        "attack_type": body.get("attack_type"),
+        "epsilon": float(body.get("epsilon", 0.1)),
+        "iterations": int(body.get("iterations", 20)),
+    }
 
 
 def startup():
