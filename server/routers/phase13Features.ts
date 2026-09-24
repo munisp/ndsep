@@ -1022,7 +1022,7 @@ export const crossBorderMonitorRouter = router({
         `UPDATE cross_border_transfers SET nitda_notified = true, updated_at = NOW() WHERE id = $1 RETURNING *`,
         [input.id]
       );
-      await logAudit('crossBorder.notifyNITDA', 'cross_border_transfer', input.id, String(ctx.user.id), { notified_by: ctx.user.email });
+      await logAudit('crossBorder.notifyNDPC', 'cross_border_transfer', input.id, String(ctx.user.id), { notified_by: ctx.user.email });
       emitMutationEvent("ndsep.regulatory.mutation", { action: "phase13Features", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return row;
     }),

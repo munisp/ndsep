@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-09-24T03:03:34.449141Z",
+  "seed": 42,
+  "n_orgs": 800,
+  "n_transactions": 120000,
+  "fraud_rate": 0.003,
+  "fraud_rate_target": 0.003,
+  "fraud_type_counts": {
+    "structuring": 72,
+    "insider_collusion": 72,
+    "money_mule": 72,
+    "cnp_fraud": 72,
+    "account_takeover": 72
+  },
+  "credit_default_rate": 0.1475,
+  "graph": {
+    "n_nodes": 7158,
+    "n_edges": 10864,
+    "high_risk_rate": 0.15375
+  },
+  "files": {
+    "organizations": "/mnt/agents/ndsep/ml/data/output/organizations.parquet",
+    "transactions": "/mnt/agents/ndsep/ml/data/output/transactions.parquet",
+    "credit_features": "/mnt/agents/ndsep/ml/data/output/credit_features.parquet",
+    "graph_nodes": "/mnt/agents/ndsep/ml/data/output/graph_nodes.parquet",
+    "graph_edges": "/mnt/agents/ndsep/ml/data/output/graph_edges.parquet",
+    "graph_labels": "/mnt/agents/ndsep/ml/data/output/graph_labels.parquet"
+  },
+  "disclaimer": "Synthetic data standing in until production DB pipelines feed real data. See module docstring."
+}

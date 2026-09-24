@@ -976,6 +976,19 @@ export const dpcoRouter = router({
         });
       } catch (_) { /* non-fatal */ }
 
+      // Welcome/activation email to the newly approved DPCO (fire-and-forget)
+      if (org?.email) {
+        const { sendWelcomeActivation } = await import("../emailNotification");
+        sendWelcomeActivation({
+          to: org.email,
+          orgName: org.name ?? "Your Organisation",
+          approvalType: "dpco_registration",
+          licenceNumber,
+          licenceExpiresAt,
+          portalUrl: process.env.VITE_OAUTH_PORTAL_URL ?? undefined,
+        }).catch((e: unknown) => logger.warn({ err: e instanceof Error ? e.message : String(e), dpcoOrgId: input.id }, "[Email] Welcome/activation email failed"));
+      }
+
       emitMutationEvent("ndsep.dpco.mutation", { action: "dpco", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, licenceNumber, org };
     }),

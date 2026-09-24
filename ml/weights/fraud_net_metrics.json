@@ -1,0 +1,18 @@
+{
+  "model": "fraud",
+  "version": "20260924T030640Z",
+  "trained_at": "2026-09-24T03:06:40Z",
+  "data_source": "file:/mnt/agents/ndsep/ml/data/output/transactions",
+  "device": "cpu",
+  "n_train": 72000,
+  "n_test": 24000,
+  "positive_rate_test": 0.003,
+  "best_val_auc": 0.9897772019762993,
+  "accuracy": 0.9695416666666666,
+  "precision": 0.08238276299112801,
+  "recall": 0.9027777777777778,
+  "f1": 0.15098722415795587,
+  "roc_auc": 0.963240415691519,
+  "feature_stats_path": "/mnt/agents/ndsep/ml/weights/fraud_net_feature_stats.json",
+  "weights_path": "/mnt/agents/ndsep/ml/weights/fraud_net.pt"
+}

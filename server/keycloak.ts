@@ -182,14 +182,23 @@ export async function verifyKeycloakToken(token: string): Promise<KeycloakUser |
   };
 }
 
+/** NDSEP platform roles — must match the `user_role` pgEnum in drizzle/schema.ts. */
+export type NdsepRole = "user" | "admin" | "auditor" | "org_admin" | "dpco" | "government_staff" | "regulator";
+
 /**
  * Map Keycloak roles to NDSEP platform roles.
+ * Single source of truth for Keycloak → NDSEP role mapping; roles without a
+ * DB enum counterpart (legal_officer, finance_officer, tech_officer, org_user)
+ * collapse to "user".
  */
-export function mapKeycloakRoleToNdsep(kcUser: KeycloakUser): "admin" | "auditor" | "org_admin" | "user" {
+export function mapKeycloakRoleToNdsep(kcUser: KeycloakUser): NdsepRole {
   const all = [...kcUser.roles, ...kcUser.clientRoles];
   if (all.includes("ndsep-admin") || all.includes("admin")) return "admin";
   if (all.includes("ndsep-auditor") || all.includes("auditor")) return "auditor";
   if (all.includes("ndsep-org-admin") || all.includes("org_admin")) return "org_admin";
+  if (all.includes("ndsep-dpco") || all.includes("dpco") || all.includes("data_protection_officer")) return "dpco";
+  if (all.includes("ndsep-government-staff") || all.includes("government_staff")) return "government_staff";
+  if (all.includes("ndsep-regulator") || all.includes("regulator")) return "regulator";
   return "user";
 }
 

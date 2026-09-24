@@ -130,7 +130,7 @@ import {
   getSectorComplianceEventStats,
 } from "./db";
 import { requirePermission, permifyWriteRelationship } from "./permify";
-import { sendCertificateGranted, sendPortalPhaseUpdate, sendAppealUpdate, sendPenaltyNotice, sendCitizenRequestUpdate, sendEnforcementCaseOpened } from "./emailNotification";
+import { sendCertificateGranted, sendPortalPhaseUpdate, sendAppealUpdate, sendPenaltyNotice, sendCitizenRequestUpdate, sendEnforcementCaseOpened, sendWelcomeActivation } from "./emailNotification";
 import { broadcast } from "./websocket";
 import { cacheGet, cacheSet, cacheDel, cacheGetJson, cacheSetJson } from "./cache";
 import { withCache, withSWR, CK, TTL, invalidateOrgCaches, invalidateComplianceCaches, invalidateCertificateCaches, invalidateAccreditationCaches, invalidateBgpCaches } from "./queryCache";
@@ -606,7 +606,7 @@ export const appRouter = router({
     updateRole: protectedProcedure
       .input(z.object({
         userId: z.number(),
-        role: z.enum(["user", "admin", "auditor", "org_admin"]),
+        role: z.enum(["user", "admin", "auditor", "org_admin", "dpco", "government_staff", "regulator"]),
       }))
       .mutation(async ({ input, ctx }) => {
         await requirePermission(ctx.user.id, "assign_role", "user", input.userId);
@@ -1197,6 +1197,14 @@ export const appRouter = router({
               certifiedAt: new Date(),
               verifyBaseUrl: portalUrl.replace("/portal", ""),
             }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+            // Welcome/activation email with next steps (fire-and-forget)
+            sendWelcomeActivation({
+              to: sub.contactEmail,
+              orgName: sub.orgName ?? "Your Organisation",
+              approvalType: "compliance_certification",
+              reference: sub.submissionToken ?? undefined,
+              portalUrl,
+            }).catch((e: unknown) => logger.warn({ err: e instanceof Error ? e.message : String(e), submissionId: input.id }, "[Email] Welcome/activation email failed"));
           } else {
             sendPortalPhaseUpdate({
               to: sub.contactEmail,

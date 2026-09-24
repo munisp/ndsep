@@ -11,6 +11,7 @@ import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { getPgSslConfig } from "../dbSslConfig";
 import { getDatabaseUrl } from "../config";
 import { logger } from "../logger";
+import { startWorkflow } from "../temporal";
 const { Pool } = pg;
 let _pool: InstanceType<typeof Pool> | null = null;
 function getPool() {
@@ -78,6 +79,23 @@ export const accreditationRouter = router({
       existingDpcoOrgId: z.number().optional(),
     }))
     .mutation(async ({ input }) => {
+      // Duplicate-application guard (mirrors dpco.registerOrganisation): reject
+      // when an application for the same email / RC / CAC number is already in
+      // an active (non-terminal) state.
+      const [duplicate] = await q<any>(
+        `SELECT id, status FROM dpco_accreditation_applications
+         WHERE (email = ? OR rc_number = ? OR (cac_number IS NOT NULL AND cac_number = ?))
+           AND status NOT IN ('approved', 'rejected', 'withdrawn', 'expired')
+         LIMIT 1`,
+        [input.email, input.rcNumber, input.cacNumber ?? null]
+      );
+      if (duplicate) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "An accreditation application for this organisation (email, RC or CAC number) is already in progress.",
+        });
+      }
+
       const token = generateToken();
       const fee = input.applicationType === "renewal" ? RENEWAL_FEE_KOBO : NEW_APP_FEE_KOBO;
       const [app] = await q<any>(
@@ -107,6 +125,21 @@ export const accreditationRouter = router({
           content: `A new ${input.applicationType === 'new' ? 'initial' : 'renewal'} DPCO accreditation application has been submitted.\n\n**Organisation:** ${input.orgName}\n**RC Number:** ${input.rcNumber}\n**Email:** ${input.email}\n**Reference:** ${token}\n\nReview at: /admin/accreditation`,
         });
       } catch { /* notification failure is non-blocking */ }
+      // Temporal: kick off the accreditation review workflow (document review →
+      // technical assessment → committee review → certificate). Degrade
+      // gracefully — a Temporal outage must not fail the submission.
+      if (app?.id) {
+        startWorkflow("accreditationWorkflow", {
+          workflowId: `accreditation-${app.id}`,
+          taskQueue: "ndsep-accreditation",
+          input: {
+            applicationId: app.id,
+            dpcoOrgId: input.existingDpcoOrgId ?? 0,
+            applicantEmail: input.email,
+            submittedAt: new Date().toISOString(),
+          },
+        }).catch((e: unknown) => logger.warn({ err: e instanceof Error ? e.message : String(e), applicationId: app.id }, "[Temporal] Failed to start accreditation workflow — continuing without it"));
+      }
       emitMutationEvent(EVENTS.ACCREDITATION_SUBMITTED, {
         applicationId: app?.id, orgName: input.orgName, type: input.applicationType,
         referenceToken: token, fee,

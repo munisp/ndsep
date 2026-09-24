@@ -21,7 +21,7 @@
 
 import { logger } from "./logger";
 import { captureError } from "./errorMonitoring";
-import { verifyKeycloakToken } from "./keycloak";
+import { verifyKeycloakToken, mapKeycloakRoleToNdsep } from "./keycloak";
 
 const KEYCLOAK_URL = process.env.KEYCLOAK_URL ?? "http://localhost:8080";
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? "ndsep";
@@ -122,36 +122,21 @@ function decodeJwtPayload(token: string): TokenPayload | null {
 }
 
 function mapRoles(payload: TokenPayload): string[] {
-  const roles = new Set<string>();
-
-  // Realm roles
-  if (payload.realm_access?.roles) {
-    for (const role of payload.realm_access.roles) {
-      roles.add(role);
-    }
-  }
-
-  // Client-specific roles
-  const clientAccess = payload.resource_access?.[KEYCLOAK_CLIENT_ID];
-  if (clientAccess?.roles) {
-    for (const role of clientAccess.roles) {
-      roles.add(role);
-    }
-  }
-
-  // Map Keycloak roles to NDSEP roles
-  const ndsepRoles: string[] = [];
-  if (roles.has("admin") || roles.has("realm-admin")) ndsepRoles.push("admin");
-  if (roles.has("ndpc-officer") || roles.has("regulator")) ndsepRoles.push("regulator");
-  if (roles.has("dpco-manager") || roles.has("dpco")) ndsepRoles.push("dpco");
-  if (roles.has("org-dpo") || roles.has("dpo")) ndsepRoles.push("dpo");
-  if (roles.has("auditor")) ndsepRoles.push("auditor");
-  if (roles.has("citizen")) ndsepRoles.push("citizen");
-
-  // Default role if none mapped
-  if (ndsepRoles.length === 0) ndsepRoles.push("viewer");
-
-  return ndsepRoles;
+  // Delegate to the single source of truth in ./keycloak so both auth paths
+  // resolve the same NDSEP platform role (previously this mapper emitted
+  // conflicting roles such as "dpo"/"citizen"/"viewer" that do not exist in
+  // the user_role pgEnum).
+  const ndsepRole = mapKeycloakRoleToNdsep({
+    sub: payload.sub,
+    username: payload.preferred_username ?? payload.sub,
+    email: payload.email,
+    name: payload.name,
+    roles: payload.realm_access?.roles ?? [],
+    clientRoles: payload.resource_access?.[KEYCLOAK_CLIENT_ID]?.roles ?? [],
+    mfaVerified: false,
+    raw: payload,
+  });
+  return [ndsepRole];
 }
 
 export async function validateAccessToken(token: string): Promise<KeycloakSession["user"] | null> {

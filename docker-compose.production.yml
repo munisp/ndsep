@@ -67,6 +67,11 @@ services:
       OPA_URL: http://opa:8181
       OPA_DECISION_PATH: /v1/data/ndsep/authz/allow
       KEYCLOAK_ISSUER_URL: https://${KEYCLOAK_HOSTNAME:?KEYCLOAK_HOSTNAME is required}
+      # Worker/ML service wiring (in-cluster DNS names)
+      KAFKA_BROKERS: kafka:9092
+      RAY_ML_URL: http://ray-ml-engine:8250
+      TIGERBEETLE_LEDGER_URL: http://tigerbeetle-ledger-service:8206
+      TEMPORAL_ADDRESS: temporal:7233
     depends_on:
       postgres:
         condition: service_healthy
@@ -1621,7 +1626,10 @@ services:
     container_name: ndsep-tigerbeetle-ledger-service
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
+      # Go tigerbeetle_ledger requires TIGERBEETLE_ADDRESSES + TIGERBEETLE_CLUSTER_ID
+      # (see orchestration/go/cmd/tigerbeetle_ledger/main.go requiredEnv).
+      TIGERBEETLE_ADDRESSES: ${TIGERBEETLE_ADDRESSES:-tigerbeetle:3000}
+      TIGERBEETLE_CLUSTER_ID: ${TIGERBEETLE_CLUSTER_ID:-0}
       PORT: "8206"
     depends_on:
       postgres:

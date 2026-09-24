@@ -17,7 +17,7 @@ import {
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
-export const userRoleEnum = pgEnum("user_role", ["user", "admin", "auditor", "org_admin", "dpco"]);
+export const userRoleEnum = pgEnum("user_role", ["user", "admin", "auditor", "org_admin", "dpco", "government_staff", "regulator"]);
 export const assetTypeEnum = pgEnum("asset_type", ["hardware", "software", "cloud", "network", "database", "saas"]);
 export const assetStatusEnum = pgEnum("asset_status", ["active", "inactive", "quarantined", "decommissioned"]);
 export const complianceStatusEnum = pgEnum("compliance_status", ["compliant", "non_compliant", "under_review", "remediation"]);
@@ -38,6 +38,7 @@ export const users = pgTable("users", {
   role: userRoleEnum("role").default("user").notNull(),
   organizationId: integer("organization_id"),
   dpcoOrgId: integer("dpco_org_id"),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   lastSignedIn: timestamp("last_signed_in").defaultNow().notNull(),

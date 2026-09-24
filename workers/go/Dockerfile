@@ -14,7 +14,10 @@ RUN go mod download
 COPY . .
 
 # Build argument: which worker to compile
+# docker-compose-workers-addition.yml passes the worker name as build-arg CMD;
+# docker-compose.middleware.yml passes it as WORKER. CMD wins when provided.
 ARG WORKER=dapr_bridge
+ARG CMD=${WORKER}
 
 # Build the specified worker binary with optimizations
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
@@ -22,7 +25,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     -ldflags="-w -s -X main.Version=$(date +%Y%m%d) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -trimpath \
     -o /worker \
-    ./cmd/${WORKER}/...
+    ./cmd/${CMD}/...
 
 # ─── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM scratch

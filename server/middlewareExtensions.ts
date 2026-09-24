@@ -12,7 +12,10 @@ const DAPR_BRIDGE_URL = process.env.DAPR_BRIDGE_URL || "http://localhost:8150";
 const FLUVIO_RELAY_URL = process.env.FLUVIO_RELAY_URL || "http://localhost:8151";
 const MOJALOOP_ADAPTER_URL = process.env.MOJALOOP_ADAPTER_URL || "http://localhost:8152";
 const APISIX_MANAGER_URL = process.env.APISIX_MANAGER_URL || "http://localhost:8153";
-const TIGERBEETLE_LEDGER_URL = process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8160";
+// Go tigerbeetle_ledger proxy (orchestration/go/cmd/tigerbeetle_ledger) defaults to PORT 8240.
+// In docker-compose-workers-addition.yml the service runs as tigerbeetle-ledger-service with PORT=8206,
+// so deployments should set TIGERBEETLE_LEDGER_URL=http://tigerbeetle-ledger-service:8206.
+const TIGERBEETLE_LEDGER_URL = process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8240";
 const OPENSEARCH_INDEXER_URL = process.env.OPENSEARCH_INDEXER_URL || "http://localhost:8161";
 const KEYCLOAK_VALIDATOR_URL = process.env.KEYCLOAK_VALIDATOR_URL || "http://localhost:8162";
 const LAKEHOUSE_INGEST_URL = process.env.LAKEHOUSE_INGEST_URL || "http://localhost:8163";
@@ -129,7 +132,13 @@ export async function lakehouseIngest(table: string, records: object[]): Promise
 
 // ─── TigerBeetle ─────────────────────────────────────────────────────────────
 
-/** Record a financial transaction in TigerBeetle */
+/**
+ * Record a financial transaction in TigerBeetle.
+ * Targets the Go tigerbeetle_ledger proxy: POST /transaction with
+ * { org_id, penalty_id, amount_usd, currency, type, description, issued_by, timestamp }.
+ * The Go service only accepts type in {penalty, fine, escrow, settlement, refund}
+ * and currently only supports the USD ledger.
+ */
 export async function tigerbeetleTransfer(params: {
   debitAccountId: string;
   creditAccountId: string;
@@ -138,14 +147,27 @@ export async function tigerbeetleTransfer(params: {
   reference: string;
   transferType?: string;
 }): Promise<void> {
-  await postJSON(`${TIGERBEETLE_LEDGER_URL}/transfers`, {
-    debit_account_id: params.debitAccountId,
-    credit_account_id: params.creditAccountId,
-    amount: params.amount,
+  await postJSON(`${TIGERBEETLE_LEDGER_URL}/transaction`, {
+    org_id: params.debitAccountId,
+    penalty_id: params.reference,
+    amount_usd: params.amount,
     currency: params.currency,
-    user_data: params.reference,
-    transfer_type: params.transferType || "REGULATORY_FINE",
+    type: toLedgerTransactionType(params.transferType),
+    description: `Transfer ${params.debitAccountId} -> ${params.creditAccountId} (${params.reference})`,
+    issued_by: "ndsep-platform",
+    timestamp: new Date().toISOString(),
   });
+}
+
+/** Map free-form transfer types onto the Go ledger's accepted transaction types. */
+function toLedgerTransactionType(transferType?: string): "penalty" | "fine" | "escrow" | "settlement" | "refund" {
+  const t = (transferType || "fine").toLowerCase();
+  if (t === "penalty" || t === "fine" || t === "escrow" || t === "settlement" || t === "refund") return t;
+  if (t.includes("refund")) return "refund";
+  if (t.includes("escrow")) return "escrow";
+  if (t.includes("fine") || t.includes("penalty")) return "fine";
+  if (t.includes("settle") || t.includes("transfer")) return "settlement";
+  return "penalty";
 }
 
 // ─── Mojaloop ────────────────────────────────────────────────────────────────

@@ -38,7 +38,7 @@ export default function Phase13CrossBorderMonitor() {
     onError: (e: any) => toast.error((e instanceof Error ? e.message : String(e))),
   });
   const notifyNITDA = trpc.phase13.crossBorderMonitor.notifyNITDA.useMutation({
-    onSuccess: () => { utils.phase13.crossBorderMonitor.list.invalidate(); toast.success("NITDA notified successfully"); },
+    onSuccess: () => { utils.phase13.crossBorderMonitor.list.invalidate(); toast.success("NDPC notified successfully"); },
     onError: (e: any) => toast.error((e instanceof Error ? e.message : String(e))),
   });
 
@@ -63,7 +63,7 @@ export default function Phase13CrossBorderMonitor() {
               <ArrowRightLeft className="h-6 w-6 text-indigo-600" />
               Cross-Border Transfer Monitor
             </h1>
-            <p className="text-muted-foreground mt-1">Track international data transfers — NDPA Chapter VI, NITDA notification requirements</p>
+            <p className="text-muted-foreground mt-1">Track international data transfers — NDPA Chapter VI, NDPC notification requirements</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -164,7 +164,7 @@ export default function Phase13CrossBorderMonitor() {
                       <th className="text-left py-2 px-3">Mechanism</th>
                       <th className="text-left py-2 px-3">Volume</th>
                       <th className="text-left py-2 px-3">Risk</th>
-                      <th className="text-left py-2 px-3">NITDA</th>
+                      <th className="text-left py-2 px-3">NDPC</th>
                       <th className="text-left py-2 px-3">Date</th>
                       <th className="text-left py-2 px-3">Actions</th>
                     </tr>
@@ -194,7 +194,7 @@ export default function Phase13CrossBorderMonitor() {
                         <td className="py-2 px-3 text-muted-foreground">{t.created_at ? new Date(t.created_at).toLocaleDateString() : "—"}</td>
                         <td className="py-2 px-3">
                           {!t.nitda_notified && (
-                            <Button size="sm" variant="ghost" title="Notify NITDA" onClick={() => notifyNITDA.mutate({ id: t.id })}>
+                            <Button size="sm" variant="ghost" title="Notify NDPC" onClick={() => notifyNITDA.mutate({ id: t.id })}>
                               <Bell className="h-3 w-3 text-blue-600" />
                             </Button>
                           )}

@@ -53,6 +53,7 @@ import {
   InsertOrganizationUser,
   sectorComplianceEvents,
   InsertSectorComplianceEvent,
+  type User,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -117,7 +118,11 @@ export async function getUserByOpenId(openId: string) {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result[0];
+  const user = result[0];
+  // Deactivated accounts (is_active = false) must not authenticate. This is the
+  // single funnel used by both the cookie-session and Keycloak bearer paths.
+  if (user && user.isActive === false) return undefined;
+  return user;
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -504,7 +509,7 @@ export async function listUsers() {
   }).from(users).orderBy(users.createdAt);
 }
 
-export async function updateUserRole(userId: number, role: "user" | "admin" | "auditor" | "org_admin") {
+export async function updateUserRole(userId: number, role: User["role"]) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.update(users)

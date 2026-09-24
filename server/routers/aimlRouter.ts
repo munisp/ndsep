@@ -51,6 +51,9 @@ const PYTHON_WORKER_URL = process.env.PYTHON_WORKER_URL || "http://localhost:830
 const LAKEHOUSE_ANALYTICS_URL = process.env.LAKEHOUSE_ANALYTICS_URL || "http://localhost:8140";
 const ML_PRODUCTION_URL = process.env.ML_PRODUCTION_URL || "http://localhost:8085";
 const GNN_ENGINE_URL = process.env.GNN_ENGINE_URL || "http://localhost:8216";
+// Ray ML engine (workers/python/ray_ml_engine.py) hosts the real PyTorch GraphSAGE GNN
+// plus drift detection; prefer it over the frozen-weight numpy GNN where endpoints exist.
+const RAY_ML_URL = process.env.RAY_ML_URL || "http://localhost:8250";
 
 // ── Helper: safe fetch with timeout ───────────────────────────────────────────
 async function safeFetch(url: string, options?: RequestInit, timeoutMs = 5000): Promise<any> {
@@ -585,10 +588,17 @@ export const modelRegistryRouter = router({
          ORDER BY day`,
         [input.modelName],
       );
+      // Real drift signal comes from the Ray ML engine's DataDriftMonitor
+      // (KS-test + PSI over live features). Falls back to the placeholder
+      // when the engine is unreachable so the UI shape stays intact.
+      const rayDrift = await safeFetch(`${RAY_ML_URL}/drift/report`, undefined, 10000);
+      const driftDetected = !rayDrift?.error && rayDrift?.drifted === true;
       return {
         model: input.modelName,
         drift_data: rows || [],
-        drift_detected: false,
+        drift_detected: driftDetected,
+        drift_report: rayDrift?.error ? null : rayDrift,
+        drift_source: rayDrift?.error ? "placeholder" : "ray_ml_engine",
         last_checked: new Date().toISOString(),
       };
     }),
@@ -903,19 +913,25 @@ export const mlProductionRouter = router({
 
 // ── GNN Compliance Engine Router ──────────────────────────────────────────────
 export const gnnRouter = router({
+  // Health/predict/explain endpoints are served by the real PyTorch GNN in the
+  // Ray ML engine (RAY_ML_URL). Read-only graph traversals below still use the
+  // legacy numpy engine (GNN_ENGINE_URL) — no PyTorch equivalent exists there.
   health: protectedProcedure.query(async () => {
-    return await safeFetch(`${GNN_ENGINE_URL}/health`);
+    return await safeFetch(`${RAY_ML_URL}/health`);
   }),
 
   buildGraph: protectedProcedure.mutation(async () => {
     emitMutationEvent("ndsep.ai.mutation", { action: "gnn_build", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-    return await safeFetch(`${GNN_ENGINE_URL}/graph/build`, {
+    return await safeFetch(`${RAY_ML_URL}/graph/build`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ source: "database" }),
     }, 60000);
   }),
 
+  // NOTE: graphStats, embedding, neighbors, findPath and similarity have no
+  // PyTorch equivalent in the Ray ML engine — they remain on the legacy numpy
+  // GNN engine (GNN_ENGINE_URL) and return {error, available:false} when it is down.
   graphStats: protectedProcedure.query(async () => {
     return await safeFetch(`${GNN_ENGINE_URL}/graph/stats`);
   }),
@@ -934,7 +950,7 @@ export const gnnRouter = router({
     }),
 
   allEmbeddings: protectedProcedure.query(async () => {
-    return await safeFetch(`${GNN_ENGINE_URL}/embeddings/all`, undefined, 30000);
+    return await safeFetch(`${RAY_ML_URL}/embeddings/all`, undefined, 30000);
   }),
 
   predictLink: protectedProcedure
@@ -943,7 +959,8 @@ export const gnnRouter = router({
       target: z.string(),
     }))
     .query(async ({ input }) => {
-      return await safeFetch(`${GNN_ENGINE_URL}/predict/link`, {
+      // Ray ML engine /predict/link accepts the same {source, target} schema.
+      return await safeFetch(`${RAY_ML_URL}/predict/link`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
@@ -953,7 +970,9 @@ export const gnnRouter = router({
   predictViolations: protectedProcedure
     .input(z.object({ orgId: z.string() }))
     .query(async ({ input }) => {
-      return await safeFetch(`${GNN_ENGINE_URL}/predict/violations`, {
+      // Ray ML engine /predict/violations returns global LSTM forecasts
+      // (per-org filtering is not supported by the PyTorch endpoint).
+      return await safeFetch(`${RAY_ML_URL}/predict/violations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ org_id: input.orgId }),

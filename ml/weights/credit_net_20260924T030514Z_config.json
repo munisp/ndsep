@@ -1,0 +1,9 @@
+{
+  "model": "credit_net",
+  "input_dim": 10,
+  "hidden_dims": [
+    64,
+    32
+  ],
+  "dropout": 0.2
+}

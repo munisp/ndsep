@@ -1,0 +1,18 @@
+{
+  "model": "credit",
+  "version": "20260924T030640Z",
+  "trained_at": "2026-09-24T03:06:40Z",
+  "data_source": "file:/mnt/agents/ndsep/ml/data/output/credit_features",
+  "device": "cpu",
+  "n_train": 480,
+  "n_test": 160,
+  "positive_rate_test": 0.14375,
+  "best_val_auc": 0.8514093137254902,
+  "accuracy": 0.71875,
+  "precision": 0.3103448275862069,
+  "recall": 0.782608695652174,
+  "f1": 0.4444444444444444,
+  "roc_auc": 0.8156140907648365,
+  "feature_stats_path": "/mnt/agents/ndsep/ml/weights/credit_net_feature_stats.json",
+  "weights_path": "/mnt/agents/ndsep/ml/weights/credit_net.pt"
+}

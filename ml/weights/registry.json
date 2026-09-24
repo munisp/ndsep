@@ -1,0 +1,128 @@
+[
+  {
+    "model": "fraud",
+    "version": "20260924T030640Z",
+    "registered_at": "2026-09-24T03:06:40.625324Z",
+    "algorithm": "MLP (BatchNorm/Dropout) binary classifier",
+    "framework": "pytorch-cpu",
+    "metrics": {
+      "accuracy": 0.9695416666666666,
+      "precision": 0.08238276299112801,
+      "recall": 0.9027777777777778,
+      "f1": 0.15098722415795587,
+      "roc_auc": 0.963240415691519
+    },
+    "weights_path": "/mnt/agents/ndsep/ml/weights/fraud_net.pt",
+    "data_snapshot_id": "file:/mnt/agents/ndsep/ml/data/output/transactions",
+    "notes": null,
+    "postgres": "skipped"
+  },
+  {
+    "model": "credit",
+    "version": "20260924T030640Z",
+    "registered_at": "2026-09-24T03:06:40.945742Z",
+    "algorithm": "MLP default-risk scorer",
+    "framework": "pytorch-cpu",
+    "metrics": {
+      "accuracy": 0.71875,
+      "precision": 0.3103448275862069,
+      "recall": 0.782608695652174,
+      "f1": 0.4444444444444444,
+      "roc_auc": 0.8156140907648365
+    },
+    "weights_path": "/mnt/agents/ndsep/ml/weights/credit_net.pt",
+    "data_snapshot_id": "file:/mnt/agents/ndsep/ml/data/output/credit_features",
+    "notes": null,
+    "postgres": "skipped"
+  },
+  {
+    "model": "gnn",
+    "version": "20260924T030643Z",
+    "registered_at": "2026-09-24T03:06:43.835570Z",
+    "algorithm": "GraphSAGE-style GNN (pure PyTorch)",
+    "framework": "pytorch-cpu",
+    "metrics": {
+      "accuracy": 0.89375,
+      "precision": 0.7058823529411765,
+      "recall": 0.5,
+      "f1": 0.5853658536585366,
+      "roc_auc": 0.8903186274509804
+    },
+    "weights_path": "/mnt/agents/ndsep/ml/weights/gnn_net.pt",
+    "data_snapshot_id": "file:/mnt/agents/ndsep/ml/data/output/graph_nodes",
+    "notes": null,
+    "postgres": "skipped"
+  },
+  {
+    "model": "fraud",
+    "version": "20260924T030511Z",
+    "registered_at": "2026-09-24T03:05:11.195809Z",
+    "algorithm": "MLP (BatchNorm/Dropout) binary classifier",
+    "framework": "pytorch-cpu",
+    "metrics": {
+      "accuracy": 0.9823,
+      "precision": 0.14146341463414633,
+      "recall": 0.9666666666666667,
+      "f1": 0.24680851063829787,
+      "roc_auc": 0.9794132397191575
+    },
+    "weights_path": "/mnt/agents/ndsep/ml/weights/fraud_net_20260924T030511Z.pt",
+    "data_snapshot_id": "synthetic_batch_seed_777",
+    "notes": "fine_tune run; drift={\"n_features\": 16, \"n_drifted\": 11, \"drift_detected\": true, \"psi_threshold\": 0.25, \"ks_p_threshold\": 0.01}",
+    "postgres": "skipped"
+  },
+  {
+    "model": "credit",
+    "version": "20260924T030514Z",
+    "registered_at": "2026-09-24T03:05:14.110321Z",
+    "algorithm": "MLP default-risk scorer",
+    "framework": "pytorch-cpu",
+    "metrics": {
+      "accuracy": 0.8333333333333334,
+      "precision": 0.4411764705882353,
+      "recall": 0.7142857142857143,
+      "f1": 0.5454545454545454,
+      "roc_auc": 0.8379475821336286
+    },
+    "weights_path": "/mnt/agents/ndsep/ml/weights/credit_net_20260924T030514Z.pt",
+    "data_snapshot_id": "synthetic_batch_seed_777",
+    "notes": "fine_tune run; drift={\"n_features\": 10, \"n_drifted\": 10, \"drift_detected\": true, \"psi_threshold\": 0.25, \"ks_p_threshold\": 0.01}",
+    "postgres": "skipped"
+  },
+  {
+    "model": "gnn",
+    "version": "20260924T030517Z",
+    "registered_at": "2026-09-24T03:05:17.116636Z",
+    "algorithm": "GraphSAGE-style GNN (pure PyTorch)",
+    "framework": "pytorch-cpu",
+    "metrics": {
+      "accuracy": 0.8933333333333333,
+      "precision": 0.6296296296296297,
+      "recall": 0.7391304347826086,
+      "f1": 0.68,
+      "roc_auc": 0.9263950701814446
+    },
+    "weights_path": "/mnt/agents/ndsep/ml/weights/gnn_net_20260924T030517Z.pt",
+    "data_snapshot_id": "synthetic_batch_seed_777",
+    "notes": "fine_tune run; drift={\"n_features\": 20, \"n_drifted\": 14, \"drift_detected\": true, \"psi_threshold\": 0.25, \"ks_p_threshold\": 0.01}",
+    "postgres": "skipped"
+  },
+  {
+    "model": "fraud",
+    "version": "20260924T030833Z",
+    "registered_at": "2026-09-24T03:08:33.914139Z",
+    "algorithm": "MLP (BatchNorm/Dropout) binary classifier",
+    "framework": "pytorch-cpu",
+    "metrics": {
+      "accuracy": 0.9762,
+      "precision": 0.10902255639097744,
+      "recall": 0.9666666666666667,
+      "f1": 0.19594594594594594,
+      "roc_auc": 0.9713808090939485
+    },
+    "weights_path": "/mnt/agents/ndsep/ml/weights/fraud_net_20260924T030833Z.pt",
+    "data_snapshot_id": "synthetic_batch_seed_777",
+    "notes": "fine_tune run; drift={\"n_features\": 16, \"n_drifted\": 2, \"drift_detected\": true, \"psi_threshold\": 0.25, \"ks_p_threshold\": 0.01}",
+    "postgres": "skipped"
+  }
+]

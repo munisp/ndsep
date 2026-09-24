@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, exportProcedure, deleteProcedure, approveProcedure} from "../_core/trpc";
 import { getDb, getPool } from "../db";
 import { sql } from "drizzle-orm";
@@ -271,12 +272,28 @@ export const apiKeyManagementRouter = router({
   create: protectedProcedure
     .input(z.object({ name: z.string(), orgId: z.number(), scopes: z.array(z.string()).default(["read"]), expiresInDays: z.number().default(365) }))
     .mutation(async ({ input, ctx }) => {
+      // Org-scope enforcement: non-admin users may only mint keys for
+      // organisations they belong to (organization_users membership).
+      if (ctx.user.role !== "admin") {
+        const membership = await exec(
+          `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+          [ctx.user.id, input.orgId]
+        );
+        if (membership.length === 0) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "You can only create API keys for organisations you belong to.",
+          });
+        }
+      }
       const rawKey = generateApiKey();
       const keyHash = hashApiKey(rawKey);
       const keyId = `kid_${crypto.randomBytes(8).toString("hex")}`;
       const expiresAt = new Date(Date.now() + input.expiresInDays * 86400000).toISOString();
-      const scopesJson = JSON.stringify(input.scopes).replace(/'/g, "''");
-      await exec(`INSERT INTO api_keys (key_id, key_hash, name, organization_id, scopes, expires_at, created_by, created_at, status, request_count) VALUES ('${keyId}', '${keyHash}', '${input.name}', ${input.orgId}, '${scopesJson}', '${expiresAt}', ${ctx.user.id}, NOW(), 'active', 0)`);
+      await exec(
+        `INSERT INTO api_keys (key_id, key_hash, name, organization_id, scopes, expires_at, created_by, created_at, status, request_count) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), 'active', 0)`,
+        [keyId, keyHash, input.name, input.orgId, JSON.stringify(input.scopes), expiresAt, ctx.user.id]
+      );
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "production_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { keyId, rawKey, name: input.name, expiresAt, scopes: input.scopes, warning: "Store this key securely — it will not be shown again." };
     }),

@@ -11,6 +11,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "temporal:worker": "tsx workers/temporal/worker.ts",
     "db:seed": "node scripts/seed.mjs",
     "db:seed:force": "FORCE_SEED=1 node scripts/seed.mjs",
     "seed:all": "node scripts/seed-comprehensive.mjs",

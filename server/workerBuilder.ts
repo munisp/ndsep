@@ -143,11 +143,10 @@ function buildRustWorker(crateName: string, binaryName: string): BuildResult {
 }
 
 // Go workers that should be auto-built
+// NOTE: noc_collector, noc_uptime and noc_agent_perception are Rust crates
+// under workers/rust/ — they live in RUST_WORKERS below, not here.
 const GO_WORKERS = [
   "digital_twin",
-  "noc_collector",
-  "noc_uptime",
-  "noc_agent_perception",
   "noc_escalation",
   "dpi_engine",
   "discovery_agent",
@@ -168,6 +167,9 @@ const RUST_WORKERS = [
   { crate: "financial-ledger", binary: "financial_ledger" },
   { crate: "sla-tracker", binary: "sla_tracker" },
   { crate: "evidence-signer", binary: "evidence_signer" },
+  { crate: "noc_collector", binary: "noc_collector" },
+  { crate: "noc_uptime", binary: "noc_uptime" },
+  { crate: "noc_agent_perception", binary: "noc_agent_perception" },
 ];
 
 export function buildAllWorkers(): {

@@ -1,0 +1,24 @@
+# NDSEP ML stack dependencies (ml/ directory)
+# CPU-first. Install with:  pip install -r requirements-ml.txt
+
+# Deep learning (CPU build; for the CUDA build use the pytorch index instead)
+torch==2.8.0
+
+# Data / science
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.4.0
+scipy>=1.12.0
+
+# Lakehouse (parquet + local SQL over snapshots)
+pyarrow>=15.0.0
+duckdb>=0.10.0
+
+# OPTIONAL: distributed/parallel training (train.py --use-ray).
+# The stack runs fully WITHOUT Ray — every Ray path has a local
+# sequential fallback (HAS_RAY pattern). Uncomment to enable:
+# ray[default]>=2.9.0
+
+# Postgres access for fine_tune.py / registry.py (continuous training +
+# model-registry inserts against the NDSEP platform database)
+psycopg2-binary>=2.9.9

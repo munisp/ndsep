@@ -56,9 +56,9 @@ describe("middlewareExtensions — service URL defaults", () => {
     const url = process.env.APISIX_MANAGER_URL || "http://localhost:8153";
     expect(url).toBe("http://localhost:8153");
   });
-  it("uses localhost:8160 for TigerBeetle ledger", () => {
-    const url = process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8160";
-    expect(url).toBe("http://localhost:8160");
+  it("uses localhost:8240 for TigerBeetle ledger (Go tigerbeetle_ledger default PORT)", () => {
+    const url = process.env.TIGERBEETLE_LEDGER_URL || "http://localhost:8240";
+    expect(url).toBe("http://localhost:8240");
   });
   it("uses localhost:8161 for OpenSearch indexer", () => {
     const url = process.env.OPENSEARCH_INDEXER_URL || "http://localhost:8161";
@@ -247,21 +247,23 @@ describe("middlewareExtensions — lakehouseIngest", () => {
 describe("middlewareExtensions — tigerbeetleTransfer", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("posts to /transfers with debit/credit accounts", async () => {
+  it("posts to /transaction with the Go tigerbeetle_ledger payload schema", async () => {
     mockFetch.mockResolvedValue(mockOk());
     const { tigerbeetleTransfer } = await import("./middlewareExtensions");
     await tigerbeetleTransfer({
       debitAccountId: "ACC-001",
       creditAccountId: "ACC-002",
       amount: 500000,
-      currency: "NGN",
+      currency: "USD",
       reference: "FINE-2026-001",
     });
     const call = mockFetch.mock.calls[0];
+    expect(String(call[0])).toContain("/transaction");
     const body = JSON.parse(call[1].body);
-    expect(body.debit_account_id).toBe("ACC-001");
-    expect(body.amount).toBe(500000);
-    expect(body.transfer_type).toBe("REGULATORY_FINE");
+    expect(body.org_id).toBe("ACC-001");
+    expect(body.penalty_id).toBe("FINE-2026-001");
+    expect(body.amount_usd).toBe(500000);
+    expect(body.type).toBe("fine");
   });
 });
 

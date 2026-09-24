@@ -119,6 +119,29 @@ services:
     networks:
       - ndsep-internal
 
+  # Long-running breach-timer monitor (ticker loop; no HTTP listener, so no healthcheck)
+  breach-monitor:
+    <<: *resource-defaults
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: breach_monitor
+    container_name: ndsep-breach-monitor
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+    # breach_monitor has no HTTP listener and does not implement the image's
+    # "-health-check" flag, so disable healthchecking for this service.
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
   car-pdf-generator:
     <<: *resource-defaults
     build:
@@ -783,11 +806,16 @@ services:
     container_name: ndsep-tigerbeetle-ledger-service
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-3000}
+      # Go tigerbeetle_ledger requires TIGERBEETLE_ADDRESSES + TIGERBEETLE_CLUSTER_ID
+      # (see orchestration/go/cmd/tigerbeetle_ledger/main.go requiredEnv).
+      TIGERBEETLE_ADDRESSES: ${TIGERBEETLE_ADDRESSES:-tigerbeetle:3000}
+      TIGERBEETLE_CLUSTER_ID: ${TIGERBEETLE_CLUSTER_ID:-0}
       PORT: "8206"
     depends_on:
       postgres:
         condition: service_healthy
+      tigerbeetle:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8206/health"]
       <<: *hc-defaults
@@ -816,6 +844,36 @@ services:
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8207/health"]
       <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # Temporal workflow worker (workers/temporal/worker.ts) — runs the Node
+  # workflow/activity implementations on the ndsep-accreditation and
+  # ndsep-breach task queues. No HTTP listener, so no healthcheck.
+  temporal-worker:
+    <<: *resource-defaults
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: deps
+    container_name: ndsep-temporal-worker
+    command: ["pnpm", "exec", "tsx", "workers/temporal/worker.ts"]
+    volumes:
+      - ./workers:/app/workers
+      - ./server:/app/server
+      - ./shared:/app/shared
+      - /app/node_modules
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     logging: *default-logging
     networks:
       - ndsep-internal
@@ -1209,6 +1267,48 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - ndsep-internal
+
+  # Ray ML/DL/GNN engine (PyTorch GraphSAGE GNN, XGBoost, LSTM, drift monitor).
+  # Serves RAY_ML_URL (default http://localhost:8250) for the API server.
+  ray-ml-engine:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-ray-ml-engine
+    command: >
+      sh -c "if [ -f /app/requirements-ml.txt ]; then
+               pip install --no-cache-dir -r /app/requirements-ml.txt;
+             else
+               pip install --no-cache-dir fastapi 'uvicorn[standard]' numpy scipy
+                 scikit-learn psycopg2-binary duckdb joblib xgboost shap torch
+                 --extra-index-url https://download.pytorch.org/whl/cpu;
+             fi && python3 /app/ray_ml_engine.py"
+    volumes:
+      - ./workers/python:/app
+    environment:
+      RAY_ML_PORT: "8250"
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      ML_MODEL_PATH: /app/models
+      LAKEHOUSE_DIR: /app/lakehouse_data
+    ports:
+      - "8250:8250"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8250/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
     networks:
       - ndsep-internal
 

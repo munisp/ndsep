@@ -159,6 +159,51 @@ export async function sendCertificateGranted(opts: {
   });
 }
 
+// ─── Welcome / activation (approved stakeholder onboarding) ─────────────────
+
+export async function sendWelcomeActivation(opts: {
+  to: string;
+  orgName: string;
+  approvalType: "dpco_registration" | "compliance_certification";
+  reference?: string;
+  licenceNumber?: string;
+  licenceExpiresAt?: string;
+  portalUrl?: string;
+}): Promise<boolean> {
+  const isDpco = opts.approvalType === "dpco_registration";
+  const detailRows = [
+    opts.licenceNumber
+      ? `<tr style="background:#f0fdf4"><td style="padding:8px 12px;border:1px solid #bbf7d0;font-weight:600">Licence Number</td><td style="padding:8px 12px;border:1px solid #bbf7d0;font-family:monospace">${opts.licenceNumber}</td></tr>`
+      : "",
+    opts.licenceExpiresAt
+      ? `<tr><td style="padding:8px 12px;border:1px solid #bbf7d0;font-weight:600">Licence Expires</td><td style="padding:8px 12px;border:1px solid #bbf7d0">${opts.licenceExpiresAt}</td></tr>`
+      : "",
+    opts.reference
+      ? `<tr style="background:#f0fdf4"><td style="padding:8px 12px;border:1px solid #bbf7d0;font-weight:600">Reference</td><td style="padding:8px 12px;border:1px solid #bbf7d0;font-family:monospace">${opts.reference}</td></tr>`
+      : "",
+  ].join("");
+  const nextSteps = isDpco
+    ? `<li>Sign in to the NDSEP portal with your organisation credentials to activate your DPCO account.</li>
+       <li>Complete your DPCO organisation profile (services, sectors, staff details).</li>
+       <li>Keep your professional indemnity insurance and CAC records current to maintain your licence.</li>`
+    : `<li>Sign in to the NDSEP Organisation Portal to activate your compliance workspace.</li>
+       <li>Register your data processing assets and complete your Record of Processing Activities (RoPA).</li>
+       <li>Appoint a Data Protection Officer (DPO) and keep your self-assessment up to date.</li>`;
+  const body = `
+    <p>Dear <strong>${opts.orgName}</strong>,</p>
+    <p>Welcome to the NDSEP platform! Your ${isDpco ? "DPCO registration" : "organisation"} has been <strong>approved</strong> by the Nigeria Data Protection Commission (NDPC).</p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0">${detailRows}</table>
+    <p><strong>Next steps to activate your account:</strong></p>
+    <ol style="line-height:1.8">${nextSteps}</ol>
+    <p>If you did not expect this approval, contact NDPC support immediately.</p>
+  `;
+  return sendEmail({
+    to: opts.to,
+    subject: `[NDSEP] Welcome — Your ${isDpco ? "DPCO Registration" : "Organisation"} Has Been Approved`,
+    html: baseTemplate("Welcome to NDSEP — Account Approved", body, opts.portalUrl ? { label: "Activate in Portal", url: opts.portalUrl } : undefined),
+  });
+}
+
 // ─── Appeal status update ─────────────────────────────────────────────────────
 
 export async function sendAppealUpdate(opts: {

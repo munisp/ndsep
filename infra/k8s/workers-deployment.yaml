@@ -296,7 +296,7 @@ spec:
       containers:
         - name: ml-prediction
           image: ndsep/python-workers:latest
-          command: ["python3", "-u", "workers/python/ml_compliance_prediction.py"]
+          command: ["python3", "-u", "workers/python/ml_prediction_worker.py"]
           envFrom:
             - configMapRef: { name: ndsep-worker-config }
             - secretRef: { name: ndsep-secrets }

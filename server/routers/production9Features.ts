@@ -895,7 +895,7 @@ export const userManagementRouter = router({
     .input(
       z.object({
         userId: z.number().int().positive(),
-        role: z.enum(["admin", "user", "government_staff", "org_admin", "auditor"]),
+        role: z.enum(["admin", "user", "government_staff", "org_admin", "auditor", "dpco", "regulator"]),
       })
     )
     .mutation(async ({ input, ctx }) => {
