@@ -252,6 +252,7 @@ const DpoMarketplace = lazy(() => import("@/pages/DpoMarketplace"));
 const PublicSanctionsRegister = lazy(() => import("@/pages/PublicSanctionsRegister"));
 const FoiaPublicPortal = lazy(() => import("@/pages/FoiaPublicPortal"));
 const ElectionOversight = lazy(() => import("@/pages/ElectionOversight"));
+const InsiderThreat = lazy(() => import("@/pages/InsiderThreat"));
 const TranslatedDsarPortal = lazy(() => import("@/components/i18n/TranslatedDsarPortal"));
 const TranslatedWhistleblowerIntake = lazy(() => import("@/components/i18n/TranslatedWhistleblowerIntake"));
 const TranslatedPublicComplianceRegistry = lazy(() => import("@/components/i18n/TranslatedRegistryHeader"));
@@ -532,6 +533,7 @@ function Router() {
         <Route path="/sanctions-register" component={PublicSanctionsRegister} />
         <Route path="/foia" component={FoiaPublicPortal} />
         <Route path="/election-oversight" component={ElectionOversight} />
+        <Route path="/insider-threat" component={InsiderThreat} />
         {/* Gap 9 — translated public compliance registry shell */}
         <Route path="/registry" component={TranslatedPublicComplianceRegistry} />
         {/* Catch-all — must be last */}
