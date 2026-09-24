@@ -38,7 +38,8 @@ import requests
 # ── Configuration ──────────────────────────────────────────────────────────────
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-PORT = int(os.environ.get("OLLAMA_WORKER_PORT", "8203"))
+# workerManager sets OLLAMA_PORT; OLLAMA_WORKER_PORT is the legacy/standalone name.
+PORT = int(os.environ.get("OLLAMA_PORT", os.environ.get("OLLAMA_WORKER_PORT", "8203")))
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "mistral")
 MAX_TOKENS = int(os.environ.get("OLLAMA_MAX_TOKENS", "2048"))
 TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.3"))
