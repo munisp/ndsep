@@ -272,6 +272,21 @@ import { foiaRouter } from "./routers/foia";
 import { electionOversightRouter } from "./routers/electionOversight";
 import { aiRegulationRouter } from "./routers/aiRegulation";
 import { consentPropagationRouter } from "./routers/consentPropagation";
+import { complaintAnalyticsRouter } from "./routers/complaintAnalytics";
+import { complianceScanningRouter } from "./routers/complianceScanning";
+import { crossBorderDeclarationsRouter } from "./routers/crossBorderDeclarations";
+import { dataSovereigntyRouter } from "./routers/dataSovereignty";
+import { insiderThreatRouter } from "./routers/insiderThreat";
+import { ninIdentityRouter } from "./routers/ninIdentity";
+import { policyMonitorRouter } from "./routers/policyMonitor";
+import { publicComplaintsRouter } from "./routers/publicComplaints";
+import { publicationWorkbenchRouter } from "./routers/publicationWorkbench";
+import { regIntelRouter } from "./routers/regIntel";
+import { revenueVerificationRouter } from "./routers/revenueVerification";
+import { settlementWorkflowRouter } from "./routers/settlementWorkflow";
+import { supervisionRiskRouter } from "./routers/supervisionRisk";
+import { tribunalBundleRouter } from "./routers/tribunalBundle";
+import { ussdChannelRouter } from "./routers/ussdChannel";
 import { antiwipeRouter } from "./antiwipe";
 import { getIntelSummary, getCrossplatformCorrelations, getNocThreatFeed, enrichBankingWithMaritime, enrichComplianceWithSiem } from "./intelAggregator";
 import { logger } from "./logger";
@@ -328,6 +343,21 @@ export const appRouter = router({
   aiRegulation: aiRegulationRouter,
   consentPropagation: consentPropagationRouter,
   antiwipe: antiwipeRouter,
+  insiderThreat: insiderThreatRouter,
+  complaintAnalytics: complaintAnalyticsRouter,
+  complianceScanning: complianceScanningRouter,
+  crossBorderDeclarations: crossBorderDeclarationsRouter,
+  dataSovereignty: dataSovereigntyRouter,
+  ninIdentity: ninIdentityRouter,
+  policyMonitor: policyMonitorRouter,
+  publicComplaints: publicComplaintsRouter,
+  publicationWorkbench: publicationWorkbenchRouter,
+  regIntel: regIntelRouter,
+  revenueVerification: revenueVerificationRouter,
+  settlementWorkflow: settlementWorkflowRouter,
+  supervisionRisk: supervisionRiskRouter,
+  tribunalBundle: tribunalBundleRouter,
+  ussdChannel: ussdChannelRouter,
   intelAggregator: router({
     summary: protectedProcedure.query(async () => getIntelSummary()),
     correlations: protectedProcedure.query(async () => getCrossplatformCorrelations()),

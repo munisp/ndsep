@@ -176,6 +176,64 @@ export const PII_FIELDS: Record<string, string[]> = {
   // Consent-propagation data-subject references + processor contacts (migration 0054).
   withdrawal_events: ["subject_ref"],
   downstream_processors: ["contact_email"],
+  // ── Round-8 feature-router PII (migrations 0081–0096) ──
+  // Public complaints channel (migration 0081).
+  public_complaints: ["complainant_name", "complainant_email", "complainant_phone", "description", "submitter_ip_hash"],
+  // Compliance scanning officer identities (migration 0083).
+  scan_targets: ["created_by"],
+  scan_runs: ["created_by"],
+  scan_artifacts: ["attested_by"],
+  scan_findings: ["resolved_by"],
+  scan_suppressions: ["requested_by", "approved_by"],
+  // Policy monitor officer identities (migration 0084).
+  monitored_policies: ["created_by"],
+  policy_reviews: ["assigned_to", "assigned_by", "decided_by", "escalated_by", "controller_notified_by", "created_by"],
+  // Tribunal bundle officer/accessor identities (migration 0085).
+  tribunal_bundles: ["assembled_by", "sealed_by", "export_requested_by", "export_first_approver", "export_second_approver", "manifest"],
+  bundle_artifacts: ["metadata"],
+  bundle_access_log: ["accessor"],
+  // Settlement workflow counterparty + officer identities (migration 0086).
+  settlements: ["proposed_by", "respondent_name", "respondent_email", "reduction_legal_basis"],
+  settlement_terms: ["proposed_by", "transparency_rationale"],
+  settlement_approvals: ["approver"],
+  // Revenue verification attestation identities (migration 0087).
+  verified_revenues: ["attestation", "verifier", "created_by", "external_ref"],
+  integration_credentials_audit: ["actor", "credential_fingerprint"],
+  penalty_computations: ["computed_by"],
+  // Supervision risk officer identities (migration 0088).
+  supervision_plans: ["generated_by", "approved_by"],
+  supervision_plan_items: ["assigned_team", "referred_by"],
+  risk_scores: ["computed_by"],
+  risk_weights: ["updated_by"],
+  // Cross-border transfer declarations (migration 0089).
+  transfer_declarations: ["processors", "submitted_by"],
+  declaration_amendments: ["prior_state", "amended_by"],
+  transfer_findings: ["evidence", "resolved_by", "created_by"],
+  // Publication workbench unredacted text + redaction keys (migration 0090).
+  publication_documents: ["body_raw", "summary", "title", "org_name", "created_by"],
+  redaction_tasks: ["redaction_map", "minor_names_applied", "reviewer_id", "created_by"],
+  publication_approvals: ["approver_id", "approver_name"],
+  disclosure_access_log: ["accessor_id"],
+  // Reg-intel legal query text + asker/officer identities (migration 0091).
+  legal_queries: ["question", "asked_by"],
+  legal_instruments: ["created_by"],
+  legal_versions: ["created_by"],
+  rule_legal_references: ["created_by"],
+  // USSD/SMS channel pseudonymous subscriber identifiers (migration 0092).
+  ussd_sessions: ["msisdn_hmac", "msisdn_last4", "payload"],
+  ussd_intake_queue: ["msisdn_hmac", "msisdn_last4", "description"],
+  sms_outbox: ["msisdn_hmac", "msisdn_last4", "message"],
+  // NIN identity verification pseudonymous identifiers (migration 0093).
+  identity_verifications: ["nin_hmac", "verification_token", "subject_ref"],
+  verification_audit_log: ["actor", "subject_ref", "details"],
+  // Data sovereignty officer identities (migrations 0094–0096).
+  hosting_declarations: ["submitted_by", "reviewed_by", "admin_access_locations"],
+  residency_attestations: ["attesting_officer_name", "attesting_officer_title", "revoked_by"],
+  residency_violations: ["acknowledged_by", "resolved_by", "details"],
+  cross_regulator_referrals: ["referred_by", "received_by", "case_summary"],
+  egress_thresholds: ["updated_by"],
+  asn_geo_reference: ["created_by"],
+  sovereignty_scores: ["computed_by"],
 };
 
 /**
