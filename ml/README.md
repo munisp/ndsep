@@ -226,3 +226,188 @@ fail soft (file registry / synthetic batch) when the DB is unreachable.
   with docker-compose; without it, tracking is a silent no-op by design.
 - Ray is optional and off by default; without it, `--model all` trains
   sequentially (and Ray runs skip MLflow tracking).
+
+## Neo4j graph store
+
+The compliance graph (orgs / violations / enforcement actions / officers +
+`HAS_VIOLATION` / `ENFORCED_BY` / `SECTOR_PEER` / `TRANSACTS_WITH` /
+`EMPLOYS` edges) can live in a real Neo4j 5 database instead of only in
+parquet/lakehouse snapshots.
+
+### Architecture
+
+```
+Postgres / lakehouse snapshots / synthetic generator
+        │  python -m ml.graph.sync_to_neo4j   (idempotent MERGE, UNWIND batches)
+        ▼
+      Neo4j 5.26-community  ──►  GNN training graph source (ml/graph/graph_source.py)
+        ▲                        KGQA / graph analytics
+        └── workers/python/neo4j_graph_service.py  (FastAPI, port 8220)
+            /health /graph/push /graph/fetch /graph/neighbors /graph/path
+            /graph/communities /graph/rings
+```
+
+### Pieces
+
+- **`ml/graph/neo4j_store.py`** — real client on the official `neo4j`
+  driver (`pip install neo4j`). `Neo4jGraphStore` is a context manager;
+  `push_graph(nodes, edges, labels)` MERGEs nodes by `node_id`
+  (labels `Organization` / `Violation` / `EnforcementAction` / `Officer` /
+  `Sector`, uniqueness constraint per label) and relationships by
+  `(src, dst, type)` in batched `UNWIND` write transactions — re-running
+  is idempotent. `fetch_graph()` returns the exact
+  `(nodes_df, edges_df, labels_df)` frames `train_gnn()` consumes.
+  `neighbors()`, `shortest_path()`, `detect_communities()`,
+  `collusion_rings()` (orgs sharing officer / enforcement signals,
+  weighted connected components). Module-level wrappers open short-lived
+  connections from env config. `HAS_NEO4J=False` when the driver is not
+  installed — every caller degrades gracefully.
+- **`ml/graph/graph_source.py`** — canonical training-graph source.
+  `load_training_graph()` resolves in order: **Neo4j → lakehouse snapshot
+  (`graph_nodes`/`graph_edges`/`graph_labels` via
+  `ml/training/lakehouse.load_latest`) → fresh synthetic generation**.
+  Force with `NDSEP_GRAPH_SOURCE=neo4j|lakehouse|synthetic`.
+- **`ml/graph/sync_to_neo4j.py`** — CLI push job:
+  `python -m ml.graph.sync_to_neo4j [--source lakehouse|synthetic]
+  [--dry-run]`.
+- **`workers/python/neo4j_graph_service.py`** — FastAPI worker on
+  `NEO4J_SERVICE_PORT` (default **8220**). When Neo4j is unreachable it
+  rebuilds the graph from Postgres (`DATABASE_URL`) in memory and serves
+  reads from it; every response flags `source:
+  "neo4j"|"postgres"|"unavailable"`. Pushes require Neo4j (503 otherwise).
+- **Compose**: `neo4j` service in `docker-compose-workers-addition.yml`
+  (image `neo4j:5.26-community`, ports `7474`/`7687`, APOC enabled,
+  healthcheck via `cypher-shell`, data on the `neo4j_data` volume).
+
+### Env vars
+
+| Var | Default | Purpose |
+|---|---|---|
+| `NEO4J_URI` | `bolt://localhost:7687` | Bolt endpoint |
+| `NEO4J_USER` | `neo4j` | auth user |
+| `NEO4J_PASSWORD` | `ndsep-neo4j-dev` | auth password (dev default — override in compose/prod) |
+| `NEO4J_SERVICE_PORT` | `8220` | FastAPI worker port |
+| `NDSEP_GRAPH_SOURCE` | `auto` | force graph source for `load_training_graph()` |
+
+### Wiring GNN training
+
+`ml/training/train.py::train_gnn()` still loads the graph via
+`get_dataset(...)` (that file is owned by another workstream and was not
+modified). To adopt the canonical source, replace these three lines in
+`train_gnn()`:
+
+```python
+nodes, src_n = get_dataset("graph_nodes", data_dir)
+edges, _ = get_dataset("graph_edges", data_dir)
+labels, _ = get_dataset("graph_labels", data_dir)
+```
+
+with the one-liner:
+
+```python
+from ml.graph.graph_source import load_training_graph
+nodes, edges, labels, src_n = load_training_graph()
+```
+
+Everything downstream (`nodes[f"f{i}"]` feature columns, `edges.src/dst`,
+`labels.node_id/high_risk`, the `src_n` provenance string) is unchanged —
+`fetch_graph()` reconstructs the identical frame shapes.
+
+### Honest limits
+
+- **Community edition** (`neo4j:5.26-community`): no GDS plugin by
+  default, so `detect_communities()` tries `gds.labelPropagation` and
+  falls back to a deterministic pure-Python label propagation over the
+  fetched edge list; `collusion_rings()` is Cypher for signal extraction
+  + Python connected components. GDS (or Fabric/sharding) can be enabled
+  later by adding the plugin and bumping the image — the code path is
+  already there.
+- **Full-graph fetch**: `fetch_graph()` pulls the whole graph into
+  memory per call — fine at the current ~5k-node scale; needs paging /
+  sampling for much larger graphs.
+- The synthetic graph stores features as a `features` float-array
+  property; Postgres-fallback graphs built by the worker have no GNN
+  feature vectors (structure-only reads).
+- Sync is batch, not streaming: Neo4j reflects the last
+  `sync_to_neo4j` run, not live Postgres state. Hook it into the
+  continuous-training schedule (ml/CONTINUOUS_TRAINING.md) for
+  periodic refresh.
+
+## Bayesian/MCMC layer
+
+`ml/bayesian/` adds **posterior inference** to the stack: instead of
+point estimates from the PyTorch models, it answers regulatory questions
+with full posterior distributions and credible intervals. Pure
+numpy/scipy, CPU-only, fully seedable. No relation to the Rust
+`workers/rust/monte_carlo` engine — that service is **forward scenario
+simulation** (assume sector inputs, simulate 1,000+ possible futures,
+report outcome percentiles); this layer is **inverse inference**
+(observe events, infer the latent rates that generated them). They
+complement each other: posteriors from here can feed priors/inputs
+there.
+
+### What each model answers
+
+1. **Beta-Binomial sector fraud rates** (`models.beta_binomial_rates`) —
+   *"Which sectors have genuinely elevated fraud?"* Posterior fraud rate
+   per sector given observed frauds/transactions, with 95% HDIs and
+   P(sector rate > pooled rate). Conjugate Beta posterior is analytic;
+   an adaptive-MH sampler on logit(p) cross-checks it (R-hat/ESS in
+   every output row).
+2. **Poisson change-point** (`models.poisson_changepoint`) — *"Did the
+   compliance-violation regime shift (e.g. after an enforcement
+   campaign)?"* Single change-point in a count series; rates
+   before/after, discrete uniform prior on the change location. The tau
+   posterior is computed **exactly** on a grid (conjugate rate
+   marginals), with P(rate increased) and rate HDIs.
+3. **Gamma-Poisson insider-risk shrinkage**
+   (`models.gamma_poisson_shrinkage`) — *"Which officers/units have
+   genuinely elevated event rates?"* Per-unit event counts with
+   exposures; empirical-Bayes Gamma population prior shrinks low-count
+   units toward the population mean and flags units whose posterior mean
+   exceeds the 99% population credible bound. Consumed by the
+   insider-threat module; `run_analysis` runs it per-organization as a
+   proxy until per-officer counts exist.
+
+### The sampler
+
+`ml/bayesian/mcmc.py`: random-walk Metropolis-Hastings with Robbins-Monro
+proposal-scale adaptation targeting ~0.234 acceptance, multiple chains
+(>= 2), burn-in/thinning, split-R-hat (Gelman-Rubin), autocorrelation
+ESS with an initial-positive-sequence cutoff, and mean/median/95%-HDI
+posterior summaries.
+
+### Run
+
+```bash
+python3 -m ml.bayesian.run_analysis          # writes ml/bayesian/results/
+pytest ml/tests/test_bayesian.py -v          # 9 correctness tests
+```
+
+`run_analysis` reads `transactions`/`organizations` from the lakehouse
+(`load_latest`); if the lakehouse is unreadable (e.g. no parquet engine)
+it regenerates the synthetic corpus via the generator. Outputs:
+`sector_fraud_rates.json`, `changepoint_violations.json`,
+`insider_risk_shrinkage.json`, `SUMMARY.md` — committed real numbers
+under `ml/bayesian/results/`.
+
+### Honest limits
+
+- **Random-walk MH, no NUTS/HMC**: `numpyro` is optional and not
+  installed here, so there is no gradient-based sampler. MH mixes poorly
+  on correlated/high-dimensional posteriors — the models above are
+  deliberately low-dimensional (per-sector rate, 3-parameter
+  change-point, conjugate shrinkage) and rates are sampled on the
+  logit/log scale. Always check R-hat (< 1.05) and ESS before trusting
+  tails; install `numpyro` and port if correlated posteriors appear.
+- **EB shrinkage can over-shrink**: the Gamma-Poisson population prior
+  is fit by method of moments; when between-unit variance is
+  Poisson-consistent, shrinkage is heavy by design — a unit needs
+  genuinely disproportionate counts to be flagged. The flagging
+  threshold (99% population bound) is a screening rule, not proof of
+  misconduct.
+- **Change-point is single-break only** and the tau grid posterior
+  assumes a discrete uniform prior; multiple regime shifts need an
+  extension (e.g. binary segmentation or BOCPD).
+- Data remains **synthetic** until NDPC pipelines feed real counts, so
+  the committed results demonstrate correctness, not production findings.
