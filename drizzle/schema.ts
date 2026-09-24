@@ -1,7 +1,9 @@
 import {
   bigint,
+  bigserial,
   boolean,
   date,
+  index,
   integer,
   inet,
   jsonb,
@@ -12,6 +14,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
 
@@ -3080,3 +3083,620 @@ export const penaltyCalculations = pgTable("penalty_calculations", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wave 1 Gap 2 (Gaps 7, 8, 11, 12) — appended from drizzle/wave1-g2-schema-snippet.ts
+// DDL: drizzle/migrations/0040..0043
+// NOTE: enforcement_fines is managed by raw SQL (server/routers/phase11Features.ts)
+// and has no Drizzle table def, so penaltyId columns below are plain integers.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Gap 7: Whistleblower follow-up channel ─────────────────────────────────
+
+export const whistleblowerChannelTokens = pgTable("whistleblower_channel_tokens", {
+  id: serial("id").primaryKey(),
+  reportId: integer("report_id").notNull().references(() => whistleblowerReports.id),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  issuedTo: varchar("issued_to", { length: 20 }).notNull().default("reporter"),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type WhistleblowerChannelToken = typeof whistleblowerChannelTokens.$inferSelect;
+
+export const whistleblowerMessages = pgTable("whistleblower_messages", {
+  id: serial("id").primaryKey(),
+  reportId: integer("report_id").notNull().references(() => whistleblowerReports.id),
+  sender: varchar("sender", { length: 20 }).notNull(),
+  body: text("body").notNull(),
+  encrypted: boolean("encrypted").notNull().default(true),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type WhistleblowerMessage = typeof whistleblowerMessages.$inferSelect;
+
+export const protectionFlags = pgTable("protection_flags", {
+  id: serial("id").primaryKey(),
+  reportId: integer("report_id").notNull().references(() => whistleblowerReports.id),
+  reporterEmail: varchar("reporter_email", { length: 255 }),
+  employerName: varchar("employer_name", { length: 255 }),
+  retaliationType: varchar("retaliation_type", { length: 50 }).notNull().default("other"),
+  description: text("description").notNull(),
+  status: varchar("status", { length: 30 }).notNull().default("open"),
+  protectiveMeasures: text("protective_measures"),
+  priority: varchar("priority", { length: 20 }).notNull().default("high"),
+  assignedTo: varchar("assigned_to", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+});
+export type ProtectionFlag = typeof protectionFlags.$inferSelect;
+
+export const whistleblowerRewards = pgTable("whistleblower_rewards", {
+  id: serial("id").primaryKey(),
+  reportId: integer("report_id").notNull().references(() => whistleblowerReports.id),
+  rewardType: varchar("reward_type", { length: 30 }).notNull().default("recognition"),
+  amount: numeric("amount", { precision: 14, scale: 2 }),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  citation: text("citation"),
+  status: varchar("status", { length: 30 }).notNull().default("nominated"),
+  decidedBy: varchar("decided_by", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type WhistleblowerReward = typeof whistleblowerRewards.$inferSelect;
+
+// ─── Gap 8: Sector-regulator reconciliation ─────────────────────────────────
+
+export const jurisdictionConflicts = pgTable("jurisdiction_conflicts", {
+  id: serial("id").primaryKey(),
+  matterRef: varchar("matter_ref", { length: 100 }).notNull(),
+  regulators: jsonb("regulators").notNull().default([]),
+  conflictType: varchar("conflict_type", { length: 50 }).notNull().default("overlapping_mandate"),
+  description: text("description"),
+  status: varchar("status", { length: 30 }).notNull().default("raised"),
+  precedenceDecision: text("precedence_decision"),
+  leadRegulator: varchar("lead_regulator", { length: 50 }),
+  decidedBy: varchar("decided_by", { length: 255 }),
+  raisedBy: varchar("raised_by", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+});
+export type JurisdictionConflict = typeof jurisdictionConflicts.$inferSelect;
+
+export const caseReferrals = pgTable("case_referrals", {
+  id: serial("id").primaryKey(),
+  referralRef: varchar("referral_ref", { length: 50 }).notNull().unique(),
+  fromRegulator: varchar("from_regulator", { length: 50 }).notNull(),
+  toRegulator: varchar("to_regulator", { length: 50 }).notNull(),
+  matterRef: varchar("matter_ref", { length: 100 }),
+  casePayload: jsonb("case_payload").notNull().default({}),
+  status: varchar("status", { length: 30 }).notNull().default("sent"),
+  notes: text("notes"),
+  respondedBy: varchar("responded_by", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  respondedAt: timestamp("responded_at"),
+  resolvedAt: timestamp("resolved_at"),
+});
+export type CaseReferral = typeof caseReferrals.$inferSelect;
+
+// ─── Gap 11: DPO marketplace ────────────────────────────────────────────────
+
+export const dpoMarketplaceProfiles = pgTable("dpo_marketplace_profiles", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  profileType: varchar("profile_type", { length: 20 }).notNull().default("dpo"),
+  email: varchar("email", { length: 255 }).notNull(),
+  phone: varchar("phone", { length: 50 }),
+  bio: text("bio"),
+  sectors: jsonb("sectors").notNull().default([]),
+  regions: jsonb("regions").notNull().default([]),
+  languages: jsonb("languages").notNull().default([]),
+  capacity: integer("capacity").notNull().default(1),
+  verified: boolean("verified").notNull().default(false),
+  verifiedBy: varchar("verified_by", { length: 255 }),
+  verifiedAt: timestamp("verified_at"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type DpoMarketplaceProfile = typeof dpoMarketplaceProfiles.$inferSelect;
+
+export const marketplaceEngagements = pgTable("marketplace_engagements", {
+  id: serial("id").primaryKey(),
+  engagementRef: varchar("engagement_ref", { length: 50 }).notNull().unique(),
+  orgId: integer("org_id").references(() => organizations.id),
+  orgName: varchar("org_name", { length: 255 }).notNull(),
+  contactEmail: varchar("contact_email", { length: 255 }).notNull(),
+  requirements: jsonb("requirements").notNull().default({}),
+  status: varchar("status", { length: 30 }).notNull().default("open"),
+  matchedProfileId: integer("matched_profile_id").references(() => dpoMarketplaceProfiles.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type MarketplaceEngagement = typeof marketplaceEngagements.$inferSelect;
+
+// ─── Gap 12: Fine payment & reconciliation ──────────────────────────────────
+
+export const paymentRrrCodes = pgTable("payment_rrr_codes", {
+  id: serial("id").primaryKey(),
+  rrr: varchar("rrr", { length: 20 }).notNull().unique(),
+  penaltyId: integer("penalty_id").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  status: varchar("status", { length: 20 }).notNull().default("generated"),
+  gatewayRef: varchar("gateway_ref", { length: 100 }),
+  expiresAt: timestamp("expires_at").notNull(),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type PaymentRrrCode = typeof paymentRrrCodes.$inferSelect;
+
+export const paymentReconciliations = pgTable("payment_reconciliations", {
+  id: serial("id").primaryKey(),
+  rrr: varchar("rrr", { length: 20 }).notNull(),
+  penaltyId: integer("penalty_id"),
+  matchedAmount: numeric("matched_amount", { precision: 14, scale: 2 }),
+  matchStatus: varchar("match_status", { length: 20 }).notNull().default("unmatched"),
+  batchDate: date("batch_date").defaultNow().notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type PaymentReconciliation = typeof paymentReconciliations.$inferSelect;
+
+export const paymentInstallments = pgTable("payment_installments", {
+  id: serial("id").primaryKey(),
+  planRef: varchar("plan_ref", { length: 50 }).notNull().unique(),
+  penaltyId: integer("penalty_id").notNull(),
+  schedule: jsonb("schedule").notNull().default([]),
+  status: varchar("status", { length: 20 }).notNull().default("active"),
+  defaultedAt: timestamp("defaulted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type PaymentInstallment = typeof paymentInstallments.$inferSelect;
+
+export const receipts = pgTable("receipts", {
+  id: serial("id").primaryKey(),
+  receiptNumber: varchar("receipt_number", { length: 30 }).notNull().unique(),
+  rrr: varchar("rrr", { length: 20 }),
+  penaltyId: integer("penalty_id"),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  payerEmail: varchar("payer_email", { length: 255 }),
+  issuedAt: timestamp("issued_at").defaultNow().notNull(),
+});
+export type Receipt = typeof receipts.$inferSelect;
+
+export const refundRequests = pgTable("refund_requests", {
+  id: serial("id").primaryKey(),
+  refundRef: varchar("refund_ref", { length: 50 }).notNull().unique(),
+  rrr: varchar("rrr", { length: 20 }),
+  penaltyId: integer("penalty_id"),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  reason: text("reason").notNull(),
+  requestedBy: varchar("requested_by", { length: 255 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("requested"),
+  decidedBy: varchar("decided_by", { length: 255 }),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type RefundRequest = typeof refundRequests.$inferSelect;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wave 1 Group 3 (Gaps 13–17) — appended from drizzle/schema-snippets/wave1-g3-gaps-13-17.ts
+// DDL: drizzle/migrations/0050_* … 0054_*.sql
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Gap 13: Public Sanctions Register ──────────────────────────────────────
+
+export const enforcementNoticeTypeEnum = pgEnum("enforcement_notice_type", [
+  "final_order", "undertaking", "administrative_fine", "reprimand"
+]);
+export const enforcementNoticeStatusEnum = pgEnum("enforcement_notice_status", [
+  "draft", "published", "remediated", "delisted", "expired"
+]);
+export const delistingRequestStatusEnum = pgEnum("delisting_request_status", [
+  "pending", "under_review", "approved", "rejected"
+]);
+
+export const enforcementNotices = pgTable("enforcement_notices", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").references(() => organizations.id),
+  orgName: varchar("org_name", { length: 256 }).notNull(),
+  noticeType: varchar("notice_type", { length: 32 }).notNull(),
+  title: varchar("title", { length: 512 }).notNull(),
+  summary: text("summary"),
+  legalInstrumentRef: varchar("legal_instrument_ref", { length: 128 }),
+  gazetteNumber: varchar("gazette_number", { length: 64 }),
+  publishedAt: timestamp("published_at"),
+  sanctionStart: timestamp("sanction_start"),
+  sanctionEnd: timestamp("sanction_end"),
+  status: varchar("status", { length: 32 }).default("draft").notNull(),
+  pdfRef: text("pdf_ref"),
+  publicNote: text("public_note"),
+  createdBy: integer("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type EnforcementNotice = typeof enforcementNotices.$inferSelect;
+
+export const delistingRequests = pgTable("delisting_requests", {
+  id: serial("id").primaryKey(),
+  noticeId: integer("notice_id").references(() => enforcementNotices.id).notNull(),
+  organizationId: integer("organization_id").references(() => organizations.id),
+  applicantName: varchar("applicant_name", { length: 256 }).notNull(),
+  applicantEmail: varchar("applicant_email", { length: 256 }).notNull(),
+  remediationSummary: text("remediation_summary").notNull(),
+  evidenceRefs: jsonb("evidence_refs").$type<string[]>().default([]),
+  status: varchar("status", { length: 32 }).default("pending").notNull(),
+  reviewerId: integer("reviewer_id"),
+  reviewerNotes: text("reviewer_notes"),
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewed_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type DelistingRequest = typeof delistingRequests.$inferSelect;
+
+// ─── Gap 14: FOIA Module ────────────────────────────────────────────────────
+
+export const foiaExemptionCodeEnum = pgEnum("foia_exemption_code", [
+  "national_security", "personal_privacy", "law_enforcement", "commercial_confidence"
+]);
+export const foiaRequestStatusEnum = pgEnum("foia_request_status", [
+  "received", "processing", "partial_disclosure", "disclosed", "refused", "closed"
+]);
+
+export const foiaRequests = pgTable("foia_requests", {
+  id: serial("id").primaryKey(),
+  referenceNumber: varchar("reference_number", { length: 32 }).unique().notNull(),
+  requesterName: varchar("requester_name", { length: 256 }).notNull(),
+  requesterEmail: varchar("requester_email", { length: 256 }).notNull(),
+  requesterPhone: varchar("requester_phone", { length: 64 }),
+  subject: varchar("subject", { length: 512 }).notNull(),
+  description: text("description").notNull(),
+  preferredFormat: varchar("preferred_format", { length: 32 }).default("electronic").notNull(),
+  status: varchar("status", { length: 32 }).default("received").notNull(),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+  statutoryDeadline: timestamp("statutory_deadline").notNull(),
+  assignedOfficerId: integer("assigned_officer_id").references(() => users.id),
+  exemptionCode: foiaExemptionCodeEnum("exemption_code"),
+  refusalReason: text("refusal_reason"),
+  disclosureNotes: text("disclosure_notes"),
+  disclosedAt: timestamp("disclosed_at"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type FoiaRequest = typeof foiaRequests.$inferSelect;
+
+export const foiaTasks = pgTable("foia_tasks", {
+  id: serial("id").primaryKey(),
+  foiaRequestId: integer("foia_request_id").references(() => foiaRequests.id).notNull(),
+  taskType: varchar("task_type", { length: 32 }).notNull(),
+  title: varchar("title", { length: 512 }).notNull(),
+  notes: text("notes"),
+  status: varchar("status", { length: 32 }).default("open").notNull(),
+  assignedTo: integer("assigned_to").references(() => users.id),
+  dueAt: timestamp("due_at"),
+  completedAt: timestamp("completed_at"),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type FoiaTask = typeof foiaTasks.$inferSelect;
+
+// ─── Gap 15: Election-Period Oversight ──────────────────────────────────────
+
+export const electionPeriodStatusEnum = pgEnum("election_period_status", [
+  "proclaimed", "active", "concluded", "archived"
+]);
+
+export const electionPeriods = pgTable("election_periods", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 256 }).notNull(),
+  description: text("description"),
+  startsAt: timestamp("starts_at").notNull(),
+  endsAt: timestamp("ends_at").notNull(),
+  status: varchar("status", { length: 32 }).default("proclaimed").notNull(),
+  heightenedScrutiny: boolean("heightened_scrutiny").default(false).notNull(),
+  proclaimedBy: integer("proclaimed_by").references(() => users.id),
+  proclaimedAt: timestamp("proclaimed_at").defaultNow().notNull(),
+  concludedAt: timestamp("concluded_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type ElectionPeriod = typeof electionPeriods.$inferSelect;
+
+export const politicalMicrotargetingReports = pgTable("political_microtargeting_reports", {
+  id: serial("id").primaryKey(),
+  electionPeriodId: integer("election_period_id").references(() => electionPeriods.id),
+  referenceNumber: varchar("reference_number", { length: 32 }).unique().notNull(),
+  reporterName: varchar("reporter_name", { length: 256 }),
+  reporterEmail: varchar("reporter_email", { length: 256 }),
+  isAnonymous: boolean("is_anonymous").default(false).notNull(),
+  partyOrCampaign: varchar("party_or_campaign", { length: 256 }).notNull(),
+  platform: varchar("platform", { length: 64 }).notNull(),
+  description: text("description").notNull(),
+  evidenceRefs: jsonb("evidence_refs").$type<string[]>().default([]),
+  regionState: varchar("region_state", { length: 64 }),
+  status: varchar("status", { length: 32 }).default("received").notNull(),
+  reviewedBy: integer("reviewed_by").references(() => users.id),
+  reviewNotes: text("review_notes"),
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type PoliticalMicrotargetingReport = typeof politicalMicrotargetingReports.$inferSelect;
+
+export const inecReferrals = pgTable("inec_referrals", {
+  id: serial("id").primaryKey(),
+  caseReference: varchar("case_reference", { length: 64 }).unique().notNull(),
+  electionPeriodId: integer("election_period_id").references(() => electionPeriods.id),
+  microtargetingReportId: integer("microtargeting_report_id").references(() => politicalMicrotargetingReports.id),
+  complaintReference: varchar("complaint_reference", { length: 64 }),
+  subject: varchar("subject", { length: 512 }).notNull(),
+  summary: text("summary").notNull(),
+  status: varchar("status", { length: 32 }).default("referred").notNull(),
+  jointActionNotes: text("joint_action_notes"),
+  referredBy: integer("referred_by").references(() => users.id),
+  referredAt: timestamp("referred_at").defaultNow().notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  resolvedAt: timestamp("resolved_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type InecReferral = typeof inecReferrals.$inferSelect;
+
+// ─── Gap 16: AI-Regulation Instruments ──────────────────────────────────────
+
+export const aiRiskTierEnum = pgEnum("ai_risk_tier", [
+  "minimal", "limited", "high", "unacceptable"
+]);
+
+export const aiRiskTierAssessments = pgTable("ai_risk_tier_assessments", {
+  id: serial("id").primaryKey(),
+  systemRef: varchar("system_ref", { length: 64 }).unique().notNull(),
+  organizationId: integer("organization_id").references(() => organizations.id),
+  systemName: varchar("system_name", { length: 256 }).notNull(),
+  systemPurpose: text("system_purpose"),
+  tier: aiRiskTierEnum("tier").notNull(),
+  rationale: text("rationale").notNull(),
+  assessorId: integer("assessor_id").references(() => users.id),
+  assessorName: varchar("assessor_name", { length: 256 }),
+  assessedAt: timestamp("assessed_at").defaultNow().notNull(),
+  reviewDueAt: timestamp("review_due_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type AiRiskTierAssessment = typeof aiRiskTierAssessments.$inferSelect;
+
+export const aiPermits = pgTable("ai_permits", {
+  id: serial("id").primaryKey(),
+  assessmentId: integer("assessment_id").references(() => aiRiskTierAssessments.id).notNull(),
+  permitRef: varchar("permit_ref", { length: 64 }).unique().notNull(),
+  organizationId: integer("organization_id").references(() => organizations.id),
+  instrumentType: varchar("instrument_type", { length: 32 }).default("permit").notNull(),
+  status: varchar("status", { length: 32 }).default("applied").notNull(),
+  conditions: jsonb("conditions").$type<string[]>().default([]),
+  appliedAt: timestamp("applied_at").defaultNow().notNull(),
+  reviewedBy: integer("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  decisionNotes: text("decision_notes"),
+  grantedAt: timestamp("granted_at"),
+  expiresAt: timestamp("expires_at"),
+  suspendedAt: timestamp("suspended_at"),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type AiPermit = typeof aiPermits.$inferSelect;
+
+export const aiConformityAssessments = pgTable("ai_conformity_assessments", {
+  id: serial("id").primaryKey(),
+  assessmentId: integer("assessment_id").references(() => aiRiskTierAssessments.id).notNull(),
+  permitId: integer("permit_id").references(() => aiPermits.id),
+  ref: varchar("ref", { length: 64 }).unique().notNull(),
+  checklistResults: jsonb("checklist_results").$type<Record<string, "pass" | "fail" | "n/a">>().default({}),
+  overallResult: varchar("overall_result", { length: 32 }),
+  assessorId: integer("assessor_id").references(() => users.id),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  certificateRef: varchar("certificate_ref", { length: 64 }),
+  certificateIssuedAt: timestamp("certificate_issued_at"),
+  certificateExpiresAt: timestamp("certificate_expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type AiConformityAssessment = typeof aiConformityAssessments.$inferSelect;
+
+export const aiIncidents = pgTable("ai_incidents", {
+  id: serial("id").primaryKey(),
+  incidentRef: varchar("incident_ref", { length: 64 }).unique().notNull(),
+  organizationId: integer("organization_id").references(() => organizations.id),
+  reporterType: varchar("reporter_type", { length: 16 }).default("public").notNull(),
+  reporterName: varchar("reporter_name", { length: 256 }),
+  reporterEmail: varchar("reporter_email", { length: 256 }),
+  systemName: varchar("system_name", { length: 256 }).notNull(),
+  description: text("description").notNull(),
+  severity: varchar("severity", { length: 16 }).default("medium").notNull(),
+  harmCategories: jsonb("harm_categories").$type<string[]>().default([]),
+  occurredAt: timestamp("occurred_at"),
+  status: varchar("status", { length: 32 }).default("received").notNull(),
+  triagedBy: integer("triaged_by").references(() => users.id),
+  triageNotes: text("triage_notes"),
+  reportedAt: timestamp("reported_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type AiIncident = typeof aiIncidents.$inferSelect;
+
+export const aiEnforcementLinks = pgTable("ai_enforcement_links", {
+  id: serial("id").primaryKey(),
+  sourceType: varchar("source_type", { length: 32 }).notNull(),
+  sourceId: integer("source_id").notNull(),
+  enforcementCaseId: integer("enforcement_case_id").references(() => enforcementCases.id),
+  financialPenaltyId: integer("financial_penalty_id").references(() => financialPenalties.id),
+  linkNotes: text("link_notes").notNull(),
+  escalatedBy: integer("escalated_by").references(() => users.id),
+  escalatedAt: timestamp("escalated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  sourceIdx: index("idx_ai_enforcement_links_source").on(t.sourceType, t.sourceId),
+}));
+export type AiEnforcementLink = typeof aiEnforcementLinks.$inferSelect;
+
+// ─── Gap 17: Consent Propagation ────────────────────────────────────────────
+
+export const consentPurposes = pgTable("consent_purposes", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").references(() => organizations.id).notNull(),
+  purposeKey: varchar("purpose_key", { length: 64 }).notNull(),
+  name: varchar("name", { length: 256 }).notNull(),
+  description: text("description"),
+  lawfulBasis: varchar("lawful_basis", { length: 32 }).default("consent").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  orgPurposeUniq: uniqueIndex("consent_purposes_org_key_uniq").on(t.organizationId, t.purposeKey),
+}));
+export type ConsentPurpose = typeof consentPurposes.$inferSelect;
+
+export const downstreamProcessors = pgTable("downstream_processors", {
+  id: serial("id").primaryKey(),
+  purposeId: integer("purpose_id").references(() => consentPurposes.id).notNull(),
+  processorName: varchar("processor_name", { length: 256 }).notNull(),
+  contactEmail: varchar("contact_email", { length: 256 }).notNull(),
+  ackEndpointUrl: text("ack_endpoint_url"),
+  slaHours: integer("sla_hours").default(72).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type DownstreamProcessor = typeof downstreamProcessors.$inferSelect;
+
+export const withdrawalEvents = pgTable("withdrawal_events", {
+  id: serial("id").primaryKey(),
+  purposeId: integer("purpose_id").references(() => consentPurposes.id).notNull(),
+  organizationId: integer("organization_id").references(() => organizations.id).notNull(),
+  subjectRef: varchar("subject_ref", { length: 256 }).notNull(),
+  consentRecordId: integer("consent_record_id").references(() => consentRecords.id),
+  withdrawnAt: timestamp("withdrawn_at").defaultNow().notNull(),
+  reason: text("reason"),
+  initiatedBy: varchar("initiated_by", { length: 16 }).default("subject").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type WithdrawalEvent = typeof withdrawalEvents.$inferSelect;
+
+export const propagationRecords = pgTable("propagation_records", {
+  id: serial("id").primaryKey(),
+  withdrawalEventId: integer("withdrawal_event_id").references(() => withdrawalEvents.id).notNull(),
+  processorId: integer("processor_id").references(() => downstreamProcessors.id).notNull(),
+  ackToken: varchar("ack_token", { length: 128 }).unique().notNull(),
+  notifiedAt: timestamp("notified_at"),
+  notificationChannel: varchar("notification_channel", { length: 32 }),
+  ackedAt: timestamp("acked_at"),
+  proofRef: text("proof_ref"),
+  status: varchar("status", { length: 32 }).default("pending").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  eventProcessorUniq: uniqueIndex("propagation_records_event_processor_uniq").on(t.withdrawalEventId, t.processorId),
+}));
+export type PropagationRecord = typeof propagationRecords.$inferSelect;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anti-wipe protection — appended from drizzle/snippets/antiwipe_tables.snippet.ts
+// DDL: drizzle/migrations/0060..0063
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Anti-wipe: append-only evidence vault (0060) ────────────────────────────
+
+export const evidenceVaultEntries = pgTable("evidence_vault_entries", {
+  hash: text("hash").primaryKey(), // sha256 hex of file content
+  path: text("path").notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  contentType: text("content_type"),
+  uploaderId: integer("uploader_id"),
+  uploaderName: text("uploader_name"),
+  caseRef: text("case_ref"),
+  sealed: boolean("sealed").notNull().default(false),
+  sealedAt: timestamp("sealed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type EvidenceVaultEntry = typeof evidenceVaultEntries.$inferSelect;
+
+// ─── Anti-wipe: hash-chained audit ledger + anchors (0061) ───────────────────
+
+export const auditLedger = pgTable("audit_ledger", {
+  seq: bigserial("seq", { mode: "number" }).primaryKey(),
+  prevHash: text("prev_hash").notNull(),
+  entryHash: text("entry_hash").notNull().unique(),
+  payload: jsonb("payload").notNull(),
+  actor: text("actor"),
+  action: text("action").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type AuditLedgerEntry = typeof auditLedger.$inferSelect;
+
+export const ledgerAnchors = pgTable("ledger_anchors", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  anchorDate: date("anchor_date").notNull().unique(),
+  rootHash: text("root_hash").notNull(),
+  firstSeq: bigint("first_seq", { mode: "number" }),
+  lastSeq: bigint("last_seq", { mode: "number" }),
+  entryCount: integer("entry_count").notNull(),
+  externalAnchor: jsonb("external_anchor"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type LedgerAnchorRow = typeof ledgerAnchors.$inferSelect;
+
+// ─── Anti-wipe: backup manifest + canary registry (0062) ─────────────────────
+
+export const backupManifest = pgTable("backup_manifest", {
+  backupId: text("backup_id").primaryKey(),
+  type: text("type").notNull().default("postgres"),
+  path: text("path").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  sizeBytes: bigint("size_bytes", { mode: "number" }),
+  sha256: text("sha256"),
+  verified: boolean("verified").notNull().default(false),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type BackupManifestRow = typeof backupManifest.$inferSelect;
+
+export const canaryFiles = pgTable("canary_files", {
+  path: text("path").primaryKey(),
+  sha256: text("sha256").notNull(),
+  directory: text("directory").notNull(),
+  writtenAt: timestamp("written_at", { withTimezone: true }).defaultNow().notNull(),
+  lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+  status: text("status").notNull().default("ok"),
+});
+export type CanaryFileRow = typeof canaryFiles.$inferSelect;
+
+// ─── Anti-wipe: watchdog heartbeats (0063) ───────────────────────────────────
+
+export const watchdogHeartbeats = pgTable("watchdog_heartbeats", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  workerId: text("worker_id").notNull(),
+  checkedAt: timestamp("checked_at", { withTimezone: true }).defaultNow().notNull(),
+  vaultFiles: integer("vault_files"),
+  vaultVerified: integer("vault_verified"),
+  canariesOk: integer("canaries_ok"),
+  canariesFailed: integer("canaries_failed"),
+  ledgerHeadHash: text("ledger_head_hash"),
+  ledgerOk: boolean("ledger_ok"),
+  status: text("status").notNull(),
+  details: jsonb("details"),
+});
+export type WatchdogHeartbeatRow = typeof watchdogHeartbeats.$inferSelect;

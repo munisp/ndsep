@@ -12,6 +12,7 @@ import { getPgSslConfig } from "../dbSslConfig";
 import { getDatabaseUrl } from "../config";
 import { logger } from "../logger";
 import { startWorkflow } from "../temporal";
+import { withCache, CK, TTL } from "../queryCache";
 const { Pool } = pg;
 let _pool: InstanceType<typeof Pool> | null = null;
 function getPool() {
@@ -495,26 +496,30 @@ export const accreditationRouter = router({
       sector: z.string().optional(),
     }).optional())
     .query(async ({ input }) => {
-      const conditions: string[] = ["status = 'active'"];
-      const params: unknown[] = [];
-      if (input?.search) {
-        conditions.push("(name ILIKE ? OR email ILIKE ?)");
-        params.push(`%${input.search}%`, `%${input.search}%`);
-      }
-      if (input?.sector) {
-        conditions.push("sectors ILIKE ?");
-        params.push(`%${input.sector}%`);
-      }
-      const where = conditions.join(" AND ");
-      const rows = await q<any>(
-        `SELECT id, name, email, phone, dpo_name, dpo_email, sectors, tier, licence_number, licence_expires_at, created_at
-         FROM dpco_organisations
-         WHERE ${where}
-         ORDER BY name ASC
-         LIMIT 50`,
-        params
-      );
-      return rows.map(r => ({
+      // Public registry search widget — cache per (search, sector) for
+      // TTL.ACCREDITATION seconds; the DPCO list changes on admin approval.
+      const cacheKey = CK.publicDpcoList(`accred|${input?.search ?? ""}|${input?.sector ?? ""}`);
+      return withCache(cacheKey, TTL.ACCREDITATION, async () => {
+        const conditions: string[] = ["status = 'active'"];
+        const params: unknown[] = [];
+        if (input?.search) {
+          conditions.push("(name ILIKE ? OR email ILIKE ?)");
+          params.push(`%${input.search}%`, `%${input.search}%`);
+        }
+        if (input?.sector) {
+          conditions.push("sectors ILIKE ?");
+          params.push(`%${input.sector}%`);
+        }
+        const where = conditions.join(" AND ");
+        const rows = await q<any>(
+          `SELECT id, name, email, phone, dpo_name, dpo_email, sectors, tier, licence_number, licence_expires_at, created_at
+           FROM dpco_organisations
+           WHERE ${where}
+           ORDER BY name ASC
+           LIMIT 50`,
+          params
+        );
+        return rows.map(r => ({
         id: r.id,
         name: r.name,
         email: r.email,
@@ -524,7 +529,8 @@ export const accreditationRouter = router({
         tier: r.tier,
         licenceNumber: r.licence_number,
         licenceExpiresAt: r.licence_expires_at,
-      }));
+        }));
+      });
     }),
 
   // ── Generate certificate data for approved applications ───────────────────

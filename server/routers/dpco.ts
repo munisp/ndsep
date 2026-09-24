@@ -10,6 +10,7 @@ import { getPgSslConfig } from "../dbSslConfig";
 import { encryptField } from "../encryption";
 import { getDatabaseUrl } from "../config";
 import { logger } from "../logger";
+import { withCache, CK, TTL } from "../queryCache";
 
 const { Pool } = pg;
 let _dpcoPool: InstanceType<typeof Pool> | null = null;
@@ -1187,29 +1188,36 @@ export const dpcoRouter = router({
       offset: z.number().int().min(0).default(0),
     }))
     .query(async ({ input }) => {
-      const conditions: string[] = ["status = 'active'"];
-      const params: unknown[] = [];
-      if (input.search) {
-        conditions.push("(name ILIKE ? OR email ILIKE ?)");
-        const s = `%${input.search}%`;
-        params.push(s, s);
-      }
-      if (input.sector) {
-        conditions.push("? = ANY(sectors)");
-        params.push(input.sector);
-      }
-      const where = `WHERE ${conditions.join(" AND ")}`;
-      const rows = await q(
-        `SELECT id, name, licence_number, status, tier, email, phone, dpo_name, dpo_email,
-                services, sectors, website, logo_url, licence_expires_at, approved_at
-         FROM dpco_organisations ${where}
-         ORDER BY name ASC LIMIT ? OFFSET ?`,
-        [...params, input.limit, input.offset]
+      // Public DPCO registry list — cache per filter/page combination for
+      // TTL.ORG_LIST seconds; the list changes only on admin licence actions.
+      const cacheKey = CK.publicDpcoList(
+        `active|${input.search ?? ""}|${input.sector ?? ""}|${input.limit}|${input.offset}`
       );
-      const [{ total }] = await q<{ total: number }>(
-        `SELECT COUNT(*) as total FROM dpco_organisations ${where}`, params
-      );
-      return { rows, total };
+      return withCache(cacheKey, TTL.ORG_LIST, async () => {
+        const conditions: string[] = ["status = 'active'"];
+        const params: unknown[] = [];
+        if (input.search) {
+          conditions.push("(name ILIKE ? OR email ILIKE ?)");
+          const s = `%${input.search}%`;
+          params.push(s, s);
+        }
+        if (input.sector) {
+          conditions.push("? = ANY(sectors)");
+          params.push(input.sector);
+        }
+        const where = `WHERE ${conditions.join(" AND ")}`;
+        const rows = await q(
+          `SELECT id, name, licence_number, status, tier, email, phone, dpo_name, dpo_email,
+                  services, sectors, website, logo_url, licence_expires_at, approved_at
+           FROM dpco_organisations ${where}
+           ORDER BY name ASC LIMIT ? OFFSET ?`,
+          [...params, input.limit, input.offset]
+        );
+        const [{ total }] = await q<{ total: number }>(
+          `SELECT COUNT(*) as total FROM dpco_organisations ${where}`, params
+        );
+        return { rows, total };
+      });
     }),
 
   // Public: submit an engagement request from the Org Portal

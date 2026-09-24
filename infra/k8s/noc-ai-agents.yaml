@@ -1,3 +1,13 @@
+# NOC AI agent family. Each image below builds from a source tree in this repo:
+#   ndsep/noc-ai-perception  ← workers/rust/noc_agent_perception/Dockerfile
+#     (build context: workers/rust — cargo workspace root)
+#   ndsep/noc-ai-reasoning   ← workers/python/Dockerfile.ai_reasoning
+#     (build context: workers/python; source: noc_agent_reasoning.py)
+#   ndsep/noc-ai-action      ← workers/go/cmd/noc_agent_action/Dockerfile
+#     (build context: workers/go — Go module root)
+# The statistical anomaly detector of the same family
+# (workers/python/noc_anomaly_detector.py) runs via docker-compose
+# (docker-compose-workers-addition.yml, service noc-anomaly-detector).
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -18,6 +28,7 @@ spec:
     spec:
       containers:
         - name: perception
+          # docker build -f noc_agent_perception/Dockerfile -t ndsep/noc-ai-perception:latest .  (context: workers/rust)
           image: ndsep/noc-ai-perception:latest
           ports:
             - containerPort: 8194
@@ -79,6 +90,7 @@ spec:
     spec:
       containers:
         - name: reasoning
+          # docker build -f Dockerfile.ai_reasoning -t ndsep/noc-ai-reasoning:latest .  (context: workers/python)
           image: ndsep/noc-ai-reasoning:latest
           ports:
             - containerPort: 8195
@@ -92,6 +104,10 @@ spec:
               value: "http://ollama:11434"
             - name: RELAY_URL
               value: "http://ndsep-server:4000"
+            - name: PERCEPTION_URL
+              value: "http://noc-ai-perception:8194"
+            - name: ACTION_URL
+              value: "http://noc-ai-action:8196"
           resources:
             requests:
               memory: "256Mi"
@@ -142,6 +158,7 @@ spec:
     spec:
       containers:
         - name: action
+          # docker build -f cmd/noc_agent_action/Dockerfile -t ndsep/noc-ai-action:latest .  (context: workers/go)
           image: ndsep/noc-ai-action:latest
           ports:
             - containerPort: 8196

@@ -6,7 +6,9 @@ WORKDIR /app
 COPY go.mod ./
 RUN go mod download || true
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/service ./cmd/${CMD}/main.go
+# -trimpath + -ldflags="-s -w": strip local paths, symbol and DWARF tables —
+# smaller binaries, faster container pull and cold start.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/service ./cmd/${CMD}/main.go
 
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates tzdata && adduser -D -u 1001 appuser

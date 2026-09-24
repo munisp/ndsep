@@ -295,6 +295,36 @@ async function startServer() {
   // ── CSRF Protection (H3) ─────────────────────────────────────────────────
   app.use(csrfCookieMiddleware);           // Set CSRF cookie if not present
   app.use("/api/trpc", csrfValidationMiddleware); // Validate CSRF on tRPC mutations
+
+  // ── HTTP cache policy for tRPC responses ────────────────────────────────
+  // Default: no-store for every tRPC response (they are authenticated /
+  // user-specific and must never be shared-cached). A small allowlist of
+  // genuinely public, non-personalized read endpoints gets a short shared
+  // TTL with stale-while-revalidate. tRPC queries arrive as GET
+  // /api/trpc/<procedure>[.<procedure>,...] when the client uses
+  // httpBatchLink, so we key on the procedure path. User-specific public
+  // lookups (foia.track, dsar.publicTrack, getApplicationStatus) are
+  // deliberately NOT in the allowlist.
+  const PUBLIC_CACHEABLE_TRPC: Record<string, string> = {
+    "sanctionsRegister.search": "public, max-age=30, stale-while-revalidate=60",
+    "sanctionsRegister.stats": "public, max-age=60, stale-while-revalidate=120",
+    "sanctionsRegister.detail": "public, max-age=60, stale-while-revalidate=120",
+    "publicRegistry.sectorStats": "public, max-age=300, stale-while-revalidate=600",
+    "electionOversight.activePeriod": "public, max-age=60, stale-while-revalidate=120",
+    "accreditation.publicListDpcos": "public, max-age=120, stale-while-revalidate=240",
+    "dpco.listActiveDpcos": "public, max-age=120, stale-while-revalidate=240",
+  };
+  app.use("/api/trpc", (req, res, next) => {
+    if (req.method === "GET") {
+      // req.path here is "/<procedure>" (or comma-joined for batch GETs)
+      const procedures = req.path.replace(/^\//, "").split(",");
+      const policy = procedures.length === 1 ? PUBLIC_CACHEABLE_TRPC[procedures[0]] : undefined;
+      res.setHeader("Cache-Control", policy ?? "no-store");
+    } else {
+      res.setHeader("Cache-Control", "no-store");
+    }
+    next();
+  });
   // ── Public tRPC Rate Limiting (H2) ────────────────────────────────────────
   app.use("/api/trpc/dsar.publicSubmit", dsarPublicLimiter);
   app.use("/api/trpc/dsar.publicTrack", dsarPublicLimiter);
@@ -1435,6 +1465,12 @@ async function startServer() {
     startInvoiceOverdueScheduler();
     startNationalReportScheduler();
     startSlaBreachScheduler();
+    // Anti-wipe scheduler (OPTIONAL — off by default; set ANTIWIPE_SCHEDULER_ENABLED=true to enable)
+    if (process.env.ANTWIPE_SCHEDULER_ENABLED === "true" || process.env.ANTIWIPE_SCHEDULER_ENABLED === "true") {
+      import("../antiwipe/scheduler")
+        .then((m) => { m.startAntiwipeScheduler(); logger.info("[Antiwipe] Scheduler started"); })
+        .catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[Antiwipe] Scheduler start failed (non-fatal)"));
+    }
 
     // ── Audit Log Retention Policy (SEC-028) ────────────────────────────────────────────────────────────────────────────────────
     // Runs daily at 02:00 UTC. Purges audit_logs older than 7 years per NDPA Article 30.

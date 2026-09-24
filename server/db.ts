@@ -59,6 +59,24 @@ import { ENV } from "./_core/env";
 
 const { Pool } = pg;
 
+// ── Pool sizing / statement guardrails (env-configurable) ────────────────────
+// Defaults are chosen for a single API replica against a modest Postgres
+// instance: 20 connections ≈ (2 × vCPU) + spindle headroom; statement and
+// idle-in-transaction timeouts protect the pool from runaway queries and
+// leaked transactions, which are the dominant causes of pool exhaustion
+// (visible as multi-second p99 latency spikes under load).
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+const DB_POOL_MAX = envInt("DB_POOL_MAX", 20);
+const DB_POOL_IDLE_TIMEOUT_MS = envInt("DB_POOL_IDLE_TIMEOUT_MS", 30_000);
+const DB_POOL_CONNECTION_TIMEOUT_MS = envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5_000);
+const DB_STATEMENT_TIMEOUT_MS = envInt("DB_STATEMENT_TIMEOUT_MS", 30_000);
+const DB_IDLE_IN_TX_TIMEOUT_MS = envInt("DB_IDLE_IN_TRANSACTION_TIMEOUT_MS", 30_000);
+
 let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: InstanceType<typeof Pool> | null = null;
 
@@ -76,10 +94,16 @@ export async function getDb() {
       _pool = new Pool({
         connectionString: PG_URL,
         ssl: getPgSslConfig(),
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
-      });
+        max: DB_POOL_MAX,
+        idleTimeoutMillis: DB_POOL_IDLE_TIMEOUT_MS,
+        connectionTimeoutMillis: DB_POOL_CONNECTION_TIMEOUT_MS,
+        // Applied per-connection by node-postgres (SET at connect time).
+        // Prevents a single slow query / leaked transaction from holding a
+        // pooled connection indefinitely. Override via env for maintenance
+        // windows or reporting replicas.
+        statement_timeout: DB_STATEMENT_TIMEOUT_MS,
+        idle_in_transaction_session_timeout: DB_IDLE_IN_TX_TIMEOUT_MS,
+      } as pg.PoolConfig);
       _db = drizzle(_pool);
     } catch (error) {
       logger.warn({ data: error }, "[Database] Failed to connect:");
@@ -130,72 +154,95 @@ export async function getUserByOpenId(openId: string) {
 export async function getDashboardStats() {
   const db = await getDb();
   if (!db) return null;
-  const [orgStats] = await db.select({
-    total: sql<number>`count(*)`,
-    compliant: sql<number>`count(*) filter (where compliance_status = 'compliant')`,
-    nonCompliant: sql<number>`count(*) filter (where compliance_status = 'non_compliant')`,
-    underReview: sql<number>`count(*) filter (where compliance_status = 'under_review')`,
-    avgScore: sql<number>`avg(compliance_score)`,
-    avgRisk: sql<number>`avg(risk_score)`,
-  }).from(organizations);
+  // Perf: run the six independent table aggregates concurrently instead of
+  // sequentially (see note on the compliance-gap aggregates below).
+  const [
+    [orgStats],
+    [assetStats],
+    [violationStats],
+    [alertStats],
+    [penaltyStats],
+    [networkStats],
+  ] = await Promise.all([
+    db.select({
+      total: sql<number>`count(*)`,
+      compliant: sql<number>`count(*) filter (where compliance_status = 'compliant')`,
+      nonCompliant: sql<number>`count(*) filter (where compliance_status = 'non_compliant')`,
+      underReview: sql<number>`count(*) filter (where compliance_status = 'under_review')`,
+      avgScore: sql<number>`avg(compliance_score)`,
+      avgRisk: sql<number>`avg(risk_score)`,
+    }).from(organizations),
 
-  const [assetStats] = await db.select({
-    total: sql<number>`count(*)`,
-    outsideBorders: sql<number>`count(*) filter (where is_within_borders = false)`,
-    quarantined: sql<number>`count(*) filter (where status = 'quarantined')`,
-  }).from(assets);
+    db.select({
+      total: sql<number>`count(*)`,
+      outsideBorders: sql<number>`count(*) filter (where is_within_borders = false)`,
+      quarantined: sql<number>`count(*) filter (where status = 'quarantined')`,
+    }).from(assets),
 
-  const [violationStats] = await db.select({
-    total: sql<number>`count(*)`,
-    critical: sql<number>`count(*) filter (where severity = 'critical')`,
-    open: sql<number>`count(*) filter (where status = 'non_compliant')`,
-  }).from(complianceViolations);
+    db.select({
+      total: sql<number>`count(*)`,
+      critical: sql<number>`count(*) filter (where severity = 'critical')`,
+      open: sql<number>`count(*) filter (where status = 'non_compliant')`,
+    }).from(complianceViolations),
 
-  const [alertStats] = await db.select({
-    total: sql<number>`count(*)`,
-    unresolved: sql<number>`count(*) filter (where is_resolved = false)`,
-    critical: sql<number>`count(*) filter (where severity = 'critical' and is_resolved = false)`,
-  }).from(securityAlerts);
+    db.select({
+      total: sql<number>`count(*)`,
+      unresolved: sql<number>`count(*) filter (where is_resolved = false)`,
+      critical: sql<number>`count(*) filter (where severity = 'critical' and is_resolved = false)`,
+    }).from(securityAlerts),
 
-  const [penaltyStats] = await db.select({
-    total: sql<number>`count(*)`,
-    totalAmount: sql<number>`sum(amount)`,
-    pendingAmount: sql<number>`sum(amount) filter (where payment_status = 'pending')`,
-    overdueAmount: sql<number>`sum(amount) filter (where payment_status = 'overdue')`,
-    overdue: sql<number>`count(*) filter (where payment_status = 'overdue')`,
-    pending: sql<number>`count(*) filter (where payment_status = 'pending')`,
-  }).from(financialPenalties);
+    db.select({
+      total: sql<number>`count(*)`,
+      totalAmount: sql<number>`sum(amount)`,
+      pendingAmount: sql<number>`sum(amount) filter (where payment_status = 'pending')`,
+      overdueAmount: sql<number>`sum(amount) filter (where payment_status = 'overdue')`,
+      overdue: sql<number>`count(*) filter (where payment_status = 'overdue')`,
+      pending: sql<number>`count(*) filter (where payment_status = 'pending')`,
+    }).from(financialPenalties),
 
-  const [networkStats] = await db.select({
-    total: sql<number>`count(*)`,
-    crossBorder: sql<number>`count(*) filter (where is_cross_border = true)`,
-    blocked: sql<number>`count(*) filter (where is_blocked = true)`,
-    exfiltration: sql<number>`count(*) filter (where event_type = 'exfiltration_attempt')`,
-  }).from(networkEvents);
+    db.select({
+      total: sql<number>`count(*)`,
+      crossBorder: sql<number>`count(*) filter (where is_cross_border = true)`,
+      blocked: sql<number>`count(*) filter (where is_blocked = true)`,
+      exfiltration: sql<number>`count(*) filter (where event_type = 'exfiltration_attempt')`,
+    }).from(networkEvents),
+  ]);
 
   // ── NDPA/GAID Compliance Stats (18 gap-closure tables) ──────────────────────
   const pool = _pool;
   let complianceGapStats = null;
   if (pool) {
     try {
-      const [consentRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE consent_status = 'active')::int AS active, count(*) FILTER (WHERE consent_status = 'withdrawn')::int AS withdrawn FROM consent_records`)).rows;
-      const [breachRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE breach_incident_status IN ('detected','assessing'))::int AS open, count(*) FILTER (WHERE breach_incident_severity IN ('critical','high'))::int AS critical FROM breach_incidents`)).rows;
-      const [dpoRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active, count(*) FILTER (WHERE credential_status = 'verified')::int AS verified FROM dpo_appointments`)).rows;
-      const [dpiaRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE dpia_risk_level IN ('high','critical'))::int AS highRisk, count(*) FILTER (WHERE dpia_status = 'approved')::int AS approved FROM dpia_assessments`)).rows;
-      const [ropaRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active FROM ropa_records`)).rows;
-      const [retentionRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active FROM retention_policies`)).rows;
-      const [dpoReportRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE dpo_report_status = 'submitted')::int AS submitted FROM dpo_reports`)).rows;
-      const [carRow] = (await pool.query(`SELECT count(*)::int AS total, avg(compliance_score)::numeric(5,1) AS "avgScore" FROM compliance_audit_returns`)).rows;
-      const [adequacyRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE adequacy_status = 'adequate')::int AS adequate FROM adequacy_determinations`)).rows;
-      const [dpaRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE dpa_status = 'active')::int AS active FROM data_processing_agreements`)).rows;
-      const [privacyRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE privacy_notice_status = 'published')::int AS published FROM privacy_notices`)).rows;
-      const [cookieRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE consent_given = true)::int AS consented FROM cookie_consent_records`)).rows;
-      const [autoDecRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE significant_effect = true)::int AS significant, count(*) FILTER (WHERE human_review_completed_at IS NOT NULL)::int AS reviewed FROM automated_decision_records`)).rows;
-      const [parentalRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE parental_consent_status = 'granted')::int AS granted FROM parental_consent_records`)).rows;
-      const [trainingRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE training_status = 'completed')::int AS completed FROM staff_training_records`)).rows;
-      const [transferRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE transfer_instrument_status = 'active')::int AS active FROM transfer_instruments`)).rows;
-      const [exportRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE export_job_status = 'completed')::int AS completed, count(*) FILTER (WHERE export_job_status = 'failed')::int AS failed FROM data_export_jobs`)).rows;
-      const [dcpmiRow] = (await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active FROM dcpmi_thresholds`)).rows;
+      // Perf: these 18 single-row aggregates were previously awaited
+      // sequentially (total latency = sum of round trips). They are
+      // independent, so run them concurrently — latency becomes the slowest
+      // single query instead of the sum. This matters most on cache-miss
+      // (the dashboard stats endpoint is SWR-cached, so misses are rare but
+      // were multi-hundred-ms when they occurred).
+      const [
+        [consentRow], [breachRow], [dpoRow], [dpiaRow], [ropaRow], [retentionRow],
+        [dpoReportRow], [carRow], [adequacyRow], [dpaRow], [privacyRow], [cookieRow],
+        [autoDecRow], [parentalRow], [trainingRow], [transferRow], [exportRow], [dcpmiRow],
+      ] = await Promise.all([
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE consent_status = 'active')::int AS active, count(*) FILTER (WHERE consent_status = 'withdrawn')::int AS withdrawn FROM consent_records`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE breach_incident_status IN ('detected','assessing'))::int AS open, count(*) FILTER (WHERE breach_incident_severity IN ('critical','high'))::int AS critical FROM breach_incidents`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active, count(*) FILTER (WHERE credential_status = 'verified')::int AS verified FROM dpo_appointments`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE dpia_risk_level IN ('high','critical'))::int AS highRisk, count(*) FILTER (WHERE dpia_status = 'approved')::int AS approved FROM dpia_assessments`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active FROM ropa_records`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active FROM retention_policies`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE dpo_report_status = 'submitted')::int AS submitted FROM dpo_reports`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, avg(compliance_score)::numeric(5,1) AS "avgScore" FROM compliance_audit_returns`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE adequacy_status = 'adequate')::int AS adequate FROM adequacy_determinations`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE dpa_status = 'active')::int AS active FROM data_processing_agreements`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE privacy_notice_status = 'published')::int AS published FROM privacy_notices`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE consent_given = true)::int AS consented FROM cookie_consent_records`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE significant_effect = true)::int AS significant, count(*) FILTER (WHERE human_review_completed_at IS NOT NULL)::int AS reviewed FROM automated_decision_records`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE parental_consent_status = 'granted')::int AS granted FROM parental_consent_records`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE training_status = 'completed')::int AS completed FROM staff_training_records`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE transfer_instrument_status = 'active')::int AS active FROM transfer_instruments`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE export_job_status = 'completed')::int AS completed, count(*) FILTER (WHERE export_job_status = 'failed')::int AS failed FROM data_export_jobs`).then(r => r.rows),
+        pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE is_active = true)::int AS active FROM dcpmi_thresholds`).then(r => r.rows),
+      ]);
 
       complianceGapStats = {
         consent: consentRow, breaches: breachRow, dpoRegistry: dpoRow,

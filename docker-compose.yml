@@ -226,6 +226,9 @@ services:
       PQC_ENGINE_URL: http://pqc-engine:8190
       COMPLIANCE_AI_URL: http://compliance-ai:8200
       REGULATORY_INTEL_URL: http://regulatory-intelligence:8201
+      # llama.cpp native inference fallback for ollama_llm_worker (service is
+      # declared in docker-compose-workers-addition.yml).
+      LLAMACPP_URL: http://llamacpp-inference:8204
       DAPR_HTTP_PORT: "3500"
       DAPR_ENABLED: "true"
       KAFKA_BROKERS: kafka:9092
@@ -380,18 +383,10 @@ services:
     depends_on: [postgres, kafka, redis]
     restart: unless-stopped
 
-  noc-anomaly-detector:
-    build:
-      context: .
-      dockerfile: workers/python/Dockerfile
-    command: ["python", "-m", "workers.python.noc_anomaly_detector"]
-    environment:
-      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
-      KAFKA_BROKERS: "kafka:9092"
-      REDIS_URL: "redis://redis:6379"
-    depends_on: [postgres, kafka, redis]
-    restart: unless-stopped
-
+  # noc-anomaly-detector moved to docker-compose-workers-addition.yml — this
+  # entry was broken (the python Dockerfile copies worker files flat into /app,
+  # so the `python -m workers.python.*` module path cannot resolve, and the
+  # repo-root build context cannot satisfy `COPY requirements.txt .`).
   watchlist-screener:
     build:
       context: .

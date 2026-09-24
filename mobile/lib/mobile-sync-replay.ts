@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { appendActivityAudit } from "./mobile-activity";
 import { scheduleFieldUpdateNotification } from "./mobile-notifications";
+import { flushInspectionQueue } from "./offlineSync";
 import { createTRPCClient } from "./trpc";
 
 export type PendingFieldMutation =
@@ -75,6 +76,16 @@ export async function getQueuedFieldMutations() {
 }
 
 export async function replayQueuedFieldMutations() {
+  // Flush queued field-inspection evidence to the NDSEP server's
+  // fieldInspection.syncBatch endpoint (see lib/offlineSync.ts) even when the
+  // local mutation queue below is empty. Failures there are retried with
+  // backoff inside offlineSync and must not block local replay.
+  try {
+    await flushInspectionQueue();
+  } catch {
+    // Best-effort; offlineSync retains items for the next replay cycle.
+  }
+
   const queue = await readQueue();
   if (queue.length === 0) {
     return { replayed: 0, failed: 0, reconciled: 0 };

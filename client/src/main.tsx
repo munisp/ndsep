@@ -1,4 +1,5 @@
 import "@/lib/i18n"; // i18n must be imported before App
+import "@/lib/i18nCitizen"; // registers citizen-facing translation bundles (gap 9)
 import { trpc } from "@/lib/trpc";
 import { UNAUTHED_ERR_MSG } from '@shared/const';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

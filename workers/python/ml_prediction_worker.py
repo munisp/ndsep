@@ -47,12 +47,29 @@ def get_db():
     return psycopg2.connect(DB_URL)
 
 
+# Reuse a single keep-alive HTTP session for event broadcasts. A prediction
+# cycle emits up to 2 events per organization; without a session each event
+# pays a fresh TCP handshake to the relay.
+_http_session: Optional[requests.Session] = None
+
+
+def _get_http_session() -> requests.Session:
+    global _http_session
+    if _http_session is None:
+        _http_session = requests.Session()
+        _http_session.headers.update({"Content-Type": "application/json"})
+        adapter = requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=4, max_retries=1)
+        _http_session.mount("http://", adapter)
+        _http_session.mount("https://", adapter)
+    return _http_session
+
+
 def broadcast(event: str, data: dict) -> bool:
     if not RELAY_URL:
         log.warning("Event relay is not configured; event %s was not delivered", event)
         return False
     try:
-        response = requests.post(RELAY_URL, json={"event": event, "data": data}, timeout=5)
+        response = _get_http_session().post(RELAY_URL, json={"event": event, "data": data}, timeout=5)
         if not response.ok:
             raise RuntimeError(f"HTTP {response.status_code}: {response.text[:300]}")
         return True
@@ -91,23 +108,64 @@ def extract_features(connection, org_id: int) -> Optional[np.ndarray]:
                     blocked, alerts, critical * 25 + high * 10 + medium * 5 + low * 2], dtype=np.float64)
 
 
+def extract_all_features(connection) -> dict:
+    """Set-based variant of extract_features.
+
+    Computes the identical feature vector for every organization in one query
+    (same 30d/7d windows and severity filters) instead of 4 queries per
+    organization. Organizations with a NULL compliance_score are omitted,
+    mirroring extract_features returning None.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT o.id, o.compliance_score,
+                   COALESCE(v.critical, 0), COALESCE(v.high, 0),
+                   COALESCE(v.medium, 0), COALESCE(v.low, 0),
+                   COALESCE(n.total_network, 0), COALESCE(n.cross_border, 0), COALESCE(n.blocked, 0),
+                   COALESCE(a.alerts, 0)
+              FROM organizations o
+              LEFT JOIN LATERAL (
+                  SELECT COUNT(*) FILTER (WHERE severity = 'critical') AS critical,
+                         COUNT(*) FILTER (WHERE severity = 'high') AS high,
+                         COUNT(*) FILTER (WHERE severity = 'medium') AS medium,
+                         COUNT(*) FILTER (WHERE severity = 'low') AS low
+                    FROM compliance_violations cv
+                   WHERE cv.organization_id = o.id AND cv.detected_at > NOW() - INTERVAL '30 days'
+              ) v ON true
+              LEFT JOIN LATERAL (
+                  SELECT COUNT(*) AS total_network,
+                         COUNT(*) FILTER (WHERE is_cross_border) AS cross_border,
+                         COUNT(*) FILTER (WHERE is_blocked) AS blocked
+                    FROM network_events ne
+                   WHERE ne.organization_id = o.id AND ne.detected_at > NOW() - INTERVAL '7 days'
+              ) n ON true
+              LEFT JOIN LATERAL (
+                  SELECT COUNT(*) AS alerts
+                    FROM security_alerts sa
+                   WHERE sa.organization_id = o.id AND sa.created_at > NOW() - INTERVAL '30 days'
+              ) a ON true
+             WHERE o.compliance_score IS NOT NULL
+             ORDER BY o.id
+        """)
+        rows = cursor.fetchall()
+    features: dict = {}
+    for (org_id, compliance_score, critical, high, medium, low,
+         total_network, cross_border, blocked, alerts) in rows:
+        features[org_id] = np.array(
+            [float(compliance_score), critical, high, medium, low, total_network,
+             cross_border, blocked, alerts, critical * 25 + high * 10 + medium * 5 + low * 2],
+            dtype=np.float64)
+    return features
+
+
 def train_models(connection) -> bool:
     """Train on real organizations only; no synthetic data is manufactured."""
     global rf_pipeline, isolation_forest, model_trained, last_training_error
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT id FROM organizations ORDER BY id")
-        org_ids = [row[0] for row in cursor.fetchall()]
     observations: list[np.ndarray] = []
     labels: list[int] = []
-    for org_id in org_ids:
-        try:
-            features = extract_features(connection, org_id)
-            if features is None:
-                continue
-            observations.append(features)
-            labels.append(int(features[0] < 60 or features[1] > 0))
-        except Exception as error:
-            log.error("Feature extraction failed for organization %s: %s", org_id, error)
+    for features in extract_all_features(connection).values():
+        observations.append(features)
+        labels.append(int(features[0] < 60 or features[1] > 0))
     if len(observations) < 10 or len(set(labels)) < 2:
         model_trained = False
         last_training_error = f"Insufficient labelled persisted data: samples={
@@ -145,9 +203,11 @@ def run_prediction_cycle() -> int:
         with connection.cursor() as cursor:
             cursor.execute("SELECT id, name FROM organizations ORDER BY id")
             organizations = cursor.fetchall()
+        # One set-based feature query for the whole cycle (was 4 queries/org).
+        all_features = extract_all_features(connection)
         written = 0
         for org_id, org_name in organizations:
-            features = extract_features(connection, org_id)
+            features = all_features.get(org_id)
             if features is None:
                 log.warning("Skipping organization %s because its observed feature set is incomplete", org_id)
                 continue

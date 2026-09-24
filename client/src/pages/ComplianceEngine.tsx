@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 
 function RangerMetricsPanel() {
@@ -176,20 +176,31 @@ export default function ComplianceEngine() {
     });
   }
 
-  const violBySeverity = (violations ?? []).reduce((acc: any, v: any) => {
-    acc[v.severity] = (acc[v.severity] ?? 0) + 1;
-    return acc;
-  }, {});
+  // useMemo: pagination/modal state changes re-render this page often; keep
+  // chart inputs referentially stable so Recharts skips unchanged series.
+  const violBySeverity = useMemo(
+    () => (violations ?? []).reduce((acc: any, v: any) => {
+      acc[v.severity] = (acc[v.severity] ?? 0) + 1;
+      return acc;
+    }, {}),
+    [violations],
+  );
 
-  const sevChartData = Object.entries(violBySeverity).map(([k, v]) => ({
-    name: k.toUpperCase(), count: v as number, color: SEV_COLORS[k] ?? "#6b7280"
-  }));
+  const sevChartData = useMemo(
+    () => Object.entries(violBySeverity).map(([k, v]) => ({
+      name: k.toUpperCase(), count: v as number, color: SEV_COLORS[k] ?? "#6b7280"
+    })),
+    [violBySeverity],
+  );
 
-  const policyCompliance = (policies ?? []).map((p: any) => ({
-    name: p.name?.substring(0, 25) + (p.name?.length > 25 ? "…" : ""),
-    weight: Number(p.weight ?? 0),
-    active: p.isActive,
-  }));
+  const policyCompliance = useMemo(
+    () => (policies ?? []).map((p: any) => ({
+      name: p.name?.substring(0, 25) + (p.name?.length > 25 ? "…" : ""),
+      weight: Number(p.weight ?? 0),
+      active: p.isActive,
+    })),
+    [policies],
+  );
 
   return (
     <div className="space-y-6">

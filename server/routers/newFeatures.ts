@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { emitEvent, logAuditEvent, broadcastEvent, cacheGetJson, cacheSetJson, cacheDel, triggerWorkflow } from "../middlewareHelpers";
 import { emitComplianceEvent, opensearchIndex, lakehouseIngest, daprPublish, fluvioPublish, permifyCheck } from "../middlewareExtensions";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
+import { withCache, CK, TTL } from "../queryCache";
 import { syncBreachIncident } from "../permifySync";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import { startWorkflow } from "../temporal";
@@ -198,37 +199,48 @@ export const publicRegistryRouter = router({
   search: publicProcedure
     .input(z.object({ query: z.string().optional(), sector: z.string().optional(), page: z.number().int().min(1).default(1), limit: z.number().int().min(1).max(50).default(20) }))
     .query(async ({ input }) => {
-      const offset = (input.page - 1) * input.limit;
-      const params: unknown[] = [];
-      const conds: string[] = [];
-      // Use parameterized queries to prevent SQL injection
-      if (input.query) {
-        params.push(`%${input.query}%`);
-        conds.push(`(o.name ILIKE $${params.length} OR o.rc_number ILIKE $${params.length})`);
-      }
-      if (input.sector) {
-        params.push(input.sector);
-        conds.push(`o.sector = $${params.length}`);
-      }
-      const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
-      params.push(input.limit);
-      params.push(offset);
-      const [rows] = await execRaw(
-        `SELECT o.id, o.name, o.sector, o.rc_number, o.state, o.country, o.compliance_score, o.ndpc_registration_status, o.ndpc_registration_date, o.last_audit_date, o.dpco_assigned FROM organizations o ${where} ORDER BY o.compliance_score DESC NULLS LAST, o.name ASC LIMIT $${params.length - 1} OFFSET $${params.length}`,
-        params
+      // Public, unauthenticated hot path: cache per (query, sector, page, limit)
+      // for TTL.SEARCH seconds; payload contains only already-public fields.
+      const cacheKey = CK.publicRegistrySearch(
+        `${input.query ?? ''}|${input.sector ?? ''}|${input.page}|${input.limit}`
       );
-      const countParams = params.slice(0, params.length - 2);
-      const [cnt] = await execRaw(`SELECT COUNT(*) as total FROM organizations o ${where}`, countParams);
-      return { data: rows as any[], total: parseInt((cnt as any[])[0]?.total ?? '0') };
+      return withCache(cacheKey, TTL.SEARCH, async () => {
+        const offset = (input.page - 1) * input.limit;
+        const params: unknown[] = [];
+        const conds: string[] = [];
+        // Use parameterized queries to prevent SQL injection
+        if (input.query) {
+          params.push(`%${input.query}%`);
+          conds.push(`(o.name ILIKE $${params.length} OR o.rc_number ILIKE $${params.length})`);
+        }
+        if (input.sector) {
+          params.push(input.sector);
+          conds.push(`o.sector = $${params.length}`);
+        }
+        const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+        params.push(input.limit);
+        params.push(offset);
+        const [rows] = await execRaw(
+          `SELECT o.id, o.name, o.sector, o.rc_number, o.state, o.country, o.compliance_score, o.ndpc_registration_status, o.ndpc_registration_date, o.last_audit_date, o.dpco_assigned FROM organizations o ${where} ORDER BY o.compliance_score DESC NULLS LAST, o.name ASC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+          params
+        );
+        const countParams = params.slice(0, params.length - 2);
+        const [cnt] = await execRaw(`SELECT COUNT(*) as total FROM organizations o ${where}`, countParams);
+        return { data: rows as any[], total: parseInt((cnt as any[])[0]?.total ?? '0') };
+      });
     }),
   orgDetail: publicProcedure.input(z.object({ id: z.number().int() })).query(async ({ input }) => {
     const [rows] = await exec(sql`SELECT o.*, (SELECT COUNT(*) FROM financial_penalties fp WHERE fp.organization_id = o.id) as total_penalties, (SELECT COUNT(*) FROM breach_incidents bi WHERE bi.organization_id = o.id) as total_breaches FROM organizations o WHERE o.id = ${input.id}`);
     return (rows as any[])[0] ?? null;
   }),
   sectorStats: publicProcedure.query(async () => {
-    const pool = getSharedPool();
-    const result = await pool.query(`SELECT sector, COUNT(*) as org_count, AVG(compliance_score) as avg_score FROM organizations GROUP BY sector ORDER BY avg_score DESC NULLS LAST`);
-    return result.rows as any[];
+    // Expensive GROUP BY over organizations on a public endpoint — cache for
+    // TTL.SECTOR_AGG seconds (aggregation tolerates minutes of staleness).
+    return withCache(CK.publicRegistrySectorStats(), TTL.SECTOR_AGG, async () => {
+      const pool = getSharedPool();
+      const result = await pool.query(`SELECT sector, COUNT(*) as org_count, AVG(compliance_score) as avg_score FROM organizations GROUP BY sector ORDER BY avg_score DESC NULLS LAST`);
+      return result.rows as any[];
+    });
   }),
 });
 

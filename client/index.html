@@ -21,6 +21,15 @@
     <!-- Fonts: Inter (UI) + Space Grotesk (headers) + JetBrains Mono (data) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+    <!-- API origin: the client calls a same-origin /api/trpc endpoint
+         (client/src/main.tsx), so the connection is already warm and an API
+         preconnect is intentionally omitted — a same-origin preconnect is a
+         no-op. If a deployment ever splits the API to a separate origin
+         (e.g. https://api.example.gov), add:
+           <link rel="preconnect" href="https://api.example.gov" crossorigin />
+           <link rel="dns-prefetch" href="https://api.example.gov" />
+         See docs/PERFORMANCE.md. -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <!-- Prevent FOUC on dark mode -->
     <script>

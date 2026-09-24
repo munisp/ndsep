@@ -43,11 +43,28 @@ metrics: Dict[str, Any] = {
     "start_time": time.time(), "by_topic": defaultdict(int), "connected": False,
 }
 
+# Reuse HTTP keep-alive connections instead of a fresh TCP+TLS handshake per
+# routed message. Sessions are not documented as thread-safe, so keep one per
+# consumer thread (12 topics = 12 threads) via threading.local.
+_thread_local = threading.local()
+
+
+def _get_session() -> requests.Session:
+    session = getattr(_thread_local, "session", None)
+    if session is None:
+        session = requests.Session()
+        session.headers.update({"Content-Type": "application/json"})
+        adapter = requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=4, max_retries=1)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        _thread_local.session = session
+    return session
+
 
 def _post_required(url: str, payload: Dict[str, Any]) -> None:
     if not url:
         raise RuntimeError("Required downstream URL is not configured")
-    response = requests.post(url, json=payload, timeout=10)
+    response = _get_session().post(url, json=payload, timeout=10)
     if not response.ok:
         raise RuntimeError(f"Downstream endpoint {url} returned HTTP {response.status_code}: {response.text[:300]}")
 

@@ -1,6 +1,6 @@
 import { Link } from "expo-router";
-import { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { memo, useMemo, useState } from "react";
+import { FlatList, Pressable, Text, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { getJurisdictionPolicy } from "@/lib/nigeria-jurisdiction-policy";
@@ -61,7 +61,8 @@ function StatCard({ label, value, detail, tone = "primary" }: { label: string; v
   );
 }
 
-function PermitCard({
+// Memoized row: list updates only re-render cards whose props changed.
+const PermitCard = memo(function PermitCard({
   caseId,
   title,
   permitType,
@@ -108,7 +109,7 @@ function PermitCard({
       </Pressable>
     </Link>
   );
-}
+});
 
 export default function PermitsScreen() {
   const platformQuery = trpc.permitting.getPlatform.useQuery();
@@ -197,9 +198,45 @@ export default function PermitsScreen() {
           description: "Track project certainty, approval risk, and the operational blockers that influence delivery schedules, financing confidence, and housing or infrastructure rollout.",
         };
 
+  // Precompute per-case row props once so FlatList rows are cheap to render
+  // and PermitCard memoization can bail out on unchanged rows.
+  const caseRows = useMemo(
+    () =>
+      filteredCases.map((item) => {
+        const dueDays = item.obligations.length ? Math.min(...item.obligations.map((obligation) => daysUntil(obligation.dueAt))) : null;
+        const reminderHours = reminders.filter((reminder) => reminder.caseId === item.id).map((reminder) => hoursUntil(reminder.dueAt));
+        const nearestReminderHours = reminderHours.length ? Math.min(...reminderHours) : null;
+        return {
+          caseId: item.id,
+          title: item.title,
+          permitType: item.permitType,
+          sector: item.sector,
+          stage: item.stage,
+          applicantName: item.applicantName,
+          locationLabel: item.locationLabel,
+          priority: item.priority,
+          nearestDueDays: Number.isFinite(dueDays as number) ? (dueDays as number) : null,
+          urgentHandoffHours: nearestReminderHours,
+        };
+      }),
+    [filteredCases, reminders],
+  );
+
   return (
     <ScreenContainer className="bg-background">
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 20 }}>
+      <FlatList
+        data={caseRows}
+        keyExtractor={(row) => row.caseId}
+        renderItem={({ item }) => <PermitCard {...item} />}
+        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+        windowSize={7}
+        maxToRenderPerBatch={8}
+        initialNumToRender={10}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews
+        ListHeaderComponent={
+          <View style={{ gap: 20, marginBottom: 16 }}>
         <View className="rounded-[28px] bg-primary p-6">
           <Text className="text-sm font-medium text-white/80">Expanded permitting platform</Text>
           <Text className="mt-3 text-3xl font-bold text-white">Permits and licensing</Text>
@@ -359,30 +396,15 @@ export default function PermitsScreen() {
 
         <View>
           <Text className="text-lg font-semibold text-foreground">Filtered permit cases</Text>
-          <View className="mt-3 gap-3">
-            {filteredCases.map((item) => {
-              const dueDays = item.obligations.length ? Math.min(...item.obligations.map((obligation) => daysUntil(obligation.dueAt))) : null;
-              const reminderHours = reminders.filter((reminder) => reminder.caseId === item.id).map((reminder) => hoursUntil(reminder.dueAt));
-              const nearestReminderHours = reminderHours.length ? Math.min(...reminderHours) : null;
-              return (
-                <PermitCard
-                  key={item.id}
-                  caseId={item.id}
-                  title={item.title}
-                  permitType={item.permitType}
-                  sector={item.sector}
-                  stage={item.stage}
-                  applicantName={item.applicantName}
-                  locationLabel={item.locationLabel}
-                  priority={item.priority}
-                  nearestDueDays={Number.isFinite(dueDays as number) ? (dueDays as number) : null}
-                  urgentHandoffHours={nearestReminderHours}
-                />
-              );
-            })}
-          </View>
         </View>
-      </ScrollView>
+          </View>
+        }
+        ListEmptyComponent={
+          <View className="rounded-2xl border border-border bg-surface p-4">
+            <Text className="text-sm text-muted">No permit cases match the current filters.</Text>
+          </View>
+        }
+      />
     </ScreenContainer>
   );
 }

@@ -1,6 +1,6 @@
 import { Link } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
-import { PanResponder, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { FlatList, PanResponder, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import Animated, {
   Easing,
   interpolateColor,
@@ -46,7 +46,9 @@ const animatedCardBaseStyle = {
   padding: 20,
 } as const;
 
-function SwipeActivityCard({
+// Memoized row: with a long activity feed, only rows whose item/busy state
+// actually changed re-render when the list updates.
+const SwipeActivityCard = memo(function SwipeActivityCard({
   item,
   busy,
   onInlineAction,
@@ -229,7 +231,7 @@ function SwipeActivityCard({
       ) : null}
     </Animated.View>
   );
-}
+});
 
 export default function NotificationsScreen() {
   const { bundle, refresh, isRefetching, approveIdentityDocument, approveLegalWorkflow, analyzeActivities } = useMobilePlatformBundle();
@@ -290,22 +292,42 @@ export default function NotificationsScreen() {
     await loadFeed();
   }
 
-  async function handleInlineAction(item: ActivityRecord) {
-    if (!item.action) return;
-    setBusyActionId(item.id);
-    try {
-      if (item.action.kind === "approve_kyc" && item.action.onboardingDocumentId) {
-        await approveIdentityDocument(item.action.onboardingDocumentId);
+  // Stable callbacks so memoized SwipeActivityCard rows skip re-renders.
+  const handleInlineAction = useCallback(
+    async (item: ActivityRecord) => {
+      if (!item.action) return;
+      setBusyActionId(item.id);
+      try {
+        if (item.action.kind === "approve_kyc" && item.action.onboardingDocumentId) {
+          await approveIdentityDocument(item.action.onboardingDocumentId);
+        }
+        if (item.action.kind === "approve_legal" && item.action.legalWorkflowId) {
+          await approveLegalWorkflow(item.action.legalWorkflowId);
+        }
+        await recordActivityAction(item.id, item.action.label);
+        await markActivityRead(item.id);
+      } finally {
+        setBusyActionId(null);
       }
-      if (item.action.kind === "approve_legal" && item.action.legalWorkflowId) {
-        await approveLegalWorkflow(item.action.legalWorkflowId);
-      }
-      await recordActivityAction(item.id, item.action.label);
-      await markActivityRead(item.id);
-    } finally {
-      setBusyActionId(null);
-    }
-  }
+    },
+    [approveIdentityDocument, approveLegalWorkflow],
+  );
+
+  const handleDismissItem = useCallback((id: string) => void dismissActivity(id), []);
+  const handleMarkReadItem = useCallback((id: string) => void markActivityRead(id), []);
+
+  const renderActivityItem = useCallback(
+    ({ item }: { item: ActivityRecord }) => (
+      <SwipeActivityCard
+        item={item}
+        busy={busyActionId === item.id}
+        onInlineAction={handleInlineAction}
+        onDismiss={handleDismissItem}
+        onMarkRead={handleMarkReadItem}
+      />
+    ),
+    [busyActionId, handleInlineAction, handleDismissItem, handleMarkReadItem],
+  );
 
   const visibleItems = useMemo(() => filterActivities(items, activeFilter, searchTerm), [items, activeFilter, searchTerm]);
   const supervisorDigests = useMemo(() => {
@@ -334,10 +356,20 @@ export default function NotificationsScreen() {
 
   return (
     <ScreenContainer className="bg-background">
-      <ScrollView
-        contentContainerStyle={{ padding: 20, gap: 16 }}
+      <FlatList
+        data={visibleItems}
+        keyExtractor={(item) => item.id}
+        renderItem={renderActivityItem}
+        contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+        windowSize={7}
+        maxToRenderPerBatch={8}
+        initialNumToRender={10}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => void handleRefresh()} />}
-      >
+        ListHeaderComponent={
+          <View style={{ gap: 16, marginBottom: 16 }}>
         <View>
           <Text className="text-3xl font-bold text-foreground">Notifications</Text>
           <Text className="mt-2 text-sm leading-5 text-muted">
@@ -443,19 +475,14 @@ export default function NotificationsScreen() {
           </View>
         </View>
 
-        <View className="gap-3">
-          {visibleItems.map((item) => (
-            <SwipeActivityCard
-              key={item.id}
-              item={item}
-              busy={busyActionId === item.id}
-              onInlineAction={(selected) => void handleInlineAction(selected)}
-              onDismiss={(id) => void dismissActivity(id)}
-              onMarkRead={(id) => void markActivityRead(id)}
-            />
-          ))}
-        </View>
-      </ScrollView>
+          </View>
+        }
+        ListEmptyComponent={
+          <View className="rounded-2xl border border-border bg-surface p-4">
+            <Text className="text-sm text-muted">No activity events match the current filter.</Text>
+          </View>
+        }
+      />
     </ScreenContainer>
   );
 }

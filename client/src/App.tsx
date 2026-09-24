@@ -119,7 +119,6 @@ const EngageDpco = lazy(() => import("@/pages/EngageDpco"));
 const DpcoPwaDashboard = lazy(() => import("@/pages/DpcoPwaDashboard"));
 const PwaDashboard = lazy(() => import("@/pages/PwaDashboard"));
 const DpcoPwaUI = lazy(() => import("@/pages/DpcoPwaUI"));
-const DsarPublicPortal = lazy(() => import("@/pages/DsarPublicPortal"));
 const DpiaWizard = lazy(() => import("@/pages/DpiaWizard"));
 const AiGovernanceScoring = lazy(() => import("@/pages/AiGovernanceScoring"));
 const SectorBenchmarking = lazy(() => import("@/pages/SectorBenchmarking"));
@@ -213,7 +212,6 @@ const RegulatoryIntelligence = lazy(() => import("@/pages/RegulatoryIntelligence
 const IncidentResponse = lazy(() => import("@/pages/IncidentResponse"));
 const ComplianceGapAnalyzer = lazy(() => import("@/pages/ComplianceGapAnalyzer"));
 const VendorRisk = lazy(() => import("@/pages/VendorRisk"));
-const WhistleblowerPortal = lazy(() => import("@/pages/WhistleblowerPortal"));
 const RegulatorySandbox = lazy(() => import("@/pages/RegulatorySandbox"));
 const AIEthicsBoard = lazy(() => import("@/pages/AIEthicsBoard"));
 const NationalIDVerification = lazy(() => import("@/pages/NationalIDVerification"));
@@ -242,6 +240,21 @@ const SecurityDashboard = lazy(() => import("@/pages/SecurityDashboard"));
 const MiddlewareHealth = lazy(() => import("@/pages/MiddlewareHealth"));
 const PlatformIntelligence = lazy(() => import("@/pages/PlatformIntelligence"));
 const DigitalTwin = lazy(() => import("@/pages/DigitalTwin"));
+// Wave-1 feature-gap pages (gaps 1-6, 11, 13-15) + citizen i18n shells (gap 9)
+const Home = lazy(() => import("@/pages/Home"));
+const CrossBorderAdequacy = lazy(() => import("@/pages/CrossBorderAdequacy"));
+const DsarEdgeCases = lazy(() => import("@/pages/DsarEdgeCases"));
+const MinorsConsent = lazy(() => import("@/pages/MinorsConsent"));
+const BreachEdgeCases = lazy(() => import("@/pages/BreachEdgeCases"));
+const FieldInspection = lazy(() => import("@/pages/FieldInspection"));
+const AppealsDueProcess = lazy(() => import("@/pages/AppealsDueProcess"));
+const DpoMarketplace = lazy(() => import("@/pages/DpoMarketplace"));
+const PublicSanctionsRegister = lazy(() => import("@/pages/PublicSanctionsRegister"));
+const FoiaPublicPortal = lazy(() => import("@/pages/FoiaPublicPortal"));
+const ElectionOversight = lazy(() => import("@/pages/ElectionOversight"));
+const TranslatedDsarPortal = lazy(() => import("@/components/i18n/TranslatedDsarPortal"));
+const TranslatedWhistleblowerIntake = lazy(() => import("@/components/i18n/TranslatedWhistleblowerIntake"));
+const TranslatedPublicComplianceRegistry = lazy(() => import("@/components/i18n/TranslatedRegistryHeader"));
 
 function Router() {
   return (
@@ -255,6 +268,7 @@ function Router() {
       <Route path="/register" component={DpcoRegister} />
       <Route path="/status/:token" component={OrgStatusTracker} />
       <Route path="/status" component={OrgStatusTracker} />
+      <Route path="/home" component={Home} />
       <Route>
     <DashboardLayout>
       <Switch>
@@ -363,8 +377,8 @@ function Router() {
         <Route path="/admin" component={AdminPlatformSettings} />
         <Route path="/admin/accreditation" component={AdminAccreditation} />
         <Route path="/accreditation" component={AccreditationWorkflow} />
-        <Route path="/dsar" component={DsarPublicPortal} />
-        <Route path="/dsar-portal" component={DsarPublicPortal} />
+        <Route path="/dsar" component={TranslatedDsarPortal} />
+        <Route path="/dsar-portal" component={TranslatedDsarPortal} />
         <Route path="/dpia-wizard" component={DpiaWizard} />
         <Route path="/ai-governance-scoring" component={AiGovernanceScoring} />
         <Route path="/sector-benchmarking" component={SectorBenchmarking} />
@@ -461,7 +475,7 @@ function Router() {
         <Route path="/incident-response" component={IncidentResponse} />
         <Route path="/compliance-gap" component={ComplianceGapAnalyzer} />
         <Route path="/vendor-risk" component={VendorRisk} />
-        <Route path="/whistleblower" component={WhistleblowerPortal} />
+        <Route path="/whistleblower" component={TranslatedWhistleblowerIntake} />
         <Route path="/regulatory-sandbox" component={RegulatorySandbox} />
         <Route path="/ai-ethics" component={AIEthicsBoard} />
         <Route path="/national-id" component={NationalIDVerification} />
@@ -507,6 +521,19 @@ function Router() {
         <Route path="/estorides" component={EstoridesDashboard} />
         <Route path="/liveness-verification" component={LivenessVerification} />
         <Route path="/wiredigg" component={NetworkIntelligencePage} />
+        {/* Wave-1 feature gaps — cross-border adequacy, DSAR/minors/breach edge cases, field inspection, appeals, DPO marketplace, sanctions register, FOIA, election oversight */}
+        <Route path="/cross-border-adequacy" component={CrossBorderAdequacy} />
+        <Route path="/dsar-edge-cases" component={DsarEdgeCases} />
+        <Route path="/minors-consent" component={MinorsConsent} />
+        <Route path="/breach-edge-cases" component={BreachEdgeCases} />
+        <Route path="/field-inspection" component={FieldInspection} />
+        <Route path="/appeals" component={AppealsDueProcess} />
+        <Route path="/dpo-marketplace" component={DpoMarketplace} />
+        <Route path="/sanctions-register" component={PublicSanctionsRegister} />
+        <Route path="/foia" component={FoiaPublicPortal} />
+        <Route path="/election-oversight" component={ElectionOversight} />
+        {/* Gap 9 — translated public compliance registry shell */}
+        <Route path="/registry" component={TranslatedPublicComplianceRegistry} />
         {/* Catch-all — must be last */}
         <Route component={NotFound} />
       </Switch>

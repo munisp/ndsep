@@ -18,9 +18,12 @@ import type { EdgeInsets, Metrics, Rect } from "react-native-safe-area-context";
 
 import { trpc, createTRPCClient } from "@/lib/trpc";
 import { initManusRuntime, subscribeSafeAreaInsets } from "@/lib/_core/manus-runtime";
-import "@/lib/background-sync";
-import "@/lib/mobile-geofencing";
-import "@/lib/mobile-notifications";
+
+// NOTE: background-sync / mobile-geofencing / mobile-notifications are heavy
+// native modules (expo-task-manager, expo-location, expo-notifications) that
+// only register background tasks as a side effect. They are dynamically
+// imported after first paint (see useEffect below) to keep them off the
+// cold-start critical path instead of being top-level imports here.
 
 const DEFAULT_WEB_INSETS: EdgeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const DEFAULT_WEB_FRAME: Rect = { x: 0, y: 0, width: 0, height: 0 };
@@ -39,6 +42,17 @@ export default function RootLayout() {
   // Initialize Manus runtime for cookie injection from parent container
   useEffect(() => {
     initManusRuntime();
+  }, []);
+
+  // Deferred cold-start loading: register background sync, geofencing, and
+  // notification side effects only after the first frame has committed.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      void import("@/lib/background-sync");
+      void import("@/lib/mobile-geofencing");
+      void import("@/lib/mobile-notifications");
+    }, 0);
+    return () => clearTimeout(handle);
   }, []);
 
   const handleSafeAreaUpdate = useCallback((metrics: Metrics) => {

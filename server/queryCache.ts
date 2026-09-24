@@ -67,6 +67,13 @@ export const CK = {
   aiGovernanceScores:      () => "ndsep:ai:governance:scores",
   nationalReport:          (year: number, month: number) => `ndsep:report:national:${year}:${month}`,
   searchResults:           (query: string, type: string) => `ndsep:search:${type}:${Buffer.from(query).toString("base64").slice(0, 32)}`,
+  // Public, high-traffic read endpoints (no auth context in the payload)
+  publicRegistrySearch:    (raw: string) => `ndsep:public-registry:search:${Buffer.from(raw).toString("base64").slice(0, 48)}`,
+  publicRegistrySectorStats: () => "ndsep:public-registry:sector-stats",
+  sanctionsSearch:         (raw: string) => `ndsep:sanctions:search:${Buffer.from(raw).toString("base64").slice(0, 48)}`,
+  sanctionsStats:          () => "ndsep:sanctions:stats",
+  electionActivePeriod:    () => "ndsep:election:active-period",
+  publicDpcoList:          (raw: string) => `ndsep:dpco:public-list:${Buffer.from(raw).toString("base64").slice(0, 48)}`,
 } as const;
 
 // ─── Generic Cache-Aside Helper ───────────────────────────────────────────────

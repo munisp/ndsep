@@ -263,6 +263,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Ship modern JS only: no legacy transpilation/helpers for browsers the
+    // portal does not support; keeps bundles smaller and parse time lower.
+    target: "esnext",
     // Source maps are opt-in for production diagnostics. Rendering source maps
     // for the full portal can exhaust constrained local/CI build environments
     // without affecting runtime functionality.

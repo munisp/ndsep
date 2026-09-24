@@ -10,9 +10,10 @@ import json
 import time
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.request import urlopen, Request
-from urllib.error import URLError
 from collections import defaultdict
+
+import requests
+from requests.auth import HTTPBasicAuth
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [opensearch-query] %(message)s')
 logger = logging.getLogger(__name__)
@@ -47,18 +48,23 @@ metrics = {
 }
 
 
+# Persistent HTTP session: every search/aggregation reuses a keep-alive
+# connection to OpenSearch instead of paying a fresh TCP(+TLS) handshake per
+# query — the dominant per-request overhead at low result sizes.
+_http_session = requests.Session()
+_http_session.auth = HTTPBasicAuth(OPENSEARCH_USER, OPENSEARCH_PASS)
+_http_session.headers.update({"Content-Type": "application/json"})
+_adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16, max_retries=1)
+_http_session.mount("http://", _adapter)
+_http_session.mount("https://", _adapter)
+
+
 def opensearch_request(method: str, path: str, body: dict = None) -> dict:
-    import base64
     url = f"{OPENSEARCH_URL}{path}"
-    data = json.dumps(body).encode() if body else None
-    req = Request(url, data=data, method=method)
-    req.add_header("Content-Type", "application/json")
-    creds = base64.b64encode(f"{OPENSEARCH_USER}:{OPENSEARCH_PASS}".encode()).decode()
-    req.add_header("Authorization", f"Basic {creds}")
     try:
-        with urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
-    except URLError as e:
+        resp = _http_session.request(method, url, json=body, timeout=10)
+        return resp.json()
+    except requests.exceptions.ConnectionError as e:
         logger.warning(f"OpenSearch not available: {e}")
         return {"degraded": True, "error": str(e), "hits": {"hits": [], "total": {"value": 0}}}
     except Exception as e:

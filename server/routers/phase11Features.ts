@@ -382,25 +382,24 @@ export const sectorBenchmarkRouter = router({
   }),
 
   runAutomatedBenchmark: protectedProcedure.mutation(async () => {
-    // Compute new benchmark scores for all orgs based on latest compliance data
-    const orgs = await rawQuery(`SELECT id, sector FROM organizations`);
-    let updated = 0;
-    for (const org of orgs) {
-      const [latest] = await rawQuery(
-        `SELECT score FROM compliance_score_history WHERE org_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
-        [org.id]
-      );
-      if (latest) {
-        // Insert new benchmark record
-        await rawQuery(
-          `INSERT INTO compliance_score_history (org_id, sector, score, recorded_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT DO NOTHING`,
-          [org.id, org.sector, latest.score] // use actual score, no random variation
-        );
-        updated++;
-      }
-    }
+    // Compute new benchmark scores for all orgs based on latest compliance data.
+    // Perf: was 1 + 2N round trips (latest-score SELECT + INSERT per org);
+    // now a single set-based INSERT..SELECT. For each org, copy its most
+    // recent score forward — identical semantics to the previous loop.
+    const inserted = await rawQuery(
+      `INSERT INTO compliance_score_history (org_id, sector, score, recorded_at)
+       SELECT o.id, o.sector, h.score, NOW()
+       FROM organizations o
+       JOIN LATERAL (
+         SELECT score FROM compliance_score_history ch
+         WHERE ch.org_id = o.id
+         ORDER BY ch.recorded_at DESC
+         LIMIT 1
+       ) h ON true
+       ON CONFLICT DO NOTHING
+       RETURNING org_id`
+    );
+    const updated = inserted.length;
     emitMutationEvent(EVENTS.COMPLIANCE_REMEDIATION, { action: "compliance_remediation", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
     return { benchmarked: updated, timestamp: new Date().toISOString() };
   }),

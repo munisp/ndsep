@@ -42,6 +42,8 @@ DB_URL = os.getenv("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@lo
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 RELAY_URL = os.getenv("RELAY_URL", "http://localhost:4000")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+PERCEPTION_URL = os.getenv("PERCEPTION_URL", "http://localhost:8194")
+ACTION_URL = os.getenv("ACTION_URL", "http://localhost:8196")
 REASONING_MODEL = os.getenv("REASONING_MODEL", "qwen2.5:1.5b")
 CONFIDENCE_AUTO_THRESHOLD = 0.85
 CONFIDENCE_SUGGEST_THRESHOLD = 0.50
@@ -662,7 +664,7 @@ def poll_perception_anomalies():
     while True:
         time.sleep(20)
         try:
-            resp = requests.get("http://localhost:8194/api/anomalies", timeout=5)
+            resp = requests.get(f"{PERCEPTION_URL}/api/anomalies", timeout=5)
             if resp.ok:
                 data = resp.json()
                 anomalies = data.get("anomalies", [])
@@ -685,7 +687,7 @@ def poll_perception_anomalies():
                             if diagnosis.should_auto_execute:
                                 # Forward to action engine
                                 requests.post(
-                                    "http://localhost:8196/api/execute",
+                                    f"{ACTION_URL}/api/execute",
                                     json=diagnosis.model_dump(),
                                     timeout=5,
                                 )

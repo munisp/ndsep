@@ -663,6 +663,54 @@ services:
     networks:
       - ndsep-internal
 
+  # OpenAppSec WAF event collector (workers/go/cmd/openappsec_waf) — receives
+  # WAF events from the openappsec agent on /event, aggregates threat stats on
+  # /stats. Pure HTTP worker (no DB). Set WORKER_RELAY_URL to relay each event
+  # to the main API (left unset by default: the relay posts fire-and-forget).
+  openappsec-waf:
+    <<: *resource-defaults
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: openappsec_waf
+    container_name: ndsep-openappsec-waf
+    environment:
+      PORT: "8167"
+      # WORKER_RELAY_URL: http://ndsep-api:5000/api/workers/event
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8167/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # NOC AI action engine (workers/go/cmd/noc_agent_action) — executes the
+  # remediation plans produced by noc-agent-reasoning (step-by-step execution,
+  # rollback, health verification). Port is fixed at 8196 in main.go, matching
+  # the noc-ai-action k8s Service in infra/k8s/noc-ai-agents.yaml.
+  noc-agent-action:
+    <<: *resource-defaults
+    build:
+      context: ./workers/go
+      dockerfile: Dockerfile
+      args:
+        CMD: noc_agent_action
+    container_name: ndsep-noc-agent-action
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      RELAY_URL: ${NDSEP_RELAY_URL:-http://ndsep-api:5000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8196/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
 # ─── Orchestration Go Services ────────────────────────────────────────────────
   dpco-api-gateway:
     <<: *resource-defaults
@@ -1343,6 +1391,155 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - ndsep-internal
+
+  # llama.cpp native inference fallback (workers/python/llamacpp_inference.py).
+  # ollama_llm_worker calls LLAMACPP_URL when Ollama is unavailable; the
+  # ndsep-api service sets LLAMACPP_URL=http://llamacpp-inference:8204.
+  # Module imports are stdlib-only; llama-cpp-python is loaded lazily and only
+  # when LLAMACPP_MODEL_PATH points at a GGUF model.
+  llamacpp-inference:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-llamacpp-inference
+    command: ["python3", "/app/llamacpp_inference.py"]
+    volumes:
+      - ./workers/python:/app
+    environment:
+      LLAMACPP_PORT: "8204"
+      LLAMACPP_MODEL_PATH: ${LLAMACPP_MODEL_PATH:-}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8204/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # NOC AI reasoning engine (workers/python/noc_agent_reasoning.py) — LLM root
+  # cause analysis + remediation planning. Brain of the noc-ai agent family
+  # (mirrors the noc-ai-reasoning Deployment in infra/k8s/noc-ai-agents.yaml).
+  # Serves FastAPI on the hardcoded port 8195.
+  noc-agent-reasoning:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-noc-agent-reasoning
+    command: >
+      sh -c "pip install --no-cache-dir fastapi 'uvicorn[standard]' psycopg2-binary requests pydantic
+             && python3 /app/noc_agent_reasoning.py"
+    volumes:
+      - ./workers/python:/app
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      REDIS_URL: redis://redis:6379
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      RELAY_URL: ${NDSEP_RELAY_URL:-http://ndsep-api:5000}
+      ACTION_URL: http://noc-agent-action:8196
+      # Perception engine (workers/rust/noc_agent_perception) is deployed via
+      # k8s (infra/k8s/noc-ai-agents.yaml); override when running it in compose.
+      PERCEPTION_URL: ${PERCEPTION_URL:-http://localhost:8194}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      noc-agent-action:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8195/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # NOC anomaly detector (workers/python/noc_anomaly_detector.py) — statistical
+  # (Z-score + threshold) anomaly detection over infra metrics. Long-running
+  # poll loop with no HTTP listener, so healthchecking is disabled.
+  noc-anomaly-detector:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-noc-anomaly-detector
+    command: ["python3", "/app/noc_anomaly_detector.py"]
+    volumes:
+      - ./workers/python:/app
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      ANOMALY_POLL_INTERVAL: "30"
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # Offline sync worker (workers/python/offline_sync_worker.py) — replays
+  # mutations queued by offline/PWA field-inspection clients against the
+  # database (server-wins conflict resolution, idempotency). Complements the
+  # fieldInspection.syncBatch API in server/routers/fieldInspection.ts.
+  # Poll-loop worker (worker_base), no HTTP listener -> healthcheck disabled.
+  offline-sync-worker:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-offline-sync-worker
+    command: >
+      sh -c "pip install --no-cache-dir psycopg2-binary
+             && python3 /app/offline_sync_worker.py"
+    volumes:
+      - ./workers/python:/app
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      NDSEP_PG_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      NDSEP_API_URL: ${NDSEP_API_URL:-http://ndsep-api:5000}
+      WORKER_RELAY_URL: ${NDSEP_RELAY_URL:-http://ndsep-api:5000/api/workers/event}
+      SYNC_BATCH_SIZE: "50"
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # Anti-wipe filesystem watchdog (workers/python/antiwipe_watchdog.py) —
+  # integrity loop for the antiwipe controls (canary hashes, evidence-vault
+  # re-hashing, hash-chained ledger head via the antiwipe API). Exits non-zero
+  # on hard integrity failure so the restart policy raises the alarm.
+  # Health server on WATCHDOG_HEALTH_PORT (8170).
+  antiwipe-watchdog:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-antiwipe-watchdog
+    command: >
+      sh -c "pip install --no-cache-dir psycopg2-binary requests
+             && python3 /app/antiwipe_watchdog.py"
+    volumes:
+      - ./workers/python:/app
+      - ./data:/app/data
+    environment:
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      ANTIWIPE_API_URL: ${NDSEP_API_URL:-http://ndsep-api:5000}
+      ANTWIPE_API_URL: ${NDSEP_API_URL:-http://ndsep-api:5000}
+      WORKER_RELAY_URL: ${NDSEP_RELAY_URL:-http://ndsep-api:5000/api/workers/event}
+      EVIDENCE_VAULT_DIR: /app/data/vault
+      ANTWIPE_QUARANTINE_DIR: /app/data/quarantine
+      WATCHDOG_INTERVAL: "300"
+      WATCHDOG_VERIFY_N: "25"
+      WATCHDOG_HEALTH_PORT: "8170"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8170/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
     networks:
       - ndsep-internal
 

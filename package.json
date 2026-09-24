@@ -29,6 +29,7 @@
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
+    "perf:bench": "node scripts/perf/bench-server.mjs",
     "prepare": "husky"
   },
   "dependencies": {
@@ -157,6 +158,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@builder.io/vite-plugin-jsx-loc": "^0.1.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",

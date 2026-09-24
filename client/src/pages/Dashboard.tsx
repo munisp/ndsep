@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useNdsepSocket } from "@/hooks/useNdsepSocket";
@@ -25,7 +25,9 @@ const METRIC_GRADIENTS: Record<string, string> = {
   purple: "from-[oklch(0.58_0.20_290)] to-[oklch(0.55_0.22_320)]",
 };
 
-function MetricCard({
+// Memoized: the dashboard re-renders on every websocket tick (live alerts),
+// but metric cards only change when their own props change.
+const MetricCard = React.memo(function MetricCard({
   label, value, sub, icon: Icon, trend, color = "blue"
 }: {
   label: string; value: string | number; sub?: string;
@@ -58,7 +60,7 @@ function MetricCard({
       </div>
     </div>
   );
-}
+});
 
 
 
@@ -71,17 +73,19 @@ export default function Dashboard() {
   const { data: mlPredictions } = trpc.dashboard.mlPredictions.useQuery();
   const { data: violationTrendRaw } = trpc.dashboard.violationTrend.useQuery();
   const { data: networkTrafficRaw } = trpc.network.trafficByHour.useQuery();
-  const riskTrendData = (violationTrendRaw ?? []).map((r: any) => ({
+  // useMemo: websocket ticks re-render this page far more often than these
+  // query results change; stable references keep Recharts from re-animating.
+  const riskTrendData = useMemo(() => (violationTrendRaw ?? []).map((r: any) => ({
     month: r.period,
     risk: Number(r.critical ?? 0),
     compliance: Number(r.violations ?? 0),
-  }));
-  const networkFlowData = (networkTrafficRaw ?? []).map((r: any) => ({
+  })), [violationTrendRaw]);
+  const networkFlowData = useMemo(() => (networkTrafficRaw ?? []).map((r: any) => ({
     hour: r.time?.slice(0, 2) ?? "00",
     inbound: Number(r.inbound ?? 0),
     outbound: Number(r.outbound ?? 0),
     blocked: Number(r.blocked ?? 0),
-  }));
+  })), [networkTrafficRaw]);
   // BGP strip dismiss state — persisted in localStorage with 24h TTL
   const BGP_DISMISS_KEY = "ndsep_bgp_dismissed_until";
   const [bgpDismissed, setBgpDismissedState] = useState(() => {

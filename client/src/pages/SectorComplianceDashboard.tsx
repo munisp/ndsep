@@ -16,7 +16,7 @@
  *   - Drill-down to sector-specific pages
  *   - Export compliance summary as PDF
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -204,34 +204,49 @@ export default function SectorComplianceDashboard() {
   });
 
   // Build a map of sector id -> most recent event createdAt
-  const sectorLastScanMap = new Map<string, string>();
-  for (const ev of (sectorEventsQuery.data ?? [])) {
-    const sectorId = `${ev.sector}-monitor`;
-    if (!sectorLastScanMap.has(sectorId)) {
-      const ts = ev.createdAt instanceof Date ? ev.createdAt.toISOString() : String(ev.createdAt);
-      sectorLastScanMap.set(sectorId, ts);
+  const sectorLastScanMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ev of (sectorEventsQuery.data ?? [])) {
+      const sectorId = `${ev.sector}-monitor`;
+      if (!map.has(sectorId)) {
+        const ts = ev.createdAt instanceof Date ? ev.createdAt.toISOString() : String(ev.createdAt);
+        map.set(sectorId, ts);
+      }
     }
-  }
+    return map;
+  }, [sectorEventsQuery.data]);
 
   // Group stats by sector for score computation
-  const statsBySector = new Map<string, Array<{ severity: string; resolved: boolean; count: number }>>();
-  for (const row of (statsQuery.data ?? [])) {
-    const key = `${row.sector}-monitor`;
-    if (!statsBySector.has(key)) statsBySector.set(key, []);
-    statsBySector.get(key)!.push({ severity: row.severity, resolved: row.resolved ?? false, count: row.count });
-  }
+  const statsBySector = useMemo(() => {
+    const map = new Map<string, Array<{ severity: string; resolved: boolean; count: number }>>();
+    for (const row of (statsQuery.data ?? [])) {
+      const key = `${row.sector}-monitor`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push({ severity: row.severity, resolved: row.resolved ?? false, count: row.count });
+    }
+    return map;
+  }, [statsQuery.data]);
 
-  const workerMap = new Map<string, string>(
-    ((workersQuery.data ?? []) as Array<{ id: string; status: string }>).map((w) => [w.id, w.status])
+  // useMemo: websocket updates and local state changes re-render this page
+  // frequently; keep chart inputs referentially stable so Recharts does not
+  // recompute/re-animate unchanged series.
+  const workerMap = useMemo(
+    () => new Map<string, string>(
+      ((workersQuery.data ?? []) as Array<{ id: string; status: string }>).map((w) => [w.id, w.status])
+    ),
+    [workersQuery.data],
   );
 
-  const sectors: SectorStatus[] = SECTOR_DEFS.map(def =>
-    buildSectorData(
-      def,
-      workerMap.get(def.id) === "running",
-      sectorLastScanMap.get(def.id),
-      statsBySector.get(def.id) ?? [],
-    )
+  const sectors: SectorStatus[] = useMemo(
+    () => SECTOR_DEFS.map(def =>
+      buildSectorData(
+        def,
+        workerMap.get(def.id) === "running",
+        sectorLastScanMap.get(def.id),
+        statsBySector.get(def.id) ?? [],
+      )
+    ),
+    [workerMap, sectorLastScanMap, statsBySector],
   );
 
   const totalViolations = sectors.reduce((s, x) => s + x.violations, 0);
@@ -264,12 +279,15 @@ export default function SectorComplianceDashboard() {
     }
   };
 
-  const barData = sectors.map(s => ({
-    name: s.shortName,
-    score: s.complianceScore,
-    violations: s.violations,
-    fill: s.color,
-  }));
+  const barData = useMemo(
+    () => sectors.map(s => ({
+      name: s.shortName,
+      score: s.complianceScore,
+      violations: s.violations,
+      fill: s.color,
+    })),
+    [sectors],
+  );
 
   return (
     <>

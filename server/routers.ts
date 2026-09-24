@@ -257,6 +257,22 @@ import { phantomTideRouter } from "./routers/phantomTide";
 import { wazuhRouter } from "./routers/wazuh";
 import { sigintRouter } from "./routers/sigint";
 import { estoridesRouter } from "./routers/estorides";
+import { crossBorderAdequacyRouter } from "./routers/crossBorderAdequacy";
+import { dsarEdgeCasesRouter } from "./routers/dsarEdgeCases";
+import { minorsConsentRouter } from "./routers/minorsConsent";
+import { breachEdgeCasesRouter } from "./routers/breachEdgeCases";
+import { fieldInspectionRouter } from "./routers/fieldInspection";
+import { appealsDueProcessRouter } from "./routers/appealsDueProcess";
+import { whistleblowerChannelRouter } from "./routers/whistleblowerChannel";
+import { regulatorReconciliationRouter } from "./routers/regulatorReconciliation";
+import { dpoMarketplaceRouter } from "./routers/dpoMarketplace";
+import { finePaymentsRouter } from "./routers/finePayments";
+import { sanctionsRegisterRouter } from "./routers/sanctionsRegister";
+import { foiaRouter } from "./routers/foia";
+import { electionOversightRouter } from "./routers/electionOversight";
+import { aiRegulationRouter } from "./routers/aiRegulation";
+import { consentPropagationRouter } from "./routers/consentPropagation";
+import { antiwipeRouter } from "./antiwipe";
 import { getIntelSummary, getCrossplatformCorrelations, getNocThreatFeed, enrichBankingWithMaritime, enrichComplianceWithSiem } from "./intelAggregator";
 import { logger } from "./logger";
 
@@ -296,6 +312,22 @@ export const appRouter = router({
   wazuh: wazuhRouter,
   sigint: sigintRouter,
   estorides: estoridesRouter,
+  crossBorderAdequacy: crossBorderAdequacyRouter,
+  dsarEdgeCases: dsarEdgeCasesRouter,
+  minorsConsent: minorsConsentRouter,
+  breachEdgeCases: breachEdgeCasesRouter,
+  fieldInspection: fieldInspectionRouter,
+  appealsDueProcess: appealsDueProcessRouter,
+  whistleblowerChannel: whistleblowerChannelRouter,
+  regulatorReconciliation: regulatorReconciliationRouter,
+  dpoMarketplace: dpoMarketplaceRouter,
+  finePayments: finePaymentsRouter,
+  sanctionsRegister: sanctionsRegisterRouter,
+  foia: foiaRouter,
+  electionOversight: electionOversightRouter,
+  aiRegulation: aiRegulationRouter,
+  consentPropagation: consentPropagationRouter,
+  antiwipe: antiwipeRouter,
   intelAggregator: router({
     summary: protectedProcedure.query(async () => getIntelSummary()),
     correlations: protectedProcedure.query(async () => getCrossplatformCorrelations()),
