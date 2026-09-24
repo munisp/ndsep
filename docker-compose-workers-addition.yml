@@ -311,12 +311,18 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       FALKORDB_URL: ${FALKORDB_URL:-redis://falkordb:6379}
-      PORT: "8151"
+      FALKORDB_GRAPH_NAME: ${FALKORDB_GRAPH_NAME:-ndsep_compliance}
+      FALKORDB_REBUILD_ENABLED: ${FALKORDB_REBUILD_ENABLED:-false}
+      # Canonical worker port is 8210 (matches FALKORDB_WORKER_URL default in
+      # server/routers/aimlRouter.ts and workerManager FALKORDB_PORT).
+      FALKORDB_PORT: "8210"
     depends_on:
       postgres:
         condition: service_healthy
+      falkordb:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8151/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8210/health"]
       <<: *hc-defaults
     logging: *default-logging
     networks:
@@ -1577,9 +1583,199 @@ services:
     networks:
       - ndsep-internal
 
+  # ─── Neo4j graph store for the ML compliance graph ─────────────────────────
+  # Real graph backend for ml/graph/neo4j_store.py (GNN training graph) and
+  # workers/python/neo4j_graph_service.py (NEO4J_SERVICE_PORT, default 8220).
+  # Community edition: APOC is enabled but GDS is NOT — community detection
+  # and collusion-ring analytics run python-side (see ml/README.md,
+  # "Neo4j graph store"). Data persists on the neo4j_data volume.
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: ndsep-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-ndsep-neo4j-dev}
+      # Re-declared so the healthcheck can read the same password.
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-ndsep-neo4j-dev}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_pagecache__size: 256m
+    ports:
+      - "7474:7474"   # HTTP (browser / Bloom)
+      - "7687:7687"   # Bolt
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_PASSWORD}\" 'RETURN 1' >/dev/null 2>&1 || wget -qO- http://localhost:7474 >/dev/null 2>&1"]
+      start_period: 60s
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # FalkorDB graph server backing falkordb-kg-worker (FALKORDB_URL
+  # redis://falkordb:6379). Internal-network only (no published port) to avoid
+  # clashing with the platform redis on host :6379; publish 6379 locally if a
+  # host-side worker needs it.
+  falkordb:
+    image: falkordb/falkordb-server:v4.20.3
+    container_name: ndsep-falkordb
+    environment:
+      REDIS_ARGS: >-
+        --appendonly yes
+        --appendfsync everysec
+    volumes:
+      - falkordb_data:/var/lib/falkordb/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # Ollama LLM server consumed by ollama_llm_worker, epr_kgqa_worker and the
+  # API server (OLLAMA_URL=http://ollama:11434). Pull a model after first
+  # start: scripts/setup-ollama.sh (default qwen2.5:3b).
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ndsep-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags >/dev/null || wget -qO- http://localhost:11434/api/tags >/dev/null || exit 1"]
+      start_period: 30s
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # CocoIndex incremental ETL worker (workers/python/cocoindex_etl_worker.py).
+  # PostgreSQL → chunk+embed → Qdrant for policies, violations, enforcement
+  # actions, audit logs and organizations. Serves COCOINDEX_WORKER_URL
+  # (default http://localhost:8201) for the API server. Watermarks persist on
+  # the ./data bind mount so restarts do not re-index everything.
+  cocoindex-etl-worker:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-cocoindex-etl-worker
+    command: >
+      sh -c "pip install --no-cache-dir psycopg2-binary requests qdrant-client sentence-transformers
+             && python3 /app/cocoindex_etl_worker.py"
+    volumes:
+      - ./workers/python:/app
+      - ./data:/app/data
+    environment:
+      COCOINDEX_PORT: "8201"
+      COCOINDEX_DATA_DIR: /app/data/cocoindex
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      WORKER_RELAY_URL: ${NDSEP_RELAY_URL:-http://ndsep-api:5000/api/workers/event}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8201/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # EPR-KGQA worker (workers/python/epr_kgqa_worker.py) — knowledge-graph
+  # question answering (entity extraction → semantic retrieval → graph
+  # traversal → LLM answer). Serves EPR_KGQA_URL (default
+  # http://localhost:8202) for the API server.
+  epr-kgqa-worker:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-epr-kgqa-worker
+    command: >
+      sh -c "pip install --no-cache-dir psycopg2-binary requests qdrant-client sentence-transformers
+             && python3 /app/epr_kgqa_worker.py"
+    volumes:
+      - ./workers/python:/app
+    environment:
+      EPR_KGQA_PORT: "8202"
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      OLLAMA_URL: http://ollama:11434
+      WORKER_RELAY_URL: ${NDSEP_RELAY_URL:-http://ndsep-api:5000/api/workers/event}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8202/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # ART adversarial robustness worker (workers/python/art_adversarial_worker.py).
+  # Attacks the REAL trained fraud_net weights (ml/weights/fraud_net.pt) with
+  # FGSM/PGD via ART's PyTorchClassifier; falls back to the synthetic sklearn
+  # demo when torch/weights/data are unavailable. Serves ART_WORKER_URL
+  # (default http://localhost:8213) for the API server.
+  art-adversarial-worker:
+    <<: *resource-defaults
+    image: python:3.11-slim
+    container_name: ndsep-art-adversarial-worker
+    command: >
+      sh -c "pip install --no-cache-dir numpy scikit-learn pandas pyarrow requests adversarial-robustness-toolbox torch --extra-index-url https://download.pytorch.org/whl/cpu
+             && python3 /app/art_adversarial_worker.py"
+    volumes:
+      - ./workers/python:/app
+      - ./ml/weights:/ml/weights:ro
+      - ./ml/data/output:/ml/data/output:ro
+    environment:
+      ART_PORT: "8213"
+      ART_MODEL_WEIGHTS: /ml/weights/fraud_net.pt
+      ART_FRAUD_DATA: /ml/data/output/transactions.parquet
+      WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      WORKER_RELAY_URL: ${NDSEP_RELAY_URL:-http://ndsep-api:5000/api/workers/event}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8213/health', timeout=5)"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
+  # Monte Carlo simulation engine (workers/rust/monte_carlo) — previously only
+  # deployed via k8s (k8s/digital-twin-v2.yaml). Serves MONTE_CARLO_URL
+  # (http://monte-carlo:8177) for the platform-twin consumers.
+  monte-carlo:
+    <<: *resource-defaults
+    build:
+      context: ./workers/rust
+      dockerfile: Dockerfile
+      args:
+        WORKER: monte_carlo
+    container_name: ndsep-monte-carlo
+    environment:
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
+      MONTE_CARLO_PORT: "8177"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8177/health"]
+      <<: *hc-defaults
+    logging: *default-logging
+    networks:
+      - ndsep-internal
+
 networks:
   ndsep-internal:
     name: ndsep-internal
 
 volumes:
   mlflow-artifacts:
+  neo4j_data:
+  falkordb_data:
+  ollama_data:
