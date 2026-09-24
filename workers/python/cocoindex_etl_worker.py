@@ -43,6 +43,11 @@ EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
 CHUNK_SIZE = 512   # characters per chunk
 CHUNK_OVERLAP = 64  # overlap between chunks
 ETL_INTERVAL = 180  # 3 minutes
+# Watermarks are persisted to a JSON file so ETL progress survives restarts.
+WATERMARK_FILE = os.environ.get(
+    "COCOINDEX_WATERMARK_FILE",
+    os.path.join(os.environ.get("COCOINDEX_DATA_DIR", "./data/cocoindex"),
+                 "watermarks.json"))
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [NDSEP-CocoIndex] %(levelname)s %(message)s",
@@ -57,6 +62,36 @@ _last_etl_time = None
 _etl_runs = 0
 _errors = 0
 _watermarks: Dict[str, str] = {}  # table → last_processed_at
+_watermark_lock = threading.Lock()
+
+
+def load_watermarks() -> None:
+    """Load persisted watermarks from the JSON watermark file (if present)."""
+    global _watermarks
+    try:
+        if os.path.exists(WATERMARK_FILE):
+            with open(WATERMARK_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                with _watermark_lock:
+                    _watermarks = {str(k): str(v) for k, v in data.items()}
+                log.info(f"Loaded {len(_watermarks)} watermarks from {WATERMARK_FILE}")
+    except Exception as e:
+        log.warning(f"Could not load watermarks from {WATERMARK_FILE}: {e}")
+
+
+def save_watermarks() -> None:
+    """Atomically persist watermarks to the JSON watermark file."""
+    try:
+        os.makedirs(os.path.dirname(WATERMARK_FILE) or ".", exist_ok=True)
+        tmp_path = WATERMARK_FILE + ".tmp"
+        with _watermark_lock:
+            snapshot = dict(_watermarks)
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2)
+        os.replace(tmp_path, WATERMARK_FILE)
+    except Exception as e:
+        log.warning(f"Could not persist watermarks to {WATERMARK_FILE}: {e}")
 
 # ── CocoIndex integration ──────────────────────────────────────────────────────
 
@@ -328,8 +363,109 @@ def etl_enforcement_actions(conn) -> int:
             })
     if rows:
         _watermarks["enforcement"] = rows[-1]["created_at"]
-    count = upsert_to_qdrant("ndsep_audit_logs", all_points)
+    count = upsert_to_qdrant("ndsep_enforcement_actions", all_points)
     log.info(f"CocoIndex ETL: {count} enforcement action chunks indexed")
+    return count
+
+
+def etl_audit_logs(conn) -> int:
+    """ETL audit logs with incremental watermark."""
+    watermark = _watermarks.get("audit_logs", "1970-01-01")
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""
+            SELECT al.id::text, al.action, al.resource_type, al.details,
+                   al.ip_address, o.name as org_name, al.created_at::text
+            FROM audit_logs al
+            LEFT JOIN organizations o ON o.id = al.organization_id
+            WHERE al.created_at > %s
+            ORDER BY al.created_at
+            LIMIT 200
+        """, (watermark,))
+        rows = cur.fetchall()
+    if not rows:
+        return 0
+
+    all_points = []
+    for row in rows:
+        full_text = (f"Audit Action: {row['action']}\n"
+                     f"Resource: {row.get('resource_type', '')}\n"
+                     f"Organization: {row.get('org_name', '')}\n"
+                     f"Details: {row.get('details', '')}")
+        chunks = chunk_text(full_text)
+        vectors = embed(chunks)
+        if not vectors:
+            continue
+        for idx, (chunk, vec) in enumerate(zip(chunks, vectors)):
+            all_points.append({
+                "id": make_chunk_id(f"audit-{row['id']}", idx),
+                "vector": vec,
+                "payload": {
+                    "source_type": "audit_log",
+                    "source_id": row["id"],
+                    "chunk_index": idx,
+                    "chunk_text": chunk,
+                    "action": row["action"],
+                    "resource_type": row.get("resource_type", ""),
+                    "org_name": row.get("org_name", ""),
+                    "etl_timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            })
+    if rows:
+        _watermarks["audit_logs"] = rows[-1]["created_at"]
+    count = upsert_to_qdrant("ndsep_audit_logs", all_points)
+    log.info(f"CocoIndex ETL: {count} audit log chunks indexed")
+    return count
+
+
+def etl_organizations(conn) -> int:
+    """ETL organizations with incremental watermark on updated_at."""
+    watermark = _watermarks.get("organizations", "1970-01-01")
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""
+            SELECT id::text, name, sector, country, city,
+                   compliance_score::text, compliance_status, risk_score::text,
+                   updated_at::text
+            FROM organizations
+            WHERE updated_at > %s
+            ORDER BY updated_at
+            LIMIT 200
+        """, (watermark,))
+        rows = cur.fetchall()
+    if not rows:
+        return 0
+
+    all_points = []
+    for row in rows:
+        full_text = (f"Organization: {row['name']}\n"
+                     f"Sector: {row.get('sector', '')}\n"
+                     f"Country: {row.get('country', '')}\n"
+                     f"City: {row.get('city', '')}\n"
+                     f"Compliance Status: {row.get('compliance_status', '')}\n"
+                     f"Compliance Score: {row.get('compliance_score', '')}\n"
+                     f"Risk Score: {row.get('risk_score', '')}")
+        chunks = chunk_text(full_text)
+        vectors = embed(chunks)
+        if not vectors:
+            continue
+        for idx, (chunk, vec) in enumerate(zip(chunks, vectors)):
+            all_points.append({
+                "id": make_chunk_id(f"org-{row['id']}", idx),
+                "vector": vec,
+                "payload": {
+                    "source_type": "organization",
+                    "source_id": row["id"],
+                    "chunk_index": idx,
+                    "chunk_text": chunk,
+                    "name": row["name"],
+                    "sector": row.get("sector", ""),
+                    "compliance_status": row.get("compliance_status", ""),
+                    "etl_timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            })
+    if rows:
+        _watermarks["organizations"] = rows[-1]["updated_at"]
+    count = upsert_to_qdrant("ndsep_organizations", all_points)
+    log.info(f"CocoIndex ETL: {count} organization chunks indexed")
     return count
 
 
@@ -343,6 +479,9 @@ def run_etl():
             total += etl_policies(conn)
             total += etl_violations(conn)
             total += etl_enforcement_actions(conn)
+            total += etl_audit_logs(conn)
+            total += etl_organizations(conn)
+            save_watermarks()
             _total_chunks_indexed += total
             _etl_runs += 1
             _last_etl_time = datetime.now(timezone.utc).isoformat()
@@ -406,6 +545,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def etl_loop():
     time.sleep(15)
+    load_watermarks()
     init_cocoindex()
     run_etl()
     while True:
