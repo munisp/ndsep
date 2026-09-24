@@ -687,7 +687,7 @@ export const citizenRequestTypeEnum = pgEnum("citizen_request_type", [
   "access", "erasure", "portability", "rectification", "restriction", "objection"
 ]);
 export const citizenRequestStatusEnum = pgEnum("citizen_request_status", [
-  "submitted", "acknowledged", "in_progress", "completed", "rejected", "escalated"
+  "submitted", "acknowledged", "in_progress", "completed", "rejected", "escalated", "overdue"
 ]);
 
 export const citizenRequests = pgTable("citizen_requests", {
@@ -706,6 +706,11 @@ export const citizenRequests = pgTable("citizen_requests", {
   supportingDocKey: text("supporting_doc_key"),
   dueDate: timestamp("due_date"),
   completedAt: timestamp("completed_at"),
+  escalatedAt: timestamp("escalated_at"),
+  escalationReason: text("escalation_reason"),
+  assignedTo: integer("assigned_to"),
+  extensionReason: text("extension_reason"),
+  extendedAt: timestamp("extended_at"),
   submittedAt: timestamp("submitted_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

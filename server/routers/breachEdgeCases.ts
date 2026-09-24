@@ -16,7 +16,7 @@ import { autoDecryptRows } from "../encryptionMiddleware";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
-  if (!pool) return [];
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   try {
     const safeParams = params.map((p) =>
       Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
@@ -28,8 +28,17 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return autoDecryptRows(query, rows);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[breachEdge] DB query error");
-    return [];
+    // Keep the original pg error on .cause so callers can branch on SQLSTATE
+    // (e.g. 23505 retry for the supplement-sequence race).
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error", cause: err });
   }
+}
+
+/** audit_logs.resource_id / user_id are int4; coerce non-numeric refs to NULL. */
+function toIntOrNull(v: string | number | null): number | null {
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : parseInt(v, 10);
+  return Number.isInteger(n) && Math.abs(n) < 2147483647 ? n : null;
 }
 
 async function logAudit(
@@ -43,7 +52,7 @@ async function logAudit(
     await exec(
       `INSERT INTO audit_logs (action, resource_type, resource_id, user_id, details, ip_address, created_at)
        VALUES ($1, $2, $3, $4, $5, NULL, NOW())`,
-      [action, resourceType, String(resourceId ?? ""), userId, JSON.stringify(details)]
+      [action, resourceType, toIntOrNull(resourceId), toIntOrNull(userId), JSON.stringify(details)]
     );
   } catch (err) {
     logger.warn({ err, action, resourceType }, "[breachEdge] Audit log write failed");
@@ -57,8 +66,63 @@ function fireAndForget(action: string): void {
 
 /** Statutory NDPC notification window under NDPA s.40 */
 const NOTIFICATION_WINDOW_HOURS = 72;
-/** Flat draft penalty per commenced 24h of lateness (NGN) — admin confirms/waives */
-const PENALTY_PER_DAY_NGN = 2_000_000;
+
+/**
+ * Late-notification draft-penalty schedule, framed on NDPA 2023 s.49:
+ * for a "data controller of major importance" the statutory maximum fine is
+ * the GREATER of ₦10,000,000 or 2% of annual gross turnover (s.49(2); the
+ * residual category is the greater of ₦2,000,000 or 2% of turnover).
+ *
+ * The auto-generated draft accrues DAILY_RATE_OF_BASE of that s.49 base per
+ * commenced 24h of lateness, capped at MAX_ACCRUAL_DAYS days so a forgotten
+ * breach cannot accrue an unbounded draft. These figures are NDPC policy
+ * parameters, not statutory entitlements: every draft still requires admin
+ * confirmation (confirmLatePenalty) before it is enforceable, and the exact
+ * statutory basis/classification must be confirmed by counsel.
+ */
+const LATE_PENALTY_MAJOR_CONTROLLER_BASE_NGN = 10_000_000;
+const LATE_PENALTY_TURNOVER_RATE = 0.02;
+const LATE_PENALTY_DAILY_RATE_OF_BASE = 0.01; // 1% of the s.49 base per commenced day late
+const LATE_PENALTY_MAX_ACCRUAL_DAYS = 30; // daily accrual cap
+
+/** Compute the draft penalty for `daysLate` days of late notification. */
+function computeLatePenaltyDraft(daysLate: number, annualTurnoverNgn: number | null): number {
+  const base = Math.max(
+    LATE_PENALTY_MAJOR_CONTROLLER_BASE_NGN,
+    annualTurnoverNgn != null && annualTurnoverNgn > 0 ? annualTurnoverNgn * LATE_PENALTY_TURNOVER_RATE : 0,
+  );
+  const cappedDays = Math.min(daysLate, LATE_PENALTY_MAX_ACCRUAL_DAYS);
+  return Math.round(base * LATE_PENALTY_DAILY_RATE_OF_BASE * cappedDays * 100) / 100;
+}
+
+const STAFF_ROLES = ["admin", "government_staff"];
+
+/**
+ * Authorization: staff (admin/government_staff) may act on any breach;
+ * everyone else must belong to the organisation that owns the breach
+ * (organization_users membership — same pattern as productionFeatures
+ * apiKeyManagement).
+ */
+async function assertBreachAccess(
+  user: { id: number; role: string },
+  breachId: number,
+): Promise<{ organization_id: number; detected_at: string }> {
+  const rows = await exec(
+    `SELECT organization_id, detected_at FROM breach_incidents WHERE id = $1`,
+    [breachId],
+  );
+  if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Breach incident not found" });
+  if (!STAFF_ROLES.includes(user.role)) {
+    const membership = await exec(
+      `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+      [user.id, rows[0].organization_id],
+    );
+    if (membership.length === 0) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "You can only act on breaches for organisations you belong to." });
+    }
+  }
+  return rows[0];
+}
 
 export const breachEdgeCasesRouter = router({
   // ─── Extended classification ─────────────────────────────────────────────
@@ -77,6 +141,7 @@ export const breachEdgeCasesRouter = router({
       if (fields.processor_origin === false && fields.originating_processor_id) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "originating_processor_id requires processor_origin = true" });
       }
+      await assertBreachAccess(ctx.user, breach_id);
       const [row] = await exec(
         `UPDATE breach_incidents SET
            joint_controller_ids = COALESCE($2::jsonb, joint_controller_ids),
@@ -131,13 +196,29 @@ export const breachEdgeCasesRouter = router({
       breach_id: z.number().int().positive(),
       notified_at: z.string().optional(),
       complete: z.boolean().default(true),
+      // Optional: organisation's annual gross turnover (NGN), used to compute
+      // the NDPA s.49 "2% of turnover" limb of the late-notification draft.
+      annual_turnover_ngn: z.number().positive().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      const existing = await assertBreachAccess(ctx.user, input.breach_id);
+      // Temporal sanity: a notification cannot predate detection. The server
+      // receipt time (NOW()) is preferred whenever the caller does not supply
+      // an explicit notified_at.
+      if (input.notified_at) {
+        const notifiedAtInput = new Date(input.notified_at);
+        if (Number.isNaN(notifiedAtInput.getTime())) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "notified_at is not a valid timestamp" });
+        }
+        if (notifiedAtInput.getTime() < new Date(existing.detected_at).getTime()) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "notified_at cannot be earlier than detected_at" });
+        }
+      }
       const rows = await exec(
         `UPDATE breach_incidents
          SET ndpc_notified_at = COALESCE($2::timestamptz, NOW()),
              notification_completed_at = CASE WHEN $3 THEN COALESCE($2::timestamptz, NOW()) ELSE notification_completed_at END,
-             status = CASE WHEN status IN ('detected', 'assessing') THEN 'ndpc_notified'::breach_status ELSE status END,
+             breach_incident_status = CASE WHEN breach_incident_status IN ('detected', 'assessing') THEN 'ndpc_notified' ELSE breach_incident_status END,
              updated_at = NOW()
          WHERE id = $1
          RETURNING id, organization_id, detected_at, ndpc_notified_at`,
@@ -153,7 +234,9 @@ export const breachEdgeCasesRouter = router({
       let penaltyDraft = null;
       if (hoursLate > 0) {
         const daysLate = Math.ceil(hoursLate / 24);
-        const proposedAmount = daysLate * PENALTY_PER_DAY_NGN;
+        // NDPA s.49-based draft: accrues a fixed share of the greater-of
+        // (₦10M, 2% turnover) base per day late, with capped daily accrual.
+        const proposedAmount = computeLatePenaltyDraft(daysLate, input.annual_turnover_ngn ?? null);
         const [draft] = await exec(
           `INSERT INTO breach_late_penalties
              (breach_id, organization_id, detected_at, notified_at, hours_late, proposed_amount, admin_task_created)
@@ -194,7 +277,7 @@ export const breachEdgeCasesRouter = router({
       let where = "";
       if (input?.status) { params.push(input.status); where = `WHERE p.status = $${params.length}`; }
       return exec(
-        `SELECT p.*, b.title AS breach_title, b.severity
+        `SELECT p.*, b.title AS breach_title, b.breach_incident_severity AS severity
          FROM breach_late_penalties p
          JOIN breach_incidents b ON b.id = p.breach_id
          ${where} ORDER BY p.created_at DESC LIMIT 200`,
@@ -247,14 +330,30 @@ export const breachEdgeCasesRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const [row] = await exec(
-        `INSERT INTO breach_supplements (breach_id, supplement_sequence, supplementary_details, reason, submitted_by)
-         VALUES ($1,
-                 COALESCE((SELECT MAX(supplement_sequence) FROM breach_supplements WHERE breach_id = $1), 0) + 1,
-                 $2, $3, $4)
-         RETURNING *`,
-        [input.breach_id, input.supplementary_details, input.reason ?? null, ctx.user.name ?? String(ctx.user.id)]
-      );
+      await assertBreachAccess(ctx.user, input.breach_id);
+      // supplement_sequence is MAX+1 guarded by UNIQUE(breach_id,
+      // supplement_sequence) (0033; re-asserted in 0076). Two concurrent
+      // submissions can compute the same MAX — retry on the unique violation
+      // instead of failing or duplicating a sequence number.
+      let row: any = null;
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < 3 && !row; attempt++) {
+        try {
+          const [inserted] = await exec(
+            `INSERT INTO breach_supplements (breach_id, supplement_sequence, supplementary_details, reason, submitted_by)
+             VALUES ($1,
+                     COALESCE((SELECT MAX(supplement_sequence) FROM breach_supplements WHERE breach_id = $1), 0) + 1,
+                     $2, $3, $4)
+             RETURNING *`,
+            [input.breach_id, input.supplementary_details, input.reason ?? null, ctx.user.name ?? String(ctx.user.id)]
+          );
+          row = inserted;
+        } catch (err) {
+          lastErr = err;
+          if ((err as { cause?: { code?: string } })?.cause?.code !== "23505") throw err;
+        }
+      }
+      if (!row) throw lastErr instanceof Error ? lastErr : new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not allocate supplement sequence" });
       await logAudit("breach_supplement_submitted", "breach_supplements", row?.id, String(ctx.user.id), { breach_id: input.breach_id });
       fireAndForget("breachEdgeCases.submitSupplement");
       return row;

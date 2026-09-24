@@ -32,14 +32,19 @@ export async function syncOrgMembership(userId: string, orgId: string | number, 
 export async function syncPlatformRole(userId: string, role: string): Promise<void> {
   await writeRel("platform", "ndsep", role, userId);
   if (role === "admin") {
-    await writeRel("compliance", "*", "write", userId);
-    await writeRel("enforcement", "*", "write", userId);
-    await writeRel("banking", "*", "write", userId);
-    await writeRel("audit", "*", "write", userId);
+    // adminProcedure gates on checkPermission(userId, "admin", "write") —
+    // without this tuple every admin mutation is denied even after role sync.
+    await writeRel("admin", "ndsep", "write", userId);
+    await writeRel("admin", "ndsep", "read", userId);
+    await writeRel("compliance", "ndsep", "write", userId);
+    await writeRel("enforcement", "ndsep", "write", userId);
+    await writeRel("banking", "ndsep", "write", userId);
+    await writeRel("audit", "ndsep", "write", userId);
   }
   if (role === "government_staff") {
-    await writeRel("compliance", "*", "read", userId);
-    await writeRel("enforcement", "*", "read", userId);
+    await writeRel("admin", "ndsep", "read", userId);
+    await writeRel("compliance", "ndsep", "read", userId);
+    await writeRel("enforcement", "ndsep", "read", userId);
   }
 }
 

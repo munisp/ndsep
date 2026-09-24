@@ -13,10 +13,16 @@ import { logger } from "../logger";
 import { logAuditEvent } from "../middlewareHelpers";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
+import { encryptField } from "../encryption";
+
+/** SHA-256 hex digest — used for ack-token-at-rest and subject lookup hashes. */
+function sha256Hex(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
-  if (!pool) return [];
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   try {
     const safeParams = params.map((p) =>
       Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
@@ -27,7 +33,7 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return autoDecryptRows(query, result.rows ?? []);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[consent-prop] DB query error");
-    return [];
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
   }
 }
 
@@ -114,31 +120,52 @@ export const consentPropagationRouter = router({
     .mutation(async ({ input, ctx }) => {
       const purposes = await exec(`SELECT * FROM consent_purposes WHERE id = $1 AND is_active = true`, [input.purposeId]);
       if (!purposes[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Active purpose not found." });
+      // subject_ref is PII: stored encrypted (encryptField / PII_FIELDS), with
+      // a deterministic SHA-256 lookup hash alongside it (random-IV ciphertext
+      // is not equality-searchable).
+      const subjectRefHash = sha256Hex(input.subjectRef.trim().toLowerCase());
+      // Withdrawal idempotency: the same subject withdrawing the same purpose
+      // on the same day returns the existing event instead of duplicating the
+      // downstream fan-out.
+      const dupe = await exec(
+        `SELECT * FROM withdrawal_events
+         WHERE purpose_id = $1 AND subject_ref_hash = $2 AND withdrawn_at::date = CURRENT_DATE
+         ORDER BY id DESC LIMIT 1`,
+        [input.purposeId, subjectRefHash]
+      );
+      if (dupe[0]) {
+        return { event: dupe[0], processorsNotified: 0, ackTokens: [], idempotent: true };
+      }
       const events = await exec(
-        `INSERT INTO withdrawal_events (purpose_id, organization_id, subject_ref, consent_record_id, reason, initiated_by)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [input.purposeId, purposes[0].organization_id, input.subjectRef, input.consentRecordId ?? null,
+        `INSERT INTO withdrawal_events (purpose_id, organization_id, subject_ref, subject_ref_hash, consent_record_id, reason, initiated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [input.purposeId, purposes[0].organization_id, encryptField(input.subjectRef), subjectRefHash, input.consentRecordId ?? null,
          input.reason ?? null, input.initiatedBy]
       );
       const event = events[0];
-      // Fan out: one propagation record per active downstream processor
+      // Fan out: one propagation record per active downstream processor.
+      // The raw ack token is returned to the caller EXACTLY ONCE (for secure
+      // out-of-band delivery to the processor); only its SHA-256 hash is
+      // persisted, so a database leak does not expose usable ack tokens.
       const processors = await exec(`SELECT * FROM downstream_processors WHERE purpose_id = $1 AND is_active = true`, [input.purposeId]);
+      const ackTokens: Array<{ processorId: number; processorName: string; ackToken: string }> = [];
       for (const proc of processors) {
-        const token = crypto.randomBytes(24).toString("hex");
+        const rawToken = crypto.randomBytes(24).toString("hex");
         await exec(
           `INSERT INTO propagation_records (withdrawal_event_id, processor_id, ack_token)
            VALUES ($1,$2,$3)
            ON CONFLICT (withdrawal_event_id, processor_id) DO NOTHING`,
-          [event.id, proc.id, token]
+          [event.id, proc.id, sha256Hex(rawToken)]
         );
+        ackTokens.push({ processorId: proc.id, processorName: proc.processor_name, ackToken: rawToken });
       }
       // Optionally link back to the canonical consent_records row
       if (input.consentRecordId) {
         await exec(`UPDATE consent_records SET consent_status = 'withdrawn', consent_withdrawn_at = NOW(), updated_at = NOW() WHERE id = $1`, [input.consentRecordId]);
       }
-      await logAuditEvent("consent_prop.withdrawal_recorded", "withdrawal_event", event?.id ?? "", String((ctx as any).user?.id ?? ""), { purposeId: input.purposeId, subjectRef: input.subjectRef, processors: processors.length });
+      await logAuditEvent("consent_prop.withdrawal_recorded", "withdrawal_event", event?.id ?? "", String((ctx as any).user?.id ?? ""), { purposeId: input.purposeId, subjectRefHash, processors: processors.length });
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "consent_withdrawal_propagation", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return { event, processorsNotified: processors.length };
+      return { event, processorsNotified: processors.length, ackTokens };
     }),
 
   listWithdrawals: protectedProcedure
@@ -185,18 +212,63 @@ export const consentPropagationRouter = router({
       return rows;
     }),
 
-  /** Mark a propagation record as notified (email/webhook dispatch recorded) */
+  /**
+   * Mark a propagation record as notified, performing a real dispatch: when
+   * the processor registered an ack_endpoint_url we POST the withdrawal
+   * notification to it (best-effort, 5s timeout, HTTP status recorded). When
+   * no URL is configured the record is still marked notified with a note so
+   * the SLA clock runs from the manual/email notification. Dispatch failures
+   * never block the state transition — they are recorded for retry/review.
+   */
   markNotified: protectedProcedure
     .input(z.object({ id: z.number().int(), channel: z.enum(["email", "webhook", "manual"]) }))
     .mutation(async ({ input, ctx }) => {
+      const found = await exec(
+        `SELECT pr.id, pr.withdrawal_event_id, pr.status, dp.processor_name, dp.ack_endpoint_url
+         FROM propagation_records pr
+         JOIN downstream_processors dp ON dp.id = pr.processor_id
+         WHERE pr.id = $1`,
+        [input.id]
+      );
+      const rec = found[0];
+      if (!rec) throw new TRPCError({ code: "NOT_FOUND", message: "Propagation record not found." });
+      if (!["pending", "notified"].includes(rec.status)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Propagation record not found or already acknowledged." });
+      }
+      let dispatchStatus: number | null = null;
+      let dispatchNote: string | null = null;
+      if (rec.ack_endpoint_url) {
+        try {
+          const res = await fetch(rec.ack_endpoint_url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              type: "consent.withdrawal",
+              withdrawalEventId: rec.withdrawal_event_id,
+              propagationRecordId: rec.id,
+              notifiedAt: new Date().toISOString(),
+            }),
+            signal: AbortSignal.timeout(5_000),
+          });
+          dispatchStatus = res.status;
+          if (!res.ok) dispatchNote = `Downstream ack endpoint responded HTTP ${res.status}`;
+        } catch (err) {
+          dispatchNote = `Dispatch failed (best-effort): ${err instanceof Error ? err.message : String(err)}`;
+          logger.warn({ err, recordId: input.id }, "[consent-prop] Processor dispatch failed; marking notified anyway");
+        }
+      } else {
+        dispatchNote = "No ack_endpoint_url configured; notification handled out-of-band";
+      }
       const rows = await exec(
-        `UPDATE propagation_records SET status = 'notified', notified_at = NOW(), notification_channel = $1, updated_at = NOW()
-         WHERE id = $2 AND status IN ('pending','notified') RETURNING id`,
-        [input.channel, input.id]
+        `UPDATE propagation_records
+         SET status = 'notified', notified_at = NOW(), notification_channel = $1,
+             last_dispatch_status = $2, last_dispatch_note = $3, updated_at = NOW()
+         WHERE id = $4 AND status IN ('pending','notified') RETURNING id`,
+        [input.channel, dispatchStatus, dispatchNote, input.id]
       );
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Propagation record not found or already acknowledged." });
-      await logAuditEvent("consent_prop.processor_notified", "propagation_record", input.id, String((ctx as any).user?.id ?? ""), { channel: input.channel });
-      return { success: true };
+      await logAuditEvent("consent_prop.processor_notified", "propagation_record", input.id, String((ctx as any).user?.id ?? ""), { channel: input.channel, dispatchStatus, dispatchNote });
+      return { success: true, dispatchStatus, dispatchNote };
     }),
 
   /** Public, token-based: processor acknowledges the withdrawal with proof */
@@ -206,11 +278,13 @@ export const consentPropagationRouter = router({
       proofRef: z.string().min(4).max(1024), // reference to deletion/cessation proof
     }))
     .mutation(async ({ input }) => {
+      // Tokens are stored as SHA-256 hashes at rest; the plaintext form is
+      // also accepted for legacy rows created before hashing was introduced.
       const rows = await exec(
         `UPDATE propagation_records SET status = 'acknowledged', acked_at = NOW(), proof_ref = $1, updated_at = NOW()
-         WHERE ack_token = $2 AND status IN ('pending','notified','overdue')
+         WHERE (ack_token = $2 OR ack_token = $3) AND status IN ('pending','notified','overdue')
          RETURNING id, withdrawal_event_id, processor_id`,
-        [input.proofRef, input.ackToken]
+        [input.proofRef, sha256Hex(input.ackToken), input.ackToken]
       );
       if (!rows[0]) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Invalid acknowledgment token or withdrawal already acknowledged." });

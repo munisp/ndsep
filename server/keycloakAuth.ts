@@ -28,6 +28,10 @@ const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? "ndsep";
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? "ndsep-web";
 const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET;
 const KEYCLOAK_ENABLED = (process.env.KEYCLOAK_ENABLED ?? "false") === "true";
+// Align with keycloak.ts: tokens are issued under KEYCLOAK_ISSUER_URL (the
+// external/public base URL) which may differ from the internal KEYCLOAK_URL
+// used for back-channel calls. Issuer comparison must use the issuer URL.
+const KEYCLOAK_ISSUER_URL = process.env.KEYCLOAK_ISSUER_URL ?? KEYCLOAK_URL;
 
 const OIDC_BASE = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect`;
 
@@ -79,7 +83,7 @@ export function getKeycloakConfig(): KeycloakConfig {
     url: KEYCLOAK_URL,
     realm: KEYCLOAK_REALM,
     clientId: KEYCLOAK_CLIENT_ID,
-    issuer: `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`,
+    issuer: `${KEYCLOAK_ISSUER_URL}/realms/${KEYCLOAK_REALM}`,
     authUrl: `${OIDC_BASE}/auth`,
     tokenUrl: `${OIDC_BASE}/token`,
     userinfoUrl: `${OIDC_BASE}/userinfo`,

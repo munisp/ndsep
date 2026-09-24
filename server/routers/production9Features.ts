@@ -19,6 +19,8 @@ import { logger } from "../logger";
 import { emitComplianceEvent, opensearchIndex, lakehouseIngest, daprPublish, fluvioPublish, permifyCheck } from "../middlewareExtensions";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
+import { ENV } from "../_core/env";
+import { TRPCError } from "@trpc/server";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
@@ -920,6 +922,13 @@ export const userManagementRouter = router({
   deactivate: adminProcedure
     .input(z.object({ userId: z.number().int().positive() }))
     .mutation(async ({ input, ctx }) => {
+      // Break-glass guard: the platform owner account must never be
+      // deactivated through the API — doing so could lock out the last
+      // administrator with no recovery path.
+      const target = await exec(`SELECT open_id FROM users WHERE id = $1`, [input.userId]);
+      if (target[0]?.open_id && target[0].open_id === ENV.ownerOpenId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "The platform owner account cannot be deactivated" });
+      }
       await exec(
         `UPDATE users SET role = 'user', is_active = false WHERE id = $1`,
         [input.userId]

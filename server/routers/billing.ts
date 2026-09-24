@@ -39,6 +39,31 @@ function generateInvoiceNumber(dpcoOrgId: number): string {
   return `INV-${year}${month}-DPCO${dpcoOrgId}-${seq}`;
 }
 
+/**
+ * Ownership guard for DPCO billing objects: platform admins see everything;
+ * DPCO users (who carry a dpcoOrgId claim, see server/routers/dpco.ts) may
+ * only touch invoices/payments belonging to their own DPCO organisation.
+ */
+function assertDpcoOwnership(ctx: { user: Record<string, unknown> }, dpcoOrgId: number): void {
+  if (ctx.user.role === "admin") return;
+  const callerDpcoOrg = ctx.user.dpcoOrgId;
+  if (callerDpcoOrg == null || Number(callerDpcoOrg) !== Number(dpcoOrgId)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You can only access billing records for your own DPCO organisation",
+    });
+  }
+}
+
+/** NGN amounts are stored as numeric(15,2); all arithmetic is done in kobo
+ *  integers to avoid binary-float drift, then converted back for storage. */
+function toKobo(naira: number): number {
+  return Math.round(naira * 100);
+}
+function toNaira(kobo: number): number {
+  return kobo / 100;
+}
+
 // ─── Subscription Tiers ───────────────────────────────────────────────────────
 const SUBSCRIPTION_TIERS: Record<
   string,
@@ -144,7 +169,7 @@ export const billingRouter = router({
 
   getInvoice: protectedProcedure
     .input(z.object({ id: z.number().int() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const [invoice] = await q<any>(
         `SELECT i.*, d.name as dpco_name, d.licence_number as dpco_licence,
                 d.email as dpco_email, d.phone as dpco_phone
@@ -155,6 +180,7 @@ export const billingRouter = router({
       );
       if (!invoice)
         throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
+      assertDpcoOwnership(ctx as unknown as { user: Record<string, unknown> }, invoice.dpco_org_id);
 
       const payments = await q<any>(
         `SELECT * FROM dpco_payments WHERE invoice_id = ? ORDER BY paid_at DESC`,
@@ -248,7 +274,10 @@ export const billingRouter = router({
         status: z.enum(["draft", "sent", "paid", "overdue", "cancelled"]),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const [existing] = await q<any>(`SELECT dpco_org_id FROM dpco_invoices WHERE id = ?`, [input.id]);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Invoice not found" });
+      assertDpcoOwnership(ctx as unknown as { user: Record<string, unknown> }, existing.dpco_org_id);
       await q(
         `UPDATE dpco_invoices SET status = ?, updated_at = NOW() WHERE id = ?`,
         [input.status, input.id]
@@ -282,7 +311,7 @@ export const billingRouter = router({
         notes: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       // Fetch invoice
       const [invoice] = await q<any>(
         `SELECT * FROM dpco_invoices WHERE id = ?`,
@@ -293,21 +322,74 @@ export const billingRouter = router({
           code: "NOT_FOUND",
           message: "Invoice not found",
         });
+      assertDpcoOwnership(ctx as unknown as { user: Record<string, unknown> }, invoice.dpco_org_id);
       if (invoice.status === "paid")
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Invoice already paid",
         });
+      if (invoice.status === "cancelled")
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot record payments against a cancelled invoice",
+        });
 
-      const platformFeeAmount =
-        input.amount * Number(invoice.platform_fee_rate);
-      const dpcoNetAmount = input.amount - platformFeeAmount;
-      const paymentRef = `PAY-${Date.now()}-${invoice.dpco_org_id}`;
+      // Idempotency: a gateway reference may only be recorded once. Replaying
+      // the same reference returns the original payment instead of
+      // double-crediting the invoice.
+      if (input.gatewayReference) {
+        const [dupe] = await q<any>(
+          `SELECT * FROM dpco_payments WHERE gateway_reference = ?`,
+          [input.gatewayReference]
+        );
+        if (dupe) {
+          return {
+            payment: dupe,
+            platformFeeAmount: Number(dupe.platform_fee_amount),
+            dpcoNetAmount: Number(dupe.dpco_net_amount),
+            paymentReference: dupe.payment_reference,
+            idempotent: true,
+          };
+        }
+      }
 
-      // Atomic transaction: insert payment + revenue split + mark invoice paid
+      // Money math in kobo integers (no binary-float drift).
+      const amountKobo = toKobo(input.amount);
+      const platformFeeKobo = Math.round(amountKobo * Number(invoice.platform_fee_rate));
+      const dpcoNetKobo = amountKobo - platformFeeKobo;
+      const platformFeeAmount = toNaira(platformFeeKobo);
+      const dpcoNetAmount = toNaira(dpcoNetKobo);
+
+      // Atomic transaction: insert payment + revenue split + advance the
+      // invoice's CUMULATIVE paid state (partial payments no longer flip the
+      // invoice straight to 'paid').
       const client = await getPool().connect();
       try {
         await client.query("BEGIN");
+
+        // Unique payment reference from a DB sequence (migration 0077).
+        const seqRes = await client.query(`SELECT nextval('ndsep_dpco_payment_ref_seq') AS n`);
+        const paymentRef = `PAY-${new Date().getFullYear()}-${String(seqRes.rows[0]?.n ?? 1).padStart(6, "0")}`;
+
+        // Lock the invoice row and compute the cumulative position.
+        const invRes = await client.query(
+          `SELECT total_amount FROM dpco_invoices WHERE id = $1 FOR UPDATE`,
+          [input.invoiceId]
+        );
+        const totalKobo = toKobo(Number(invRes.rows[0].total_amount));
+        const paidRes = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) AS paid FROM dpco_payments WHERE invoice_id = $1`,
+          [input.invoiceId]
+        );
+        const alreadyPaidKobo = toKobo(Number(paidRes.rows[0].paid));
+        const newTotalKobo = alreadyPaidKobo + amountKobo;
+        if (newTotalKobo > totalKobo) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Payment of ${input.amount} exceeds the invoice's outstanding balance of ${toNaira(totalKobo - alreadyPaidKobo)}`,
+          });
+        }
+        const fullyPaid = newTotalKobo >= totalKobo;
 
         // Insert payment
         const payRes = await client.query(
@@ -350,10 +432,15 @@ export const billingRouter = router({
           ]
         );
 
-        // Mark invoice as paid
+        // Advance the invoice cumulatively: only a fully-settled balance
+        // earns 'paid' (fixes the partial-payment-marks-paid bug).
         await client.query(
-          `UPDATE dpco_invoices SET status = 'paid', paid_at = NOW(), updated_at = NOW() WHERE id = $1`,
-          [input.invoiceId]
+          `UPDATE dpco_invoices
+           SET status = $2,
+               paid_at = CASE WHEN $2 = 'paid' THEN NOW() ELSE paid_at END,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [input.invoiceId, fullyPaid ? "paid" : "partially_paid"]
         );
 
         await client.query("COMMIT");
@@ -368,9 +455,12 @@ export const billingRouter = router({
           platformFeeAmount,
           dpcoNetAmount,
           paymentReference: paymentRef,
+          invoiceStatus: fullyPaid ? "paid" : "partially_paid",
+          amountPaidTotal: toNaira(newTotalKobo),
         };
       } catch (err) {
         await client.query("ROLLBACK");
+        if (err instanceof TRPCError) throw err;
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Payment recording failed: ${(err as Error).message}`,

@@ -16,7 +16,7 @@ import { autoDecryptRows } from "../encryptionMiddleware";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
-  if (!pool) return [];
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   try {
     const safeParams = params.map((p) =>
       Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
@@ -28,8 +28,15 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return autoDecryptRows(query, rows);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[crossBorder] DB query error");
-    return [];
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
   }
+}
+
+/** audit_logs.resource_id / user_id are int4; coerce non-numeric refs to NULL. */
+function toIntOrNull(v: string | number | null): number | null {
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : parseInt(v, 10);
+  return Number.isInteger(n) && Math.abs(n) < 2147483647 ? n : null;
 }
 
 async function logAudit(
@@ -43,7 +50,7 @@ async function logAudit(
     await exec(
       `INSERT INTO audit_logs (action, resource_type, resource_id, user_id, details, ip_address, created_at)
        VALUES ($1, $2, $3, $4, $5, NULL, NOW())`,
-      [action, resourceType, String(resourceId ?? ""), userId, JSON.stringify(details)]
+      [action, resourceType, toIntOrNull(resourceId), toIntOrNull(userId), JSON.stringify(details)]
     );
   } catch (err) {
     logger.warn({ err, action, resourceType }, "[crossBorder] Audit log write failed");

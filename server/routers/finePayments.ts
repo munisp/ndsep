@@ -33,8 +33,17 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return result.rows ?? [];
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[finePayments] DB query error");
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
+    // Preserve the original pg error on .cause so callers can react to
+    // specific SQLSTATEs (e.g. 23505 unique-violation for the one-live-RRR
+    // per penalty guard) without string-matching messages.
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error", cause: err });
   }
+}
+
+/** Extract the Postgres SQLSTATE from an exec() failure, if any. */
+function sqlstate(err: unknown): string | undefined {
+  const cause = (err as { cause?: { code?: string } } | null)?.cause;
+  return cause?.code;
 }
 
 /** audit_logs.resource_id / user_id are int4; coerce non-numeric refs to NULL. */
@@ -62,22 +71,91 @@ async function logAudit(
   }
 }
 
-/** Receipt number generator: NDPC-RCT-YYYY-##### (per-year zero-padded sequence). */
-async function nextReceiptNumber(): Promise<string> {
+/**
+ * Reference-number allocation from a Postgres SEQUENCE (migration 0075/0077).
+ * Replaces the racy COUNT(*)+1 / Date.now()-suffix schemes: sequence values
+ * are unique across concurrent settlements by construction. `sequence` is an
+ * internal constant, never user input.
+ */
+async function nextSequencedRef(sequence: string, prefix: string): Promise<string> {
   const year = new Date().getFullYear();
-  const [row] = await exec(
-    `SELECT COUNT(*)::int + 1 AS seq FROM receipts WHERE receipt_number LIKE $1`,
-    [`NDPC-RCT-${year}-%`],
+  const [row] = await exec(`SELECT nextval('${sequence}') AS n`);
+  return `${prefix}-${year}-${String(row?.n ?? 1).padStart(5, "0")}`;
+}
+
+/** Receipt number generator: NDPC-RCT-YYYY-##### backed by ndsep_receipt_number_seq. */
+async function nextReceiptNumber(): Promise<string> {
+  return nextSequencedRef("ndsep_receipt_number_seq", "NDPC-RCT");
+}
+
+/**
+ * Route a non-settleable gateway payment to the unmatched reconciliation
+ * queue for manual review (expired RRRs, amount mismatches). Idempotent per
+ * RRR+reason via the NOT EXISTS guard.
+ */
+async function routeToUnmatchedQueue(
+  rrr: string,
+  penaltyId: number | null,
+  amount: number | null,
+  notes: string,
+): Promise<void> {
+  await exec(
+    `INSERT INTO payment_reconciliations (rrr, penalty_id, matched_amount, match_status, batch_date, notes)
+     SELECT $1, $2, $3, 'unmatched', CURRENT_DATE, $4
+     WHERE NOT EXISTS (
+       SELECT 1 FROM payment_reconciliations r WHERE r.rrr = $1 AND r.notes = $4
+     )`,
+    [rrr, penaltyId, amount, notes],
   );
-  return `NDPC-RCT-${year}-${String(row?.seq ?? 1).padStart(5, "0")}`;
+  await logAudit("payment.routed_to_unmatched", "payment_rrr_code", rrr, null, { penalty_id: penaltyId, amount, notes });
 }
 
 /**
  * Shared settlement path used by the gateway webhook and the dev simulator:
  * mark RRR paid, issue the receipt, update the fine, email the payer.
  * Idempotent — re-settling an already-paid RRR is a no-op.
+ *
+ * Genuine payments that cannot be settled cleanly are NOT silently dropped:
+ *  - webhookAmount !== RRR amount  -> unmatched/reconciliation queue;
+ *  - RRR expired/cancelled/unknown-but-present -> unmatched/reconciliation
+ *    queue (the payer's money must be traced, not vanish into {}).
  */
-async function settleRrr(rrr: string, payerEmail: string | null): Promise<{ receiptNumber?: string }> {
+async function settleRrr(
+  rrr: string,
+  payerEmail: string | null,
+  webhookAmount: number | null = null,
+): Promise<{ receiptNumber?: string; queuedForReview?: boolean }> {
+  const existing = await exec(
+    `SELECT id, penalty_id, amount, currency, status, expires_at FROM payment_rrr_codes WHERE rrr = $1`,
+    [rrr],
+  );
+  const current = existing[0];
+  if (current && current.status === "paid") {
+    // Already settled — idempotent no-op.
+    return {};
+  }
+  if (current && webhookAmount != null && Number(webhookAmount) !== Number(current.amount)) {
+    // Amount mismatch: do not settle. The under/over-payment goes to the
+    // unmatched queue for manual reconciliation.
+    await routeToUnmatchedQueue(
+      rrr,
+      current.penalty_id,
+      webhookAmount,
+      `Webhook amount ${webhookAmount} does not match RRR amount ${current.amount}; manual reconciliation required`,
+    );
+    return { queuedForReview: true };
+  }
+  if (current && current.status !== "generated") {
+    // Genuine payment against an expired/cancelled RRR — route to the
+    // unmatched queue instead of silently swallowing it.
+    await routeToUnmatchedQueue(
+      rrr,
+      current.penalty_id,
+      webhookAmount ?? Number(current.amount),
+      `Payment received for RRR in '${current.status}' status; manual reconciliation required`,
+    );
+    return { queuedForReview: true };
+  }
   const rows = await exec(
     `UPDATE payment_rrr_codes SET status = 'paid', paid_at = NOW()
      WHERE rrr = $1 AND status = 'generated' AND expires_at > NOW()
@@ -85,15 +163,26 @@ async function settleRrr(rrr: string, payerEmail: string | null): Promise<{ rece
     [rrr],
   );
   if (!rows[0]) {
-    // Already paid / expired / unknown — idempotent no-op.
+    if (current) {
+      // Generated but past expiry at settlement time — same expired-RRR path.
+      await routeToUnmatchedQueue(
+        rrr,
+        current.penalty_id,
+        webhookAmount ?? Number(current.amount),
+        "Payment received for expired RRR; manual reconciliation required",
+      );
+      return { queuedForReview: true };
+    }
+    // Unknown RRR — idempotent no-op (callers 404 unknown RRRs upstream).
     return {};
   }
   const payment = rows[0];
   const receiptNumber = await nextReceiptNumber();
+  // Receipt numbers come from ndsep_receipt_number_seq and are unique by
+  // construction; a conflict here is a real integrity failure, not a skip.
   await exec(
     `INSERT INTO receipts (receipt_number, rrr, penalty_id, amount, currency, payer_email)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (receipt_number) DO NOTHING`,
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [receiptNumber, rrr, payment.penalty_id, payment.amount, payment.currency, payerEmail],
   );
   // Reflect the settlement on the fine itself (mirrors phase11 recordPayment semantics).
@@ -166,11 +255,27 @@ export const finePaymentsRouter = router({
         payerEmail: input.payerEmail,
         description: `NDPC penalty NDSEP-PEN-${String(input.penaltyId).padStart(6, "0")}`,
       });
-      const rows = await exec(
-        `INSERT INTO payment_rrr_codes (rrr, penalty_id, amount, currency, gateway_ref, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING rrr, amount, currency, status, expires_at`,
-        [result.rrr, input.penaltyId, amount, fine[0].currency ?? "NGN", result.gatewayRef, result.expiresAt],
-      );
+      let rows: any[];
+      try {
+        rows = await exec(
+          `INSERT INTO payment_rrr_codes (rrr, penalty_id, amount, currency, gateway_ref, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING rrr, amount, currency, status, expires_at`,
+          [result.rrr, input.penaltyId, amount, fine[0].currency ?? "NGN", result.gatewayRef, result.expiresAt],
+        );
+      } catch (err) {
+        // Double-RRR race: the partial unique index
+        // idx_payment_rrr_one_active_per_penalty (migration 0075) admits at
+        // most one live/settled RRR per penalty. A concurrent request won the
+        // race — return the RRR it minted instead of erroring.
+        if (sqlstate(err) === "23505") {
+          const raced = await exec(
+            `SELECT rrr, amount, currency, status, expires_at FROM payment_rrr_codes WHERE penalty_id = $1 AND status = 'generated'`,
+            [input.penaltyId],
+          );
+          if (raced[0]) return { ...raced[0], reused: true };
+        }
+        throw err;
+      }
       await logAudit("payment.rrr_generate", "payment_rrr_code", result.rrr, String(ctx.user.id), { penalty_id: input.penaltyId, amount });
       return { ...rows[0], reused: false };
     }),
@@ -207,9 +312,14 @@ export const finePaymentsRouter = router({
       }
       const rrrRows = await exec(`SELECT amount FROM payment_rrr_codes WHERE rrr = $1`, [input.rrr]);
       if (!rrrRows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "RRR not found" });
-      const { receiptNumber } = await settleRrr(input.rrr, input.payerEmail ?? null);
-      await logAudit("payment.gateway_webhook", "payment_rrr_code", input.rrr, null, { amount: input.amount, receipt: receiptNumber ?? null });
-      return { success: true, receiptNumber: receiptNumber ?? null };
+      // The webhook amount is compared against the RRR amount inside
+      // settleRrr; mismatches/expired-RRR payments are routed to the
+      // unmatched reconciliation queue rather than silently swallowed.
+      const { receiptNumber, queuedForReview } = await settleRrr(input.rrr, input.payerEmail ?? null, input.amount);
+      await logAudit("payment.gateway_webhook", "payment_rrr_code", input.rrr, null, {
+        amount: input.amount, receipt: receiptNumber ?? null, queued_for_review: queuedForReview ?? false,
+      });
+      return { success: true, receiptNumber: receiptNumber ?? null, queuedForReview: queuedForReview ?? false };
     }),
 
   /**
@@ -345,7 +455,8 @@ export const finePaymentsRouter = router({
           paid_at: null as string | null,
         };
       });
-      const planRef = `INS-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      // Per-year DB-sequence reference (migration 0077) — no Date.now() suffix.
+      const planRef = await nextSequencedRef("ndsep_installment_plan_ref_seq", "INS");
       const rows = await exec(
         `INSERT INTO payment_installments (plan_ref, penalty_id, schedule)
          VALUES ($1, $2, $3) RETURNING *`,
@@ -353,6 +464,90 @@ export const finePaymentsRouter = router({
       );
       await logAudit("payment.installment_create", "payment_installment", rows[0].id, String(ctx.user.id), { plan_ref: planRef, penalty_id: input.penaltyId, installments: input.installments });
       return rows[0];
+    }),
+
+  /**
+   * Record a payment against an installment plan. The amount is applied to
+   * the earliest unpaid tranches (paid_amount tracked per tranche so partial
+   * tranche payments work), the fine's amount_paid/status advance
+   * cumulatively, and the plan flips to 'completed' when every tranche is
+   * paid — so plans can actually complete. Idempotent on paymentReference.
+   */
+  recordInstallmentPayment: protectedProcedure
+    .input(z.object({
+      planRef: z.string().min(4),
+      amount: z.number().positive(),
+      paymentReference: z.string().min(5),
+      paidAt: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const plans = await exec(
+        `SELECT id, plan_ref, penalty_id, schedule, status, recorded_payments FROM payment_installments WHERE plan_ref = $1`,
+        [input.planRef],
+      );
+      const plan = plans[0];
+      if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Installment plan not found" });
+      if (plan.status !== "active") {
+        throw new TRPCError({ code: "CONFLICT", message: `Plan is '${plan.status}'; payments can only be applied to active plans` });
+      }
+      const recorded = typeof plan.recorded_payments === "string" ? JSON.parse(plan.recorded_payments) : (plan.recorded_payments ?? []);
+      // Idempotency: a reference already applied to this plan returns the
+      // current state instead of double-counting.
+      if (recorded.some((p: { payment_reference?: string }) => p.payment_reference === input.paymentReference)) {
+        return { planRef: plan.plan_ref, status: plan.status, idempotent: true, alreadyApplied: true };
+      }
+      const schedule = (typeof plan.schedule === "string" ? JSON.parse(plan.schedule) : plan.schedule) as Array<{
+        seq: number; due_date: string; amount: number; status: string; paid_at: string | null; paid_amount?: number;
+      }>;
+      let remaining = Math.round(input.amount * 100) / 100;
+      const paidAt = input.paidAt ?? new Date().toISOString();
+      for (const entry of schedule) {
+        if (remaining <= 0) break;
+        if (entry.status === "paid") continue;
+        const alreadyPaid = Number(entry.paid_amount ?? 0);
+        const outstanding = Math.round((Number(entry.amount) - alreadyPaid) * 100) / 100;
+        const applied = Math.min(outstanding, remaining);
+        entry.paid_amount = Math.round((alreadyPaid + applied) * 100) / 100;
+        remaining = Math.round((remaining - applied) * 100) / 100;
+        if (entry.paid_amount >= Number(entry.amount)) {
+          entry.status = "paid";
+          entry.paid_at = paidAt;
+        }
+      }
+      if (remaining > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Payment of ${input.amount} exceeds the plan's outstanding balance by ${remaining}`,
+        });
+      }
+      const allPaid = schedule.every((e) => e.status === "paid");
+      recorded.push({ payment_reference: input.paymentReference, amount: input.amount, applied_at: paidAt });
+      const updated = await exec(
+        `UPDATE payment_installments
+         SET schedule = $1, recorded_payments = $2,
+             status = CASE WHEN $3 THEN 'completed' ELSE status END,
+             updated_at = NOW()
+         WHERE id = $4 RETURNING *`,
+        [JSON.stringify(schedule), JSON.stringify(recorded), allPaid, plan.id],
+      );
+      // Advance the fine cumulatively (mirrors settleRrr / phase11 recordPayment).
+      await exec(
+        `UPDATE enforcement_fines
+         SET status = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN 'paid' ELSE 'partial' END,
+             amount_paid = COALESCE(amount_paid, 0) + $2,
+             paid_at = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN NOW() ELSE paid_at END,
+             payment_reference = $3,
+             payment_method = 'installment',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [plan.penalty_id, input.amount, input.paymentReference],
+      );
+      await logAudit("payment.installment_payment", "payment_installment", plan.id, String(ctx.user.id), {
+        plan_ref: plan.plan_ref, amount: input.amount, payment_reference: input.paymentReference, completed: allPaid,
+      });
+      emitMutationEvent("ndsep.payments.installment", { action: "payment", planRef: plan.plan_ref, ts: new Date().toISOString() })
+        .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      return updated[0];
     }),
 
   listInstallmentPlans: protectedProcedure
@@ -476,7 +671,8 @@ export const finePaymentsRouter = router({
       if (!input.rrr && !input.penaltyId) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Provide rrr or penaltyId" });
       }
-      const refundRef = `RFD-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      // Per-year DB-sequence reference (migration 0077) — no Date.now() suffix.
+      const refundRef = await nextSequencedRef("ndsep_refund_ref_seq", "RFD");
       const rows = await exec(
         `INSERT INTO refund_requests (refund_ref, rrr, penalty_id, amount, reason, requested_by)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -512,6 +708,41 @@ export const finePaymentsRouter = router({
       );
       if (!rows[0]) {
         throw new TRPCError({ code: "CONFLICT", message: `Refund not found or not in '${allowedFrom.join("/")}' status` });
+      }
+      // On approval the refunded amount must be reversed out of the fine:
+      // decrement amount_paid and recompute the cumulative status so a
+      // refunded "paid" fine re-opens (paid -> partial/pending) instead of
+      // staying falsely settled.
+      if (input.decision === "approved") {
+        const refund = rows[0];
+        let penaltyId: number | null = refund.penalty_id ?? null;
+        if (penaltyId == null && refund.rrr) {
+          const rrrRows = await exec(`SELECT penalty_id FROM payment_rrr_codes WHERE rrr = $1`, [refund.rrr]);
+          penaltyId = rrrRows[0]?.penalty_id ?? null;
+        }
+        if (penaltyId != null) {
+          await exec(
+            `UPDATE enforcement_fines
+             SET amount_paid = GREATEST(0, COALESCE(amount_paid, 0) - $2),
+                 status = CASE
+                   WHEN GREATEST(0, COALESCE(amount_paid, 0) - $2) >= amount THEN 'paid'
+                   WHEN GREATEST(0, COALESCE(amount_paid, 0) - $2) > 0 THEN 'partial'
+                   ELSE 'pending'
+                 END,
+                 paid_at = CASE
+                   WHEN GREATEST(0, COALESCE(amount_paid, 0) - $2) >= amount THEN paid_at
+                   ELSE NULL
+                 END,
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [penaltyId, refund.amount],
+          );
+          await logAudit("payment.refund_fine_reverted", "enforcement_fine", penaltyId, String(ctx.user.id), {
+            refund_ref: input.refundRef, amount: refund.amount,
+          });
+        } else {
+          logger.warn({ refundRef: input.refundRef }, "[finePayments] Approved refund has no resolvable penalty; fine state not reverted");
+        }
       }
       await logAudit("payment.refund_decide", "refund_request", rows[0].id, String(ctx.user.id), { refund_ref: input.refundRef, decision: input.decision });
       emitMutationEvent("ndsep.payments.refund", { action: input.decision, refundRef: input.refundRef, ts: new Date().toISOString() })

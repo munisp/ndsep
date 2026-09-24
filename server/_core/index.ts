@@ -1436,6 +1436,28 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Feature flags init skipped");
   }
 
+  // ── Permify authorization schema bootstrap ────────────────────────────────
+  // Without this the Permify tenant has no NDSEP schema and EVERY permission
+  // check denies (total lockout). Idempotent; failures stay fail-closed.
+  try {
+    const { permifyBootstrapSchema } = await import("../permify");
+    const bootstrapped = await permifyBootstrapSchema();
+    if (!bootstrapped) {
+      logger.warn("[Startup] Permify schema bootstrap did not complete — authorization checks will deny until Permify is reachable");
+    }
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Permify schema bootstrap skipped");
+  }
+
+  // ── Breach 72-hour timer table (NDPA s.40 countdown) ─────────────────────
+  try {
+    const { initBreachTimers } = await import("../breachTimer");
+    const { getSharedPool } = await import("../db");
+    await initBreachTimers(getSharedPool());
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Breach timer init skipped");
+  }
+
   try {
     const { initRealtimeServer } = await import("../realtime");
     initRealtimeServer(server);

@@ -130,8 +130,11 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet[field] = value ?? null;
     });
     if (user.lastSignedIn !== undefined) { values.lastSignedIn = user.lastSignedIn; updateSet.lastSignedIn = user.lastSignedIn; }
-    if (user.role !== undefined) { values.role = user.role; updateSet.role = user.role; }
-    else if (user.openId === ENV.ownerOpenId) { values.role = "admin"; updateSet.role = "admin"; }
+    // Role is assigned on first insert only. Re-authentication must never
+    // clobber a role that was deliberately changed in the DB (e.g. an admin
+    // demoting/promoting a user, or a token with stale/default role claims).
+    if (user.role !== undefined) { values.role = user.role; }
+    else if (user.openId === ENV.ownerOpenId) { values.role = "admin"; }
     if (!values.lastSignedIn) values.lastSignedIn = new Date();
     if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
     await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
@@ -145,7 +148,10 @@ export async function getUserByOpenId(openId: string) {
   const user = result[0];
   // Deactivated accounts (is_active = false) must not authenticate. This is the
   // single funnel used by both the cookie-session and Keycloak bearer paths.
-  if (user && user.isActive === false) return undefined;
+  // Break-glass: the platform owner (ENV.ownerOpenId) is never treated as
+  // inactive so an accidental/bulk deactivation cannot lock out the last
+  // administrator with no recovery path.
+  if (user && user.isActive === false && openId !== ENV.ownerOpenId) return undefined;
   return user;
 }
 

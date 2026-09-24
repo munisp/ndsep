@@ -96,6 +96,18 @@ export const auditorProcedure = t.procedure.use(
   }),
 );
 
+/** Staff: regulators and auditors handling citizen-facing workloads (DSAR, complaints) */
+export const staffProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+    const allowedRoles: string[] = ['admin', 'government_staff', 'auditor'];
+    if (!ctx.user || !allowedRoles.includes(ctx.user.role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Staff access required" });
+    }
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  }),
+);
+
 // ─── PBAC-enforced procedure factories ───────────────────────────────────────
 import { pbacMiddleware } from "../security/pbac";
 

@@ -6,7 +6,10 @@
  *   exposing days_remaining
  * - Automatic stay of enforcement: filing an appeal records a penalty_stays
  *   row (companion table; the financial_penalties enum is untouched)
- * - Tribunal escalation tracking
+ * - High Court / judicial-review escalation tracking (Nigeria has no
+ *   dedicated Data Protection Tribunal; NDPA 2023 appeals lie to the
+ *   Federal High Court. Column/table names are unchanged — only display
+ *   labels and defaults were corrected.)
  */
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
@@ -19,7 +22,7 @@ import { sendAppealUpdate } from "../emailNotification";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
-  if (!pool) return [];
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   try {
     const safeParams = params.map((p) =>
       Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
@@ -31,8 +34,15 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return autoDecryptRows(query, rows);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[appealsDP] DB query error");
-    return [];
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
   }
+}
+
+/** audit_logs.resource_id / user_id are int4; coerce non-numeric refs to NULL. */
+function toIntOrNull(v: string | number | null): number | null {
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : parseInt(v, 10);
+  return Number.isInteger(n) && Math.abs(n) < 2147483647 ? n : null;
 }
 
 async function logAudit(
@@ -46,7 +56,7 @@ async function logAudit(
     await exec(
       `INSERT INTO audit_logs (action, resource_type, resource_id, user_id, details, ip_address, created_at)
        VALUES ($1, $2, $3, $4, $5, NULL, NOW())`,
-      [action, resourceType, String(resourceId ?? ""), userId, JSON.stringify(details)]
+      [action, resourceType, toIntOrNull(resourceId), toIntOrNull(userId), JSON.stringify(details)]
     );
   } catch (err) {
     logger.warn({ err, action, resourceType }, "[appealsDP] Audit log write failed");
@@ -58,8 +68,35 @@ function fireAndForget(action: string): void {
     .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
 }
 
-/** Statutory appeal window: 30 days from the penalty decision date */
-const APPEAL_WINDOW_DAYS = 30;
+/**
+ * Appeal window (days), computed from the penalty decision/served date
+ * (financial_penalties.decision_date / served_date, falling back to
+ * created_at). Configurable via NDSEP_APPEAL_WINDOW_DAYS; default 30.
+ * NOTE: the statutory basis for this window under the NDPA 2023 / NDPC
+ * procedural rules must be confirmed by counsel before reliance — the
+ * Commission's official appeal regulations were still being finalised at
+ * implementation time.
+ */
+const APPEAL_WINDOW_DAYS = Math.max(1, Number(process.env.NDSEP_APPEAL_WINDOW_DAYS ?? 30) || 30);
+
+const STAFF_ROLES = ["admin", "government_staff"];
+
+/**
+ * IDOR guard: filing an appeal (which also grants an automatic stay of
+ * enforcement) requires staff privileges or membership of the organisation
+ * that owns the penalty — otherwise any authenticated user could freeze
+ * enforcement against an arbitrary organisation's penalty.
+ */
+async function assertOrgAccess(user: { id: number; role: string }, organizationId: number): Promise<void> {
+  if (STAFF_ROLES.includes(user.role)) return;
+  const membership = await exec(
+    `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+    [user.id, organizationId],
+  );
+  if (membership.length === 0) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "You can only file appeals for organisations you belong to." });
+  }
+}
 
 export const appealsDueProcessRouter = router({
   // ─── Deadline computation ────────────────────────────────────────────────
@@ -67,10 +104,14 @@ export const appealsDueProcessRouter = router({
   computeAppealDeadline: protectedProcedure
     .input(z.object({ penaltyId: z.number().int().positive() }))
     .query(async ({ input }) => {
+      // The window runs from the penalty decision/served date
+      // (COALESCE(served_date, decision_date, created_at)) — not the row
+      // creation time.
       const [penalty] = await exec(
-        `SELECT id, organization_id, created_at AS decision_date,
-                (created_at + INTERVAL '${APPEAL_WINDOW_DAYS} days') AS appeal_deadline,
-                GREATEST(0, CEIL(EXTRACT(EPOCH FROM (created_at + INTERVAL '${APPEAL_WINDOW_DAYS} days' - NOW())) / 86400))::int AS days_remaining
+        `SELECT id, organization_id,
+                COALESCE(served_date, decision_date, created_at) AS decision_date,
+                (COALESCE(served_date, decision_date, created_at) + INTERVAL '${APPEAL_WINDOW_DAYS} days') AS appeal_deadline,
+                GREATEST(0, CEIL(EXTRACT(EPOCH FROM (COALESCE(served_date, decision_date, created_at) + INTERVAL '${APPEAL_WINDOW_DAYS} days' - NOW())) / 86400))::int AS days_remaining
          FROM financial_penalties WHERE id = $1`,
         [input.penaltyId]
       );
@@ -115,10 +156,17 @@ export const appealsDueProcessRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const [penalty] = await exec(
-        `SELECT id, created_at, (created_at + INTERVAL '${APPEAL_WINDOW_DAYS} days') AS deadline FROM financial_penalties WHERE id = $1`,
+        `SELECT id, organization_id,
+                (COALESCE(served_date, decision_date, created_at) + INTERVAL '${APPEAL_WINDOW_DAYS} days') AS deadline
+         FROM financial_penalties WHERE id = $1`,
         [input.penaltyId]
       );
       if (!penalty) throw new TRPCError({ code: "NOT_FOUND", message: "Penalty not found" });
+      // Stay IDOR guard: the caller must own the penalised organisation (or be staff).
+      if (penalty.organization_id !== input.organizationId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "organizationId does not match the penalty's organisation" });
+      }
+      await assertOrgAccess(ctx.user, input.organizationId);
       if (new Date(penalty.deadline) < new Date()) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `The ${APPEAL_WINDOW_DAYS}-day appeal window for this penalty has expired` });
       }
@@ -263,7 +311,11 @@ export const appealsDueProcessRouter = router({
       return row;
     }),
 
-  // ─── Tribunal escalation ─────────────────────────────────────────────────
+  // ─── High Court / judicial-review escalation ─────────────────────────────
+  // Nigeria has no Data Protection Tribunal: NDPA 2023 appeals and judicial
+  // review of Commission decisions lie to the Federal High Court. The
+  // tribunal_escalations table/column names are retained for compatibility;
+  // only labels/defaults reflect the correct forum.
   escalateToTribunal: protectedProcedure
     .input(z.object({
       appealId: z.number().int().positive(),
@@ -276,9 +328,11 @@ export const appealsDueProcessRouter = router({
       const [row] = await exec(
         `INSERT INTO tribunal_escalations (appeal_id, penalty_id, tribunal_name, case_number, created_by)
          VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [input.appealId, appeal[0].penalty_id, input.tribunalName ?? "Data Protection Tribunal", input.caseNumber ?? null, ctx.user.name ?? String(ctx.user.id)]
+        [input.appealId, appeal[0].penalty_id, input.tribunalName ?? "Federal High Court (judicial review)", input.caseNumber ?? null, ctx.user.name ?? String(ctx.user.id)]
       );
-      await exec(`UPDATE penalty_appeals SET status = 'under_review', updated_at = NOW() WHERE id = $1`, [input.appealId]);
+      // Do not regress decided/withdrawn appeals back to 'under_review':
+      // escalation only advances a still-open 'submitted' appeal.
+      await exec(`UPDATE penalty_appeals SET status = 'under_review', updated_at = NOW() WHERE id = $1 AND status = 'submitted'`, [input.appealId]);
       await logAudit("appeal_escalated_tribunal", "tribunal_escalations", row?.id, String(ctx.user.id), { appeal_id: input.appealId });
       fireAndForget("appealsDueProcess.escalateToTribunal");
       return row;

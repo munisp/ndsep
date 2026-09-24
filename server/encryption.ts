@@ -156,6 +156,26 @@ export const PII_FIELDS: Record<string, string[]> = {
   dpco_registrations: ["email", "phone", "dpo_email", "contact_name", "contact_email", "contact_phone"],
   dpco_clients: ["contact_name", "contact_email", "contact_phone"],
   dpco_licensed_firms: ["email", "phone"],
+  // ── Feature-router PII (migrations 0031–0054) ──
+  // Whistleblower channel message bodies (gap 7 / migration 0040).
+  whistleblower_messages: ["body"],
+  // DSAR third-party / deceased-subject representatives (migration 0031).
+  dsar_third_party_submissions: ["representative_name", "representative_email", "representative_phone"],
+  dsar_deceased_subjects: ["deceased_name", "executor_name", "executor_contact"],
+  // DPO marketplace contact identities (migration 0042).
+  dpo_marketplace_profiles: ["email", "phone"],
+  marketplace_engagements: ["contact_email"],
+  // Public sanctions register delisting applicants (migration 0050).
+  delisting_requests: ["applicant_name", "applicant_email"],
+  // FOIA requester identities (migration 0051).
+  foia_requests: ["requester_name", "requester_email", "requester_phone"],
+  // Election-oversight reporter identities (migration 0052).
+  political_microtargeting_reports: ["reporter_name", "reporter_email"],
+  // AI-incident reporter identities (migration 0053).
+  ai_incidents: ["reporter_name", "reporter_email"],
+  // Consent-propagation data-subject references + processor contacts (migration 0054).
+  withdrawal_events: ["subject_ref"],
+  downstream_processors: ["contact_email"],
 };
 
 /**

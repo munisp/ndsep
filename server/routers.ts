@@ -1904,12 +1904,22 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const result = await createCitizenRequest(input as any);
         const reqId = (result as any)?.id ?? 0;
-        // Temporal: auto-trigger DSAR fulfillment workflow (30-day statutory deadline)
+        // Temporal: auto-trigger DSAR fulfillment workflow (30-day statutory deadline).
+        // Must match the workflow type registered on the ndsep-dsar task queue
+        // (workers/temporal/workflows/dsarFulfillment.ts) and its input shape.
         if (input.requestType === "dsar" || input.requestType === "erasure" || input.requestType === "access") {
-          startWorkflow("dsar-fulfillment", {
+          startWorkflow("dsarFulfillmentWorkflow", {
             workflowId: `dsar-${reqId}`,
             taskQueue: "ndsep-dsar",
-            input: { requestId: String(reqId), requestType: input.requestType, citizenEmail: input.citizenEmail, deadlineDays: 30, steps: ["acknowledge", "identity-verify", "data-locate", "data-compile", "review", "deliver", "close"] },
+            input: {
+              dsarId: String(reqId),
+              requestType: input.requestType,
+              subjectId: String(ctx.user.id),
+              orgId: Number((result as any)?.organizationId ?? 0),
+              citizenEmail: input.citizenEmail,
+              citizenNin: input.citizenNin,
+            },
+            executionTimeoutSeconds: 31 * 24 * 3600, // 30-day DSAR SLA + margin
           }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "temporal fire-and-forget"));
         }
         // CQRS command dispatch

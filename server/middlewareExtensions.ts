@@ -5,6 +5,7 @@
  */
 
 import { permifyCheck as checkPermifyPermission } from "./permify";
+import { logger } from "./logger";
 
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
@@ -147,6 +148,25 @@ export async function tigerbeetleTransfer(params: {
   reference: string;
   transferType?: string;
 }): Promise<void> {
+  // The Go tigerbeetle_ledger proxy only supports the USD ledger. Previously a
+  // non-USD amount was silently forwarded as if it were USD, falsifying the
+  // ledger. Now: record a reconciliation_pending marker loudly and skip the
+  // ledger write — amounts are NEVER silently coerced across currencies.
+  if (params.currency.toUpperCase() !== "USD") {
+    logger.error(
+      {
+        reconciliation_pending: true,
+        reason: "non_usd_currency",
+        currency: params.currency,
+        amount: params.amount,
+        reference: params.reference,
+        debitAccountId: params.debitAccountId,
+        creditAccountId: params.creditAccountId,
+      },
+      "[tigerbeetle] reconciliation_pending: non-USD transfer NOT written to the USD-only ledger — manual reconciliation required",
+    );
+    return;
+  }
   await postJSON(`${TIGERBEETLE_LEDGER_URL}/transaction`, {
     org_id: params.debitAccountId,
     penalty_id: params.reference,
@@ -159,7 +179,11 @@ export async function tigerbeetleTransfer(params: {
   });
 }
 
-/** Map free-form transfer types onto the Go ledger's accepted transaction types. */
+/**
+ * Map transfer types onto the Go ledger's accepted transaction types.
+ * Unknown types THROW: silently coercing an unknown type to 'penalty'
+ * misclassifies ledger entries and corrupts financial reporting.
+ */
 function toLedgerTransactionType(transferType?: string): "penalty" | "fine" | "escrow" | "settlement" | "refund" {
   const t = (transferType || "fine").toLowerCase();
   if (t === "penalty" || t === "fine" || t === "escrow" || t === "settlement" || t === "refund") return t;
@@ -167,7 +191,7 @@ function toLedgerTransactionType(transferType?: string): "penalty" | "fine" | "e
   if (t.includes("escrow")) return "escrow";
   if (t.includes("fine") || t.includes("penalty")) return "fine";
   if (t.includes("settle") || t.includes("transfer")) return "settlement";
-  return "penalty";
+  throw new Error(`[tigerbeetle] unknown ledger transaction type: '${transferType}' — refusing to coerce to a default type`);
 }
 
 // ─── Mojaloop ────────────────────────────────────────────────────────────────
@@ -231,8 +255,10 @@ export async function permifyWriteRelationship(
   relation: string,
   subjectId: string
 ): Promise<void> {
+  // Canonical subject id format is "user:<id>" — must match every check path.
+  const normalizedSubjectId = subjectId.startsWith("user:") ? subjectId : `user:${subjectId}`;
   await postJSON(`${PERMIFY_SYNC_URL}/relationships/write`, {
-    entityType, entityId, relation, subjectType: "user", subjectId,
+    entityType, entityId, relation, subjectType: "user", subjectId: normalizedSubjectId,
   });
 }
 

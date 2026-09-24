@@ -9,7 +9,61 @@ import { withCache, CK, TTL } from "../queryCache";
 import { syncBreachIncident } from "../permifySync";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import { startWorkflow } from "../temporal";
+import { startBreachTimer, markBreachNotified } from "../breachTimer";
 import { logger } from "../logger";
+
+// ─── Breach 72-hour statutory window (NDPA s.40) ─────────────────────────────
+const BREACH_NOTIFICATION_WINDOW_HOURS = 72;
+/** Flat draft penalty per commenced 24h of lateness (NGN) — admin confirms/waives. */
+const LATE_PENALTY_PER_DAY_NGN = 2_000_000;
+
+/**
+ * Late-notification bookkeeping for the ndpc_notified transition: stop the
+ * 72-hour countdown timer and, when notification exceeded the statutory
+ * window, create (idempotently, per breach) a draft penalty for admin review.
+ * Implemented locally — mirrors the canonical logic without coupling routers.
+ */
+async function handleNdpcNotified(breachId: number): Promise<void> {
+  try {
+    const pool = getSharedPool();
+    try {
+      await markBreachNotified(pool, breachId);
+    } catch (e) {
+      logger.warn({ err: e instanceof Error ? e.message : String(e), breachId }, "[breach] markBreachNotified failed (timer row may be absent)");
+    }
+    const res = await pool.query(
+      `SELECT organization_id, detected_at, ndpc_notified_at FROM breach_incidents WHERE id = $1`,
+      [breachId]
+    );
+    const breach = res.rows[0];
+    if (!breach?.detected_at || !breach?.ndpc_notified_at) return;
+    const hoursLate = Math.max(
+      0,
+      (new Date(breach.ndpc_notified_at).getTime() - new Date(breach.detected_at).getTime()) / 3_600_000 - BREACH_NOTIFICATION_WINDOW_HOURS
+    );
+    if (hoursLate <= 0) return;
+    const daysLate = Math.ceil(hoursLate / 24);
+    const proposedAmount = daysLate * LATE_PENALTY_PER_DAY_NGN;
+    await pool.query(
+      `INSERT INTO breach_late_penalties
+         (breach_id, organization_id, detected_at, notified_at, hours_late, proposed_amount, admin_task_created)
+       VALUES ($1, $2, $3, $4, $5, $6, true)
+       ON CONFLICT (breach_id) DO UPDATE SET
+         notified_at = EXCLUDED.notified_at,
+         hours_late = EXCLUDED.hours_late,
+         proposed_amount = EXCLUDED.proposed_amount,
+         updated_at = NOW()`,
+      [breachId, breach.organization_id, breach.detected_at, breach.ndpc_notified_at, hoursLate.toFixed(2), proposedAmount]
+    );
+    await pool.query(
+      `INSERT INTO audit_logs (action, resource_type, resource_id, user_id, details, created_at)
+       VALUES ('breach_late_penalty_task', 'breach_late_penalties', $1, NULL, $2, NOW())`,
+      [String(breachId), JSON.stringify({ task: "review_late_notification_penalty", breach_id: breachId, hours_late: hoursLate.toFixed(2), proposed_amount_ngn: proposedAmount })]
+    );
+  } catch (e) {
+    logger.warn({ err: e instanceof Error ? e.message : String(e), breachId }, "[breach] late-notification penalty draft failed");
+  }
+}
 
 async function exec(query: any): Promise<[any[], any]> {
   const db = await getDb();
@@ -41,7 +95,7 @@ export const ndpaComplianceDashboardRouter = router({
     const [breachCount] = await exec(sql`SELECT COUNT(*) as total, SUM(CASE WHEN breach_incident_status NOT IN ('resolved','closed') THEN 1 ELSE 0 END) as active, SUM(CASE WHEN ndpc_notified_at IS NULL AND ndpc_notification_deadline < NOW() THEN 1 ELSE 0 END) as overdue FROM breach_incidents`);
     const [consentCount] = await exec(sql`SELECT COUNT(*) as total, SUM(CASE WHEN consent_status = 'active' THEN 1 ELSE 0 END) as active, SUM(CASE WHEN consent_status = 'withdrawn' THEN 1 ELSE 0 END) as withdrawn FROM consent_records`);
     const [dpoCount] = await exec(sql`SELECT COUNT(*) as total, SUM(CASE WHEN is_active = true AND credential_status = 'verified' THEN 1 ELSE 0 END) as verified, SUM(CASE WHEN certification_expires_at < NOW() + INTERVAL '30 days' THEN 1 ELSE 0 END) as expiring_soon FROM dpo_appointments`);
-    const [dsarCount] = await exec(sql`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending FROM citizen_requests WHERE request_type = 'dsar'`);
+    const [dsarCount] = await exec(sql`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) as pending FROM citizen_requests`);
     return {
       snapshots: (snapshots as any[]),
       breaches: (breachCount as any[])[0] ?? {},
@@ -96,11 +150,35 @@ export const breachIncidentRouter = router({
       const created = (result as any[])[0];
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "breach_reported", entityId: created?.id, ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       syncBreachIncident(String(created?.id ?? ""), String(ctx.user.id), input.organizationId).catch(() => {});
-      // Trigger Temporal breach-response workflow (72-hour SLA)
-      startWorkflow("breach-response", {
+      // Start the 72-hour NDPA s.40 countdown for escalation tracking.
+      try {
+        await startBreachTimer(getSharedPool(), Number(created?.id), new Date());
+      } catch (e) {
+        logger.warn({ err: e instanceof Error ? e.message : String(e), breachId: created?.id }, "[breach] startBreachTimer failed");
+      }
+      // Trigger the registered breachNotificationWorkflow (72-hour SLA).
+      // Input shape must match BreachNotificationInput in
+      // workers/temporal/workflows/breachNotification.ts.
+      const [dpoRows] = await exec(sql`SELECT dpo_email FROM dpo_appointments WHERE organization_id = ${input.organizationId} AND is_active = true ORDER BY appointed_at DESC LIMIT 1`);
+      const [orgRows] = await exec(sql`SELECT contact_email FROM organizations WHERE id = ${input.organizationId}`);
+      const orgEmail = (orgRows as any[])[0]?.contact_email ?? "";
+      const dpoEmail = (dpoRows as any[])[0]?.dpo_email ?? orgEmail;
+      const ceoEmail = orgEmail || dpoEmail;
+      startWorkflow("breachNotificationWorkflow", {
         workflowId: `breach-${created?.id ?? 0}`,
         taskQueue: "ndsep-breach",
-        input: { breachId: String(created?.id ?? 0), orgId: input.organizationId, severity: input.severity, title: input.title, affectedCount: input.affectedIndividualsCount, steps: ["containment", "assessment", "ndpc-notification", "individual-notification", "remediation", "post-mortem"] },
+        input: {
+          breachId: Number(created?.id ?? 0),
+          orgId: input.organizationId,
+          dpoEmail,
+          ceoEmail,
+          severity: input.severity,
+          estimatedAffectedRecords: input.affectedIndividualsCount,
+          discoveredAt: new Date().toISOString(),
+        },
+        // The workflow waits through 24h + 36h + 12h deadline conditions —
+        // allow comfortably more than the 72-hour statutory window.
+        executionTimeoutSeconds: 7 * 24 * 3600,
       }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "temporal fire-and-forget"));
       return created;
     }),
@@ -118,6 +196,11 @@ export const breachIncidentRouter = router({
       if (input.remediationActions) { params.push(input.remediationActions); sets.push(`remediation_actions = $${params.length}`); }
       params.push(input.id);
       await execRaw(`UPDATE breach_incidents SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+      if (input.status === 'ndpc_notified') {
+        // Stop the 72-hour countdown and, when the statutory window was
+        // exceeded, create the late-notification penalty draft for review.
+        await handleNdpcNotified(input.id);
+      }
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "compliance_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),

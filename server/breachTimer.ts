@@ -111,7 +111,10 @@ export async function checkBreachTimers(pool: Pool): Promise<{
       if (hoursRemaining <= 6) urgency = "critical";
       else if (hoursRemaining <= 24) urgency = "urgent";
 
-      // Check if escalation should be sent
+      // Check if escalation should be sent. Send at most ONE escalation per
+      // timer per pass: the in-memory counter must track the DB update,
+      // otherwise every crossed threshold matches in a single pass and the
+      // caller receives a burst of duplicate escalations.
       for (const threshold of ESCALATION_THRESHOLDS_HOURS) {
         const remaining = BREACH_DEADLINE_HOURS - threshold;
         if (hoursRemaining <= remaining && timer.escalationsSent < ESCALATION_THRESHOLDS_HOURS.indexOf(threshold) + 1) {
@@ -120,6 +123,8 @@ export async function checkBreachTimers(pool: Pool): Promise<{
             `UPDATE breach_timers SET escalations_sent = escalations_sent + 1 WHERE breach_id = $1`,
             [timer.breachId]
           );
+          timer.escalationsSent += 1;
+          break;
         }
       }
     }

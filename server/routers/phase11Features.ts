@@ -109,24 +109,27 @@ ${items}
 });
 
 // ─── DSAR Automation ─────────────────────────────────────────────────────────
+// Canonical store is citizen_requests (canonical status enum:
+// submitted/acknowledged/in_progress/completed/rejected/escalated/overdue).
 export const dsarAutomationRouter = router({
   getDeadlineAlerts: protectedProcedure.query(async () => {
     return rawQuery(`
       SELECT
-        d.id, d.subject_name, d.subject_email, d.request_type, d.status,
-        d.submitted_at, d.deadline_at,
-        EXTRACT(EPOCH FROM (d.deadline_at - NOW())) / 86400 AS days_remaining,
+        d.id, d.citizen_name AS subject_name, d.citizen_email AS subject_email,
+        d.request_type, d.status,
+        d.submitted_at, d.response_deadline AS deadline_at,
+        EXTRACT(EPOCH FROM (d.response_deadline - NOW())) / 86400 AS days_remaining,
         CASE
-          WHEN d.deadline_at < NOW() THEN 'overdue'
-          WHEN d.deadline_at < NOW() + INTERVAL '3 days' THEN 'critical'
-          WHEN d.deadline_at < NOW() + INTERVAL '7 days' THEN 'warning'
+          WHEN d.response_deadline < NOW() THEN 'overdue'
+          WHEN d.response_deadline < NOW() + INTERVAL '3 days' THEN 'critical'
+          WHEN d.response_deadline < NOW() + INTERVAL '7 days' THEN 'warning'
           ELSE 'on_track'
         END AS urgency,
         o.name AS org_name
-      FROM dsar_requests d
-      LEFT JOIN organizations o ON o.id = d.org_id
-      WHERE d.status NOT IN ('completed', 'rejected', 'withdrawn')
-      ORDER BY d.deadline_at ASC
+      FROM citizen_requests d
+      LEFT JOIN organizations o ON o.id = d.organization_id
+      WHERE d.status NOT IN ('completed', 'rejected')
+      ORDER BY d.response_deadline ASC NULLS LAST
     `);
   }),
 
@@ -134,13 +137,13 @@ export const dsarAutomationRouter = router({
     .input(z.object({ dsarId: z.number(), assigneeId: z.number() }))
     .mutation(async ({ input }) => {
       await rawQuery(
-        `UPDATE dsar_requests SET assigned_to = $1, status = 'in_progress', updated_at = NOW() WHERE id = $2`,
+        `UPDATE citizen_requests SET assigned_to = $1, status = 'in_progress', updated_at = NOW() WHERE id = $2`,
         [input.assigneeId, input.dsarId]
       );
       await rawQuery(
-        `INSERT INTO dsar_audit_log (dsar_id, action, actor_id, created_at)
-         VALUES ($1, 'auto_assigned', $2, NOW())`,
-        [input.dsarId, input.assigneeId]
+        `INSERT INTO audit_logs (action, resource_type, resource_id, user_id, details, created_at)
+         VALUES ('dsar_auto_assigned', 'citizen_requests', $1, $2, $3, NOW())`,
+        [String(input.dsarId), input.assigneeId, JSON.stringify({ dsarId: input.dsarId, assigneeId: input.assigneeId })]
       );
       emitMutationEvent(EVENTS.COMPLIANCE_REMEDIATION, { action: "compliance_remediation", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { assigned: true };
@@ -155,12 +158,12 @@ export const dsarAutomationRouter = router({
     .mutation(async ({ input }) => {
       for (const id of input.dsarIds) {
         await rawQuery(
-          `UPDATE dsar_requests
-           SET deadline_at = deadline_at + ($1 || ' days')::INTERVAL,
+          `UPDATE citizen_requests
+           SET response_deadline = response_deadline + ($1 || ' days')::INTERVAL,
                extension_reason = $2,
                extended_at = NOW(),
                updated_at = NOW()
-           WHERE id = $3`,
+           WHERE id = $3 AND status NOT IN ('completed', 'rejected')`,
           [input.extensionDays, input.reason, id]
         );
       }
@@ -171,14 +174,14 @@ export const dsarAutomationRouter = router({
   getWorkflowStats: protectedProcedure.query(async () => {
     const [stats] = await rawQuery(`
       SELECT
-        COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+        COUNT(*) FILTER (WHERE status = 'submitted') AS pending,
         COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress,
         COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-        COUNT(*) FILTER (WHERE status = 'overdue' OR deadline_at < NOW()) AS overdue,
+        COUNT(*) FILTER (WHERE status = 'overdue' OR (response_deadline < NOW() AND status NOT IN ('completed','rejected'))) AS overdue,
         AVG(EXTRACT(EPOCH FROM (completed_at - submitted_at)) / 86400)
           FILTER (WHERE status = 'completed') AS avg_completion_days,
-        COUNT(*) FILTER (WHERE deadline_at < NOW() + INTERVAL '7 days' AND status NOT IN ('completed','rejected')) AS due_soon
-      FROM dsar_requests
+        COUNT(*) FILTER (WHERE response_deadline < NOW() + INTERVAL '7 days' AND status NOT IN ('completed','rejected')) AS due_soon
+      FROM citizen_requests
     `);
     return stats;
   }),
@@ -606,23 +609,53 @@ export const finePaymentRouter = router({
       paymentReference: z.string().min(5),
       paymentDate: z.string(),
     }))
-    .mutation(async ({ input }) => {
-      const [fine] = await rawQuery(
-        `SELECT amount, status FROM enforcement_fines WHERE id = $1`,
+    .mutation(async ({ input, ctx }) => {
+      // Finance-function authorization: recording settlement of an enforcement
+      // fine is restricted to platform admins and NDPC finance officers
+      // (government_staff role — there is no separate 'finance' role in the
+      // user_role enum; see drizzle/migrations/0020_user_role_enum_extend.sql).
+      if (!["admin", "government_staff"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only admin or finance (government_staff) roles may record fine payments" });
+      }
+      // Uses the pool directly rather than the rawQuery helper so database
+      // errors surface instead of being swallowed into empty results.
+      const pool = getPool();
+      if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const fineRes = await pool.query(
+        `SELECT amount, COALESCE(amount_paid, 0) AS amount_paid, status, payment_reference FROM enforcement_fines WHERE id = $1`,
         [input.fineId]
       );
+      const fine = fineRes.rows[0];
       if (!fine) throw new TRPCError({ code: "NOT_FOUND", message: "Fine not found" });
 
-      const newStatus = input.amount >= fine.amount ? "paid" : "partial";
-      await rawQuery(
+      // Idempotency: payment_reference is unique (migration 0075). Replaying
+      // the same reference against the same fine returns the current state;
+      // using it against a different fine is a conflict, not a double-post.
+      if (fine.payment_reference === input.paymentReference) {
+        return { status: fine.status, paymentReference: input.paymentReference, idempotent: true };
+      }
+      const refOwner = await pool.query(
+        `SELECT id FROM enforcement_fines WHERE payment_reference = $1 AND id <> $2`,
+        [input.paymentReference, input.fineId]
+      );
+      if (refOwner.rows[0]) {
+        throw new TRPCError({ code: "CONFLICT", message: "Payment reference already recorded against another fine" });
+      }
+
+      // F-25: status must be computed from the CUMULATIVE amount paid, not
+      // from this installment's amount alone.
+      const totalPaid = Number(fine.amount_paid) + input.amount;
+      const newStatus = totalPaid >= Number(fine.amount) ? "paid" : "partial";
+      await pool.query(
         `UPDATE enforcement_fines
-         SET status = $1, paid_at = $2, payment_reference = $3, payment_method = $4,
+         SET status = $1, paid_at = CASE WHEN $1 = 'paid' THEN $2 ELSE paid_at END,
+             payment_reference = $3, payment_method = $4,
              amount_paid = COALESCE(amount_paid, 0) + $5, updated_at = NOW()
          WHERE id = $6`,
         [newStatus, input.paymentDate, input.paymentReference, input.paymentMethod, input.amount, input.fineId]
       );
       emitMutationEvent(EVENTS.COMPLIANCE_REMEDIATION, { action: "compliance_remediation", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return { status: newStatus, paymentReference: input.paymentReference };
+      return { status: newStatus, paymentReference: input.paymentReference, amountPaid: totalPaid };
     }),
 
   getPaymentStats: protectedProcedure.query(async () => {
@@ -672,7 +705,12 @@ export const onboardingAutomationRouter = router({
   getOrgProgress: protectedProcedure
     .input(z.object({ orgId: z.number().optional() }))
     .query(async ({ input, ctx }) => {
-      const orgId = input.orgId || ctx.user.id;
+      // Resolve the organization from the caller's profile — a user id is NOT
+      // an organization id and must never be used as one.
+      const orgId = input.orgId ?? ctx.user.organizationId ?? undefined;
+      if (orgId === undefined || orgId === null) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "orgId is required when the caller has no organization" });
+      }
       const steps = [
         { key: "profile_complete", label: "Organisation Profile Complete", weight: 10 },
         { key: "dpo_appointed", label: "DPO Appointed & Registered", weight: 15 },
@@ -687,10 +725,10 @@ export const onboardingAutomationRouter = router({
 
       // Check actual completion from DB
       const [org] = await rawQuery(`SELECT * FROM organizations WHERE id = $1`, [orgId]);
-      const dsarCount = await rawQuery(`SELECT COUNT(*) FROM dsar_requests WHERE org_id = $1`, [orgId]);
+      const dsarCount = await rawQuery(`SELECT COUNT(*) FROM citizen_requests WHERE organization_id = $1`, [orgId]);
       const ropaCount = await rawQuery(`SELECT COUNT(*) FROM ropa_records WHERE org_id = $1`, [orgId]);
-      const dpoCount = await rawQuery(`SELECT COUNT(*) FROM dpo_registry WHERE org_id = $1`, [orgId]);
-      const trainingCount = await rawQuery(`SELECT COUNT(*) FROM staff_training WHERE org_id = $1`, [orgId]);
+      const dpoCount = await rawQuery(`SELECT COUNT(*) FROM dpo_appointments WHERE organization_id = $1 AND is_active = true`, [orgId]);
+      const trainingCount = await rawQuery(`SELECT COUNT(*) FROM staff_training_records WHERE organization_id = $1 AND training_status = 'completed'`, [orgId]);
 
       const completed: Record<string, boolean> = {
         profile_complete: !!org,

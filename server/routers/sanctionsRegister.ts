@@ -13,11 +13,12 @@ import { logger } from "../logger";
 import { logAuditEvent } from "../middlewareHelpers";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
+import { encryptField } from "../encryption";
 import { withCache, CK, TTL } from "../queryCache";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
-  if (!pool) return [];
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   try {
     const safeParams = params.map((p) =>
       Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
@@ -28,7 +29,7 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return autoDecryptRows(query, result.rows ?? []);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[sanctions] DB query error");
-    return [];
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
   }
 }
 
@@ -37,13 +38,18 @@ const NOTICE_TYPES = ["final_order", "undertaking", "administrative_fine", "repr
 // Computed sanction-period expiry fields, attached to any notice row.
 function withExpiryFields<T extends Record<string, any>>(row: T) {
   const now = new Date();
-  const start = row.sanction_start ? new Date(row.sanction_start) : null;
+  // A NULL sanction_start means the sanction took effect at publication and
+  // runs until sanction_end — previously such rows displayed as "not active"
+  // (indefinite-sanction display bug).
+  const start = row.sanction_start ? new Date(row.sanction_start) : (row.published_at ? new Date(row.published_at) : null);
   const end = row.sanction_end ? new Date(row.sanction_end) : null;
   const sanctionActive = !!start && start <= now && (!end || end >= now);
   const sanctionExpired = !!end && end < now;
+  // No end date => indefinite sanction (in force until remediated/lifted).
+  const sanctionIndefinite = !!start && !end && !sanctionExpired;
   const daysRemaining = end && end >= now ? Math.ceil((end.getTime() - now.getTime()) / 86400000) : null;
   const daysSinceStart = start ? Math.max(0, Math.floor((now.getTime() - start.getTime()) / 86400000)) : null;
-  return { ...row, sanction_active: sanctionActive, sanction_expired: sanctionExpired, days_remaining: daysRemaining, days_since_start: daysSinceStart };
+  return { ...row, sanction_active: sanctionActive, sanction_expired: sanctionExpired, sanction_indefinite: sanctionIndefinite, days_remaining: daysRemaining, days_since_start: daysSinceStart };
 }
 
 export const sanctionsRegisterRouter = router({
@@ -145,7 +151,7 @@ export const sanctionsRegisterRouter = router({
       const rows = await exec(
         `INSERT INTO delisting_requests (notice_id, organization_id, applicant_name, applicant_email, remediation_summary, evidence_refs)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, status, submitted_at`,
-        [input.noticeId, notice[0].organization_id ?? null, input.applicantName, input.applicantEmail, input.remediationSummary, input.evidenceRefs]
+        [input.noticeId, notice[0].organization_id ?? null, encryptField(input.applicantName), encryptField(input.applicantEmail), input.remediationSummary, input.evidenceRefs]
       );
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "sanctions_delisting_requested", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return rows[0];
@@ -268,5 +274,20 @@ export const sanctionsRegisterRouter = router({
       await logAuditEvent(`sanctions.delisting_${input.decision}`, "delisting_request", input.id, userId, { noticeId: reqs[0].notice_id });
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "sanctions_delisting_reviewed", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true, decision: input.decision };
+    }),
+
+  /**
+   * Expiry sweep (admin / cron): flips published notices whose sanction_end
+   * has passed to status='expired'. Idempotent — safe to run daily.
+   */
+  expireSweep: adminProcedure
+    .mutation(async ({ ctx }) => {
+      const rows = await exec(
+        `UPDATE enforcement_notices SET status = 'expired', updated_at = NOW()
+         WHERE status = 'published' AND sanction_end IS NOT NULL AND sanction_end < CURRENT_DATE
+         RETURNING id`,
+      );
+      await logAuditEvent("sanctions.expire_sweep", "enforcement_notice", "", String((ctx as any).user?.id ?? ""), { expired: rows.length });
+      return { expired: rows.length };
     }),
 });

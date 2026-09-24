@@ -49,16 +49,35 @@ export interface RemitaGateway {
   checkStatus(rrr: string): Promise<GatewayStatusResult>;
 }
 
-const WEBHOOK_SECRET = process.env.REMITA_WEBHOOK_SECRET ?? "ndsep-dev-remita-secret";
+// FAIL CLOSED: no hardcoded webhook-secret default. When REMITA_WEBHOOK_SECRET
+// is unset, signature verification always fails and signing throws, so a
+// misconfigured deployment rejects gateway webhooks instead of accepting
+// attacker-forged settlements signed with a known dev secret.
+const WEBHOOK_SECRET = process.env.REMITA_WEBHOOK_SECRET;
 
-/** HMAC-SHA256 signature over a payload (mock scheme; PROD uses HMAC-SHA512 — see header). */
-export function signGatewayPayload(payload: string, secret: string = WEBHOOK_SECRET): string {
-  return createHmac("sha256", secret).update(payload).digest("hex");
+if (!WEBHOOK_SECRET) {
+  logger.error(
+    "[remita] REMITA_WEBHOOK_SECRET is not configured — gateway webhook verification fails closed (all signatures rejected)",
+  );
 }
 
-/** Constant-time verification of a gateway webhook signature. */
-export function verifyGatewaySignature(payload: string, signature: string, secret: string = WEBHOOK_SECRET): boolean {
-  const expected = signGatewayPayload(payload, secret);
+/** HMAC-SHA256 signature over a payload (mock scheme; PROD uses HMAC-SHA512 — see header). */
+export function signGatewayPayload(payload: string, secret?: string): string {
+  const key = secret ?? WEBHOOK_SECRET;
+  if (!key) {
+    throw new Error("REMITA_WEBHOOK_SECRET is not configured; refusing to sign gateway payloads");
+  }
+  return createHmac("sha256", key).update(payload).digest("hex");
+}
+
+/** Constant-time verification of a gateway webhook signature. Fails closed when unconfigured. */
+export function verifyGatewaySignature(payload: string, signature: string, secret?: string): boolean {
+  const key = secret ?? WEBHOOK_SECRET;
+  if (!key) {
+    logger.error("[remita] REMITA_WEBHOOK_SECRET unset — rejecting webhook signature (fail closed)");
+    return false;
+  }
+  const expected = signGatewayPayload(payload, key);
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(signature ?? "", "utf8");
   if (a.length !== b.length) return false;

@@ -606,7 +606,9 @@ export const whistleblowerRouter = router({
     .mutation(async ({ input }) => {
       const p = pool();
       try {
-        const ref = `WBR-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+        // Per-year DB-sequence reference (migration 0077) — no Date.now() suffix.
+        const seqRow = await p.query(`SELECT nextval('ndsep_wb_report_ref_seq') AS n`);
+        const ref = `WBR-${new Date().getFullYear()}-${String(seqRow.rows[0]?.n ?? 1).padStart(5, "0")}`;
         const priority = ["data_breach", "bribery"].includes(input.category) ? "critical" : "medium";
         const q = await p.query(
           `INSERT INTO whistleblower_reports (report_ref, category, org_id, description, is_anonymous, reporter_email, evidence_urls, priority)
@@ -1250,10 +1252,10 @@ export const finesRouter = router({
           COALESCE(ef.fine_reference, CONCAT('NDPA-FINE-', LPAD(ef.id::text, 6, '0'))) as fine_ref,
           COALESCE(ef.ndpc_reference, CONCAT('NDPC/DEC/', EXTRACT(YEAR FROM ef.issued_at), '/', LPAD(ef.id::text, 4, '0'))) as ndpc_ref
           FROM enforcement_fines ef
-          LEFT JOIN organizations o ON ef.organization_id = o.id
+          LEFT JOIN organizations o ON ef.org_id = o.id
           WHERE 1=1`;
         const params: unknown[] = [];
-        if (input.orgId) { params.push(input.orgId); q += ` AND ef.organization_id = $${params.length}`; }
+        if (input.orgId) { params.push(input.orgId); q += ` AND ef.org_id = $${params.length}`; }
         if (input.status) { params.push(input.status); q += ` AND ef.status = $${params.length}`; }
         q += " ORDER BY ef.issued_at DESC";
         const result = await p.query(q, params);
@@ -1294,7 +1296,7 @@ export const finesRouter = router({
         const dueDate = new Date();
         dueDate.setDate(dueDate.getDate() + 30);
         const q = await p.query(
-          `INSERT INTO enforcement_fines (organization_id, amount, currency, status, due_date)
+          `INSERT INTO enforcement_fines (org_id, amount, currency, status, due_date)
            VALUES ($1, $2, 'NGN', 'pending', $3) RETURNING *`,
           [input.orgId, input.fineAmountNgn, dueDate]
         );
@@ -1307,7 +1309,7 @@ export const finesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const p = pool();
       try {
-        const fine = await p.query(`SELECT ef.*, o.name as org_name FROM enforcement_fines ef LEFT JOIN organizations o ON ef.organization_id = o.id WHERE ef.id = $1`, [input.fineId]);
+        const fine = await p.query(`SELECT ef.*, o.name as org_name FROM enforcement_fines ef LEFT JOIN organizations o ON ef.org_id = o.id WHERE ef.id = $1`, [input.fineId]);
         if (!fine.rows[0]) throw new Error("Fine not found");
         const f = fine.rows[0];
         // Create Stripe checkout session

@@ -79,18 +79,20 @@ export async function startTemporalWorker(): Promise<void> {
     connectionOptions as Parameters<typeof NativeConnection.connect>[0]
   );
 
-  const [accreditationActivities, breachActivities] = await Promise.all([
+  const [accreditationActivities, breachActivities, dsarActivities] = await Promise.all([
     import("./activities/accreditation"),
     import("./activities/breachNotification"),
+    import("./activities/dsarFulfillment"),
   ]);
   const workflowsPath = require.resolve("./workflows");
   const workers = await Promise.all([
     Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.accreditation, connection, namespace: TEMPORAL_NAMESPACE, activities: accreditationActivities }),
     Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.breach, connection, namespace: TEMPORAL_NAMESPACE, activities: breachActivities }),
+    Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.dsar, connection, namespace: TEMPORAL_NAMESPACE, activities: dsarActivities }),
   ]);
 
   logger.info(
-    { taskQueues: [temporalConfig.taskQueues.accreditation, temporalConfig.taskQueues.breach], namespace: TEMPORAL_NAMESPACE },
+    { taskQueues: [temporalConfig.taskQueues.accreditation, temporalConfig.taskQueues.breach, temporalConfig.taskQueues.dsar], namespace: TEMPORAL_NAMESPACE },
     "[Temporal] Workers started — listening for durable workflow tasks"
   );
   await Promise.all(workers.map((worker) => worker.run()));
@@ -178,8 +180,13 @@ export async function startBreachNotificationWorkflow(params: {
       ceoEmail: params.ceoEmail,
       severity: params.severity,
       estimatedAffectedRecords: params.estimatedAffectedRecords,
-      detectedAt: new Date().toISOString(),
+      // Must match BreachNotificationInput.discoveredAt in
+      // workflows/breachNotification.ts (the workflow rejects anything else).
+      discoveredAt: new Date().toISOString(),
     }],
+    // The workflow waits through 24h + 36h + 12h deadline conditions; allow
+    // comfortably more than the 72-hour statutory window.
+    workflowExecutionTimeout: "7 days",
   });
   return { workflowId: handle.workflowId };
 }

@@ -13,11 +13,12 @@ import { logger } from "../logger";
 import { logAuditEvent } from "../middlewareHelpers";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
+import { encryptField } from "../encryption";
 import { withCache, CK, TTL } from "../queryCache";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
-  if (!pool) return [];
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   try {
     const safeParams = params.map((p) =>
       Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
@@ -28,7 +29,7 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return autoDecryptRows(query, result.rows ?? []);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[election] DB query error");
-    return [];
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
   }
 }
 
@@ -92,8 +93,8 @@ export const electionOversightRouter = router({
            party_or_campaign, platform, description, evidence_refs, region_state)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          RETURNING id, reference_number, status, submitted_at`,
-        [period.id, ref, input.isAnonymous ? null : input.reporterName ?? null,
-         input.isAnonymous ? null : input.reporterEmail ?? null, input.isAnonymous,
+        [period.id, ref, input.isAnonymous ? null : (input.reporterName ? encryptField(input.reporterName) : null),
+         input.isAnonymous ? null : (input.reporterEmail ? encryptField(input.reporterEmail) : null), input.isAnonymous,
          input.partyOrCampaign, input.platform, input.description, input.evidenceRefs, input.regionState ?? null]
       );
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "election_microtargeting_report", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));

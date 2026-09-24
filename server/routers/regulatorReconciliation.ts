@@ -84,6 +84,23 @@ async function requireRegulatorRead(ctx: { user: { id: number | string; role?: s
   }
 }
 
+/**
+ * Referral-mutation guard: sending/acknowledging/responding to/resolving
+ * inter-regulator case referrals is restricted to NDPC staff
+ * (admin/government_staff) and regulator-role users.
+ */
+function requireStaffOrRegulator(ctx: { user: { role?: string } }): void {
+  if (!ctx.user.role || !["admin", "government_staff", "regulator"].includes(ctx.user.role)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Staff or regulator role required" });
+  }
+}
+
+/** Resolve the caller's bound regulator code, if any (users.regulator_code, migration 0077). */
+async function callerRegulatorCode(userId: number | string): Promise<string | null> {
+  const rows = await exec(`SELECT regulator_code FROM users WHERE id = $1`, [toIntOrNull(String(userId))]);
+  return rows[0]?.regulator_code ?? null;
+}
+
 export const regulatorReconciliationRouter = router({
   // ─── Jurisdiction conflicts ───────────────────────────────────────────────
 
@@ -164,10 +181,13 @@ export const regulatorReconciliationRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      requireStaffOrRegulator(ctx);
       if (input.fromRegulator === input.toRegulator) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "from_regulator and to_regulator must differ" });
       }
-      const ref = `REF-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      // Per-year DB-sequence reference (migration 0077) — no Date.now() suffix.
+      const [seqRow] = await exec(`SELECT nextval('ndsep_referral_ref_seq') AS n`);
+      const ref = `REF-${new Date().getFullYear()}-${String(seqRow?.n ?? 1).padStart(5, "0")}`;
       const rows = await exec(
         `INSERT INTO case_referrals (referral_ref, from_regulator, to_regulator, matter_ref, case_payload, notes)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -183,6 +203,7 @@ export const regulatorReconciliationRouter = router({
   acknowledgeReferral: protectedProcedure
     .input(z.object({ referralRef: z.string().min(4) }))
     .mutation(async ({ input, ctx }) => {
+      requireStaffOrRegulator(ctx);
       const rows = await exec(
         `UPDATE case_referrals SET status = 'acknowledged', acknowledged_at = NOW(), updated_at = NOW()
          WHERE referral_ref = $1 AND status = 'sent' RETURNING *`,
@@ -201,6 +222,7 @@ export const regulatorReconciliationRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      requireStaffOrRegulator(ctx);
       const rows = await exec(
         `UPDATE case_referrals
          SET status = $1, notes = COALESCE($2, notes), responded_by = $3, responded_at = NOW(), updated_at = NOW()
@@ -218,6 +240,7 @@ export const regulatorReconciliationRouter = router({
   resolveReferral: protectedProcedure
     .input(z.object({ referralRef: z.string().min(4), notes: z.string().optional() }))
     .mutation(async ({ input, ctx }) => {
+      requireStaffOrRegulator(ctx);
       const rows = await exec(
         `UPDATE case_referrals
          SET status = 'resolved', notes = COALESCE($1, notes), resolved_at = NOW(), updated_at = NOW()
@@ -258,6 +281,14 @@ export const regulatorReconciliationRouter = router({
     .input(z.object({ regulator: regulatorEnum }))
     .query(async ({ input, ctx }) => {
       await requireRegulatorRead(ctx);
+      // Dashboard scoping: a regulator-role caller bound to a regulator code
+      // (users.regulator_code) may only view its own slice; admins see all.
+      if (ctx.user.role !== "admin") {
+        const bound = await callerRegulatorCode(ctx.user.id);
+        if (bound && bound !== input.regulator) {
+          throw new TRPCError({ code: "FORBIDDEN", message: `Your account is bound to regulator '${bound}'` });
+        }
+      }
       const [conflictStats] = await exec(
         `SELECT
            COUNT(*) AS total_conflicts,

@@ -314,13 +314,20 @@ export async function emitMutationEvent(
  * Returns true only for an explicit Permify allow decision. Upstream failures
  * and malformed responses are denied so protected mutations fail closed.
  */
+/** Stable Permify instance id for platform-domain singleton resources. */
+const PLATFORM_RESOURCE_INSTANCE = "ndsep";
+
 export async function checkPermission(
   userId: string | number,
   resource: string,
   action: string
 ): Promise<boolean> {
   try {
-    const result = await permifyCheck(resource, String(userId), action, `user:${userId}`);
+    // Platform-domain resources (admin, compliance, enforcement, banking,
+    // audit) are singletons: tuples are provisioned against the stable
+    // instance id "ndsep" (see permifySync.syncPlatformRole), so checks must
+    // target the same instance — never the caller's user id.
+    const result = await permifyCheck(resource, PLATFORM_RESOURCE_INSTANCE, action, `user:${userId}`);
     return result === true;
   } catch {
     return false;

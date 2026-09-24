@@ -127,22 +127,207 @@ export async function acknowledgeActivity(input: Record<string, unknown>): Promi
   return { success: true, step: "acknowledge", duration_ms: Date.now() - start, output: { acknowledged: true, acknowledgmentSent: true } };
 }
 
+/**
+ * Identity verification is a regulatory gate: NDPA requires reasonable
+ * certainty of the requester's identity before disclosing personal data.
+ * Without an env-configured verification provider this activity must NOT
+ * claim success — it returns verified:false with reason
+ * "manual_review_required" so the workflow surfaces the request for staff
+ * review instead of auto-fulfilling.
+ *
+ * Configure DSAR_IDENTITY_VERIFY_URL (optionally DSAR_IDENTITY_VERIFY_TOKEN)
+ * to integrate a real provider. The provider endpoint receives the request
+ * context and must respond with { "verified": boolean, "reason"?: string }.
+ */
 export async function identityVerifyActivity(input: Record<string, unknown>): Promise<ActivityResult> {
   const start = Date.now();
   logger.info({ requestId: input.requestId }, "[Temporal:DSAR] Verifying identity");
-  return { success: true, step: "identity-verify", duration_ms: Date.now() - start, output: { verified: true } };
+  const providerUrl = process.env.DSAR_IDENTITY_VERIFY_URL;
+
+  if (!providerUrl) {
+    return {
+      success: true,
+      step: "identity-verify",
+      duration_ms: Date.now() - start,
+      output: { verified: false, reason: "manual_review_required" },
+    };
+  }
+
+  try {
+    const res = await fetch(providerUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.DSAR_IDENTITY_VERIFY_TOKEN
+          ? { Authorization: `Bearer ${process.env.DSAR_IDENTITY_VERIFY_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        requestId: input.requestId,
+        subjectId: input.subjectId,
+        citizenEmail: input.citizenEmail,
+        citizenNin: input.citizenNin,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`identity provider returned HTTP ${res.status}`);
+    const body = (await res.json()) as { verified?: boolean; reason?: string };
+    // Fail closed: anything other than an explicit verified:true is unverified.
+    const verified = body.verified === true;
+    return {
+      success: true,
+      step: "identity-verify",
+      duration_ms: Date.now() - start,
+      output: { verified, reason: verified ? "provider_verified" : (body.reason ?? "provider_rejected") },
+    };
+  } catch (error) {
+    logger.warn({ err: error }, "[Temporal:DSAR] Identity provider unreachable — routing to manual review");
+    return {
+      success: true,
+      step: "identity-verify",
+      duration_ms: Date.now() - start,
+      output: { verified: false, reason: "manual_review_required" },
+    };
+  }
 }
 
+/**
+ * Locate the subject's personal data records across the platform's own
+ * stores. Reports real row counts; a database failure is an activity error
+ * (not a silent zero) so the workflow never reports "no data found" when it
+ * actually could not search.
+ */
 export async function dataLocateActivity(input: Record<string, unknown>): Promise<ActivityResult> {
   const start = Date.now();
   logger.info({ requestId: input.requestId }, "[Temporal:DSAR] Locating personal data across systems");
-  return { success: true, step: "data-locate", duration_ms: Date.now() - start, output: { systemsSearched: 0, recordsFound: 0 } };
+  const { getSharedPool } = await import("./db");
+  const pool = getSharedPool();
+  const email = typeof input.citizenEmail === "string" ? input.citizenEmail : null;
+  const nin = typeof input.citizenNin === "string" ? input.citizenNin : null;
+
+  const counts: Record<string, number> = {};
+  let systemsSearched = 0;
+  let recordsFound = 0;
+  const search = async (system: string, sqlText: string, params: unknown[]) => {
+    systemsSearched++;
+    const { rows } = await pool.query(sqlText, params);
+    const n = Number(rows[0]?.count ?? 0);
+    counts[system] = n;
+    recordsFound += n;
+  };
+
+  try {
+    if (email || nin) {
+      await search(
+        "citizen_requests",
+        `SELECT COUNT(*) AS count FROM citizen_requests
+         WHERE ($1::text IS NOT NULL AND citizen_email = $1) OR ($2::text IS NOT NULL AND citizen_nin = $2)`,
+        [email, nin]
+      );
+      await search(
+        "consent_records",
+        `SELECT COUNT(*) AS count FROM consent_records
+         WHERE ($1::text IS NOT NULL AND data_subject_email = $1) OR ($2::text IS NOT NULL AND data_subject_nin = $2)`,
+        [email, nin]
+      );
+    }
+    const orgId = typeof input.orgId === "number" ? input.orgId : Number(input.orgId);
+    if (Number.isFinite(orgId)) {
+      await search(
+        "organizations",
+        `SELECT COUNT(*) AS count FROM organizations WHERE id = $1`,
+        [orgId]
+      );
+    }
+  } catch (error) {
+    return {
+      success: false,
+      step: "data-locate",
+      duration_ms: Date.now() - start,
+      error: `Data locate failed: ${error instanceof Error ? error.message : String(error)}`,
+      output: { systemsSearched, recordsFound, counts },
+    };
+  }
+
+  return {
+    success: true,
+    step: "data-locate",
+    duration_ms: Date.now() - start,
+    output: { systemsSearched, recordsFound, counts },
+  };
 }
 
+/**
+ * Delivery is only claimed when the upstream steps actually completed:
+ * identity must be verified and the data-locate step must have run. Anything
+ * else returns delivered:false with an explicit reason so the workflow result
+ * reflects the incomplete state honestly.
+ */
 export async function dataDeliverActivity(input: Record<string, unknown>): Promise<ActivityResult> {
   const start = Date.now();
   logger.info({ requestId: input.requestId, email: input.citizenEmail }, "[Temporal:DSAR] Delivering data to subject");
-  return { success: true, step: "deliver", duration_ms: Date.now() - start, output: { delivered: true, format: "json+pdf" } };
+
+  if (input.identityVerified !== true) {
+    return {
+      success: true,
+      step: "deliver",
+      duration_ms: Date.now() - start,
+      output: { delivered: false, reason: "identity_not_verified" },
+    };
+  }
+  if (typeof input.recordsFound !== "number") {
+    return {
+      success: true,
+      step: "deliver",
+      duration_ms: Date.now() - start,
+      output: { delivered: false, reason: "data_locate_incomplete" },
+    };
+  }
+
+  const deliveryUrl = process.env.DSAR_DELIVERY_URL;
+  if (!deliveryUrl) {
+    // No delivery channel configured — do not fabricate a delivery.
+    return {
+      success: true,
+      step: "deliver",
+      duration_ms: Date.now() - start,
+      output: { delivered: false, reason: "delivery_channel_not_configured", recordsFound: input.recordsFound },
+    };
+  }
+
+  try {
+    const res = await fetch(deliveryUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(process.env.DSAR_DELIVERY_TOKEN
+          ? { Authorization: `Bearer ${process.env.DSAR_DELIVERY_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify({
+        requestId: input.requestId,
+        citizenEmail: input.citizenEmail,
+        recordsFound: input.recordsFound,
+        requestType: input.requestType,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`delivery endpoint returned HTTP ${res.status}`);
+    return {
+      success: true,
+      step: "deliver",
+      duration_ms: Date.now() - start,
+      output: { delivered: true, format: "json", recordsFound: input.recordsFound },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      step: "deliver",
+      duration_ms: Date.now() - start,
+      error: `Delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+      output: { delivered: false },
+    };
+  }
 }
 
 // ── Activity Registry ────────────────────────────────────────────────────────

@@ -21,6 +21,8 @@ import { router, publicProcedure, protectedProcedure, adminProcedure } from "../
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
+import { autoDecryptRows } from "../encryptionMiddleware";
+import { encryptField } from "../encryption";
 
 const TOKEN_TTL_DAYS = 90;
 
@@ -34,7 +36,7 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
         : p
     );
     const result = await pool.query(query, safeParams);
-    return result.rows ?? [];
+    return autoDecryptRows(query, result.rows ?? []);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[wbChannel] DB query error");
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
@@ -116,7 +118,9 @@ export const whistleblowerChannelRouter = router({
       evidenceUrls: z.array(z.string()).default([]),
     }))
     .mutation(async ({ input }) => {
-      const ref = `WBR-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      // Per-year DB-sequence reference (migration 0077) — no Date.now() suffix.
+      const [seqRow] = await exec(`SELECT nextval('ndsep_wb_report_ref_seq') AS n`);
+      const ref = `WBR-${new Date().getFullYear()}-${String(seqRow?.n ?? 1).padStart(5, "0")}`;
       const priority = ["data_breach", "bribery"].includes(input.category) ? "critical" : "medium";
       const rows = await exec(
         `INSERT INTO whistleblower_reports (report_ref, category, org_id, description, is_anonymous, reporter_email, evidence_urls, priority)
@@ -193,7 +197,7 @@ export const whistleblowerChannelRouter = router({
       const rows = await exec(
         `INSERT INTO whistleblower_messages (report_id, sender, body, encrypted)
          VALUES ($1, 'reporter', $2, true) RETURNING id, sender, created_at`,
-        [report.report_id, input.body],
+        [report.report_id, encryptField(input.body)],
       );
       await logAudit("whistleblower.reporter_message", "whistleblower_report", report.report_id, null, { report_ref: report.report_ref });
       return { success: true, message: rows[0] };
@@ -211,7 +215,7 @@ export const whistleblowerChannelRouter = router({
       const rows = await exec(
         `INSERT INTO whistleblower_messages (report_id, sender, body, encrypted)
          VALUES ($1, 'case_officer', $2, true) RETURNING id, sender, created_at`,
-        [report[0].id, input.body],
+        [report[0].id, encryptField(input.body)],
       );
       await logAudit("whistleblower.officer_message", "whistleblower_report", report[0].id, String(ctx.user.id), { report_ref: input.reportRef });
       emitMutationEvent("ndsep.whistleblower.channel", { action: "officerReply", reportRef: input.reportRef, ts: new Date().toISOString() })

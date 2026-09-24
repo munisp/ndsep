@@ -166,15 +166,25 @@ export function demoLoginGuard(req: Request, res: Response, next: NextFunction):
       res.status(403).json({ error: "Demo login is disabled in production" });
       return;
     }
-    // Even when enabled in production, restrict to specific IPs
+    // Fail closed: enabling demo login in production REQUIRES a non-empty IP
+    // allowlist. An empty allowlist must never mean "allow everyone".
     const allowedIps = (process.env.DEMO_LOGIN_ALLOWED_IPS ?? "").split(",").map(s => s.trim()).filter(Boolean);
-    if (allowedIps.length > 0) {
-      const clientIp = req.ip ?? req.socket.remoteAddress ?? "";
-      if (!allowedIps.includes(clientIp)) {
-        logger.warn({ ip: clientIp }, "[Security] Demo login blocked — IP not in allowlist");
-        res.status(403).json({ error: "Demo login restricted to authorized IPs" });
-        return;
-      }
+    if (allowedIps.length === 0) {
+      logger.error({ ip: req.ip }, "[Security] Demo login blocked in production — DEMO_LOGIN_ALLOWED_IPS is not configured");
+      res.status(403).json({ error: "Demo login is not configured for production use" });
+      return;
+    }
+    const clientIp = req.ip ?? req.socket.remoteAddress ?? "";
+    if (!allowedIps.includes(clientIp)) {
+      logger.warn({ ip: clientIp }, "[Security] Demo login blocked — IP not in allowlist");
+      res.status(403).json({ error: "Demo login restricted to authorized IPs" });
+      return;
+    }
+    // Never mint admin-role demo sessions in production.
+    if (req.query.role === "admin") {
+      logger.warn({ ip: clientIp }, "[Security] Admin demo login blocked in production");
+      res.status(403).json({ error: "Admin demo sessions are not allowed in production" });
+      return;
     }
   }
   next();

@@ -10,7 +10,10 @@
  * - Keycloak: token introspection and session management
  */
 import { z } from "zod";
+import crypto from "crypto";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { ENV } from "../_core/env";
 import { startWorkflow, describeWorkflow, listWorkflows } from "../temporal";
 import { opensearchGlobalSearch, opensearchSearch, opensearchIndex } from "../middlewareExtensions";
 import { openappsecHealth, listPolicies, getRecentThreats, getThreatStats, blockIp, unblockIp } from "../openappsec";
@@ -55,16 +58,30 @@ export const temporalRouter = router({
       affectedSubjects: z.number(),
     }))
     .mutation(async ({ input }) => {
-      return startWorkflow("breach-response", {
+      // Must match the workflow type registered on the ndsep-breach task
+      // queue (workers/temporal/workflows/breachNotification.ts) and its
+      // BreachNotificationInput shape.
+      const { getSharedPool } = await import("../db");
+      const pool = getSharedPool();
+      const dpoRes = await pool.query(
+        `SELECT dpo_email FROM dpo_appointments WHERE organization_id = $1 AND is_active = true ORDER BY appointed_at DESC LIMIT 1`,
+        [input.orgId]
+      );
+      const orgRes = await pool.query(`SELECT contact_email FROM organizations WHERE id = $1`, [input.orgId]);
+      const orgEmail = orgRes.rows[0]?.contact_email ?? "";
+      const dpoEmail = dpoRes.rows[0]?.dpo_email ?? orgEmail;
+      const ceoEmail = orgEmail || dpoEmail;
+      return startWorkflow("breachNotificationWorkflow", {
         workflowId: `breach-${input.breachId}`,
         taskQueue: "ndsep-breach",
         input: {
-          breachId: input.breachId,
+          breachId: Number(input.breachId),
           orgId: input.orgId,
+          dpoEmail,
+          ceoEmail,
           severity: input.severity,
-          affectedSubjects: input.affectedSubjects,
-          slaDeadlineHours: 72,
-          steps: ["containment", "assessment", "ndpc-notification", "subject-notification", "remediation"],
+          estimatedAffectedRecords: input.affectedSubjects,
+          discoveredAt: new Date().toISOString(),
         },
         executionTimeoutSeconds: 7 * 24 * 3600, // 7 days max
       });
@@ -100,7 +117,9 @@ export const temporalRouter = router({
       orgId: z.number(),
     }))
     .mutation(async ({ input }) => {
-      return startWorkflow("dsar-fulfillment", {
+      // Must match the workflow type registered on the ndsep-dsar task queue
+      // (workers/temporal/workflows/dsarFulfillment.ts) and its input shape.
+      return startWorkflow("dsarFulfillmentWorkflow", {
         workflowId: `dsar-${input.dsarId}`,
         taskQueue: "ndsep-dsar",
         input: {
@@ -108,9 +127,8 @@ export const temporalRouter = router({
           requestType: input.requestType,
           subjectId: input.subjectId,
           orgId: input.orgId,
-          slaDeadlineHours: 720, // 30 days
-          steps: ["identity-verification", "data-collection", "review", "fulfillment", "confirmation"],
         },
+        executionTimeoutSeconds: 31 * 24 * 3600, // 30-day DSAR SLA + margin
       });
     }),
 
@@ -238,6 +256,47 @@ export const gatewayRouter = router({
 
 // ── Permify Authorization Management ────────────────────────────────────────
 
+/**
+ * Tuple-provisioning guard.
+ *
+ * The standard adminProcedure chain requires a Permify "admin/write" allow
+ * decision — but the tuples that produce that decision can only be written
+ * through these endpoints. To break the chicken-and-egg without opening a
+ * bypass, provisioning is allowed for exactly two bootstrap callers:
+ *   1. the platform owner (ctx.user.openId === ENV.ownerOpenId), or
+ *   2. a caller presenting the shared PERMIFY_BOOTSTRAP_TOKEN via the
+ *      x-permify-bootstrap-token header (constant-time compared; only active
+ *      when the env var is set to a non-empty value).
+ * Everyone else falls back to the standard admin authorization chain
+ * (platform role + Permify decision), so the endpoints remain fail-closed.
+ */
+const authzProvisioningProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (ctx.user.openId === ENV.ownerOpenId) {
+    return next({ ctx });
+  }
+
+  const bootstrapToken = process.env.PERMIFY_BOOTSTRAP_TOKEN;
+  const headerValue = ctx.req.headers["x-permify-bootstrap-token"];
+  const presented = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (bootstrapToken && presented) {
+    const a = Buffer.from(presented);
+    const b = Buffer.from(bootstrapToken);
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+      return next({ ctx });
+    }
+  }
+
+  if (ctx.user.role !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required for Permify provisioning" });
+  }
+  const { checkPermission } = await import("../middlewareIntegration");
+  const allowed = await checkPermission(ctx.user.id, "admin", "write");
+  if (!allowed) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Permify: admin write permission denied" });
+  }
+  return next({ ctx });
+});
+
 export const authzRouter = router({
   check: protectedProcedure
     .input(z.object({
@@ -255,7 +314,7 @@ export const authzRouter = router({
       return { allowed: result };
     }),
 
-  writeRelationship: adminProcedure
+  writeRelationship: authzProvisioningProcedure
     .input(z.object({
       entityType: z.string(),
       entityId: z.string(),
@@ -267,21 +326,21 @@ export const authzRouter = router({
       return { success: true };
     }),
 
-  syncUserRole: adminProcedure
+  syncUserRole: authzProvisioningProcedure
     .input(z.object({ userId: z.string(), role: z.string() }))
     .mutation(async ({ input }) => {
       await syncPlatformRole(input.userId, input.role);
       return { success: true };
     }),
 
-  syncOrgMember: adminProcedure
+  syncOrgMember: authzProvisioningProcedure
     .input(z.object({ userId: z.string(), orgId: z.number(), role: z.string() }))
     .mutation(async ({ input }) => {
       await syncOrgMembership(input.userId, input.orgId, input.role);
       return { success: true };
     }),
 
-  bulkSync: adminProcedure.mutation(async () => {
+  bulkSync: authzProvisioningProcedure.mutation(async () => {
     const { getSharedPool } = await import("../db");
     const pool = getSharedPool();
     if (!pool) return { synced: 0, errors: 0, message: "No database pool available" };

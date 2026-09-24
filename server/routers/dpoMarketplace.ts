@@ -22,6 +22,8 @@ import { router, publicProcedure, protectedProcedure, adminProcedure } from "../
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
+import { autoDecryptRows } from "../encryptionMiddleware";
+import { encryptField } from "../encryption";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -33,7 +35,7 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
         : p
     );
     const result = await pool.query(query, safeParams);
-    return result.rows ?? [];
+    return autoDecryptRows(query, result.rows ?? []);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[dpoMarket] DB query error");
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
@@ -45,6 +47,19 @@ function toIntOrNull(v: string | number | null): number | null {
   if (v == null) return null;
   const n = typeof v === "number" ? v : parseInt(v, 10);
   return Number.isInteger(n) && Math.abs(n) < 2147483647 ? n : null;
+}
+
+/** Public-directory masking: never expose raw contact PII on public endpoints. */
+function maskEmail(email: string | null): string | null {
+  if (!email) return null;
+  const at = email.indexOf("@");
+  if (at <= 0) return "***";
+  return `${email.slice(0, 1)}***@${email.slice(at + 1)}`;
+}
+
+function maskPhone(phone: string | null): string | null {
+  if (!phone) return null;
+  return `***${phone.slice(-2)}`;
 }
 
 async function logAudit(
@@ -133,11 +148,13 @@ export const dpoMarketplaceRouter = router({
       capacity: z.number().int().min(1).max(500).default(1),
     }))
     .mutation(async ({ input, ctx }) => {
+      // Contact PII is encrypted at rest (PII_FIELDS: dpo_marketplace_profiles)
+      // and owner_user_id anchors the ownership checks on update/delete.
       const rows = await exec(
-        `INSERT INTO dpo_marketplace_profiles (name, profile_type, email, phone, bio, sectors, regions, languages, capacity)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-        [input.name, input.profileType, input.email, input.phone ?? null, input.bio ?? null,
-         JSON.stringify(input.sectors), JSON.stringify(input.regions), JSON.stringify(input.languages), input.capacity],
+        `INSERT INTO dpo_marketplace_profiles (name, profile_type, email, phone, bio, sectors, regions, languages, capacity, owner_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        [input.name, input.profileType, encryptField(input.email), input.phone ? encryptField(input.phone) : null, input.bio ?? null,
+         JSON.stringify(input.sectors), JSON.stringify(input.regions), JSON.stringify(input.languages), input.capacity, ctx.user.id],
       );
       await logAudit("marketplace.profile_create", "dpo_marketplace_profile", rows[0].id, String(ctx.user.id), { email: input.email });
       return rows[0];
@@ -157,6 +174,12 @@ export const dpoMarketplaceRouter = router({
       active: z.boolean().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // Ownership: only the profile owner or an admin may modify a listing.
+      const ownerRows = await exec(`SELECT owner_user_id FROM dpo_marketplace_profiles WHERE id = $1`, [input.profileId]);
+      if (!ownerRows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Profile not found" });
+      if (ctx.user.role !== "admin" && ownerRows[0].owner_user_id !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the profile owner or an admin may update this profile" });
+      }
       const rows = await exec(
         `UPDATE dpo_marketplace_profiles SET
            name = COALESCE($2, name),
@@ -169,7 +192,7 @@ export const dpoMarketplaceRouter = router({
            active = COALESCE($9, active),
            updated_at = NOW()
          WHERE id = $1 RETURNING *`,
-        [input.profileId, input.name ?? null, input.phone ?? null, input.bio ?? null,
+        [input.profileId, input.name ?? null, input.phone ? encryptField(input.phone) : null, input.bio ?? null,
          input.sectors ? JSON.stringify(input.sectors) : null,
          input.regions ? JSON.stringify(input.regions) : null,
          input.languages ? JSON.stringify(input.languages) : null,
@@ -211,7 +234,10 @@ export const dpoMarketplaceRouter = router({
         [input.profileId],
       );
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Profile not found" });
-      return rows[0];
+      // Public endpoint: mask contact PII — direct contact details are only
+      // exchanged after an engagement is agreed, never via the directory.
+      const profile = rows[0];
+      return { ...profile, email: maskEmail(profile.email ?? null), phone: maskPhone(profile.phone ?? null) };
     }),
 
   /** NDPC admin: toggle the verified trust flag on a profile. */
@@ -245,11 +271,13 @@ export const dpoMarketplaceRouter = router({
       requirements: requirementsSchema.default({ sectors: [], regions: [], languages: [], minCapacity: 1 }),
     }))
     .mutation(async ({ input, ctx }) => {
-      const ref = `ENG-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+      // Per-year DB-sequence reference (migration 0077) — no Date.now() suffix.
+      const [seqRow] = await exec(`SELECT nextval('ndsep_engagement_ref_seq') AS n`);
+      const ref = `ENG-${new Date().getFullYear()}-${String(seqRow?.n ?? 1).padStart(5, "0")}`;
       const rows = await exec(
         `INSERT INTO marketplace_engagements (engagement_ref, org_id, org_name, contact_email, requirements)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [ref, input.orgId ?? null, input.orgName, input.contactEmail, JSON.stringify(input.requirements)],
+        [ref, input.orgId ?? null, input.orgName, encryptField(input.contactEmail), JSON.stringify(input.requirements)],
       );
       await logAudit("marketplace.engagement_post", "marketplace_engagement", rows[0].id, String(ctx.user.id), { engagement_ref: ref, org: input.orgName });
       emitMutationEvent("ndsep.marketplace.engagement", { action: "posted", engagementRef: ref, ts: new Date().toISOString() })

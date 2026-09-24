@@ -4,6 +4,13 @@
  * orders, conformity assessment lifecycle, AI incident reporting, and
  * escalation of AI findings into the existing enforcement flow via the
  * ai_enforcement_links linkage table (no changes to existing tables).
+ *
+ * LEGAL FRAMING: the risk tiers, permits and prohibition orders below are
+ * NDPC POLICY INSTRUMENTS adopted under the Commission's general NDPA 2023
+ * mandate — there is (as of implementation) no dedicated Nigerian AI statute
+ * establishing an EU-AI-Act-style tier regime. They are published as
+ * anticipatory supervisory guidance pending an explicit statutory basis and
+ * must be reviewed by counsel before being relied on in enforcement.
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
@@ -13,10 +20,11 @@ import { logger } from "../logger";
 import { logAuditEvent } from "../middlewareHelpers";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
+import { encryptField } from "../encryption";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
-  if (!pool) return [];
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
   try {
     const safeParams = params.map((p) =>
       Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
@@ -27,10 +35,12 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     return autoDecryptRows(query, result.rows ?? []);
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[ai-reg] DB query error");
-    return [];
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
   }
 }
 
+// NDPC policy-instrument risk tiers (see LEGAL FRAMING in the file header) —
+// not yet grounded in a dedicated AI statute.
 const TIERS = ["minimal", "limited", "high", "unacceptable"] as const;
 const HARM_CATEGORIES = [
   "discrimination", "privacy_harm", "physical_harm", "financial_harm",
@@ -103,6 +113,20 @@ export const aiRegulationRouter = router({
       const assessments = await exec(`SELECT * FROM ai_risk_tier_assessments WHERE id = $1`, [input.assessmentId]);
       const a = assessments[0];
       if (!a) throw new TRPCError({ code: "NOT_FOUND", message: "Risk-tier assessment not found." });
+      // IDOR guard: only staff or members of the assessed organisation may
+      // file a permit application for it.
+      if (!["admin", "government_staff"].includes(ctx.user.role)) {
+        if (a.organization_id == null) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Only staff may apply for permits on unowned assessments." });
+        }
+        const membership = await exec(
+          `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+          [ctx.user.id, a.organization_id]
+        );
+        if (membership.length === 0) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You can only apply for permits for organisations you belong to." });
+        }
+      }
       if (a.tier !== "high") {
         throw new TRPCError({ code: "BAD_REQUEST", message: `Only high-risk systems require a permit (this system is '${a.tier}').` });
       }
@@ -201,12 +225,21 @@ export const aiRegulationRouter = router({
       overallResult: z.enum(["pass", "conditional", "fail"]),
     }))
     .mutation(async ({ input }) => {
+      // The checklist is LOCKED once a certificate has been issued: editing
+      // results post-issuance would retroactively falsify the basis of an
+      // issued conformity certificate.
       const rows = await exec(
         `UPDATE ai_conformity_assessments SET checklist_results = $1, overall_result = $2, updated_at = NOW()
-         WHERE id = $3 RETURNING id`,
+         WHERE id = $3 AND certificate_issued_at IS NULL RETURNING id`,
         [input.checklistResults, input.overallResult, input.id]
       );
-      if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Conformity assessment not found." });
+      if (!rows[0]) {
+        const existing = await exec(`SELECT certificate_issued_at FROM ai_conformity_assessments WHERE id = $1`, [input.id]);
+        if (existing[0]?.certificate_issued_at) {
+          throw new TRPCError({ code: "CONFLICT", message: "Checklist is locked: a certificate has already been issued for this conformity assessment." });
+        }
+        throw new TRPCError({ code: "NOT_FOUND", message: "Conformity assessment not found." });
+      }
       return { success: true };
     }),
 
@@ -266,7 +299,7 @@ export const aiRegulationRouter = router({
           (incident_ref, organization_id, reporter_type, reporter_name, reporter_email,
            system_name, description, severity, harm_categories, occurred_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, incident_ref, status, reported_at`,
-        [ref, input.organizationId ?? null, input.reporterType, input.reporterName ?? null, input.reporterEmail ?? null,
+        [ref, input.organizationId ?? null, input.reporterType, input.reporterName ? encryptField(input.reporterName) : null, input.reporterEmail ? encryptField(input.reporterEmail) : null,
          input.systemName, input.description, input.severity, input.harmCategories, input.occurredAt ?? null]
       );
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "ai_incident_reported", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));

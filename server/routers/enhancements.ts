@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 
-import { router, publicProcedure, protectedProcedure, adminProcedure, exportProcedure, deleteProcedure, approveProcedure} from "../_core/trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure, staffProcedure, exportProcedure, deleteProcedure, approveProcedure} from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import pg from "pg";
 import { invokeLLM } from "../_core/llm";
@@ -141,8 +141,8 @@ export const dsarRouter = router({
       return safe;
     }),
 
-  /** Protected: list all DSARs with deadline tracking */
-  listWithDeadlines: protectedProcedure
+  /** Staff: list all DSARs with deadline tracking */
+  listWithDeadlines: staffProcedure
     .input(
       z.object({
         status: z.string().optional(),
@@ -160,17 +160,19 @@ export const dsarRouter = router({
         conditions.push(`status = $${idx++}`);
         params.push(input.status);
       }
+      // Canonical statuses: a request is open until completed or rejected
+      // (escalated/overdue are still open states).
       if (input?.overdue) {
-        conditions.push(`response_deadline < NOW() AND status NOT IN ('resolved', 'closed')`);
+        conditions.push(`response_deadline < NOW() AND status NOT IN ('completed', 'rejected')`);
       }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const { rows } = await pool.query(
         `SELECT *,
                 EXTRACT(DAY FROM (response_deadline - NOW())) AS days_remaining,
-                CASE WHEN response_deadline < NOW() AND status NOT IN ('resolved','closed') THEN true ELSE false END AS is_overdue
+                CASE WHEN response_deadline < NOW() AND status NOT IN ('completed','rejected') THEN true ELSE false END AS is_overdue
          FROM citizen_requests ${where}
          ORDER BY response_deadline ASC NULLS LAST
-         LIMIT ${idx++} OFFSET ${idx}`,
+         LIMIT $${idx++} OFFSET $${idx}`,
         [...params, input?.limit ?? 50, input?.offset ?? 0]
       );
       const countResult = await pool.query(
@@ -180,8 +182,8 @@ export const dsarRouter = router({
       return { rows, total: Number(countResult.rows[0].total) };
     }),
 
-  /** Protected: escalate an overdue DSAR */
-  escalate: protectedProcedure
+  /** Staff: escalate an overdue DSAR */
+  escalate: staffProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
@@ -190,21 +192,35 @@ export const dsarRouter = router({
     )
     .mutation(async ({ input }) => {
       const pool = getPool();
-      await pool.query(
+      // Transition guard: only open requests can be escalated. Completed or
+      // rejected requests are terminal and must not move back into an open
+      // state; re-escalating an already-escalated request updates the reason.
+      const { rows } = await pool.query(
         `UPDATE citizen_requests
-         SET status = 'overdue', escalated_at = NOW(), escalation_reason = $1, updated_at = NOW()
-         WHERE id = $2`,
+         SET status = 'escalated', escalated_at = NOW(), escalation_reason = $1, updated_at = NOW()
+         WHERE id = $2 AND status NOT IN ('completed', 'rejected')
+         RETURNING id`,
         [input.reason, input.id]
       );
+      if (rows.length === 0) {
+        const existing = await pool.query(`SELECT status FROM citizen_requests WHERE id = $1`, [input.id]);
+        if (existing.rows.length === 0) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "DSAR not found" });
+        }
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Cannot escalate a request in status '${existing.rows[0].status}'`,
+        });
+      }
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "enhancement_event", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { success: true };
     }),
 
-  /** Badge count: DSARs not yet resolved or closed */
-  pendingCount: protectedProcedure.query(async () => {
+  /** Staff badge count: DSARs not yet completed or rejected */
+  pendingCount: staffProcedure.query(async () => {
     const pool = getPool();
     const { rows } = await pool.query(
-      `SELECT COUNT(*) as count FROM citizen_requests WHERE status NOT IN ('resolved', 'closed')`
+      `SELECT COUNT(*) as count FROM citizen_requests WHERE status NOT IN ('completed', 'rejected')`
     );
     return { count: Number(rows[0].count) };
   }),
@@ -220,7 +236,7 @@ export const dpiaRouter = router({
       const params: unknown[] = [];
       let idx = 1;
       if (input?.orgId) { conditions.push(`org_id = $${idx++}`); params.push(input.orgId); }
-      if (input?.status) { conditions.push(`status = ${idx}`); params.push(input.status); }
+      if (input?.status) { conditions.push(`status = $${idx++}`); params.push(input.status); }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const { rows } = await pool.query(
         `SELECT d.*, u.name as created_by_name FROM dpia_assessments d
@@ -529,7 +545,7 @@ export const webhookRouter = router({
       const params: unknown[] = [];
       let idx = 1;
       if (input?.orgId) { conditions.push(`org_id = $${idx++}`); params.push(input.orgId); }
-      if (input?.dpcoOrgId) { conditions.push(`dpco_org_id = ${idx}`); params.push(input.dpcoOrgId); }
+      if (input?.dpcoOrgId) { conditions.push(`dpco_org_id = $${idx++}`); params.push(input.dpcoOrgId); }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       const { rows } = await pool.query(
         `SELECT id, org_id, dpco_org_id, url, events, is_active, failure_count,
@@ -783,7 +799,7 @@ export const carAutomationRouter = router({
       const [violRes, breachRes, dsarRes] = await Promise.all([
         pool.query(`SELECT COUNT(*) FROM violations WHERE organization_id = $1 AND status = 'open'`, [input.orgId]),
         pool.query(`SELECT COUNT(*) FROM breach_notifications WHERE organization_id = $1 AND EXTRACT(YEAR FROM submitted_at) = $2`, [input.orgId, input.year]),
-        pool.query(`SELECT COUNT(*) FROM citizen_requests WHERE organization_id = $1 AND status = 'resolved' AND EXTRACT(YEAR FROM submitted_at) = $2`, [input.orgId, input.year]),
+        pool.query(`SELECT COUNT(*) FROM citizen_requests WHERE organization_id = $1 AND status = 'completed' AND EXTRACT(YEAR FROM submitted_at) = $2`, [input.orgId, input.year]),
       ]);
       const openViolations = Number(violRes.rows[0]?.count ?? 0);
       const breachesReported = Number(breachRes.rows[0]?.count ?? 0);

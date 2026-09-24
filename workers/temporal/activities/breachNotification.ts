@@ -15,21 +15,31 @@ export async function submitNdpcNotification(params: { breachId: number; orgId: 
   if (!referenceNumber) throw new Error("Regulatory notification response did not include a referenceNumber");
   const result = await database().query(
     `UPDATE breach_incidents SET ndpc_notified_at = $1, ndpc_reference_number = $2,
-       breach_incident_status = 'notified', updated_at = NOW() WHERE id = $3 AND organization_id = $4`,
+       breach_incident_status = 'ndpc_notified', updated_at = NOW() WHERE id = $3 AND organization_id = $4`,
     [submittedAt, referenceNumber, params.breachId, params.orgId],
   );
   if (result.rowCount !== 1) throw new Error(`Breach ${params.breachId} was not found for organization ${params.orgId}`);
+  // Stop the 72-hour escalation countdown once NDPC has been notified.
+  try {
+    const { markBreachNotified } = await import("../../../server/breachTimer");
+    await markBreachNotified(database(), params.breachId);
+  } catch (err) {
+    // Timer rows are best-effort bookkeeping; the breach update above is authoritative.
+    console.warn(`[breachNotification] markBreachNotified failed for breach ${params.breachId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
   return { referenceNumber, submittedAt };
 }
 
 export async function updateBreachStatus(params: { breachId: number; stage: string; notes?: string }): Promise<void> {
+  // Values must be members of the breach_status enum:
+  // detected / assessing / ndpc_notified / individuals_notified / contained / resolved / closed
   const statusMap: Record<string, string> = {
     discovered: "detected",
     internal_assessment: "assessing",
     remediation_in_progress: "contained",
     ndpc_notification_pending: "assessing",
-    ndpc_notified: "notified",
-    post_incident_review: "investigating",
+    ndpc_notified: "ndpc_notified",
+    post_incident_review: "contained",
     closed: "resolved",
   };
   const result = await database().query(
