@@ -265,7 +265,10 @@ export async function kafkaCreateConsumer(
   instanceId: string,
   autoOffsetReset: "earliest" | "latest" = "latest"
 ): Promise<string | null> {
-  if (!KAFKA_ENABLED || !kafkaConnected || !USE_REST_PROXY) return null;
+  if (!KAFKA_ENABLED || !USE_REST_PROXY) return null;
+  // Don't gate on a stale kafkaConnected flag — probe the proxy so the
+  // consumer fallback can bootstrap itself after a broker outage.
+  if (!kafkaConnected && !(await checkKafkaHealth())) return null;
   try {
     const body = {
       name: instanceId,
@@ -295,7 +298,8 @@ export async function kafkaSubscribe(
   consumerBaseUri: string,
   topics: string[]
 ): Promise<boolean> {
-  if (!KAFKA_ENABLED || !kafkaConnected || !USE_REST_PROXY) return false;
+  if (!KAFKA_ENABLED || !USE_REST_PROXY) return false;
+  if (!kafkaConnected && !(await checkKafkaHealth())) return false;
   try {
     const res = await fetch(`${consumerBaseUri}/subscription`, {
       method: "POST",
@@ -314,7 +318,8 @@ export async function kafkaPoll(
   consumerBaseUri: string,
   maxBytes = 300000
 ): Promise<Array<{ topic: string; key: string; value: unknown; partition: number; offset: number }>> {
-  if (!KAFKA_ENABLED || !kafkaConnected || !USE_REST_PROXY) return [];
+  if (!KAFKA_ENABLED || !USE_REST_PROXY) return [];
+  if (!kafkaConnected && !(await checkKafkaHealth())) return [];
   try {
     const res = await fetch(`${consumerBaseUri}/records?max_bytes=${maxBytes}`, {
       headers: { Accept: "application/vnd.kafka.json.v2+json" },
@@ -348,22 +353,164 @@ export function kafkaMetrics() {
 
 export { kafkaConnected, checkKafkaHealth };
 
+// ── Persistent event outbox (migration 0110) ────────────────────────────────
+// Audit/compliance events must never be fire-and-forget: when Kafka is
+// degraded the previous helpers dropped them with a debug log. Now every
+// publish helper writes the event to event_outbox FIRST (same Postgres the
+// domain write committed to), then attempts an immediate publish; a relay
+// drains pending rows with exponential backoff and marks them published only
+// after broker acknowledgement. Dead rows (> MAX_ATTEMPTS) stay for operators.
+
+const OUTBOX_MAX_ATTEMPTS = 10;
+const OUTBOX_RELAY_INTERVAL_MS = Number(process.env.KAFKA_OUTBOX_RELAY_INTERVAL_MS ?? "15000");
+
+interface OutboxPool { query: (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> }
+let outboxPool: OutboxPool | null = null;
+
+async function getOutboxPool(): Promise<OutboxPool | null> {
+  if (outboxPool) return outboxPool;
+  try {
+    const db = await import("./db") as { getSharedPool?: () => OutboxPool; getPool?: () => OutboxPool };
+    const factory = db.getSharedPool ?? db.getPool;
+    outboxPool = factory ? factory.call(db) : null;
+    return outboxPool;
+  } catch {
+    return null;
+  }
+}
+
+/** Insert a pending outbox row. Returns the row id, or null if the DB is unavailable. */
+export async function enqueueOutbox(
+  topic: string,
+  key: string | null,
+  value: Record<string, unknown>,
+  headers?: Record<string, string>,
+): Promise<number | null> {
+  const pool = await getOutboxPool();
+  if (!pool) return null;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO event_outbox (topic, partition_key, payload, headers)
+       VALUES ($1, $2, $3::jsonb, $4::jsonb) RETURNING id`,
+      [topic, key, JSON.stringify(value), headers ? JSON.stringify(headers) : null],
+    );
+    return Number(rows[0]?.id ?? 0) || null;
+  } catch (err) {
+    // Table may not exist yet (migrations pending) — log loudly, never swallow.
+    logger.error({ err: err instanceof Error ? err.message : String(err), topic }, "[Kafka] Outbox enqueue failed — event durability degraded");
+    return null;
+  }
+}
+
+/**
+ * Durable publish: outbox row first, then immediate publish attempt.
+ * Returns true when the event is durable (outboxed) even if the broker is down.
+ */
+export async function publishWithOutbox(
+  topic: string,
+  key: string | null,
+  value: Record<string, unknown>,
+  headers?: Record<string, string>,
+): Promise<boolean> {
+  const outboxId = await enqueueOutbox(topic, key, value, headers);
+  const ok = await kafkaProduce(topic, key, value, headers);
+  if (ok && outboxId != null) {
+    const pool = await getOutboxPool();
+    await pool?.query(
+      `UPDATE event_outbox SET status = 'published', published_at = now() WHERE id = $1`,
+      [outboxId],
+    ).catch(() => { /* relay will mark it; at-least-once */ });
+  }
+  if (!ok) {
+    logger.warn({ topic, outboxId }, "[Kafka] Broker publish failed — event persisted in outbox for relay");
+  }
+  if (!ok && outboxId == null) {
+    // Worst case: no broker AND no outbox. Loud, not silent.
+    logger.error({ topic, key }, "[Kafka] EVENT LOST RISK: broker down and outbox unavailable");
+    errors++;
+    return false;
+  }
+  return true;
+}
+
+let outboxRelayTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Drain pending outbox rows: publish, backoff on failure, dead-letter after max attempts. */
+export async function drainOutboxOnce(batchSize = 100): Promise<{ published: number; failed: number; dead: number }> {
+  const pool = await getOutboxPool();
+  if (!pool) return { published: 0, failed: 0, dead: 0 };
+  const { rows } = await pool.query(
+    `SELECT id, topic, partition_key, payload, headers, attempts
+       FROM event_outbox
+      WHERE status = 'pending' AND next_attempt_at <= now()
+      ORDER BY id ASC
+      LIMIT $1
+      FOR UPDATE SKIP LOCKED`,
+    [batchSize],
+  );
+  let published = 0, failed = 0, dead = 0;
+  for (const row of rows) {
+    const id = Number(row.id);
+    const ok = await kafkaProduce(
+      String(row.topic),
+      row.partition_key == null ? null : String(row.partition_key),
+      (typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload) as Record<string, unknown>,
+      (row.headers ?? undefined) as Record<string, string> | undefined,
+    );
+    if (ok) {
+      await pool.query(`UPDATE event_outbox SET status = 'published', published_at = now() WHERE id = $1`, [id]).catch(() => undefined);
+      published++;
+    } else {
+      const attempts = Number(row.attempts) + 1;
+      const isDead = attempts >= OUTBOX_MAX_ATTEMPTS;
+      const backoffSec = Math.min(3600, 2 ** attempts * 5);
+      await pool.query(
+        `UPDATE event_outbox
+            SET status = $2, attempts = $3, last_error = 'broker publish failed',
+                next_attempt_at = now() + ($4 || ' seconds')::interval
+          WHERE id = $1`,
+        [id, isDead ? "dead" : "pending", attempts, String(backoffSec)],
+      ).catch(() => undefined);
+      if (isDead) { dead++; logger.error({ id, topic: row.topic }, "[Kafka] Outbox event dead-lettered after max attempts"); }
+      else failed++;
+    }
+  }
+  return { published, failed, dead };
+}
+
+/** Start the background outbox relay (idempotent). */
+export function startOutboxRelay(intervalMs = OUTBOX_RELAY_INTERVAL_MS): void {
+  if (outboxRelayTimer) return;
+  outboxRelayTimer = setInterval(() => {
+    drainOutboxOnce().catch((err) =>
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[Kafka] Outbox relay tick failed"),
+    );
+  }, intervalMs);
+  (outboxRelayTimer as { unref?: () => void }).unref?.();
+  logger.info({ intervalMs }, "[Kafka] Outbox relay started");
+}
+
+export function stopOutboxRelay(): void {
+  if (outboxRelayTimer) clearInterval(outboxRelayTimer);
+  outboxRelayTimer = null;
+}
+
 // ── Backward-compatible publish helpers (used by routers.ts) ──────────────────
 
 export async function publishPenaltyIssued(data: { penaltyId: string | number; orgId: string | number; amount: number; currency: string; reason: string; issuedBy: string }): Promise<void> {
-  await kafkaProduce("ndsep.penalties.issued", String(data.penaltyId), { event: "penalty.issued", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await publishWithOutbox("ndsep.penalties.issued", String(data.penaltyId), { event: "penalty.issued", ...data }).catch((e: unknown) => logger.error({ err: e instanceof Error ? e.message : String(e) }, "[Kafka] publishPenaltyIssued failed"));
 }
 export async function publishEnforcementCaseOpened(data: { caseId: string | number; orgId: string | number; caseType: string; severity: string; openedBy: string }): Promise<void> {
-  await kafkaProduce("ndsep.enforcement.cases", String(data.caseId), { event: "case.opened", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await publishWithOutbox("ndsep.enforcement.cases", String(data.caseId), { event: "case.opened", ...data }).catch((e: unknown) => logger.error({ err: e instanceof Error ? e.message : String(e) }, "[Kafka] publishEnforcementCaseOpened failed"));
 }
 export async function publishCitizenRightsRequest(data: { requestId: string | number; citizenId: string; requestType: string; status: string; orgId: string | number }): Promise<void> {
-  await kafkaProduce("ndsep.citizen.rights", String(data.requestId), { event: "rights.request.updated", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await publishWithOutbox("ndsep.citizen.rights", String(data.requestId), { event: "rights.request.updated", ...data }).catch((e: unknown) => logger.error({ err: e instanceof Error ? e.message : String(e) }, "[Kafka] publishCitizenRightsRequest failed"));
 }
 export async function publishComplianceViolation(data: { violationId: string | number; orgId: string | number; violationType: string; severity: string }): Promise<void> {
-  await kafkaProduce("ndsep.compliance.violations", String(data.violationId), { event: "violation.detected", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await publishWithOutbox("ndsep.compliance.violations", String(data.violationId), { event: "violation.detected", ...data }).catch((e: unknown) => logger.error({ err: e instanceof Error ? e.message : String(e) }, "[Kafka] publishComplianceViolation failed"));
 }
 export async function publishAuditEvent(data: { userId: string; action: string; resource: string; resourceId: string | number; orgId?: string | number }): Promise<void> {
-  await kafkaProduce("ndsep.audit.events", String(data.resourceId), { event: "audit.action", ...data }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+  await publishWithOutbox("ndsep.audit.events", String(data.resourceId), { event: "audit.action", ...data }).catch((e: unknown) => logger.error({ err: e instanceof Error ? e.message : String(e) }, "[Kafka] publishAuditEvent failed"));
 }
 export function isKafkaConnected(): boolean {
   return kafkaConnected;

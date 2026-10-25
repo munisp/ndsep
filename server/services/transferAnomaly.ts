@@ -111,54 +111,75 @@ export async function runContradictionScan(
     return { scanFindingsAvailable: false, declarationsScanned: 0, findingsCreated: 0, contradictions: [] };
   }
 
-  const declarations = await exec(
-    `SELECT id, organization_id FROM transfer_declarations
-     WHERE declares_no_transfers = TRUE AND status IN ('submitted','under_review','accepted')
-     ORDER BY created_at DESC LIMIT $1`,
+  const [{ n: scannedCount }] = await exec(
+    `SELECT COUNT(*)::int AS n FROM transfer_declarations
+     WHERE declares_no_transfers = TRUE AND status IN ('submitted','under_review','accepted')`,
+  );
+
+  // scan_findings has NO organization_id / category / destination_country
+  // columns (0083): reach the organisation via scan_targets, and extract the
+  // destination from the evidence JSONB payload. One grouped query (batched,
+  // bounded) instead of a per-declaration loop.
+  const contradictions = await exec(
+    `SELECT d.id AS declaration_id, d.organization_id,
+            COUNT(sf.id)::int AS evidence_count,
+            array_agg(DISTINCT dest.country) FILTER (WHERE dest.country IS NOT NULL) AS destinations
+     FROM transfer_declarations d
+     JOIN scan_targets st ON st.organization_id = d.organization_id
+     JOIN scan_findings sf ON sf.target_id = st.id
+       AND sf.finding_type IN ('pre_consent_tracker', 'tracker_detected', 'cookie_before_consent')
+       AND sf.status NOT IN ('dismissed', 'resolved', 'suppressed')
+     CROSS JOIN LATERAL (
+       SELECT COALESCE(sf.evidence->>'destination_country',
+                       sf.evidence->>'tracker_country',
+                       sf.evidence->>'country') AS country
+     ) dest
+     WHERE d.declares_no_transfers = TRUE
+       AND d.status IN ('submitted','under_review','accepted')
+     GROUP BY d.id, d.organization_id
+     ORDER BY d.id
+     LIMIT $1`,
     [limit],
   );
 
   const report: ContradictionScanReport = {
     scanFindingsAvailable: true,
-    declarationsScanned: declarations.length,
+    declarationsScanned: Number(scannedCount ?? 0),
     findingsCreated: 0,
     contradictions: [],
   };
 
-  for (const decl of declarations) {
-    // Count rows referencing the organisation that indicate foreign tracking.
-    const evidence = await exec(
-      `SELECT COUNT(*)::int AS n FROM scan_findings
-       WHERE organization_id = $1
-         AND (finding_type ILIKE '%tracker%' OR category ILIKE '%tracker%' OR destination_country IS NOT NULL)`,
-      [decl.organization_id],
-    );
-    const n = Number(evidence[0]?.n ?? 0);
+  for (const row of contradictions) {
+    const n = Number(row.evidence_count ?? 0);
     const verdict = evaluateContradiction({ declaresNoTransfers: true, foreignTrackerEvidenceCount: n });
     if (!verdict.contradiction) continue;
 
-    // Idempotent: skip if an open contradiction finding already exists.
-    const existing = await exec(
-      `SELECT id FROM transfer_findings
-       WHERE declaration_id = $1 AND finding_type = 'contradiction_tracker_evidence'
-         AND status IN ('open','referred','under_investigation') LIMIT 1`,
-      [decl.id],
-    );
-    if (existing[0]) continue;
-
-    const [row] = await exec(
+    // Idempotent + race-safe: INSERT only when no open contradiction finding
+    // exists for this declaration (NOT EXISTS evaluated at insert time).
+    const inserted = await exec(
       `INSERT INTO transfer_findings
          (declaration_id, organization_id, finding_type, severity, description, evidence, enforcement_referral, created_by)
-       VALUES ($1, $2, 'contradiction_tracker_evidence', 'high', $3, $4, TRUE, 'system:anomaly')
+       SELECT $1, $2, 'contradiction_tracker_evidence', 'high', $3, $4, TRUE, 'system:anomaly'
+       WHERE NOT EXISTS (
+         SELECT 1 FROM transfer_findings
+         WHERE declaration_id = $1 AND finding_type = 'contradiction_tracker_evidence'
+           AND status IN ('open','referred','under_investigation')
+       )
        RETURNING id`,
-      [decl.id, decl.organization_id, verdict.reason, JSON.stringify({ foreignTrackerEvidenceCount: n })],
+      [
+        row.declaration_id,
+        row.organization_id,
+        verdict.reason,
+        JSON.stringify({ foreignTrackerEvidenceCount: n, destinations: row.destinations ?? [] }),
+      ],
     );
+    if (!inserted[0]) continue;
     await exec(
       `UPDATE transfer_declarations SET compliance_status = 'non_compliant', updated_at = NOW() WHERE id = $1`,
-      [decl.id],
+      [row.declaration_id],
     );
     report.findingsCreated += 1;
-    report.contradictions.push({ declarationId: decl.id, organizationId: decl.organization_id, evidenceCount: n, findingId: row?.id ?? null });
+    report.contradictions.push({ declarationId: row.declaration_id, organizationId: row.organization_id, evidenceCount: n, findingId: inserted[0]?.id ?? null });
   }
   return report;
 }
@@ -244,48 +265,96 @@ export async function revalidateDeclarationsForAdequacy(
 
 // ─── Volume-trend anomaly scan (DB wiring around pure z-score) ──────────────
 
+/**
+ * Leave-one-out z-score outlier detection: each candidate point is scored
+ * against the mean/stddev of the series EXCLUDING itself, so a single spike
+ * does not inflate its own baseline (masking). Requires `minPoints`
+ * observations (candidate + baseline) before anything is flagged.
+ */
+export function detectLeaveOneOutOutliers(
+  series: TrendPoint[],
+  threshold = 2.5,
+  minPoints = 4,
+): OutlierPoint[] {
+  if (series.length < minPoints) return [];
+  const out: OutlierPoint[] = [];
+  for (let i = 0; i < series.length; i++) {
+    const baseline = series.filter((_, j) => j !== i).map((p) => p.value);
+    const m = mean(baseline);
+    const sd = stdDev(baseline);
+    if (sd === 0) continue; // flat baseline: no meaningful z-score
+    const z = (series[i].value - m) / sd;
+    if (Math.abs(z) >= threshold) {
+      out.push({ ...series[i], zScore: z, mean: m, stdDev: sd });
+    }
+  }
+  return out;
+}
+
 export interface VolumeAnomalyReport {
   organizationsScanned: number;
   findingsCreated: number;
-  anomalies: Array<{ organizationId: number; period: string; value: number; zScore: number; findingId: number | null }>;
+  anomalies: Array<{ organizationId: number; destination: string; period: string; value: number; zScore: number; findingId: number | null }>;
 }
 
 export async function runVolumeAnomalyScan(
   exec: QueryExec,
-  opts: { threshold?: number; minPoints?: number } = {},
+  opts: { threshold?: number; minPoints?: number; limit?: number } = {},
 ): Promise<VolumeAnomalyReport> {
   const threshold = opts.threshold ?? 2.5;
   const minPoints = opts.minPoints ?? 4;
+  const limit = Math.min(Math.max(opts.limit ?? 20000, 1), 100000);
   const rows = await exec(
-    `SELECT organization_id, to_char(period_start, 'YYYY') AS period,
-            COALESCE(volume_estimate_gb, 0)::float AS value
+    `SELECT organization_id, destination_country AS destination,
+            to_char(period_start, 'YYYY') AS period,
+            volume_estimate_gb::float AS value
      FROM transfer_declarations
-     WHERE status IN ('submitted','under_review','accepted') AND declares_no_transfers = FALSE
-     ORDER BY organization_id, period_start`,
+     WHERE status IN ('submitted','under_review','accepted')
+       AND declares_no_transfers = FALSE
+       AND volume_estimate_gb IS NOT NULL  -- NULL volume is MISSING data, never a zero
+     ORDER BY organization_id, destination_country, period_start
+     LIMIT $1`,
+    [limit],
   );
-  const byOrg = new Map<number, TrendPoint[]>();
+  // Per-destination series: volumes for different destinations are not
+  // commensurable and must not share a baseline.
+  const bySeries = new Map<string, { organizationId: number; destination: string; series: TrendPoint[] }>();
   for (const r of rows) {
-    const arr = byOrg.get(r.organization_id) ?? [];
-    arr.push({ period: r.period, value: Number(r.value) });
-    byOrg.set(r.organization_id, arr);
+    const key = `${r.organization_id}::${r.destination}`;
+    const entry = bySeries.get(key) ?? { organizationId: r.organization_id, destination: r.destination, series: [] };
+    entry.series.push({ period: r.period, value: Number(r.value) });
+    bySeries.set(key, entry);
   }
-  const report: VolumeAnomalyReport = { organizationsScanned: byOrg.size, findingsCreated: 0, anomalies: [] };
-  for (const [organizationId, series] of Array.from(byOrg)) {
-    const outliers = detectZScoreOutliers(series, threshold, minPoints);
+  const orgs = new Set<number>(rows.map((r) => r.organization_id));
+  const report: VolumeAnomalyReport = { organizationsScanned: orgs.size, findingsCreated: 0, anomalies: [] };
+  for (const { organizationId, destination, series } of Array.from(bySeries.values())) {
+    const outliers = detectLeaveOneOutOutliers(series, threshold, minPoints);
     for (const o of outliers) {
-      const [row] = await exec(
+      // NOT EXISTS dedupe: one open volume-anomaly finding per
+      // (org, destination, period) regardless of concurrent scans.
+      const inserted = await exec(
         `INSERT INTO transfer_findings
            (organization_id, finding_type, severity, description, evidence, enforcement_referral, created_by)
-         VALUES ($1, 'volume_anomaly', 'medium', $2, $3, FALSE, 'system:anomaly')
+         SELECT $1, 'volume_anomaly', 'medium', $2, $3, FALSE, 'system:anomaly'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM transfer_findings
+           WHERE organization_id = $1 AND finding_type = 'volume_anomaly'
+             AND status IN ('open','referred','under_investigation')
+             AND evidence->>'destination' = $4
+             AND evidence->>'period' = $5
+         )
          RETURNING id`,
         [
           organizationId,
-          `Declared transfer volume in period ${o.period} (${o.value} GB) is a statistical outlier for this controller (z=${o.zScore.toFixed(2)}, threshold=${threshold}).`,
-          JSON.stringify({ period: o.period, value: o.value, zScore: o.zScore, mean: o.mean, stdDev: o.stdDev }),
+          `Declared transfer volume to "${destination}" in period ${o.period} (${o.value} GB) is a statistical outlier for this controller/destination (leave-one-out z=${o.zScore.toFixed(2)}, threshold=${threshold}).`,
+          JSON.stringify({ destination, period: o.period, value: o.value, zScore: o.zScore, mean: o.mean, stdDev: o.stdDev }),
+          destination,
+          o.period,
         ],
       );
+      if (!inserted[0]) continue;
       report.findingsCreated += 1;
-      report.anomalies.push({ organizationId, period: o.period, value: o.value, zScore: o.zScore, findingId: row?.id ?? null });
+      report.anomalies.push({ organizationId, destination, period: o.period, value: o.value, zScore: o.zScore, findingId: inserted[0]?.id ?? null });
     }
   }
   return report;

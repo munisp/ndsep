@@ -22,9 +22,12 @@ import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
-import { encryptField } from "../encryption";
+import { encryptField, decryptField } from "../encryption";
+import { hashIp, ipHashSalt, extractClientIp, fixedWindowStart, counterExceedsLimit } from "../services/complaintLogic";
 
 const TOKEN_TTL_DAYS = 90;
+const TRUSTED_PROXY_COUNT = Math.max(0, parseInt(process.env.NDSEP_TRUSTED_PROXY_COUNT ?? "0", 10) || 0);
+const PUBLIC_RATE_LIMIT_PER_HOUR = Math.max(1, parseInt(process.env.WB_CHANNEL_RATE_LIMIT_PER_HOUR ?? "30", 10) || 30);
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -72,6 +75,27 @@ function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/**
+ * Non-TOCTOU per-IP rate limit for the public (token-auth) endpoints: one
+ * atomic upsert increments the fixed-window counter and returns the new
+ * value. IP extraction honours NDSEP_TRUSTED_PROXY_COUNT.
+ */
+async function enforcePublicRateLimit(req: any, action: string, maxPerHour: number = PUBLIC_RATE_LIMIT_PER_HOUR): Promise<void> {
+  const ip = extractClientIp(req?.headers, req?.ip ?? req?.socket?.remoteAddress, TRUSTED_PROXY_COUNT);
+  const key = hashIp(`wb.${action}|${ip}`, ipHashSalt());
+  const rows = await exec(
+    `INSERT INTO rate_limit_counters (limiter_key, window_start, count, updated_at)
+     VALUES ($1, $2, 1, NOW())
+     ON CONFLICT (limiter_key, window_start)
+     DO UPDATE SET count = rate_limit_counters.count + 1, updated_at = NOW()
+     RETURNING count`,
+    [key, fixedWindowStart(Date.now(), 3_600_000)],
+  );
+  if (counterExceedsLimit(Number(rows[0]?.count ?? 1), maxPerHour)) {
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit reached. Please try again later." });
+  }
+}
+
 /** Resolve a raw reporter token to its report row, enforcing expiry/revocation. */
 async function resolveToken(rawToken: string): Promise<{ report_id: number; report_ref: string }> {
   const tokenHash = hashToken(rawToken);
@@ -115,9 +139,10 @@ export const whistleblowerChannelRouter = router({
       description: z.string().min(50),
       isAnonymous: z.boolean().default(true),
       reporterEmail: z.string().email().optional(),
-      evidenceUrls: z.array(z.string()).default([]),
+      evidenceUrls: z.array(z.string().url()).max(10).default([]),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await enforcePublicRateLimit((ctx as any).req, "submit");
       // Per-year DB-sequence reference (migration 0077) — no Date.now() suffix.
       const [seqRow] = await exec(`SELECT nextval('ndsep_wb_report_ref_seq') AS n`);
       const ref = `WBR-${new Date().getFullYear()}-${String(seqRow?.n ?? 1).padStart(5, "0")}`;
@@ -125,7 +150,7 @@ export const whistleblowerChannelRouter = router({
       const rows = await exec(
         `INSERT INTO whistleblower_reports (report_ref, category, org_id, description, is_anonymous, reporter_email, evidence_urls, priority)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, report_ref, status`,
-        [ref, input.category, input.orgId ?? null, input.description, input.isAnonymous, input.reporterEmail ?? null, JSON.stringify(input.evidenceUrls), priority],
+        [ref, input.category, input.orgId ?? null, input.description, input.isAnonymous, input.reporterEmail ? encryptField(input.reporterEmail) : null, JSON.stringify(input.evidenceUrls), priority],
       );
       const report = rows[0];
       const accessToken = await mintToken(report.id);
@@ -158,32 +183,49 @@ export const whistleblowerChannelRouter = router({
   revokeChannelToken: adminProcedure
     .input(z.object({ reportRef: z.string().min(4) }))
     .mutation(async ({ input, ctx }) => {
-      await exec(
+      const rows = await exec(
         `UPDATE whistleblower_channel_tokens t SET revoked_at = NOW()
          FROM whistleblower_reports wr
-         WHERE t.report_id = wr.id AND wr.report_ref = $1 AND t.revoked_at IS NULL`,
+         WHERE t.report_id = wr.id AND wr.report_ref = $1 AND t.revoked_at IS NULL
+         RETURNING t.id`,
         [input.reportRef],
       );
-      await logAudit("whistleblower.token_revoke", "whistleblower_report", input.reportRef, String(ctx.user.id), {});
-      return { success: true };
+      if (!rows[0]) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "No active channel token found for that report (already revoked or never issued)." });
+      }
+      await logAudit("whistleblower.token_revoke", "whistleblower_report", input.reportRef, String(ctx.user.id), { revoked: rows.length });
+      return { success: true, revoked: rows.length };
     }),
 
-  /** Reporter (token-auth, no account): read the full message thread. */
+  /** Reporter (token-auth, no account): read the full message thread.
+   *  READ-ONLY — marking officer messages as read is the separate markRead
+   *  mutation so reads have no side effects. */
   getChannelMessages: publicProcedure
     .input(z.object({ accessToken: z.string().min(20) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await enforcePublicRateLimit((ctx as any).req, "read");
       const report = await resolveToken(input.accessToken);
       const messages = await exec(
         `SELECT id, sender, body, created_at, read_at
          FROM whistleblower_messages WHERE report_id = $1 ORDER BY created_at ASC`,
         [report.report_id],
       );
-      // Mark officer messages as read by the reporter.
-      exec(
-        `UPDATE whistleblower_messages SET read_at = NOW() WHERE report_id = $1 AND sender = 'case_officer' AND read_at IS NULL`,
-        [report.report_id],
-      ).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "read_at update failed"));
       return { reportRef: report.report_ref, messages };
+    }),
+
+  /** Reporter (token-auth): mark officer messages in the thread as read. */
+  markRead: publicProcedure
+    .input(z.object({ accessToken: z.string().min(20) }))
+    .mutation(async ({ input, ctx }) => {
+      await enforcePublicRateLimit((ctx as any).req, "markRead");
+      const report = await resolveToken(input.accessToken);
+      const rows = await exec(
+        `UPDATE whistleblower_messages SET read_at = NOW()
+         WHERE report_id = $1 AND sender = 'case_officer' AND read_at IS NULL
+         RETURNING id`,
+        [report.report_id],
+      );
+      return { success: true, markedRead: rows.length };
     }),
 
   /** Reporter (token-auth): reply to the case officer. */
@@ -192,7 +234,8 @@ export const whistleblowerChannelRouter = router({
       accessToken: z.string().min(20),
       body: z.string().min(1).max(10000),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await enforcePublicRateLimit((ctx as any).req, "post");
       const report = await resolveToken(input.accessToken);
       const rows = await exec(
         `INSERT INTO whistleblower_messages (report_id, sender, body, encrypted)
@@ -242,28 +285,26 @@ export const whistleblowerChannelRouter = router({
 
   // ─── Retaliation protection workflow ──────────────────────────────────────
 
-  /** Reporter (token-auth) or identified citizen: flag employer retaliation. */
+  /**
+   * Reporter (token-auth): flag employer retaliation. The channel access token
+   * is REQUIRED — anonymous unauthenticated retaliation flags would let anyone
+   * attach high-priority protection workflows to arbitrary reports.
+   */
   reportRetaliation: publicProcedure
     .input(z.object({
-      accessToken: z.string().min(20).optional(),
-      reportRef: z.string().min(4).optional(),
+      accessToken: z.string().min(20),
       reporterEmail: z.string().email().optional(),
       employerName: z.string().max(255).optional(),
       retaliationType: z.enum(["dismissal", "demotion", "harassment", "threats", "blacklisting", "other"]).default("other"),
       description: z.string().min(20),
     }))
-    .mutation(async ({ input }) => {
-      let reportId: number | null = null;
-      if (input.accessToken) {
-        reportId = (await resolveToken(input.accessToken)).report_id;
-      } else if (input.reportRef) {
-        const rows = await exec(`SELECT id FROM whistleblower_reports WHERE report_ref = $1`, [input.reportRef]);
-        reportId = rows[0]?.id ?? null;
-      }
+    .mutation(async ({ input, ctx }) => {
+      await enforcePublicRateLimit((ctx as any).req, "retaliation");
+      const reportId = (await resolveToken(input.accessToken)).report_id;
       const rows = await exec(
         `INSERT INTO protection_flags (report_id, reporter_email, employer_name, retaliation_type, description, priority)
          VALUES ($1, $2, $3, $4, $5, 'high') RETURNING id, status`,
-        [reportId, input.reporterEmail ?? null, input.employerName ?? null, input.retaliationType, input.description],
+        [reportId, input.reporterEmail ? encryptField(input.reporterEmail) : null, input.employerName ?? null, input.retaliationType, input.description],
       );
       await logAudit("whistleblower.retaliation_flag", "protection_flag", rows[0].id, null, { report_id: reportId, type: input.retaliationType });
       emitMutationEvent("ndsep.whistleblower.protection", { action: "retaliationFlagged", flagId: rows[0].id, ts: new Date().toISOString() })
@@ -271,7 +312,7 @@ export const whistleblowerChannelRouter = router({
       return { success: true, flagId: rows[0].id, message: "Retaliation report received. NDPC will review protective measures urgently." };
     }),
 
-  /** Admin: list protection flags by status. */
+  /** Admin: list protection flags by status (reporter_email decrypted). */
   listProtectionFlags: adminProcedure
     .input(z.object({ status: z.enum(["open", "under_review", "protective_measures", "closed"]).optional() }))
     .query(async ({ input }) => {
@@ -280,7 +321,8 @@ export const whistleblowerChannelRouter = router({
       const params: unknown[] = [];
       if (input.status) { params.push(input.status); sql += ` AND pf.status = $${params.length}`; }
       sql += ` ORDER BY pf.created_at DESC`;
-      return exec(sql, params);
+      const rows = await exec(sql, params);
+      return rows.map((r) => ({ ...r, reporter_email: decryptField(r.reporter_email) }));
     }),
 
   /** Admin: advance a protection flag through the workflow. */
@@ -363,7 +405,8 @@ export const whistleblowerChannelRouter = router({
   /** Reporter (token-auth): check reward status for their own report. */
   getMyRewardStatus: publicProcedure
     .input(z.object({ accessToken: z.string().min(20) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await enforcePublicRateLimit((ctx as any).req, "rewardStatus");
       const report = await resolveToken(input.accessToken);
       return exec(
         `SELECT id, reward_type, status, citation, created_at

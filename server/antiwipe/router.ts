@@ -13,7 +13,7 @@
  *   canary*                             -> ransomware tripwires
  */
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import {
   appendLedger,
   anchorLedger,
@@ -41,20 +41,34 @@ const MAX_UPLOAD_BYTES = 32 * 1024 * 1024; // 32 MiB per evidence blob via tRPC
 
 export const antiwipeRouter = router({
   // ── Ledger ──────────────────────────────────────────────────────────────
-  append: protectedProcedure
+  // adminProcedure + actor strictly from ctx.user: the ledger is regulatory
+  // evidence, so appends require admin rights and the actor can never be
+  // supplied by the caller (a caller-chosen actor would defeat attribution).
+  append: adminProcedure
     .input(
       z.object({
         action: z.string().min(1).max(128),
         payload: z.unknown(),
-        actor: z.string().max(256).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const actor =
-        input.actor ??
-        (ctx.user ? `user:${ctx.user.id}` : "anonymous");
+      const actor = `user:${ctx.user.id}`;
       return appendLedger(input.action, input.payload, actor);
     }),
+
+  // Integrity-scoped public status: chain head hash + count only (mirrors the
+  // REST handler in ./restStatus.ts for the external watchdog).
+  publicIntegrityStatus: publicProcedure.query(async () => {
+    const status = await ledgerStatus();
+    return {
+      headHash: status.headHash,
+      entryCount: status.entryCount,
+      headSeq: status.headSeq,
+      genesisHash: status.genesisHash,
+      latestAnchorDate: status.latestAnchorDate,
+      tailValid: status.tailCheck.valid,
+    };
+  }),
 
   verify: protectedProcedure
     .input(

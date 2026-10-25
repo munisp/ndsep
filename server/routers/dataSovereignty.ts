@@ -315,17 +315,19 @@ export const dataSovereigntyRouter = router({
     }),
 
   /**
-   * Record an officer attestation: named officer + statement + SHA-256 of the
-   * signed artefact + expiry. Supersedes any prior active attestation for the
-   * same declaration.
+   * Record an officer attestation. The attesting officer is BOUND TO THE
+   * CALLER (ctx.user) — a staff member cannot attest in another person's
+   * name. The document_hash must match a previously uploaded artifact
+   * (attestation_artifacts, migration 0108) referenced by document_ref.
+   * Supersedes any prior active attestation for the same declaration.
    */
   createAttestation: staffProcedure
     .input(
       z.object({
         declaration_id: z.number().int().positive(),
-        attesting_officer_name: z.string().min(2).max(256),
         attesting_officer_title: z.string().min(2).max(256),
         attestation_statement: z.string().min(20).max(8000),
+        document_ref: z.string().min(3).max(512),
         document_hash: z.string().regex(/^[0-9a-f]{64}$/, "SHA-256 hex digest required"),
         expires_at: z.string().datetime({ offset: true }),
       })
@@ -338,6 +340,18 @@ export const dataSovereigntyRouter = router({
       if (!decl) throw new TRPCError({ code: "NOT_FOUND", message: "Hosting declaration not found" });
       if (decl.declaration_status !== "approved")
         throw new TRPCError({ code: "CONFLICT", message: "Attestation requires an approved declaration" });
+      // Verify the declared hash against the uploaded artifact reference.
+      const [artifact] = await exec(
+        `SELECT artifact_ref, sha256 FROM attestation_artifacts
+         WHERE artifact_ref = $1 AND entity_ref = $2`,
+        [input.document_ref, decl.entity_ref]
+      );
+      if (!artifact)
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown document_ref — upload the signed artifact first (registerAttestationArtifact)" });
+      if (artifact.sha256 !== input.document_hash)
+        throw new TRPCError({ code: "BAD_REQUEST", message: "document_hash does not match the uploaded artifact's recorded SHA-256" });
+      // Officer identity is bound to the authenticated caller, never free text.
+      const officerName = (ctx.user as any).name ?? (ctx.user as any).email ?? `user:${ctx.user.id}`;
       const [row] = await exec(
         `WITH superseded AS (
            UPDATE residency_attestations
@@ -346,19 +360,45 @@ export const dataSovereigntyRouter = router({
          )
          INSERT INTO residency_attestations
            (declaration_id, entity_ref, attesting_officer_name, attesting_officer_title,
-            attestation_statement, document_hash, expires_at, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+            attestation_statement, document_hash, document_ref, expires_at, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
          RETURNING *`,
         [
-          input.declaration_id, decl.entity_ref, input.attesting_officer_name,
+          input.declaration_id, decl.entity_ref, officerName,
           input.attesting_officer_title, input.attestation_statement,
-          input.document_hash, input.expires_at,
+          input.document_hash, input.document_ref, input.expires_at,
         ]
       );
       await logAudit("residency_attestation_created", "residency_attestations", row?.id, String(ctx.user.id), {
         entity_ref: decl.entity_ref, declaration_id: input.declaration_id, expires_at: input.expires_at,
+        document_ref: input.document_ref,
       });
       fireAndForget("dataSovereignty.createAttestation", { entity_ref: decl.entity_ref });
+      return row;
+    }),
+
+  /** Register an uploaded signed-attestation artifact (sha256) for later
+   *  binding in createAttestation. */
+  registerAttestationArtifact: staffProcedure
+    .input(
+      z.object({
+        entity_ref: z.string().min(2).max(128),
+        artifact_ref: z.string().min(3).max(512),
+        sha256: z.string().regex(/^[0-9a-f]{64}$/, "SHA-256 hex digest required"),
+        notes: z.string().max(1000).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const [row] = await exec(
+        `INSERT INTO attestation_artifacts (artifact_ref, entity_ref, sha256, uploaded_by, notes)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (artifact_ref) DO UPDATE SET sha256 = EXCLUDED.sha256, notes = EXCLUDED.notes
+         RETURNING *`,
+        [input.artifact_ref, input.entity_ref, input.sha256, actorOf(ctx.user as any), input.notes ?? null]
+      );
+      await logAudit("attestation_artifact_registered", "attestation_artifacts", row?.id, String(ctx.user.id), {
+        entity_ref: input.entity_ref, artifact_ref: input.artifact_ref,
+      });
       return row;
     }),
 
@@ -495,13 +535,13 @@ export const dataSovereigntyRouter = router({
   /**
    * Advance the violation status machine:
    *   acknowledged -> under_remediation -> resolved
-   *   any non-terminal -> dismissed (admin only, requires reason)
+   * Dismissal is a separate ADMIN-only procedure (see dismissViolation).
    */
   updateViolationStatus: staffProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
-        to: z.enum(["under_remediation", "resolved", "dismissed"]),
+        to: z.enum(["under_remediation", "resolved"]),
         resolution_notes: z.string().min(5).max(4000),
       })
     )
@@ -527,6 +567,34 @@ export const dataSovereigntyRouter = router({
         entity_ref: current.entity_ref, from: current.status, to: input.to,
       });
       fireAndForget("dataSovereignty.updateViolationStatus", { entity_ref: current.entity_ref });
+      return row;
+    }),
+
+  /** ADMIN-ONLY dismissal — dismissing a residency violation is a regulatory
+   *  judgement call and requires a reason; never available to ordinary staff. */
+  dismissViolation: adminProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        reason: z.string().min(10).max(4000),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const [current] = await exec(`SELECT id, entity_ref, status FROM residency_violations WHERE id = $1`, [input.id]);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Violation not found" });
+      if (!(VIOLATION_TRANSITIONS[current.status] ?? []).includes("dismissed"))
+        throw new TRPCError({ code: "CONFLICT", message: `Illegal transition ${current.status} -> dismissed` });
+      const [row] = await exec(
+        `UPDATE residency_violations
+         SET status = 'dismissed', resolution_notes = $2, updated_at = NOW(),
+             resolved_by = $3, resolved_at = NOW()
+         WHERE id = $1 RETURNING *`,
+        [input.id, input.reason, actorOf(ctx.user as any)]
+      );
+      await logAudit("residency_violation_dismissed", "residency_violations", input.id, String(ctx.user.id), {
+        entity_ref: current.entity_ref, from: current.status, reason: input.reason,
+      });
+      fireAndForget("dataSovereignty.dismissViolation", { entity_ref: current.entity_ref });
       return row;
     }),
 
@@ -670,6 +738,8 @@ export const dataSovereigntyRouter = router({
         country_code: z.string().length(2).toUpperCase(),
         is_nigerian: z.boolean(),
         notes: z.string().max(1000).optional(),
+        change_reason: z.string().min(10).max(2000),
+        dual_control_note: z.string().max(500).optional(), // second-officer acknowledgement
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -677,11 +747,22 @@ export const dataSovereigntyRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "asn is required for nigerian_asn entries" });
       if (input.reference_type !== "nigerian_asn" && !input.cidr)
         throw new TRPCError({ code: "BAD_REQUEST", message: "cidr is required for CIDR entries" });
+      const conflict = input.asn != null
+        ? "(reference_type, asn) WHERE asn IS NOT NULL"
+        : "(reference_type, cidr) WHERE cidr IS NOT NULL";
+      // Capture prior state, upsert, and append an immutable revision row
+      // (asn_geo_reference_revisions, migration 0107) in one statement set.
+      const [prior] = await exec(
+        `SELECT id, to_jsonb(r) AS state FROM asn_geo_reference r
+         WHERE reference_type = $1 AND ${input.asn != null ? "asn = $2" : "cidr = $3::cidr"}
+         LIMIT 1`,
+        [input.reference_type, input.asn ?? null, input.cidr ?? null]
+      );
       const [row] = await exec(
         `INSERT INTO asn_geo_reference
            (reference_type, asn, cidr, provider, region, country_code, is_nigerian, notes, source, created_by)
          VALUES ($1, $2, $3::cidr, $4, $5, $6, $7, $8, 'admin-entry', $9)
-         ON CONFLICT ${input.asn != null ? "(reference_type, asn) WHERE asn IS NOT NULL" : "(reference_type, cidr) WHERE cidr IS NOT NULL"}
+         ON CONFLICT ${conflict}
          DO UPDATE SET provider = EXCLUDED.provider, region = EXCLUDED.region,
                        country_code = EXCLUDED.country_code, is_nigerian = EXCLUDED.is_nigerian,
                        notes = EXCLUDED.notes, source = 'admin-entry', updated_at = NOW()
@@ -692,9 +773,21 @@ export const dataSovereigntyRouter = router({
           actorOf(ctx.user as any),
         ]
       );
+      await exec(
+        `INSERT INTO asn_geo_reference_revisions
+           (reference_id, revision_no, action, prior_state, new_state, change_reason, dual_control_note, changed_by)
+         SELECT $1, COALESCE((SELECT MAX(revision_no) FROM asn_geo_reference_revisions WHERE reference_id = $1), 0) + 1,
+                $2, $3, to_jsonb(r), $4, $5, $6
+         FROM asn_geo_reference r WHERE r.id = $1`,
+        [
+          row.id, prior ? "update" : "insert", prior ? JSON.stringify(prior.state) : null,
+          input.change_reason, input.dual_control_note ?? null, actorOf(ctx.user as any),
+        ]
+      );
       await logAudit("asn_geo_reference_upserted", "asn_geo_reference", row?.id, String(ctx.user.id), {
         reference_type: input.reference_type, asn: input.asn ?? null, cidr: input.cidr ?? null,
-        is_nigerian: input.is_nigerian,
+        is_nigerian: input.is_nigerian, change_reason: input.change_reason,
+        dual_control: Boolean(input.dual_control_note),
       });
       fireAndForget("dataSovereignty.upsertReferenceEntry", {});
       return row;
@@ -743,7 +836,7 @@ export const dataSovereigntyRouter = router({
       const [vio] = await exec(
         `SELECT
            COUNT(*) FILTER (WHERE status IN ('detected', 'acknowledged', 'under_remediation'))::int AS open_count,
-           COUNT(*) FILTER (WHERE status IN ('resolved', 'dismissed')
+           COUNT(*) FILTER (WHERE status = 'resolved'
                             AND detected_at >= NOW() - interval '180 days')::int AS recent_resolved
          FROM residency_violations WHERE entity_ref = $1`,
         [input.entity_ref]
@@ -797,12 +890,22 @@ export const dataSovereigntyRouter = router({
         ? Number(eg.foreign_bytes) / Number(eg.total_bytes)
         : 0;
 
+      // Telemetry coverage: distinct hour-buckets with any rollup in the last
+      // 24 h. < 20 of 24 => provisional score, tier capped at 'partial'.
+      const [cov] = await exec(
+        `SELECT COUNT(DISTINCT date_trunc('hour', window_start))::int AS windows
+         FROM egress_flow_rollups
+         WHERE entity_ref = $1 AND window_start >= NOW() - interval '24 hours'`,
+        [input.entity_ref]
+      );
+
       const result = computeSovereigntyScore({
         declaredObservedConsistency: consistency,
         attestationDaysToExpiry,
         openViolations: Number(vio?.open_count ?? 0),
         recentlyResolvedViolations: Number(vio?.recent_resolved ?? 0),
         foreignEgressRatio: foreignRatio,
+        telemetryCoverage: { availableWindows: Number(cov?.windows ?? 0), expectedWindows: 24 },
       });
 
       const [scoreRow] = await exec(

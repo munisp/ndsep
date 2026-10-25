@@ -37,6 +37,17 @@ from pydantic import BaseModel
 import psycopg2
 import psycopg2.extras
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 # Conditional imports for analytics
 try:
     import duckdb
@@ -58,10 +69,10 @@ log = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 _raw_db_url = os.environ.get("DATABASE_URL",
-                             os.environ.get("WORKER_DATABASE_URL",
-                                            "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
-DB_URL = re.sub(r'(\?sslmode=[^&?]*)+', '?sslmode=disable', _raw_db_url)
-PORT = int(os.environ.get("LAKEHOUSE_PORT", "8140"))
+                             os.environ.get("WORKER_DATABASE_URL"))
+# Fail closed (round-9): None when unset; _require_dsn raises clearly at connect.
+DB_URL = re.sub(r'(\?sslmode=[^&?]*)+', '?sslmode=disable', _raw_db_url) if _raw_db_url else None
+PORT = int(os.environ.get("LAKEHOUSE_PORT", "8141"))  # canonical workerManager port (was 8140, collided with lakehouse-ingestion)
 WAREHOUSE_PATH = Path(os.environ.get("LAKEHOUSE_WAREHOUSE_PATH", "/tmp/ndsep-lakehouse/warehouse"))
 PARQUET_PATH = Path(os.environ.get("LAKEHOUSE_PARQUET_PATH", "/tmp/ndsep-lakehouse/parquet"))
 SNAPSHOT_PATH = Path(os.environ.get("LAKEHOUSE_SNAPSHOT_PATH", "/tmp/ndsep-lakehouse/snapshots"))
@@ -208,7 +219,7 @@ def get_duck() -> Any:
 
 
 def get_pg():
-    return psycopg2.connect(DB_URL)
+    return psycopg2.connect(_require_dsn(DB_URL))
 
 # ── ETL: PostgreSQL → Parquet ──────────────────────────────────────────────────
 

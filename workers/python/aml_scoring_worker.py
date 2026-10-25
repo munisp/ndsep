@@ -14,8 +14,19 @@ Features:
   - Network graph analysis (connected accounts)
   - STR (Suspicious Transaction Report) auto-generation
   - NFIU reporting integration
-  - ML model scoring (gradient boosting simulation)
+  - ML scoring via the trained fraud_net model (ml.inference.score_transaction)
+    when the ML stack is importable; otherwise a deterministic, explicitly
+    labelled rule-based score (NO random noise, no simulated model variance)
   - Case escalation workflow
+
+Scoring honesty (round-9): previous versions added random.gauss noise to a
+weighted sum and called it "gradient boosting simulation". That was removed.
+Every score is now labelled with `score_mode`:
+  - "fraud_net"   — probability from the trained model in ml/weights
+  - "rule_based"  — deterministic weighted rules (documented below)
+
+HTTP: GET /health on AML_SCORER_PORT (canonical workerManager port 8134),
+dependency-aware (503 when PostgreSQL is unreachable).
 """
 
 import os
@@ -25,25 +36,31 @@ import time
 import random
 import logging
 import hashlib
+import http.server
+import socketserver
+import threading
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from db_helper import get_db_connection, publish_event  # fail-closed: requires WORKER_DATABASE_URL/DATABASE_URL (round-9)
+
+# ── Trained fraud model (ml.inference) — optional but preferred scorer ───────
+# The worker tree sits at <repo>/workers/python; put the repo root on the path
+# so `import ml.inference` resolves.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+_ml_inference = None
 try:
-    from db_helper import get_db_connection, publish_event
-except ImportError:
-    import psycopg2
-
-    def get_db_connection():
-        return psycopg2.connect(
-            os.environ.get('LOCAL_DATABASE_URL',
-                           'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
-        )
-
-    def publish_event(event_type: str, payload: dict):
-        logging.info(f"[EVENT] {event_type}: {json.dumps(payload)}")
+    from ml import inference as _ml_inference
+    from ml.data.generate_synthetic import FRAUD_FEATURES as _FRAUD_FEATURES
+except Exception as _e:  # torch / weights unavailable in this container
+    logging.getLogger('aml_scoring_worker').warning(
+        "ml.inference unavailable (%s) — falling back to rule_based scoring", _e)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,8 +113,10 @@ def extract_features(case: dict, conn) -> Dict[str, float]:
                 AND id != %s
             """, (case.get('subject_account'), case.get('id')))
             freq = cur.fetchone()[0]
+            features['tx_count_24h'] = float(freq)
             features['velocity_24h'] = min(freq / 10.0, 1.0)
     except Exception:
+        features['tx_count_24h'] = 0.0
         features['velocity_24h'] = 0.0
 
     # Feature 4: Alert source risk weight
@@ -121,12 +140,17 @@ def extract_features(case: dict, conn) -> Dict[str, float]:
     return features
 
 
-def ml_score(features: Dict[str, float]) -> float:
+def rule_based_score(features: Dict[str, float]) -> float:
     """
-    Gradient boosting simulation for AML risk scoring.
-    In production, this would call a trained scikit-learn/XGBoost model.
+    Deterministic rule-based AML risk score (0–100).
+
+    This is NOT a machine-learning model: it is a fixed weighted sum of the
+    documented AML red-flag features below (weights chosen from NFIU/CBN
+    typology guidance). It is fully deterministic — the random.gauss "model
+    variance" noise of earlier versions was removed in round-9. When the
+    trained fraud_net model is available, `score_case` prefers it and only
+    uses this function as a fallback.
     """
-    # Weighted linear combination (simulating gradient boosting leaf values)
     weights = {
         'amount_ratio': 15.0,
         'structuring_flag': 25.0,
@@ -135,11 +159,44 @@ def ml_score(features: Dict[str, float]) -> float:
         'existing_score': 10.0,
         'type_weight': 15.0,
     }
-
     score = sum(features.get(k, 0) * w for k, w in weights.items())
-    # Add small noise to simulate model variance
-    score += random.gauss(0, 2)
     return max(0.0, min(100.0, score))
+
+
+def _case_to_fraud_features(case: dict, features: Dict[str, float]) -> Dict[str, float]:
+    """Map an AML case onto the fraud_net feature vector (FRAUD_FEATURES).
+
+    Unmapped fraud features are set to 0.0, which after train-time
+    standardisation is approximately the training mean — a neutral,
+    documented default (same convention as ml/training/fine_tune.py).
+    """
+    amount_ngn = (case.get('transaction_amount') or 0) / 100
+    import math
+    vec = {f: 0.0 for f in _FRAUD_FEATURES}
+    vec['amount_log'] = math.log1p(max(amount_ngn, 0.0))
+    vec['just_below_threshold'] = features.get('structuring_flag', 0.0)
+    vec['sender_tx_count_1h'] = float(features.get('tx_count_24h', 0.0))
+    vec['sender_amount_ratio'] = min(features.get('amount_ratio', 0.0), 1.0)
+    vec['is_round_amount'] = 1.0 if amount_ngn >= 1000 and amount_ngn % 1000 == 0 else 0.0
+    vec['mule_hop'] = 1.0 if case.get('alert_source') == 'fraud_engine' else 0.0
+    return vec
+
+
+def score_case(case: dict, features: Dict[str, float]) -> tuple[float, str, Optional[str]]:
+    """Score an AML case. Returns (score_0_100, score_mode, model_version).
+
+    Prefers the trained fraud_net model via ml.inference; falls back to the
+    deterministic rule-based score when the ML stack is unavailable.
+    """
+    if _ml_inference is not None:
+        try:
+            res = _ml_inference.score_transaction(
+                _case_to_fraud_features(case, features))
+            return (round(res['probability'] * 100.0, 2),
+                    'fraud_net', res.get('model_version'))
+        except Exception as e:
+            logger.warning("fraud_net scoring failed (%s) — rule_based fallback", e)
+    return (rule_based_score(features), 'rule_based', None)
 
 # ─── STR Generation ───────────────────────────────────────────────────────────
 
@@ -188,16 +245,16 @@ def process_aml_case(case: dict, conn) -> None:
     """Process a single AML case with full scoring and workflow."""
     case_ref = case.get('case_reference', 'UNKNOWN')
 
-    # Extract features and score
+    # Extract features and score (fraud_net when available, else rule_based)
     features = extract_features(case, conn)
-    score = ml_score(features)
+    score, score_mode, model_version = score_case(case, features)
 
     # Determine risk level
     if score >= 80:
         risk_level = 'high'
         status = 'escalated'
         escalated = True
-        escalation_reason = f"ML score {score:.1f} exceeds high-risk threshold"
+        escalation_reason = f"AML score {score:.1f} ({score_mode}) exceeds high-risk threshold"
     elif score >= 60:
         risk_level = 'medium'
         status = 'under_investigation'
@@ -222,7 +279,7 @@ def process_aml_case(case: dict, conn) -> None:
                 SET risk_score = %s, status = %s,
                 narrative = %s, updated_at = NOW()
                 WHERE id = %s
-            """, (int(score), status, escalation_reason or f'ML score {score:.1f} | risk={risk_level}', case['id']))
+            """, (int(score), status, escalation_reason or f'AML score {score:.1f} ({score_mode}) | risk={risk_level}', case['id']))
             conn.commit()
     except Exception as e:
         logger.error(f"Failed to update case {case_ref}: {e}")
@@ -238,6 +295,8 @@ def process_aml_case(case: dict, conn) -> None:
     publish_event('aml.case.scored', {
         'case_ref': case_ref,
         'score': score,
+        'score_mode': score_mode,
+        'model_version': model_version,
         'risk_level': risk_level,
         'escalated': escalated,
         'str_filed': str_ref is not None,
@@ -323,11 +382,61 @@ def screen_new_kyc_records(conn) -> None:
         except Exception:
             pass
 
+# ─── Health HTTP listener ────────────────────────────────────────────────────
+
+# Canonical port from server/workerManager.ts (aml-scorer → AML_SCORER_PORT=8134)
+PORT = int(os.environ.get('AML_SCORER_PORT', '8134'))
+_worker_start = time.time()
+
+
+class _HealthHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if self.path != '/health':
+            self.send_response(404)
+            self.end_headers()
+            return
+        db_ok = False
+        db_error = None
+        try:
+            conn = get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            conn.close()
+            db_ok = True
+        except Exception as e:
+            db_error = str(e)[:200]
+        body = json.dumps({
+            'status': 'healthy' if db_ok else 'unhealthy',
+            'worker': 'aml_scoring_worker',
+            'scoring_mode': 'fraud_net' if _ml_inference is not None else 'rule_based',
+            'database': 'ok' if db_ok else 'unavailable',
+            'db_error': db_error,
+            'uptime_seconds': round(time.time() - _worker_start, 1),
+        }).encode()
+        self.send_response(200 if db_ok else 503)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def _start_health_server():
+    with socketserver.TCPServer(("", PORT), _HealthHandler) as httpd:
+        httpd.allow_reuse_address = True
+        logger.info(f"AML scorer /health listening on port {PORT}")
+        httpd.serve_forever()
+
+
 # ─── Main Loop ────────────────────────────────────────────────────────────────
 
 
 def main():
-    logger.info("AML Scoring Worker starting...")
+    logger.info(f"AML Scoring Worker starting (health port {PORT}, "
+                f"scoring={'fraud_net' if _ml_inference is not None else 'rule_based'})...")
+    threading.Thread(target=_start_health_server, daemon=True).start()
 
     processed_total = 0
     iteration = 0

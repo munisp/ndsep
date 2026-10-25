@@ -12,12 +12,22 @@ from datetime import datetime, timezone
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [ai_governance_scorer] %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 DB_URL = os.environ.get(
-    "NDSEP_PG_URL",
-    "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"
+    "NDSEP_PG_URL"
 )
 
 # ─── Risk Scoring Rubric ──────────────────────────────────────────────────────
@@ -126,7 +136,7 @@ def score_ai_system(system: dict) -> dict:
 
 
 def get_connection():
-    return psycopg2.connect(DB_URL, cursor_factory=RealDictCursor)
+    return psycopg2.connect(_require_dsn(DB_URL), cursor_factory=RealDictCursor)
 
 
 def ensure_scores_table(conn):

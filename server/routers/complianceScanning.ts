@@ -86,6 +86,68 @@ const urlSchema = z.string().url().max(2048).refine(
   { message: "base_url must include http(s) scheme" }
 );
 
+// ─── SSRF guards (mirror workers/python/scan_crawler_worker.py) ─────────────
+/** Private/loopback/link-local/reserved addresses may never be scan targets. */
+export function isForbiddenScanIp(ip: string): boolean {
+  if (!ip) return true;
+  if (ip.includes(":")) {
+    const v6 = ip.toLowerCase();
+    return (
+      v6 === "::1" || v6 === "::" || v6.startsWith("fe80:") || v6.startsWith("fc") ||
+      v6.startsWith("fd") || v6.startsWith("ff0") || v6.startsWith("::ffff:127.") ||
+      v6.startsWith("::ffff:10.") || v6.startsWith("::ffff:192.168.") || v6.startsWith("::ffff:169.254.")
+    );
+  }
+  const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return true; // not an IP literal
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return (
+    a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) || (a === 169 && b === 254) || a >= 224
+  );
+}
+
+/** crawl_paths must be same-origin absolute paths — no scheme/host/credentials. */
+export function validateCrawlPath(path: string): string {
+  if (!path.startsWith("/") || path.startsWith("//")) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `crawl path must start with '/' and be same-origin: ${path}` });
+  }
+  let u: URL;
+  try {
+    u = new URL(path, "https://placeholder.invalid");
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `invalid crawl path: ${path}` });
+  }
+  if (u.host !== "placeholder.invalid") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `crawl path must not contain a host: ${path}` });
+  }
+  return path;
+}
+
+/** Full target validation: https (unless intranet flag), no forbidden IPs
+ *  (literal hosts checked here; DNS re-validation happens in the worker at
+ *  connect time and on every redirect). */
+export function validateScanTargetUrl(raw: string): URL {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "invalid base_url" });
+  }
+  const allowHttp = process.env.NDSEP_SCAN_ALLOW_INSECURE_HTTP === "true";
+  if (u.protocol !== "https:" && !(allowHttp && u.protocol === "http:")) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "base_url must use https (set NDSEP_SCAN_ALLOW_INSECURE_HTTP=true only for intranet targets)" });
+  }
+  const host = u.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".localhost")) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "base_url host is not a permitted scan target" });
+  }
+  if (isForbiddenScanIp(host.replace(/^\[|\]$/g, ""))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "base_url resolves to a private/loopback/link-local address — not a permitted scan target" });
+  }
+  return u;
+}
+
 export const complianceScanningRouter = router({
   // ─── Scan target registry ────────────────────────────────────────────────
   listTargets: protectedProcedure
@@ -132,6 +194,8 @@ export const complianceScanningRouter = router({
       notes: z.string().max(2000).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      validateScanTargetUrl(input.base_url);
+      for (const p of input.crawl_paths) validateCrawlPath(p);
       if (input.organization_id) {
         const org = await exec(`SELECT id FROM organizations WHERE id = $1`, [input.organization_id]);
         if (!org[0]) throw new TRPCError({ code: "BAD_REQUEST", message: "organization_id not found" });
@@ -162,6 +226,7 @@ export const complianceScanningRouter = router({
       notes: z.string().max(2000).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      for (const p of input.crawl_paths ?? []) validateCrawlPath(p);
       const [row] = await exec(
         `UPDATE scan_targets
             SET enabled = COALESCE($2, enabled),
@@ -399,13 +464,18 @@ export const complianceScanningRouter = router({
       resolution_notes: z.string().max(2000).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // referred -> resolved is legitimate (enforcement concluded); other
+      // terminal/closed states stay closed.
       const [row] = await exec(
         `UPDATE scan_findings
             SET status = $2,
                 resolved_at = CASE WHEN $2 IN ('resolved', 'dismissed') THEN NOW() ELSE resolved_at END,
                 resolved_by = CASE WHEN $2 IN ('resolved', 'dismissed') THEN $3 ELSE resolved_by END,
                 resolution_notes = COALESCE($4, resolution_notes)
-          WHERE id = $1 AND status IN ('open', 'acknowledged') RETURNING *`,
+          WHERE id = $1
+            AND (status IN ('open', 'acknowledged')
+                 OR (status = 'referred' AND $2 = 'resolved'))
+          RETURNING *`,
         [input.id, input.status, ctx.user.name ?? String(ctx.user.id), input.resolution_notes ?? null]
       );
       if (!row) throw new TRPCError({ code: "CONFLICT", message: "Finding not found or already closed" });

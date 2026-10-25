@@ -79,9 +79,22 @@ function mentionsProtectedTable(normalized: string, tables: readonly string[]): 
  *   - ALTER TABLE ... DROP (column/constraint drops)
  * Additionally, unqualified mass DELETE on ANY table is rejected.
  */
+export interface AssertNotDestructiveOptions {
+  /**
+   * When true, an unqualified DELETE on a NON-protected table is permitted but
+   * reported via the returned warning channel instead of throwing. Used by the
+   * main-pool wrapper (server/antiwipe/guardedQuery.ts) where legacy code paths
+   * (demo-data reset) legitimately mass-delete non-evidence tables. Protected
+   * tables are ALWAYS strictly guarded regardless of this flag.
+   */
+  allowUnqualifiedDeleteOnUnprotected?: boolean;
+  onWarning?: (message: string, sql: string) => void;
+}
+
 export function assertNotDestructive(
   sql: string,
   protectedTables: readonly string[] = PROTECTED_TABLES,
+  options: AssertNotDestructiveOptions = {},
 ): void {
   const n = normalizeSql(sql);
   const protectedHit = mentionsProtectedTable(n, protectedTables);
@@ -115,10 +128,17 @@ export function assertNotDestructive(
       );
     }
     if (!hasWhere) {
-      throw new DestructiveOperationError(
-        "antiwipe: unqualified DELETE (no WHERE) rejected for all tables",
-        sql,
-      );
+      if (options.allowUnqualifiedDeleteOnUnprotected && !protectedHit) {
+        options.onWarning?.(
+          "antiwipe: unqualified DELETE on unprotected table permitted (legacy path) — audit logged",
+          sql,
+        );
+      } else {
+        throw new DestructiveOperationError(
+          "antiwipe: unqualified DELETE (no WHERE) rejected for all tables",
+          sql,
+        );
+      }
     }
   }
 

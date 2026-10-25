@@ -283,23 +283,73 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
+            # Dependency-aware (round-9): probe Ollama live; 503 when down.
+            available = check_ollama()
             self.send_json({
-                "status": "healthy",
+                "status": "healthy" if available else "unhealthy",
                 "worker": "ollama_llm_worker",
-                "ollama_available": _ollama_available,
+                "ollama_available": available,
                 "available_models": _available_models,
                 "default_model": DEFAULT_MODEL,
                 "total_requests": _total_requests,
                 "errors": _errors,
                 "uptime_seconds": round(time.time() - _worker_start, 1),
-                "capabilities": ["generate", "chat", "compliance_qa", "classify_violation", "summarize", "assess_breach"]
-            })
+                "capabilities": ["generate", "stream", "chat", "compliance_qa", "classify_violation", "summarize", "assess_breach"]
+            }, status=200 if available else 503)
         elif self.path == "/models":
             check_ollama()
             self.send_json({"models": _available_models})
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _handle_stream(self, body: Dict):
+        """POST /stream — SSE streaming completion via Ollama's streaming API.
+
+        Emits `data: {"token": ..., "done": false}` per chunk and a final
+        `data: {"done": true}` terminator. Returns 503 when Ollama is
+        unavailable (fail closed — no fake stream)."""
+        global _errors
+        result = generate(
+            prompt=body.get("prompt", ""),
+            model=body.get("model"),
+            system=body.get("system"),
+            temperature=body.get("temperature", TEMPERATURE),
+            stream=True,
+        )
+        resp = result.get("stream")
+        if resp is None:
+            _errors += 1
+            self.send_json({"error": result.get("error", "stream unavailable"),
+                            "response": ""}, status=503)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        try:
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line.decode("utf-8"))
+                except Exception:
+                    continue
+                token = chunk.get("response", "")
+                done = bool(chunk.get("done", False))
+                self.wfile.write(
+                    f"data: {json.dumps({'token': token, 'done': done})}\n\n".encode())
+                self.wfile.flush()
+                if done:
+                    break
+        except (BrokenPipeError, ConnectionResetError):
+            log.info("Stream client disconnected")
+        except Exception as e:
+            _errors += 1
+            log.error(f"Stream failed mid-flight: {e}")
+        finally:
+            resp.close()
 
     def do_POST(self):
         body = self.read_body()
@@ -311,6 +361,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 temperature=body.get("temperature", TEMPERATURE)
             )
             self.send_json(result)
+        elif self.path == "/stream":
+            self._handle_stream(body)
         elif self.path == "/chat":
             result = chat(
                 messages=body.get("messages", []),

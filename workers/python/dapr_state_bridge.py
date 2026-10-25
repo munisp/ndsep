@@ -17,7 +17,7 @@ from collections import defaultdict
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [dapr-state-bridge] %(message)s')
 logger = logging.getLogger(__name__)
 
-PORT = int(os.getenv("DAPR_BRIDGE_PORT", "8167"))
+PORT = int(os.getenv("DAPR_STATE_PORT", os.getenv("DAPR_BRIDGE_PORT", "8216")))  # canonical: DAPR_STATE_PORT (workerManager); DAPR_BRIDGE_PORT legacy
 DAPR_HTTP_PORT = int(os.getenv("DAPR_HTTP_PORT", "3500"))
 DAPR_URL = f"http://localhost:{DAPR_HTTP_PORT}"
 DAPR_APP_ID = os.getenv("DAPR_APP_ID", "ndsep-platform")

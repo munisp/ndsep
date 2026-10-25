@@ -571,7 +571,7 @@ export const WORKER_DEFS: WorkerDef[] = [
     layer: "INFRA",
     command: path.join(BIN_DIR, "event_bus"),
     args: [],
-    port: 8160,
+    port: 8161,
     env: {
       KAFKA_BROKERS: process.env.KAFKA_BROKERS ?? "localhost:9092",
       KAFKA_ENABLED: process.env.KAFKA_ENABLED ?? "true",
@@ -624,7 +624,7 @@ export const WORKER_DEFS: WorkerDef[] = [
     layer: "ORCH",
     command: path.join(BIN_DIR, "workflow_engine"),
     args: [],
-    port: 8170,
+    port: 8171,
     env: {
       TEMPORAL_HOST: process.env.TEMPORAL_ADDRESS ?? "localhost:7233",
       TEMPORAL_NAMESPACE: process.env.TEMPORAL_NAMESPACE ?? "default",
@@ -697,7 +697,7 @@ export const WORKER_DEFS: WorkerDef[] = [
     layer: "Banking",
     command: path.join(WORKERS_DIR, "go", "bin", "nip_rtgs_processor"),
     args: [],
-    port: 8130,
+    port: 8137,
     env: {
       NIP_RTGS_PORT: "8130",
       WORKER_DATABASE_URL: DB_URL,
@@ -889,7 +889,7 @@ export const WORKER_DEFS: WorkerDef[] = [
     layer: "Insurance",
     command: "python3.11",
     args: [path.join(PYTHON_DIR, "insurance_monitor.py")],
-    port: 8125,
+    port: 8127,
     env: {
       INSURANCE_MONITOR_PORT: "8125",
       WORKER_DATABASE_URL: DB_URL,
@@ -988,7 +988,7 @@ export const WORKER_DEFS: WorkerDef[] = [
     language: "Go",
     command: path.join(BIN_DIR, "falkordb_kg_worker"),
     args: [],
-    port: 8210,
+    port: 8220,
     env: { FALKORDB_PORT: "8210", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, FALKORDB_URL: process.env.FALKORDB_URL ?? "redis://localhost:6379" },
     description: "Maintains the NDSEP knowledge graph in FalkorDB for compliance relationship queries.",
     technology: "Go · FalkorDB · Redis · GraphQL",
@@ -1048,7 +1048,7 @@ export const WORKER_DEFS: WorkerDef[] = [
     language: "Go",
     command: path.join(BIN_DIR, "rss_webhook_server"),
     args: [],
-    port: 8210,
+    port: 8241,
     env: { RSS_WEBHOOK_PORT: "8210", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
     description: "Serves RSS feeds and webhook endpoints for NDSEP regulatory intelligence.",
     technology: "Go · RSS · Webhooks · PostgreSQL",
@@ -1097,8 +1097,8 @@ export const WORKER_DEFS: WorkerDef[] = [
     language: "Python",
     command: "python3.11",
     args: [path.join(PYTHON_DIR, "cocoindex_etl_worker.py")],
-    port: 8201,
-    env: { COCOINDEX_PORT: "8201", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
+    port: 8205,
+    env: { COCOINDEX_PORT: "8205", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
     description: "ETL pipeline for COCO dataset indexing and compliance data transformation.",
     technology: "Python · CocoIndex · PostgreSQL · FastAPI",
   },
@@ -1169,8 +1169,8 @@ export const WORKER_DEFS: WorkerDef[] = [
     language: "Python",
     command: "python3.11",
     args: [path.join(PYTHON_DIR, "epr_kgqa_worker.py")],
-    port: 8202,
-    env: { EPR_KGQA_PORT: "8202", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
+    port: 8214,
+    env: { EPR_KGQA_PORT: "8214", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
     description: "Knowledge Graph Question Answering for EPR compliance using FalkorDB and LLM.",
     technology: "Python · FalkorDB · LLM · FastAPI",
   },
@@ -1362,8 +1362,8 @@ export const WORKER_DEFS: WorkerDef[] = [
     language: "Python",
     command: "python3",
     args: [path.join(PYTHON_DIR, "lakehouse_analytics_engine.py")],
-    port: 8140,
-    env: { LAKEHOUSE_PORT: "8140", DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
+    port: 8141,
+    env: { LAKEHOUSE_PORT: "8141", DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
     description: "Production lakehouse: DuckDB + Parquet ETL from PostgreSQL, materialized views, feature serving for ML.",
     technology: "Python · DuckDB · PyArrow · Parquet · FastAPI",
   },
@@ -1374,8 +1374,8 @@ export const WORKER_DEFS: WorkerDef[] = [
     language: "Python",
     command: "python3",
     args: [path.join(PYTHON_DIR, "ml_production_engine.py")],
-    port: 8085,
-    env: { ML_WORKER_PORT: "8085", DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, LAKEHOUSE_URL: "http://localhost:8140" },
+    port: 8103,
+    env: { ML_WORKER_PORT: "8103", DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, LAKEHOUSE_URL: "http://localhost:8140" },
     description: "XGBoost breach prediction, LSTM violation forecasting, IsolationForest anomaly detection, SHAP explanations.",
     technology: "Python · XGBoost · scikit-learn · SHAP · FastAPI",
   },
@@ -1386,8 +1386,8 @@ export const WORKER_DEFS: WorkerDef[] = [
     language: "Python",
     command: "python3",
     args: [path.join(PYTHON_DIR, "gnn_compliance_engine.py")],
-    port: 8216,
-    env: { GNN_PORT: "8216", DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, LAKEHOUSE_URL: "http://localhost:8140" },
+    port: 8242,
+    env: { GNN_PORT: "8242", DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, LAKEHOUSE_URL: "http://localhost:8140" },
     description: "GraphSAGE GNN with learned weights, link prediction, compliance graph embeddings for downstream ML.",
     technology: "Python · numpy · scipy · scikit-learn · FastAPI",
   },
@@ -1412,7 +1412,83 @@ export const WORKER_DEFS: WorkerDef[] = [
     description: "Real PyTorch ML/DL/GNN engine with continuous training: GraphSAGE GNN, LSTM, Autoencoder, XGBoost+SHAP. Data drift detection (KS-test/PSI), champion/challenger model promotion, feedback loop, scheduled auto-retraining. Ray distributed training. Lakehouse/DuckDB integration.",
     technology: "Python · PyTorch · Ray · XGBoost · SHAP · DuckDB · SciPy · FastAPI",
   },
+  // ── Round-9: previously orphaned workers (defined in workers/python but
+  // never registered here) — scan_crawler / policy_monitor / egress_monitor /
+  // regintel_ingest. Ports assigned from the canonical free list; the
+  // uniqueness assertion at startup (assertUniqueWorkerPorts) fails the boot
+  // if any two defs ever share a port again.
+  {
+    id: "scan-crawler",
+    name: "Compliance Scan Crawler",
+    layer: "L3",
+    language: "Python",
+    command: "python3",
+    args: [path.join(PYTHON_DIR, "scan_crawler_worker.py")],
+    port: 8243,
+    env: { SCAN_CRAWLER_PORT: "8243", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
+    description: "Crawls registered scan targets and produces compliance scan runs/findings (migrations 0083).",
+    technology: "Python · PostgreSQL · HTTP",
+  },
+  {
+    id: "policy-monitor",
+    name: "Policy Monitor Worker",
+    layer: "L3",
+    language: "Python",
+    command: "python3",
+    args: [path.join(PYTHON_DIR, "policy_monitor_worker.py")],
+    port: 8236,
+    env: { POLICY_MONITOR_PORT: "8236", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
+    description: "Monitored-policy review scheduling, escalation and controller notification (migration 0084).",
+    technology: "Python · PostgreSQL · HTTP",
+  },
+  {
+    id: "egress-monitor",
+    name: "Egress Monitor Worker",
+    layer: "L2",
+    language: "Python",
+    command: "python3",
+    args: [path.join(PYTHON_DIR, "egress_monitor_worker.py")],
+    port: 8244,
+    env: { WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL, KAFKA_REST_PROXY_URL: process.env.KAFKA_REST_URL ?? "" },
+    description: "Netflow egress anomaly/change-point detection feeding residency violation signals (migration 0095).",
+    technology: "Python · Kafka REST · PostgreSQL",
+  },
+  {
+    id: "regintel-ingest",
+    name: "RegIntel Ingest Worker",
+    layer: "L3",
+    language: "Python",
+    command: "python3",
+    args: [path.join(PYTHON_DIR, "regintel_ingest_worker.py")],
+    // Canonical 8210: matches server/routers/regIntel.ts REGINTEL_WORKER_URL
+    // default (http://localhost:8210) and the worker's own REGINTEL_PORT
+    // default. falkordb-kg and rss-webhook were moved OFF 8210 (8220/8241).
+    port: 8210,
+    env: { REGINTEL_PORT: "8210", WORKER_DATABASE_URL: DB_URL, WORKER_RELAY_URL: RELAY_URL },
+    description: "Regulatory-intelligence ingestion: legal instruments, versions and rule references (migration 0091).",
+    technology: "Python · PostgreSQL · HTTP",
+  },
 ];
+
+// ── Port uniqueness (round-9) ─────────────────────────────────────────────────
+// Duplicate worker ports caused silent health-check cross-wiring (8085, 8125,
+// 8130, 8140, 8160, 8170, 8201, 8202, 8210, 8216 all collided). Fail LOUDLY at
+// module load if any two workers ever share a port again.
+function assertUniqueWorkerPorts(defs: WorkerDef[]): void {
+  const byPort = new Map<number, string[]>();
+  for (const d of defs) {
+    const list = byPort.get(d.port) ?? [];
+    list.push(d.id);
+    byPort.set(d.port, list);
+  }
+  const collisions = [...byPort.entries()].filter(([, ids]) => ids.length > 1);
+  if (collisions.length > 0) {
+    throw new Error(
+      `[WorkerManager] Worker port collisions detected: ${collisions.map(([p, ids]) => `${p} -> ${ids.join(", ")}`).join("; ")}`,
+    );
+  }
+}
+assertUniqueWorkerPorts(WORKER_DEFS);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Process Supervisor

@@ -160,7 +160,7 @@ describe("validateDeclarationBasis — scc matrix", () => {
 });
 
 describe("validateDeclarationBasis — derogation-type bases", () => {
-  it.each(["derogation", "explicit_consent", "contract_performance", "vital_interest"] as const)(
+  it.each(["derogation", "explicit_consent", "contract_performance", "vital_interests"] as const)(
     "%s is lawful in principle but flagged for review when destination lacks adequacy",
     (basis) => {
       const out = validateDeclarationBasis({
@@ -209,7 +209,7 @@ describe("legal basis enum coverage", () => {
     expect([...LEGAL_BASES].sort()).toEqual(
       [
         "adequacy_decision", "bcr", "scc", "derogation",
-        "explicit_consent", "contract_performance", "vital_interest", "none_claimed",
+        "explicit_consent", "contract_performance", "vital_interests", "none_claimed",
       ].sort()
     );
   });

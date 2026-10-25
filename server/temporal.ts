@@ -49,6 +49,21 @@ const IS_TEMPORAL_CLOUD =
   !!(TEMPORAL_TLS_CERT && TEMPORAL_TLS_KEY) ||
   !!TEMPORAL_API_KEY;
 
+// TLS policy: plaintext gRPC is only acceptable to a loopback/dev cluster.
+// Any non-localhost Temporal address must present TLS material (mTLS cert/key
+// or API key) — in production this is a hard startup failure, not a warning.
+const IS_LOCAL_ADDRESS = /^(localhost|127\.0\.0\.1|::1)(:|$)/.test(TEMPORAL_ADDRESS) ||
+  // docker-compose service name on the internal bridge network, dev only
+  (/^temporal:7233$/.test(TEMPORAL_ADDRESS) && process.env.NODE_ENV !== "production");
+const HAS_TLS_MATERIAL = Boolean((TEMPORAL_TLS_CERT && TEMPORAL_TLS_KEY) || TEMPORAL_API_KEY);
+if (!IS_LOCAL_ADDRESS && !HAS_TLS_MATERIAL) {
+  const msg = `[Temporal] Non-localhost address ${TEMPORAL_ADDRESS} without TLS material (TEMPORAL_TLS_CERT/TEMPORAL_TLS_KEY or TEMPORAL_API_KEY)`;
+  if (process.env.NODE_ENV === "production" || process.env.TEMPORAL_REQUIRE_TLS === "true") {
+    throw new Error(`${msg} — refusing to start (fail closed)`);
+  }
+  logger.warn(`${msg} — development mode continues over PLAINTEXT gRPC`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,7 +148,7 @@ async function getTemporalClient(): Promise<any> {
       address: TEMPORAL_ADDRESS,
     };
 
-    if (IS_TEMPORAL_CLOUD) {
+    if (IS_TEMPORAL_CLOUD || HAS_TLS_MATERIAL) {
       if (TEMPORAL_TLS_CERT && TEMPORAL_TLS_KEY) {
         // mTLS — Temporal Cloud certificate-based auth
         connectionOptions.tls = {
@@ -189,6 +204,17 @@ export async function startWorkflow(
         taskQueue: options.taskQueue ?? TEMPORAL_TASK_QUEUE,
         args: options.input ? [options.input] : [],
         workflowExecutionTimeout: `${options.executionTimeoutSeconds ?? 3600}s`,
+        // Explicit conflict policy: a duplicate workflowId (idempotency key)
+        // fails loudly instead of silently deduplicating or racing.
+        workflowIdConflictPolicy: "FAIL",
+        // Explicit retry policy — workflow starts previously inherited SDK
+        // defaults, making retry behaviour version-dependent.
+        retry: {
+          initialInterval: "1s",
+          backoffCoefficient: 2,
+          maximumInterval: "30s",
+          maximumAttempts: 3,
+        },
       });
       logger.info(
         { workflowId: options.workflowId, runId: handle.firstExecutionRunId, workflowType },

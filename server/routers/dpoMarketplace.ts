@@ -302,6 +302,16 @@ export const dpoMarketplaceRouter = router({
       matchedProfileId: z.number().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // Ownership guard: only the engagement's organisation (via
+      // users.organization_id) or an admin may change its status.
+      if ((ctx.user as any).role !== "admin") {
+        const [eng] = await exec(`SELECT org_id FROM marketplace_engagements WHERE engagement_ref = $1`, [input.engagementRef]);
+        if (!eng) throw new TRPCError({ code: "NOT_FOUND", message: "Engagement not found" });
+        const [me] = await exec(`SELECT organization_id FROM users WHERE id = $1`, [toIntOrNull(String(ctx.user.id))]);
+        if (eng.org_id == null || me?.organization_id == null || Number(eng.org_id) !== Number(me.organization_id)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Only the engagement's organisation or an admin may update its status" });
+        }
+      }
       const rows = await exec(
         `UPDATE marketplace_engagements
          SET status = $1, matched_profile_id = COALESCE($2, matched_profile_id), updated_at = NOW()
@@ -323,39 +333,42 @@ export const dpoMarketplaceRouter = router({
   matchProfiles: publicProcedure
     .input(requirementsSchema.extend({ limit: z.number().int().min(1).max(50).default(10) }))
     .query(async ({ input }) => {
+      // SQL-side scoring (same rubric as scoreMatch: sectors 40 / regions 25 /
+      // languages 15 / capacity 10 / verified 10) with a hard LIMIT — the whole
+      // table is no longer pulled into memory to be sorted in JS.
       const rows = await exec(
-        `SELECT id, name, profile_type, sectors, regions, languages, capacity, verified
-         FROM dpo_marketplace_profiles WHERE active = true`,
+        `SELECT id, name, profile_type, capacity, verified,
+                ROUND((
+                  CASE WHEN $1 = 0 THEN 40
+                       ELSE 40.0 * (SELECT COUNT(*) FROM jsonb_array_elements_text(sectors) s
+                                     WHERE s = ANY(SELECT jsonb_array_elements_text($2::jsonb))) / $1 END +
+                  CASE WHEN $3 = 0 THEN 25
+                       ELSE 25.0 * (SELECT COUNT(*) FROM jsonb_array_elements_text(regions) r
+                                     WHERE r = ANY(SELECT jsonb_array_elements_text($4::jsonb))) / $3 END +
+                  CASE WHEN $5 = 0 THEN 15
+                       ELSE 15.0 * (SELECT COUNT(*) FROM jsonb_array_elements_text(languages) l
+                                     WHERE l = ANY(SELECT jsonb_array_elements_text($6::jsonb))) / $5 END +
+                  CASE WHEN $7 <= COALESCE(capacity, 0) THEN 10 ELSE 0 END +
+                  CASE WHEN verified THEN 10 ELSE 0 END
+                )::numeric, 2) AS score
+           FROM dpo_marketplace_profiles
+          WHERE active = true
+          ORDER BY score DESC, verified DESC, capacity DESC, name ASC
+          LIMIT $8`,
+        [
+          input.sectors.length, input.sectors,
+          input.regions.length, input.regions,
+          input.languages.length, input.languages,
+          input.minCapacity, input.limit,
+        ],
       );
-      const req: MatchRequirements = {
-        sectors: input.sectors, regions: input.regions, languages: input.languages, minCapacity: input.minCapacity,
-      };
-      return rows
-        .map((row) => {
-          const prof: MatchProfile = {
-            id: row.id,
-            name: row.name,
-            sectors: parseJsonArray(row.sectors),
-            regions: parseJsonArray(row.regions),
-            languages: parseJsonArray(row.languages),
-            capacity: Number(row.capacity) || 0,
-            verified: !!row.verified,
-          };
-          return {
-            profileId: prof.id,
-            name: prof.name,
-            profileType: row.profile_type,
-            verified: prof.verified,
-            capacity: prof.capacity,
-            score: scoreMatch(req, prof),
-          };
-        })
-        .sort((a, b) =>
-          b.score - a.score ||
-          Number(b.verified) - Number(a.verified) ||
-          b.capacity - a.capacity ||
-          a.name.localeCompare(b.name),
-        )
-        .slice(0, input.limit);
+      return rows.map((row) => ({
+        profileId: row.id,
+        name: row.name,
+        profileType: row.profile_type,
+        verified: !!row.verified,
+        capacity: Number(row.capacity) || 0,
+        score: Number(row.score),
+      }));
     }),
 });

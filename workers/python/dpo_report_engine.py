@@ -18,6 +18,17 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 try:
     import psycopg2
     import psycopg2.extras
@@ -33,8 +44,7 @@ PORT = int(os.environ.get("DPO_REPORT_ENGINE_PORT", "8125"))
 SCAN_INTERVAL = 120
 
 DB_URL = os.environ.get(
-    "WORKER_DATABASE_URL",
-    "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"
+    "WORKER_DATABASE_URL"
 )
 
 stats = {"reports_populated": 0, "sections_filled": 0, "last_run": None}
@@ -44,7 +54,7 @@ def get_db():
     if not HAS_DB:
         return None
     try:
-        return psycopg2.connect(DB_URL)
+        return psycopg2.connect(_require_dsn(DB_URL))
     except Exception as e:
         log.warning(f"DB connection failed: {e}")
         return None

@@ -151,13 +151,13 @@ export function autoDecryptRows<T extends Record<string, unknown>>(sql: string, 
       for (const field of fields) {
         const val = decrypted[field];
         if (typeof val === "string") {
-          (decrypted as Record<string, unknown>)[field] = decryptField(val);
+          (decrypted as Record<string, unknown>)[field] = decryptField(val, { table, column: field });
         }
         // Also check camelCase version of the field name
         const camelField = snakeToCamel(field);
         const camelVal = decrypted[camelField];
         if (typeof camelVal === "string") {
-          (decrypted as Record<string, unknown>)[camelField] = decryptField(camelVal);
+          (decrypted as Record<string, unknown>)[camelField] = decryptField(camelVal, { table, column: field });
         }
       }
     }

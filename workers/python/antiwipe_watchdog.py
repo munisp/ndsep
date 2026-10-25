@@ -52,7 +52,10 @@ API_URL = (
     os.environ.get("ANTIWIPE_API_URL")
     or os.environ.get("ANTWIPE_API_URL")  # legacy typo, kept for compatibility
     or "http://localhost:3000"
-).rstrip("/")
+)
+# Optional shared-secret for the integrity-scoped status endpoint (must match
+# the API's ANTIWIPE_SERVICE_TOKEN when the server enforces it).
+SERVICE_TOKEN = os.environ.get("ANTIWIPE_SERVICE_TOKEN", "").rstrip("/")
 INTERVAL = int(os.environ.get("WATCHDOG_INTERVAL", "300"))
 VERIFY_N = int(os.environ.get("WATCHDOG_VERIFY_N", "25"))
 HEALTH_PORT = int(os.environ.get("WATCHDOG_HEALTH_PORT", "8170"))
@@ -172,8 +175,11 @@ def _iso_ms(dt: datetime) -> str:
 
 def check_ledger_via_api() -> Optional[Dict[str, Any]]:
     """Ask the antiwipe API for chain status. None if unreachable."""
+    headers = {}
+    if SERVICE_TOKEN:
+        headers["Authorization"] = f"Bearer {SERVICE_TOKEN}"
     try:
-        resp = requests.get(f"{API_URL}/api/antiwipe/status", timeout=5)
+        resp = requests.get(f"{API_URL}/api/antiwipe/status", headers=headers, timeout=5)
         if resp.status_code == 200:
             return resp.json()
         log.warning(f"antiwipe API returned HTTP {resp.status_code}")
@@ -183,7 +189,13 @@ def check_ledger_via_api() -> Optional[Dict[str, Any]]:
 
 
 def check_ledger_via_db(pool) -> Tuple[Optional[str], Optional[bool]]:
-    """Fallback: recompute the head entry hash directly. (head_hash, ok|None)."""
+    """Fallback: recompute the head entry hash directly. (head_hash, ok|None).
+
+    Hard-failure semantics (round-9): an EMPTY chain or a head-hash MISMATCH
+    are both integrity failures (False), not "vacuously valid" / "degraded" —
+    a wiped ledger previously passed the watchdog silently. The API path
+    remains authoritative for tail-window validity.
+    """
     with worker_base.get_conn(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -191,16 +203,22 @@ def check_ledger_via_db(pool) -> Tuple[Optional[str], Optional[bool]]:
                 "FROM audit_ledger ORDER BY seq DESC LIMIT 1"
             )
             row = cur.fetchone()
-    if row is None:
-        return None, True  # empty chain is vacuously valid
+            cur.execute("SELECT COUNT(*) FROM audit_ledger")
+            total = cur.fetchone()[0]
+    if row is None or total == 0:
+        log.error("audit_ledger is EMPTY — a regulatory evidence chain must never be empty")
+        return None, False  # empty chain = hard failure
     _seq, prev_hash, entry_hash, payload, created_at = row
     recomputed = hashlib.sha256(
         (prev_hash + _canonical_json(payload) + _iso_ms(created_at)).encode("utf-8")
     ).hexdigest()
-    # Canonicalization edge cases (numeric rendering) can cause false
-    # negatives here, so a mismatch is reported as degraded (None), not
-    # a hard failure — the API path is authoritative.
-    return entry_hash, (True if recomputed == entry_hash else None)
+    if recomputed != entry_hash:
+        # Canonicalization edge cases (numeric rendering) previously demoted
+        # this to "degraded". Per the round-9 audit a head-hash mismatch is a
+        # HARD failure: the watchdog must err on the side of alerting.
+        log.error("ledger head-hash mismatch: stored=%s recomputed=%s", entry_hash, recomputed)
+        return entry_hash, False
+    return entry_hash, True
 
 
 # ── Heartbeat ────────────────────────────────────────────────────────────────
@@ -259,8 +277,13 @@ def run_cycle(pool, health) -> bool:
         ledger = api_status.get("ledger", api_status)
         result["ledger_head_hash"] = ledger.get("headHash")
         tail = ledger.get("tailCheck") or {}
-        result["ledger_ok"] = bool(tail.get("valid", True))
+        tail_valid = bool(tail.get("valid", True))
+        # Empty chain (no head hash / zero entries) = hard failure.
+        empty_chain = not ledger.get("headHash") or int(ledger.get("entryCount", 0) or 0) == 0
+        result["ledger_ok"] = bool(tail_valid and not empty_chain)
         result["details"]["ledger_source"] = "api"
+        if empty_chain:
+            result["details"]["ledger_empty_chain"] = True
     else:
         head_hash, db_ok = check_ledger_via_db(pool)
         result["ledger_head_hash"] = head_hash

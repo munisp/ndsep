@@ -47,6 +47,17 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [NDSEP-RayML] %(levelname)s %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S")
@@ -98,9 +109,9 @@ except ImportError:
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 _raw_db_url = os.environ.get("DATABASE_URL",
-                             os.environ.get("WORKER_DATABASE_URL",
-                                            "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
-DB_URL = re.sub(r'(\?sslmode=[^&?]*)+', '?sslmode=disable', _raw_db_url)
+                             os.environ.get("WORKER_DATABASE_URL"))
+# Fail closed (round-9): None when unset; _require_dsn raises clearly at connect.
+DB_URL = re.sub(r'(\?sslmode=[^&?]*)+', '?sslmode=disable', _raw_db_url) if _raw_db_url else None
 
 PORT = int(os.environ.get("RAY_ML_PORT", "8250"))
 MODEL_DIR = Path(os.environ.get("ML_MODEL_PATH", "./workers/python/models"))
@@ -330,7 +341,7 @@ def build_graph_from_db():
         return
 
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         cur.execute("SELECT id::text, name, sector, compliance_score, risk_score, compliance_status FROM organizations WHERE compliance_status IS NOT NULL")
@@ -662,7 +673,7 @@ def extract_violation_timeseries() -> tuple:
     if not HAS_PG:
         return np.array([]), np.array([])
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
             SELECT DATE_TRUNC('month', detected_at) as month,
@@ -1001,7 +1012,7 @@ def extract_features_from_db() -> tuple:
     if not HAS_PG:
         return np.array([]), np.array([]), [], FEATURE_COLUMNS
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
             SELECT o.id::text as org_id, o.name, o.sector,
@@ -1163,12 +1174,12 @@ def lakehouse_etl() -> dict:
         "audit_logs": "SELECT id, action, resource_type, created_at FROM audit_logs LIMIT 1000",
     }
 
-    re.sub(r'\?.*$', '', DB_URL)
+    re.sub(r'\?.*$', '', DB_URL or '')  # sanitized DSN (unused; kept for clarity)
     total_rows = 0
 
     for table, query in tables.items():
         try:
-            conn = psycopg2.connect(DB_URL)
+            conn = psycopg2.connect(_require_dsn(DB_URL))
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute(query)
             rows = cur.fetchall()

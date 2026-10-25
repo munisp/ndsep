@@ -692,6 +692,12 @@ async function startServer() {
     res.json({ workers: getWorkerStatuses() });
   });
 
+  // ── Anti-wipe ledger status (integrity-scoped, unauthenticated by design;
+  // optionally gated by ANTIWIPE_SERVICE_TOKEN) — consumed by the external
+  // antiwipe watchdog to detect a wiped/rolled-back audit ledger.
+  const { antiwipeStatusHandler } = await import("../antiwipe/restStatus");
+  app.get("/api/antiwipe/status", antiwipeStatusHandler);
+
   // ── National Enforcement Report PDF ──────────────────────────────────────
   app.get("/api/national-report.pdf", requireSession, async (_req, res) => {
     try {

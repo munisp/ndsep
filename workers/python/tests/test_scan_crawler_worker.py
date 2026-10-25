@@ -206,13 +206,17 @@ class TestCookieAnalysis:
             ["mystery=xyz; Expires=Wed, 01 Jan 2031 00:00:00 GMT"], SIGNATURES)
         assert cookies[0]["essential"] is False
 
-    def test_unknown_session_cookie_treated_essential_low_risk(self):
+    def test_unknown_session_cookie_not_auto_essential(self):
+        # FIX-C: unknown cookies are no longer auto-essential — an
+        # unrecognised identifier set pre-consent is a finding, not a pass.
         cookies = scw.analyze_cookies(["cart_token=tok; Path=/"], SIGNATURES)
-        assert cookies[0]["essential"] is True
+        assert cookies[0]["essential"] is False
+        assert cookies[0]["persistent"] is False
 
-    def test_short_lived_unknown_cookie_essential(self):
+    def test_short_lived_unknown_cookie_not_auto_essential(self):
+        # FIX-C: short Max-Age does not make an unknown cookie essential.
         cookies = scw.analyze_cookies(["lb=node1; Max-Age=3600"], SIGNATURES)
-        assert cookies[0]["essential"] is True
+        assert cookies[0]["essential"] is False
 
 
 # ── suppression matching (pure logic) ─────────────────────────────────────────

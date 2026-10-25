@@ -42,19 +42,42 @@ interface JwksCache {
 let jwksCache: JwksCache | null = null;
 const JWKS_TTL_MS = 60 * 60 * 1_000; // 1 hour
 
+// Negative-cache JWKS fetch failures briefly so an unreachable Keycloak does
+// not turn every token verification into a 3s timeout (round-9).
+const JWKS_FAILURE_TTL_MS = 10_000;
+let jwksFailureUntil = 0;
+
+async function fetchJwks(): Promise<JwksKey[]> {
+  const url = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+  if (!res.ok) throw new Error(`JWKS HTTP ${res.status}`);
+  const data = await res.json();
+  jwksCache = { keys: data.keys ?? [], fetchedAt: Date.now() };
+  jwksFailureUntil = 0;
+  return jwksCache.keys;
+}
+
 async function getJwks(): Promise<JwksKey[]> {
   if (jwksCache && Date.now() - jwksCache.fetchedAt < JWKS_TTL_MS) {
     return jwksCache.keys;
   }
+  if (Date.now() < jwksFailureUntil) return jwksCache?.keys ?? []; // negative cache
   try {
-    const url = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
-    if (!res.ok) return [];
-    const data = await res.json();
-    jwksCache = { keys: data.keys ?? [], fetchedAt: Date.now() };
-    return jwksCache.keys;
+    return await fetchJwks();
   } catch {
-    return [];
+    jwksFailureUntil = Date.now() + JWKS_FAILURE_TTL_MS;
+    return jwksCache?.keys ?? [];
+  }
+}
+
+/** Force-refresh the JWKS (bypasses TTL, respects failure negative-cache). */
+async function refetchJwks(): Promise<JwksKey[]> {
+  if (Date.now() < jwksFailureUntil) return jwksCache?.keys ?? [];
+  try {
+    return await fetchJwks();
+  } catch {
+    jwksFailureUntil = Date.now() + JWKS_FAILURE_TTL_MS;
+    return jwksCache?.keys ?? [];
   }
 }
 
@@ -155,8 +178,14 @@ export async function verifyKeycloakToken(token: string): Promise<KeycloakUser |
   if (!audience.includes(KEYCLOAK_CLIENT_ID)) return null;
   if (header.alg !== "RS256" || !header.kid) return null;
 
-  const keys = await getJwks();
-  const jwk = keys.find((key) => key.kid === header.kid);
+  let keys = await getJwks();
+  let jwk = keys.find((key) => key.kid === header.kid);
+  if (!jwk) {
+    // kid miss: the realm may have rotated keys since our cache — refetch once
+    // before giving up (round-9; previously an immediate, silent reject).
+    keys = await refetchJwks();
+    jwk = keys.find((key) => key.kid === header.kid);
+  }
   if (!jwk || jwk.kty !== "RSA" || jwk.use !== "sig" || (jwk.alg && jwk.alg !== "RS256")) {
     logger.warn({ kid: header.kid }, "[Keycloak] Signing key unavailable or incompatible");
     return null;

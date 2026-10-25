@@ -110,9 +110,17 @@ function _M.check_schema(conf)
         return false, "enforce mode requires at least one allowed_cidrs or allowed_host_suffixes entry " ..
                       "(refusing to enforce with an empty ruleset, which would 403 everything)"
     end
-    for _, cidr in ipairs(conf.allowed_cidrs) do
-        if type(cidr) ~= "string" or not cidr:match("^[%d%.:]+/%d+$") then
-            return false, "invalid CIDR in allowed_cidrs: " .. tostring(cidr)
+    -- Validate CIDRs with the same matcher used at runtime: a config that
+    -- ipmatcher cannot compile must be rejected at schema-check time, not
+    -- silently degrade classification later.
+    if #conf.allowed_cidrs > 0 then
+        local pok, ipmatcher = pcall(require, "apisix.core.ipmatcher")
+        if not pok then
+            return false, "apisix.core.ipmatcher unavailable; cannot validate allowed_cidrs"
+        end
+        local matcher, cerr = ipmatcher.new(conf.allowed_cidrs)
+        if not matcher then
+            return false, "invalid CIDR in allowed_cidrs: " .. tostring(cerr)
         end
     end
     return true
@@ -177,33 +185,55 @@ local function host_suffix_match(host, suffixes)
 end
 
 
+--- Classify a concrete destination IP. Returns "domestic" | "foreign".
+local function classify_ip(conf, ip)
+    if conf.treat_private_as_domestic and is_private_ip(ip) then
+        return "domestic"
+    end
+    local matcher = get_matcher(conf)
+    if matcher and matcher:match(ip) then
+        return "domestic"
+    end
+    -- A concrete IP that is NOT in the Nigerian allow-list and not
+    -- private: for residency purposes that is foreign.
+    return "foreign"
+end
+
+
+--- Strip an optional :port suffix (and upstream_addr comma lists) to a bare IP.
+local function bare_ip(addr)
+    if not addr then
+        return nil
+    end
+    -- upstream_addr may be a comma-separated list; the LAST entry is the
+    -- final upstream actually contacted.
+    local last = addr:match("([^,%s]+)%s*$") or addr
+    local host = last:match("^%[(.-)%]") or last:match("^(.-):%d+$") or last
+    if host:match("^%d+%.%d+%.%d+%.%d+$") or host:find(":") then
+        return host
+    end
+    return nil
+end
+
+
 --- Classify the request destination. Returns "domestic" | "foreign" | "unknown".
-local function classify(conf, ctx)
+--- `ip` is a concrete destination IP when one is authoritatively known
+--- (balancer phase); NEVER ctx.var.server_addr (that is the gateway's OWN
+--- address — classifying it mislabels every route).
+local function classify(conf, ctx, ip)
     local host = ctx.var.host or ""
-    -- The upstream peer address, when APISIX has already resolved it.
-    local upstream_ip = ctx.var.upstream_addr or ctx.var.server_addr
 
     if host ~= "" and host_suffix_match(host, conf.allowed_host_suffixes) then
         return "domestic"
     end
 
-    -- If the destination is a bare IP (or the upstream address is known),
-    -- match it against the CIDR ruleset.
-    local candidate = upstream_ip
+    -- Prefer the balancer-selected upstream IP; then a literal-IP Host.
+    local candidate = ip
     if not candidate and host:match("^%d+%.%d+%.%d+%.%d+$") then
         candidate = host
     end
     if candidate then
-        if conf.treat_private_as_domestic and is_private_ip(candidate) then
-            return "domestic"
-        end
-        local matcher = get_matcher(conf)
-        if matcher and matcher:match(candidate) then
-            return "domestic"
-        end
-        -- A concrete IP that is NOT in the Nigerian allow-list and not
-        -- private: for residency purposes that is foreign.
-        return "foreign"
+        return classify_ip(conf, candidate)
     end
 
     -- Hostname we cannot reduce to a rule: UNKNOWN, never assumed domestic.
@@ -229,30 +259,54 @@ local function build_event(conf, ctx, verdict, action)
 end
 
 
+-- Shared Kafka producer per broker-list config: a producer per request leaks
+-- connections; cache it (module-level via lrucache) and flush after sends.
+local function get_kafka_producer(kafka_conf)
+    local key_parts = {}
+    for _, b in ipairs(kafka_conf.brokers) do
+        core.table.insert(key_parts, b.host .. ":" .. tostring(b.port))
+    end
+    local key = table.concat(key_parts, ",")
+    return lrucache("kafka-producer:" .. key, nil, function()
+        local ok, kafka = pcall(require, "resty.kafka.producer")
+        if not ok then
+            core.log.warn(plugin_name, ": lua-resty-kafka not installed — using HTTP fallback")
+            return nil
+        end
+        local broker_list = {}
+        for _, b in ipairs(kafka_conf.brokers) do
+            core.table.insert(broker_list, { host = b.host, port = b.port })
+        end
+        return kafka:new(broker_list, { producer_type = "async" })
+    end)
+end
+
+
 local function emit_event(conf, event)
     local payload = core.json.encode(event)
 
     -- Preferred path: Kafka via lua-resty-kafka (optional dependency).
     if conf.kafka then
-        local ok, kafka = pcall(require, "resty.kafka.producer")
-        if ok then
-            local broker_list = {}
-            for _, b in ipairs(conf.kafka.brokers) do
-                core.table.insert(broker_list, { host = b.host, port = b.port })
-            end
-            local producer = kafka:new(broker_list, { producer_type = "async" })
+        local producer = get_kafka_producer(conf.kafka)
+        if producer then
             local send_ok, send_err = producer:send(conf.kafka.topic, nil, payload)
             if send_ok then
-                return
+                -- async producer buffers; flush so the event actually leaves.
+                local flush_ok, flush_err = producer:flush()
+                if flush_ok then
+                    return
+                end
+                core.log.error(plugin_name, ": Kafka flush failed (", flush_err,
+                               ") — falling back to HTTP")
+            else
+                core.log.error(plugin_name, ": Kafka send failed (", send_err,
+                               ") — falling back to HTTP")
             end
-            core.log.error(plugin_name, ": Kafka send failed (", send_err,
-                           ") — falling back to HTTP")
-        else
-            core.log.warn(plugin_name, ": lua-resty-kafka not installed — using HTTP fallback")
         end
     end
 
     -- Fallback path: HTTP POST via lua-resty-http (optional dependency).
+    -- Only a 2xx response counts as delivered.
     if conf.http_fallback_url then
         local ok, http = pcall(require, "resty.http")
         if ok then
@@ -263,7 +317,7 @@ local function emit_event(conf, event)
                 body = payload,
                 headers = { ["Content-Type"] = "application/json" },
             })
-            if res and res.status < 500 then
+            if res and res.status >= 200 and res.status < 300 then
                 return
             end
             core.log.error(plugin_name, ": HTTP fallback emit failed: ",
@@ -279,7 +333,10 @@ end
 
 
 function _M.access(conf, ctx)
-    local verdict = classify(conf, ctx)
+    -- Access phase: no balancer IP exists yet. Host-suffix rules and
+    -- literal-IP hosts classify here; anything unresolved stays "unknown"
+    -- and is re-classified in the log phase with the balancer IP.
+    local verdict = classify(conf, ctx, nil)
     ctx.residency_verdict = verdict
     ctx.residency_reference_code = conf.reference_code_prefix .. "-" ..
                                    string.sub(ngx.md5(ctx.var.request_id or
@@ -305,6 +362,15 @@ function _M.access(conf, ctx)
 end
 
 
+function _M.balancer(conf, ctx)
+    -- The balancer phase is the earliest point where the concrete upstream
+    -- IP is known; stash it for the log-phase classification.
+    if ctx.balancer_ip then
+        ctx.residency_balancer_ip = ctx.balancer_ip
+    end
+end
+
+
 function _M.header_filter(conf, ctx)
     if ctx.residency_verdict then
         core.response.set_header(conf.verdict_header, ctx.residency_verdict)
@@ -317,8 +383,20 @@ function _M.log(conf, ctx)
     if not ctx.residency_verdict then
         return
     end
-    local event = build_event(conf, ctx, ctx.residency_verdict,
+    -- Final classification: resolve an access-phase "unknown" using the
+    -- balancer-selected upstream IP (ctx.balancer_ip captured in the balancer
+    -- phase, falling back to ctx.var.upstream_addr). No IP -> stays "unknown".
+    local verdict = ctx.residency_verdict
+    if verdict == "unknown" then
+        local ip = ctx.residency_balancer_ip or bare_ip(ctx.var.upstream_addr)
+        if ip then
+            verdict = classify_ip(conf, ip)
+            ctx.residency_verdict = verdict
+        end
+    end
+    local event = build_event(conf, ctx, verdict,
                               ctx.residency_action or "passed")
+    event.upstream_ip = ctx.residency_balancer_ip or bare_ip(ctx.var.upstream_addr)
     emit_event(conf, event)
 end
 

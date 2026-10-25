@@ -147,65 +147,68 @@ export interface CollectedInputs {
  * surge_alerts, scan_findings, car_filings) are probed defensively; when a
  * source is absent the factor contributes 0 and source_tables records false.
  */
+/** Find the first usable (table, org-reference column) pair. public_complaints
+ *  and surge_alerts key controllers via controller_id; scan_findings has NO
+ *  org column at all (join through scan_targets). */
+async function resolveOrgColumn(tables: string[], cols: string[]): Promise<{ table: string; col: string } | null> {
+  for (const table of tables) {
+    if (!(await tableExists(table))) continue;
+    for (const col of cols) {
+      if (await columnExists(table, col)) return { table, col };
+    }
+  }
+  return null;
+}
+
+/** 0083 scan_findings statuses: open|acknowledged|suppressed|referred|resolved|dismissed.
+ *  "Open" for risk purposes = not yet closed out. */
+const SCAN_FINDING_OPEN_STATUSES = "'open','acknowledged','referred'";
+
 export async function collectRiskInputs(orgId: number): Promise<CollectedInputs> {
   const sourceTables: Record<string, boolean> = {};
 
-  // complaints (optional): prefer organization_id, fall back to org_id
+  // complaints / public_complaints (optional)
   let complaintVolume = 0;
-  if (await tableExists("complaints")) {
-    const col = (await columnExists("complaints", "organization_id")) ? "organization_id"
-      : (await columnExists("complaints", "org_id")) ? "org_id" : null;
-    if (col) {
-      const rows = await tryExec(
-        `SELECT count(*)::int AS n FROM complaints WHERE ${col} = $1 AND created_at > NOW() - INTERVAL '12 months'`,
-        [orgId],
-      );
-      complaintVolume = rows?.[0]?.n ?? 0;
-      sourceTables.complaints = rows != null;
-    } else {
-      sourceTables.complaints = false;
-    }
+  const complaintsRef = await resolveOrgColumn(["complaints", "public_complaints"], ["organization_id", "controller_id", "org_id"]);
+  if (complaintsRef) {
+    const rows = await tryExec(
+      `SELECT count(*)::int AS n FROM ${complaintsRef.table} WHERE ${complaintsRef.col} = $1 AND created_at > NOW() - INTERVAL '12 months'`,
+      [orgId],
+    );
+    complaintVolume = rows?.[0]?.n ?? 0;
+    sourceTables.complaints = rows != null;
   } else {
     sourceTables.complaints = false;
   }
 
   // surge_alerts (optional)
   let complaintSurge = false;
-  if (await tableExists("surge_alerts")) {
-    const col = (await columnExists("surge_alerts", "organization_id")) ? "organization_id"
-      : (await columnExists("surge_alerts", "org_id")) ? "org_id" : null;
-    if (col) {
-      const rows = await tryExec(
-        `SELECT count(*)::int AS n FROM surge_alerts WHERE ${col} = $1 AND created_at > NOW() - INTERVAL '30 days'`,
-        [orgId],
-      );
-      complaintSurge = (rows?.[0]?.n ?? 0) > 0;
-      sourceTables.surge_alerts = rows != null;
-    } else {
-      sourceTables.surge_alerts = false;
-    }
+  const surgeRef = await resolveOrgColumn(["surge_alerts"], ["controller_id", "organization_id", "org_id"]);
+  if (surgeRef) {
+    const rows = await tryExec(
+      `SELECT count(*)::int AS n FROM ${surgeRef.table} WHERE ${surgeRef.col} = $1 AND created_at > NOW() - INTERVAL '30 days'`,
+      [orgId],
+    );
+    complaintSurge = (rows?.[0]?.n ?? 0) > 0;
+    sourceTables.surge_alerts = rows != null;
   } else {
     sourceTables.surge_alerts = false;
   }
 
-  // scan_findings (optional): severity-weighted open findings
+  // scan_findings (optional): severity-weighted open findings, reached via
+  // scan_targets (scan_findings has no organization_id column).
   let scanFindingsWeighted = 0;
-  if (await tableExists("scan_findings")) {
-    const col = (await columnExists("scan_findings", "organization_id")) ? "organization_id"
-      : (await columnExists("scan_findings", "org_id")) ? "org_id" : null;
-    if (col) {
-      const rows = await tryExec(
-        `SELECT COALESCE(SUM(CASE lower(severity::text)
-               WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 1 END), 0)::int AS w
-           FROM scan_findings
-          WHERE ${col} = $1 AND (status IS NULL OR lower(status::text) IN ('open', 'unresolved', 'new'))`,
-        [orgId],
-      );
-      scanFindingsWeighted = rows?.[0]?.w ?? 0;
-      sourceTables.scan_findings = rows != null;
-    } else {
-      sourceTables.scan_findings = false;
-    }
+  if ((await tableExists("scan_findings")) && (await tableExists("scan_targets"))) {
+    const rows = await tryExec(
+      `SELECT COALESCE(SUM(CASE lower(sf.severity::text)
+             WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 1 END), 0)::int AS w
+         FROM scan_findings sf
+         JOIN scan_targets st ON st.id = sf.target_id
+        WHERE st.organization_id = $1 AND lower(sf.status::text) IN (${SCAN_FINDING_OPEN_STATUSES})`,
+      [orgId],
+    );
+    scanFindingsWeighted = rows?.[0]?.w ?? 0;
+    sourceTables.scan_findings = rows != null;
   } else {
     sourceTables.scan_findings = false;
   }
@@ -221,21 +224,16 @@ export async function collectRiskInputs(orgId: number): Promise<CollectedInputs>
 
   // Filing delinquency (optional CAR/registration filings)
   let filingDelinquencyDays = 0;
-  if (await tableExists("car_filings")) {
-    const col = (await columnExists("car_filings", "organization_id")) ? "organization_id"
-      : (await columnExists("car_filings", "org_id")) ? "org_id" : null;
-    if (col) {
-      const rows = await tryExec(
-        `SELECT COALESCE(MAX(EXTRACT(DAY FROM NOW() - due_date)), 0)::int AS d
-           FROM car_filings
-          WHERE ${col} = $1 AND due_date < NOW() AND (status IS NULL OR status NOT IN ('filed', 'accepted'))`,
-        [orgId],
-      );
-      filingDelinquencyDays = rows?.[0]?.d ?? 0;
-      sourceTables.car_filings = rows != null;
-    } else {
-      sourceTables.car_filings = false;
-    }
+  const filingsRef = await resolveOrgColumn(["car_filings"], ["organization_id", "controller_id", "org_id"]);
+  if (filingsRef) {
+    const rows = await tryExec(
+      `SELECT COALESCE(MAX(EXTRACT(DAY FROM NOW() - due_date)), 0)::int AS d
+         FROM ${filingsRef.table}
+        WHERE ${filingsRef.col} = $1 AND due_date < NOW() AND (status IS NULL OR status NOT IN ('filed', 'accepted'))`,
+      [orgId],
+    );
+    filingDelinquencyDays = rows?.[0]?.d ?? 0;
+    sourceTables.car_filings = rows != null;
   } else {
     sourceTables.car_filings = false;
   }
@@ -255,6 +253,136 @@ export async function collectRiskInputs(orgId: number): Promise<CollectedInputs>
     raw: { complaintVolume, complaintSurge, scanFindingsWeighted, priorSanctions, filingDelinquencyDays, dataVolumeClass },
     sourceTables,
   };
+}
+
+/**
+ * Batched variant of collectRiskInputs for whole-register sweeps: one grouped
+ * query per source instead of one per controller (no N+1). Per-org results are
+ * identical to collectRiskInputs.
+ */
+export async function collectRiskInputsBatch(orgIds: number[]): Promise<Map<number, CollectedInputs>> {
+  const out = new Map<number, CollectedInputs>();
+  const empty = (): CollectedInputs => ({
+    raw: { complaintVolume: 0, complaintSurge: false, scanFindingsWeighted: 0, priorSanctions: 0, filingDelinquencyDays: 0, dataVolumeClass: "medium" },
+    sourceTables: {},
+  });
+  for (const id of orgIds) out.set(id, empty());
+
+  // complaints (grouped)
+  const complaintsRef = await resolveOrgColumn(["complaints", "public_complaints"], ["organization_id", "controller_id", "org_id"]);
+  for (const c of out.values()) c.sourceTables.complaints = complaintsRef != null;
+  if (complaintsRef) {
+    const rows = await tryExec(
+      `SELECT ${complaintsRef.col} AS org_id, count(*)::int AS n FROM ${complaintsRef.table}
+        WHERE ${complaintsRef.col} = ANY($1::int[]) AND created_at > NOW() - INTERVAL '12 months' GROUP BY 1`,
+      [orgIds],
+    );
+    if (rows == null) for (const c of out.values()) c.sourceTables.complaints = false;
+    else for (const r of rows) { const c = out.get(Number(r.org_id)); if (c) c.raw.complaintVolume = Number(r.n); }
+  }
+
+  // surge_alerts (grouped)
+  const surgeRef = await resolveOrgColumn(["surge_alerts"], ["controller_id", "organization_id", "org_id"]);
+  for (const c of out.values()) c.sourceTables.surge_alerts = surgeRef != null;
+  if (surgeRef) {
+    const rows = await tryExec(
+      `SELECT ${surgeRef.col} AS org_id, count(*)::int AS n FROM ${surgeRef.table}
+        WHERE ${surgeRef.col} = ANY($1::int[]) AND created_at > NOW() - INTERVAL '30 days' GROUP BY 1`,
+      [orgIds],
+    );
+    if (rows == null) for (const c of out.values()) c.sourceTables.surge_alerts = false;
+    else for (const r of rows) { const c = out.get(Number(r.org_id)); if (c) c.raw.complaintSurge = Number(r.n) > 0; }
+  }
+
+  // scan_findings via scan_targets (grouped)
+  const scanOk = (await tableExists("scan_findings")) && (await tableExists("scan_targets"));
+  for (const c of out.values()) c.sourceTables.scan_findings = scanOk;
+  if (scanOk) {
+    const rows = await tryExec(
+      `SELECT st.organization_id AS org_id,
+              COALESCE(SUM(CASE lower(sf.severity::text)
+                WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 1 END), 0)::int AS w
+         FROM scan_findings sf
+         JOIN scan_targets st ON st.id = sf.target_id
+        WHERE st.organization_id = ANY($1::int[]) AND lower(sf.status::text) IN (${SCAN_FINDING_OPEN_STATUSES})
+        GROUP BY st.organization_id`,
+      [orgIds],
+    );
+    if (rows == null) for (const c of out.values()) c.sourceTables.scan_findings = false;
+    else for (const r of rows) { const c = out.get(Number(r.org_id)); if (c) c.raw.scanFindingsWeighted = Number(r.w); }
+  }
+
+  // sanctions register (grouped)
+  const sanctionRows = await tryExec(
+    `SELECT organization_id AS org_id, count(*)::int AS n FROM enforcement_notices
+      WHERE organization_id = ANY($1::int[]) AND status IN ('published', 'remediated') GROUP BY 1`,
+    [orgIds],
+  );
+  for (const c of out.values()) c.sourceTables.enforcement_notices = sanctionRows != null;
+  if (sanctionRows) for (const r of sanctionRows) { const c = out.get(Number(r.org_id)); if (c) c.raw.priorSanctions = Number(r.n); }
+
+  // filing delinquency (grouped)
+  const filingsRef = await resolveOrgColumn(["car_filings"], ["organization_id", "controller_id", "org_id"]);
+  for (const c of out.values()) c.sourceTables.car_filings = filingsRef != null;
+  if (filingsRef) {
+    const rows = await tryExec(
+      `SELECT ${filingsRef.col} AS org_id, COALESCE(MAX(EXTRACT(DAY FROM NOW() - due_date)), 0)::int AS d
+         FROM ${filingsRef.table}
+        WHERE ${filingsRef.col} = ANY($1::int[]) AND due_date < NOW()
+          AND (status IS NULL OR status NOT IN ('filed', 'accepted'))
+        GROUP BY 1`,
+      [orgIds],
+    );
+    if (rows == null) for (const c of out.values()) c.sourceTables.car_filings = false;
+    else for (const r of rows) { const c = out.get(Number(r.org_id)); if (c) c.raw.filingDelinquencyDays = Number(r.d); }
+  }
+
+  // data volume class (grouped)
+  const dvcOk = await columnExists("organizations", "data_volume_class");
+  for (const c of out.values()) c.sourceTables.organizations_data_volume_class = dvcOk;
+  if (dvcOk) {
+    const rows = await tryExec(`SELECT id, data_volume_class FROM organizations WHERE id = ANY($1::int[])`, [orgIds]);
+    if (rows) {
+      for (const r of rows) {
+        const v = String(r.data_volume_class ?? "").toLowerCase();
+        const c = out.get(Number(r.id));
+        if (c && (v === "low" || v === "medium" || v === "high" || v === "very_high")) c.raw.dataVolumeClass = v;
+      }
+    }
+  }
+  return out;
+}
+
+/** Map risk factors to the source-table availability flags that feed them. */
+const FACTOR_SOURCE: Record<RiskFactorKey, keyof CollectedInputs["sourceTables"]> = {
+  complaint_volume: "complaints",
+  complaint_surge: "surge_alerts",
+  scan_findings: "scan_findings",
+  prior_sanctions: "enforcement_notices",
+  filing_delinquency: "car_filings",
+  data_volume_class: "organizations_data_volume_class",
+};
+
+/**
+ * Zero the weight of every factor whose source was UNAVAILABLE so the
+ * remaining weights renormalize over available factors (computeCompositeScore
+ * already renormalizes non-zero weights). Returns the effective weights and
+ * the excluded factor list — a dead factor must never sit silently in the
+ * denominator.
+ */
+export function renormalizeWeightsForAvailability(
+  weights: RiskWeights,
+  sourceTables: Record<string, boolean>,
+): { weights: RiskWeights; excludedFactors: RiskFactorKey[] } {
+  const effective: RiskWeights = { ...weights };
+  const excludedFactors: RiskFactorKey[] = [];
+  for (const key of RISK_FACTOR_KEYS) {
+    if (sourceTables[FACTOR_SOURCE[key]] === false && (effective[key] ?? 0) > 0) {
+      effective[key] = 0;
+      excludedFactors.push(key);
+    }
+  }
+  return { weights: effective, excludedFactors };
 }
 
 async function loadWeights(): Promise<RiskWeights> {
@@ -305,14 +433,16 @@ export const supervisionRiskRouter = router({
     .input(z.object({ orgId: z.number().int().positive() }))
     .mutation(async ({ input, ctx }) => {
       const collected = await collectRiskInputs(input.orgId);
-      const weights = await loadWeights();
+      const baseWeights = await loadWeights();
+      const { weights, excludedFactors } = renormalizeWeightsForAvailability(baseWeights, collected.sourceTables);
       const result = computeCompositeScore(collected.raw, weights);
       const normalized = normalizeInputs(collected.raw);
+      const sourceTablesPayload = { ...collected.sourceTables, excluded_factors: excludedFactors };
 
       const [inputsRow] = await exec(
         `INSERT INTO risk_score_inputs (org_id, inputs, normalized, source_tables, collected_at)
          VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
-        [input.orgId, JSON.stringify(collected.raw), JSON.stringify(normalized), JSON.stringify(collected.sourceTables)],
+        [input.orgId, JSON.stringify(collected.raw), JSON.stringify(normalized), JSON.stringify(sourceTablesPayload)],
       );
       const [scoreRow] = await exec(
         `INSERT INTO risk_scores (org_id, inputs_id, score, band, weights, explanation, computed_by, computed_at)
@@ -331,19 +461,24 @@ export const supervisionRiskRouter = router({
   computeRiskScores: adminProcedure
     .input(z.object({ orgIds: z.array(z.number().int().positive()).optional() }).optional())
     .mutation(async ({ input, ctx }) => {
-      const weights = await loadWeights();
+      const baseWeights = await loadWeights();
       const orgs = input?.orgIds?.length
         ? await exec(`SELECT id FROM organizations WHERE id = ANY($1::int[])`, [input.orgIds])
         : await exec(`SELECT id FROM organizations ORDER BY id`);
+      const orgIds = orgs.map((o) => Number(o.id));
+      // Batched collection: one grouped query per source, not one per org.
+      const collectedByOrg = await collectRiskInputsBatch(orgIds);
       const results: Array<{ orgId: number; score: number; band: RiskBand }> = [];
       for (const org of orgs) {
-        const collected = await collectRiskInputs(org.id);
+        const collected = collectedByOrg.get(Number(org.id)) ?? (await collectRiskInputs(org.id));
+        const { weights, excludedFactors } = renormalizeWeightsForAvailability(baseWeights, collected.sourceTables);
         const result = computeCompositeScore(collected.raw, weights);
         const normalized = normalizeInputs(collected.raw);
+        const sourceTablesPayload = { ...collected.sourceTables, excluded_factors: excludedFactors };
         const [inputsRow] = await exec(
           `INSERT INTO risk_score_inputs (org_id, inputs, normalized, source_tables, collected_at)
            VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
-          [org.id, JSON.stringify(collected.raw), JSON.stringify(normalized), JSON.stringify(collected.sourceTables)],
+          [org.id, JSON.stringify(collected.raw), JSON.stringify(normalized), JSON.stringify(sourceTablesPayload)],
         );
         await exec(
           `INSERT INTO risk_scores (org_id, inputs_id, score, band, weights, explanation, computed_by, computed_at)
@@ -443,11 +578,24 @@ export const supervisionRiskRouter = router({
         remaining -= input.estimatedDaysPerInspection;
       }
 
-      const [plan] = await exec(
-        `INSERT INTO supervision_plans (year, name, status, capacity_inspector_days, allocated_inspector_days, generated_by)
-         VALUES ($1, $2, 'draft', $3, $4, $5) RETURNING *`,
-        [input.year, name, input.capacityInspectorDays, selected.length * input.estimatedDaysPerInspection, actor],
-      );
+      let plan: any;
+      try {
+        const pool = getPool();
+        if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+        const r = await pool.query(
+          `INSERT INTO supervision_plans (year, name, status, capacity_inspector_days, allocated_inspector_days, generated_by)
+           VALUES ($1, $2, 'draft', $3, $4, $5) RETURNING *`,
+          [input.year, name, input.capacityInspectorDays, selected.length * input.estimatedDaysPerInspection, actor],
+        );
+        plan = r.rows[0];
+      } catch (err: any) {
+        // Name race: a concurrent call created the same (year, name) plan
+        // between our existence check and this INSERT.
+        if (err?.code === "23505") {
+          throw new TRPCError({ code: "CONFLICT", message: `A supervision plan named '${name}' for ${input.year} already exists (concurrent creation)` });
+        }
+        throw err;
+      }
 
       const items: any[] = [];
       for (let i = 0; i < selected.length; i++) {
@@ -567,5 +715,37 @@ export const supervisionRiskRouter = router({
       });
       fireAndForget("supervisionRisk.referToFieldInspection");
       return { item: updated, inspectionCaseUuid: caseUuid, alreadyReferred: false };
+    }),
+
+  /**
+   * Retention: delete risk_score_inputs rows older than retentionDays that are
+   * not referenced by any risk_scores row (the referenced rows are the audit
+   * trail of a computed score and are always kept). Bounded per call.
+   */
+  sweepRiskScoreInputs: adminProcedure
+    .input(z.object({
+      retentionDays: z.number().int().min(7).max(3650).default(90),
+      limit: z.number().int().min(1).max(10000).default(2000),
+    }).optional())
+    .mutation(async ({ input, ctx }) => {
+      const retentionDays = input?.retentionDays ?? 90;
+      const limit = input?.limit ?? 2000;
+      const rows = await exec(
+        `DELETE FROM risk_score_inputs i
+          WHERE i.id IN (
+            SELECT i2.id FROM risk_score_inputs i2
+             WHERE i2.collected_at < NOW() - ($1 || ' days')::interval
+               AND NOT EXISTS (SELECT 1 FROM risk_scores s WHERE s.inputs_id = i2.id)
+             ORDER BY i2.collected_at ASC
+             LIMIT $2
+          )
+          RETURNING id`,
+        [retentionDays, limit],
+      );
+      await logAudit("risk_score_inputs_swept", "risk_score_inputs", null, String(ctx.user.id), {
+        retentionDays, deleted: rows.length,
+      });
+      fireAndForget("supervisionRisk.sweepRiskScoreInputs");
+      return { deleted: rows.length, retentionDays };
     }),
 });

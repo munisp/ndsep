@@ -30,7 +30,7 @@
  */
 import { createHash } from "crypto";
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, protectedProcedure, adminProcedure, staffProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getPool } from "../db";
 import { logger } from "../logger";
@@ -38,10 +38,31 @@ import { emitMutationEvent } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import {
   computeSection48Penalty,
-  recomputePenalty,
+  recomputePenaltyTransactional,
   selectBestRevenue,
   type VerifiedRevenueRecord,
 } from "../services/penaltyEngine";
+
+const STAFF_ROLES = new Set(["admin", "government_staff", "regulator", "auditor"]);
+
+/**
+ * Org-scope guard: staff see everything; org users are restricted to their own
+ * organisation (users.organization_id or organization_users membership).
+ */
+async function assertOrgScope(
+  user: { id: number; role: string; organizationId?: number | null },
+  orgId: number,
+): Promise<void> {
+  if (STAFF_ROLES.has(user.role)) return;
+  if (user.organizationId != null && Number(user.organizationId) === Number(orgId)) return;
+  const rows = await exec(
+    `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+    [user.id, orgId],
+  );
+  if (!rows[0]) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Record belongs to a different organisation" });
+  }
+}
 
 // ─── Shared helpers (crossBorderAdequacy conventions) ────────────────────────
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
@@ -385,8 +406,9 @@ export const revenueVerificationRouter = router({
       return result; // status "unconfigured" when the adapter is not set up
     }),
 
-  // ─── Manual filing path: dual attestation (CFO + external auditor) ─────────
-  submitManualFiling: protectedProcedure
+  // ─── Manual filing path: dual attestation by TWO DISTINCT officers, each ───
+  // ─── recorded from their own authenticated session (attested_by = ctx.user) ─
+  submitManualFiling: staffProcedure
     .input(z.object({
       orgId: z.number().int().positive(),
       amount: z.number().min(0),
@@ -408,22 +430,70 @@ export const revenueVerificationRouter = router({
         auditor_name: input.auditorName,
         auditor_firm: input.auditorFirm,
         auditor_attested_at: input.auditorAttestedAt,
+        first_attested_by_user_id: ctx.user.id,
       };
       const evidenceHash = sha256(JSON.stringify({ doc: input.documentHash.toLowerCase(), attestation }));
       const [row] = await exec(
         `INSERT INTO verified_revenues
            (org_id, source, amount, currency, fiscal_year, evidence_hash, external_ref,
-            status, attestation, document_hash, created_by)
-         VALUES ($1,'manual_filing',$2,$3,$4,$5,NULL,'pending',$6,$7,$8)
+            status, attestation, document_hash, created_by, attested_by_1, attested_at_1)
+         VALUES ($1,'manual_filing',$2,$3,$4,$5,NULL,'pending',$6,$7,$8,$8,NOW())
          RETURNING *`,
         [input.orgId, input.amount, input.currency, input.fiscalYear, evidenceHash,
-         JSON.stringify(attestation), input.documentHash.toLowerCase(), String(ctx.user.id)],
+         JSON.stringify(attestation), input.documentHash.toLowerCase(), ctx.user.id],
       );
       await logAudit("revenue.manual_filing_submitted", "verified_revenues", row?.id, String(ctx.user.id), {
         org_id: input.orgId, fiscal_year: input.fiscalYear, amount: input.amount,
-        dual_attestation: true,
+        attested_by_1: ctx.user.id,
       });
       fireAndForget("revenueVerification.submitManualFiling");
+      return row;
+    }),
+
+  /**
+   * Second attestation by a DIFFERENT officer, from their own authenticated
+   * session. Same-user double attestation is blocked; the filing only becomes
+   * verifiable once two distinct officers are recorded.
+   */
+  attestManualFiling: staffProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      officerName: z.string().min(2).max(255),
+      officerRole: z.string().min(2).max(128),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const rows = await exec(`SELECT * FROM verified_revenues WHERE id = $1`, [input.id]);
+      const current = rows[0];
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Revenue record not found" });
+      if (current.source !== "manual_filing") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Only manual filings use this attestation path" });
+      }
+      if (current.attested_by_1 == null) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Filing has no first attestation" });
+      }
+      if (current.attested_by_2 != null) {
+        throw new TRPCError({ code: "CONFLICT", message: "Filing is already dually attested" });
+      }
+      if (Number(current.attested_by_1) === Number(ctx.user.id)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Dual attestation requires a second, distinct officer" });
+      }
+      const attestation = typeof current.attestation === "string"
+        ? JSON.parse(current.attestation)
+        : (current.attestation ?? {});
+      attestation.second_attested_by_user_id = ctx.user.id;
+      attestation.second_officer_name = input.officerName;
+      attestation.second_officer_role = input.officerRole;
+      const [row] = await exec(
+        `UPDATE verified_revenues
+            SET attested_by_2 = $1, attested_at_2 = NOW(), attestation = $2, updated_at = NOW()
+          WHERE id = $3
+          RETURNING *`,
+        [ctx.user.id, JSON.stringify(attestation), input.id],
+      );
+      await logAudit("revenue.manual_filing_second_attestation", "verified_revenues", input.id, String(ctx.user.id), {
+        attested_by_1: current.attested_by_1, attested_by_2: ctx.user.id,
+      });
+      fireAndForget("revenueVerification.attestManualFiling");
       return row;
     }),
 
@@ -446,6 +516,16 @@ export const revenueVerificationRouter = router({
       }
       if (!ALLOWED_TRANSITIONS[current.status as RevenueStatus]?.includes(input.decision)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `Illegal transition ${current.status} -> ${input.decision}` });
+      }
+      // A manual filing can only be verified once two distinct officers have
+      // attested from separate authenticated sessions.
+      if (input.decision === "verified" &&
+          (current.attested_by_1 == null || current.attested_by_2 == null ||
+           Number(current.attested_by_1) === Number(current.attested_by_2))) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Verification requires dual attestation by two distinct officers (attestManualFiling)",
+        });
       }
       const verifier = ctx.user.name ?? String(ctx.user.id);
       const [row] = await exec(
@@ -510,7 +590,8 @@ export const revenueVerificationRouter = router({
       orgId: z.number().int().positive(),
       status: z.enum(REVENUE_STATUSES).optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertOrgScope(ctx.user, input.orgId);
       const params: unknown[] = [input.orgId];
       let where = `WHERE org_id = $1`;
       if (input.status) { params.push(input.status); where += ` AND status = $2`; }
@@ -519,7 +600,8 @@ export const revenueVerificationRouter = router({
 
   getRevenueHistory: protectedProcedure
     .input(z.object({ orgId: z.number().int().positive() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertOrgScope(ctx.user, input.orgId);
       const rows = await exec(
         `SELECT * FROM verified_revenues WHERE org_id = $1 ORDER BY fiscal_year DESC, created_at DESC`,
         [input.orgId],
@@ -577,9 +659,11 @@ export const revenueVerificationRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const actor = ctx.user.name ?? String(ctx.user.id);
+      const pool = getPool();
+      if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       let result;
       try {
-        result = await recomputePenalty(exec, input.fineRef, input.factors, actor);
+        result = await recomputePenaltyTransactional(pool, input.fineRef, input.factors, actor);
       } catch (err) {
         if (err instanceof TRPCError) throw err;
         throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Recomputation failed" });
@@ -594,14 +678,25 @@ export const revenueVerificationRouter = router({
       return result;
     }),
 
-  /** Computation ledger for appeal defence. */
+  /** Computation ledger for appeal defence. Org users are restricted to their own org. */
   listPenaltyComputations: protectedProcedure
     .input(z.object({ fineId: z.number().int().positive().optional(), orgId: z.number().int().positive().optional() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      let orgId = input.orgId;
+      if (!STAFF_ROLES.has(ctx.user.role)) {
+        const userOrgId = ctx.user.organizationId != null ? Number(ctx.user.organizationId) : null;
+        if (orgId != null && userOrgId != null && orgId !== userOrgId) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Computations belong to a different organisation" });
+        }
+        if (orgId == null) orgId = userOrgId ?? undefined;
+        if (orgId == null) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Organisation context required" });
+        }
+      }
       const conditions: string[] = [];
       const params: unknown[] = [];
       if (input.fineId) { params.push(input.fineId); conditions.push(`fine_id = $${params.length}`); }
-      if (input.orgId) { params.push(input.orgId); conditions.push(`org_id = $${params.length}`); }
+      if (orgId != null) { params.push(orgId); conditions.push(`org_id = $${params.length}`); }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       return exec(`SELECT * FROM penalty_computations ${where} ORDER BY created_at DESC LIMIT 200`, params);
     }),

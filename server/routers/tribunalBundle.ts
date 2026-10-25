@@ -34,7 +34,7 @@ import { router, staffProcedure, adminProcedure, protectedProcedure } from "../_
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
-import { listEvidence, verifyEvidence, sha256Hex } from "../antiwipe/vault";
+import { listEvidence, verifyEvidence, sha256Hex, putEvidence, getEvidence } from "../antiwipe/vault";
 import { appendLedger, verifyChain, canonicalJson } from "../antiwipe/ledger";
 import { merkleRoot, isHexDigest } from "../services/merkle";
 
@@ -87,14 +87,35 @@ const MAX_LEDGER_SEGMENT_ENTRIES = 10_000;
 const MAX_DUE_PROCESS_ROWS = 500;
 
 /**
+ * Resolve financial_penalties ids from enforcement_fines ids via the
+ * 0101 bridge column. Appeals/stays/escalations key financial_penalties.id;
+ * collection keys enforcement_fines.id — the two ID domains must never be
+ * mixed.
+ */
+async function resolveFinancialPenaltyIds(fineIds: number[]): Promise<number[]> {
+  if (!fineIds.length) return [];
+  const rows = await query<{ id: number }>(
+    `SELECT id FROM financial_penalties WHERE enforcement_fine_id = ANY($1::int[])`,
+    [fineIds],
+  ).catch((err: unknown) => {
+    if (isMissingTable(err)) return [] as Array<{ id: number }>;
+    throw err;
+  });
+  return rows.map((r) => Number(r.id));
+}
+
+/**
  * Due-process log for a case: notices, response windows (appeal deadlines),
  * hearings, stays. Every source table is optional — a missing migration
  * degrades that section to an empty list with an explicit note, never a
  * fake success.
  */
-async function collectDueProcessLog(caseRef: string, fineIds: number[]) {
+async function collectDueProcessLog(caseRef: string, fineIds: number[], penaltyIds: number[]) {
   const log: Record<string, unknown> = { notes: [] as string[] };
   const notes = log.notes as string[];
+  if (fineIds.length && penaltyIds.length === 0) {
+    notes.push("no financial_penalties ↔ enforcement_fines bridge rows for this case (0101 backfill incomplete) — appeal/stay data may be incomplete");
+  }
 
   if (await tableExists("enforcement_notices")) {
     const rows = await query(
@@ -123,7 +144,7 @@ async function collectDueProcessLog(caseRef: string, fineIds: number[]) {
        FROM penalty_appeals
        WHERE penalty_id = ANY($1::int[])
        ORDER BY created_at ASC LIMIT $2`,
-      [fineIds.length ? fineIds : [-1], MAX_DUE_PROCESS_ROWS],
+      [penaltyIds.length ? penaltyIds : [-1], MAX_DUE_PROCESS_ROWS],
     ).catch((err: unknown) => {
       if (isMissingTable(err)) return [] as Array<{ id: number }>;
       throw err;
@@ -153,7 +174,7 @@ async function collectDueProcessLog(caseRef: string, fineIds: number[]) {
       `SELECT id, penalty_id, appeal_id, stay_reason, status, granted_at, lifted_at
        FROM penalty_stays WHERE penalty_id = ANY($1::int[])
        ORDER BY granted_at ASC LIMIT $2`,
-      [fineIds.length ? fineIds : [-1], MAX_DUE_PROCESS_ROWS],
+      [penaltyIds.length ? penaltyIds : [-1], MAX_DUE_PROCESS_ROWS],
     );
   } else {
     log.stays = [];
@@ -163,7 +184,7 @@ async function collectDueProcessLog(caseRef: string, fineIds: number[]) {
 }
 
 /** Filings (tribunal escalations) + determinations (decided appeals/notices). */
-async function collectFilingsAndDeterminations(fineIds: number[]) {
+async function collectFilingsAndDeterminations(penaltyIds: number[]) {
   let filings: unknown[] = [];
   if (await tableExists("tribunal_escalations")) {
     filings = await query(
@@ -172,7 +193,7 @@ async function collectFilingsAndDeterminations(fineIds: number[]) {
        FROM tribunal_escalations
        WHERE penalty_id = ANY($1::int[])
        ORDER BY escalated_at ASC LIMIT $2`,
-      [fineIds.length ? fineIds : [-1], MAX_DUE_PROCESS_ROWS],
+      [penaltyIds.length ? penaltyIds : [-1], MAX_DUE_PROCESS_ROWS],
     );
   }
   let determinations: unknown[] = [];
@@ -182,7 +203,7 @@ async function collectFilingsAndDeterminations(fineIds: number[]) {
        FROM penalty_appeals
        WHERE penalty_id = ANY($1::int[]) AND status IN ('upheld', 'dismissed')
        ORDER BY reviewed_at ASC LIMIT $2`,
-      [fineIds.length ? fineIds : [-1], MAX_DUE_PROCESS_ROWS],
+      [penaltyIds.length ? penaltyIds : [-1], MAX_DUE_PROCESS_ROWS],
     );
   }
   return { filings, determinations };
@@ -277,6 +298,9 @@ export const tribunalBundleRouter = router({
         throw err;
       });
       const fineIds = fines.map((f) => Number(f.id));
+      // Appeals/stays/escalations key financial_penalties.id — resolve through
+      // the 0101 bridge so the due-process log covers this case's fines.
+      const penaltyIds = await resolveFinancialPenaltyIds(fineIds);
 
       // 1. Evidence vault artifacts (hashes are the content addresses).
       let evidenceArtifacts: BundleArtifactSpec[] = [];
@@ -305,10 +329,10 @@ export const tribunalBundleRouter = router({
       const segment = await collectLedgerSegment(caseRef);
 
       // 3. Due-process log (defensive: each source table optional).
-      const dueProcess = await collectDueProcessLog(caseRef, fineIds);
+      const dueProcess = await collectDueProcessLog(caseRef, fineIds, penaltyIds);
 
       // 4. Filings + determinations.
-      const { filings, determinations } = await collectFilingsAndDeterminations(fineIds);
+      const { filings, determinations } = await collectFilingsAndDeterminations(penaltyIds);
 
       // Snapshot artifacts: the snapshot bytes live in metadata so the court
       // verifier can re-hash them without trusting live (mutable) tables.
@@ -369,15 +393,13 @@ export const tribunalBundleRouter = router({
         };
       }
 
-      const inserted = await query<{ id: string }>(
-        `INSERT INTO tribunal_bundles (case_ref, status, artifact_count, assembled_by)
-         VALUES ($1, 'assembling', $2, $3) RETURNING id`,
-        [caseRef, artifacts.length, actor],
-      );
-      const bundleId = Number(inserted[0].id);
-
-      const manifest = {
-        bundleId,
+      // Bundle row + manifest + artifacts commit atomically (multi-write
+      // flow): a partial bundle row without its artifacts can never exist.
+      const pool = requirePool();
+      const client = await pool.connect();
+      let bundleId = 0;
+      const manifest: Record<string, unknown> = {
+        bundleId: 0, // set once the bundle row exists
         caseRef,
         assembledAt: new Date().toISOString(),
         assembledBy: actor,
@@ -395,19 +417,35 @@ export const tribunalBundleRouter = router({
         merkleRoot: root,
         notes: [evidenceNote, segment.note].filter(Boolean),
       };
-
-      await query(
-        `UPDATE tribunal_bundles SET manifest = $2, merkle_root = $3,
-                chain_segment_from = $4, chain_segment_to = $5, updated_at = now()
-         WHERE id = $1`,
-        [bundleId, manifest, root, segment.fromSeq, segment.toSeq],
-      );
-      for (const [i, a] of Array.from(artifacts.entries())) {
-        await query(
-          `INSERT INTO bundle_artifacts (bundle_id, merkle_index, artifact_type, ref, sha256, size_bytes, metadata)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [bundleId, i, a.artifactType, a.ref, a.sha256, a.sizeBytes, a.metadata],
+      try {
+        await client.query("BEGIN");
+        const inserted = await client.query(
+          `INSERT INTO tribunal_bundles (case_ref, status, artifact_count, assembled_by)
+           VALUES ($1, 'assembling', $2, $3) RETURNING id`,
+          [caseRef, artifacts.length, actor],
         );
+        bundleId = Number(inserted.rows[0].id);
+
+        manifest.bundleId = bundleId;
+        await client.query(
+          `UPDATE tribunal_bundles SET manifest = $2, merkle_root = $3,
+                  chain_segment_from = $4, chain_segment_to = $5, updated_at = now()
+           WHERE id = $1`,
+          [bundleId, JSON.stringify(manifest), root, segment.fromSeq, segment.toSeq],
+        );
+        for (const [i, a] of Array.from(artifacts.entries())) {
+          await client.query(
+            `INSERT INTO bundle_artifacts (bundle_id, merkle_index, artifact_type, ref, sha256, size_bytes, metadata)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [bundleId, i, a.artifactType, a.ref, a.sha256, a.sizeBytes, JSON.stringify(a.metadata)],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
       }
 
       // Anchor the Merkle root into the hash-chained audit ledger.
@@ -598,6 +636,47 @@ export const tribunalBundleRouter = router({
       await writeAccessLog(input.bundleId, approver, "export_approve", { outcome: outcome.status });
       if (outcome.status === "exported") {
         const bundle = await getBundleRow(input.bundleId);
+        // Produce the REAL export artifact: manifest + full artifact metadata,
+        // written to the evidence vault (content-addressed) and recorded on
+        // the bundle row with its bytes hash.
+        const artifactRows = await query(
+          `SELECT merkle_index, artifact_type, ref, sha256, size_bytes, metadata
+           FROM bundle_artifacts WHERE bundle_id = $1 ORDER BY merkle_index ASC`,
+          [input.bundleId],
+        );
+        const exportPackage = {
+          bundleId: input.bundleId,
+          caseRef: bundle.case_ref,
+          merkleRoot: bundle.merkle_root,
+          ledgerAnchorSeq: bundle.ledger_anchor_seq ?? null,
+          ledgerAnchorHash: bundle.ledger_anchor_hash ?? null,
+          manifest: bundle.manifest,
+          artifacts: artifactRows,
+          exportedTo: bundle.exported_to,
+          exportedAt: new Date().toISOString(),
+          firstApprover: bundle.export_first_approver,
+          secondApprover: approver,
+        };
+        const packageBytes = Buffer.from(canonicalJson(exportPackage), "utf8");
+        let exportArtifactHash: string;
+        try {
+          const stored = await putEvidence(packageBytes, {
+            uploaderName: `tribunal-export:${approver}`,
+            caseRef: String(bundle.case_ref),
+            contentType: "application/vnd.ndsep.tribunal-bundle+json",
+          });
+          exportArtifactHash = stored.entry.hash;
+        } catch (err) {
+          // Vault unavailable: record the content hash anyway so the export is
+          // never unaccounted for — downloadBundle then serves from the
+          // reconstructed package and re-verifies the hash.
+          exportArtifactHash = sha256Hex(packageBytes);
+          logger.error({ err, bundleId: input.bundleId }, "[tribunal] evidence vault write failed; export artifact hash recorded without vault bytes");
+        }
+        await query(
+          `UPDATE tribunal_bundles SET export_artifact_hash = $2, updated_at = now() WHERE id = $1`,
+          [input.bundleId, exportArtifactHash],
+        );
         await appendLedger(
           "tribunal_bundle.exported",
           {
@@ -607,15 +686,81 @@ export const tribunalBundleRouter = router({
             exportedTo: bundle.exported_to,
             firstApprover: bundle.export_first_approver,
             secondApprover: approver,
+            exportArtifactHash,
           },
           approver,
         );
-        await writeAccessLog(input.bundleId, approver, "export", { exportedTo: bundle.exported_to });
+        await writeAccessLog(input.bundleId, approver, "export", { exportedTo: bundle.exported_to, exportArtifactHash });
         await emitMutationEvent("tribunal.bundle.exported", {
-          bundleId: input.bundleId, exportedTo: bundle.exported_to, approver,
+          bundleId: input.bundleId, exportedTo: bundle.exported_to, approver, exportArtifactHash,
         }).catch(() => undefined);
       }
       return { bundleId: input.bundleId, ...outcome };
+    }),
+
+  /**
+   * Download the exported bundle package (court delivery). Only exported
+   * bundles with a recorded export artifact are downloadable; every download
+   * is access-logged and the returned payload carries the bytes hash so the
+   * receiver can re-verify integrity.
+   */
+  downloadBundle: verifierProcedure
+    .input(z.object({ bundleId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const accessor = actorOf(ctx.user);
+      const bundle = await getBundleRow(input.bundleId);
+      if (bundle.status !== "exported" || !bundle.export_artifact_hash) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "bundle has no export artifact — complete the dual-control export first",
+        });
+      }
+      let content: Buffer;
+      let source: "vault" | "reconstructed";
+      const stored = await getEvidence(String(bundle.export_artifact_hash)).catch(() => null);
+      if (stored) {
+        content = stored.content;
+        source = "vault";
+      } else {
+        // Vault copy unavailable — reconstruct deterministically and re-verify
+        // the bytes hash against the recorded export artifact hash.
+        const artifactRows = await query(
+          `SELECT merkle_index, artifact_type, ref, sha256, size_bytes, metadata
+           FROM bundle_artifacts WHERE bundle_id = $1 ORDER BY merkle_index ASC`,
+          [input.bundleId],
+        );
+        const exportPackage = {
+          bundleId: input.bundleId,
+          caseRef: bundle.case_ref,
+          merkleRoot: bundle.merkle_root,
+          ledgerAnchorSeq: bundle.ledger_anchor_seq ?? null,
+          ledgerAnchorHash: bundle.ledger_anchor_hash ?? null,
+          manifest: bundle.manifest,
+          artifacts: artifactRows,
+          exportedTo: bundle.exported_to,
+          exportedAt: bundle.exported_at ? new Date(String(bundle.exported_at)).toISOString() : null,
+          firstApprover: bundle.export_first_approver,
+          secondApprover: bundle.export_second_approver,
+        };
+        content = Buffer.from(canonicalJson(exportPackage), "utf8");
+        source = "reconstructed";
+        if (sha256Hex(content) !== bundle.export_artifact_hash) {
+          await writeAccessLog(input.bundleId, accessor, "download", { reason: "hash_mismatch" }, "invalid");
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "reconstructed export package does not match the recorded artifact hash — refusing download",
+          });
+        }
+      }
+      await writeAccessLog(input.bundleId, accessor, "download", { source, exportArtifactHash: bundle.export_artifact_hash });
+      return {
+        bundleId: input.bundleId,
+        caseRef: bundle.case_ref,
+        exportArtifactHash: bundle.export_artifact_hash,
+        exportedTo: bundle.exported_to,
+        source,
+        contentBase64: content.toString("base64"),
+      };
     }),
 
   /**
@@ -680,10 +825,12 @@ export const tribunalBundleRouter = router({
             } else if (!window.valid) {
               chainOk = false;
               detail = `chain verification failed at seq ${window.brokenAtSeq} (${window.reason})`;
-            } else if (
-              window.entriesChecked === storedHashes.length &&
-              window.headHash !== storedHashes[storedHashes.length - 1]
-            ) {
+            } else if (window.entriesChecked !== storedHashes.length) {
+              // The anchored segment must verify END-TO-END: a truncated
+              // window means ledger rows were removed/altered after sealing.
+              chainOk = false;
+              detail = `chain segment truncated: verified ${window.entriesChecked} of ${storedHashes.length} anchored entries`;
+            } else if (window.headHash !== storedHashes[storedHashes.length - 1]) {
               chainOk = false;
               detail = "chain head hash does not match segment";
             } else {

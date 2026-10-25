@@ -30,7 +30,7 @@ services:
     volumes: [socint_pg_data:/var/lib/postgresql/data]
     environment:
       POSTGRES_USER: socint
-      POSTGRES_PASSWORD: socint_secure_2026
+      POSTGRES_PASSWORD: ${SOCINT_POSTGRES_PASSWORD:?SOCINT_POSTGRES_PASSWORD must be set}
       POSTGRES_DB: socint_db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U socint"]
@@ -57,7 +57,7 @@ services:
     environment:
       DATABASE_URL: postgresql://socint:socint_secure_2026@socint-db:5432/socint_db
       OPENSEARCH_URL: http://socint-opensearch:9200
-      SECRET_KEY: ndsep-socint-secret-key-2026
+      SECRET_KEY: ${SOCINT_SECRET_KEY:?SOCINT_SECRET_KEY must be set}
       CORS_ORIGINS: "*"
     restart: unless-stopped
 

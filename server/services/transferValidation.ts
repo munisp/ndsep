@@ -14,7 +14,7 @@
  *  - bcr basis                   -> requires an APPROVED BCR for the organisation
  *  - scc basis                   -> requires an ACTIVE SCC registration row
  *  - derogation-type bases (derogation, explicit_consent, contract_performance,
- *    vital_interest) are lawful in principle (NDPA s.43) but flagged for review
+ *    vital_interests) are lawful in principle (NDPA s.43) but flagged for review
  *    when the destination lacks adequacy
  *  - "declares no transfers" attestations skip basis validation (contradiction
  *    detection against scan evidence is handled by transferAnomaly.ts)
@@ -27,7 +27,7 @@ export const LEGAL_BASES = [
   "derogation",
   "explicit_consent",
   "contract_performance",
-  "vital_interest",
+  "vital_interests",
   "none_claimed",
 ] as const;
 export type LegalBasis = (typeof LEGAL_BASES)[number];
@@ -70,7 +70,7 @@ const DEROGATION_BASES: ReadonlySet<LegalBasis> = new Set<LegalBasis>([
   "derogation",
   "explicit_consent",
   "contract_performance",
-  "vital_interest",
+  "vital_interests",
 ]);
 
 export function validateDeclarationBasis(input: {

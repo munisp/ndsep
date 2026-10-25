@@ -24,7 +24,7 @@ Config (env):
   NEO4J_SERVICE_PORT   listen port            (default 8220)
   NEO4J_URI            bolt URI               (default bolt://localhost:7687)
   NEO4J_USER           Neo4j user             (default neo4j)
-  NEO4J_PASSWORD       Neo4j password         (default ndsep-neo4j-dev)
+  NEO4J_PASSWORD       Neo4j password         (REQUIRED — no default; fail closed)
   DATABASE_URL / WORKER_DATABASE_URL          Postgres fallback DSN
 
 Technology: Python · FastAPI · neo4j driver · psycopg2
@@ -39,6 +39,17 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [NDSEP-NEO4J] %(levelname)s %(message)s",
@@ -70,8 +81,7 @@ except ImportError:
 
 DB_URL = os.environ.get(
     "DATABASE_URL",
-    os.environ.get("WORKER_DATABASE_URL",
-                   "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+    os.environ.get("WORKER_DATABASE_URL"))
 PORT = int(os.environ.get("NEO4J_SERVICE_PORT", "8220"))
 
 app = FastAPI(title="NDSEP Neo4j Graph Service", version="1.0.0")
@@ -123,7 +133,7 @@ def _load_postgres_graph() -> Optional[PgGraph]:
         return None
     g = PgGraph()
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("SELECT id::text, name, sector FROM organizations "
                     "LIMIT 10000")

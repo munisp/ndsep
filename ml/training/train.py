@@ -208,6 +208,18 @@ def _finalize(model, model_name, X_tr, X_te, y_te, feature_names, mean, std,
     stats["feature_stds"] = dict(zip(feature_names, std.tolist()))
     stats_path = os.path.join(weights_dir, f"{model_name}_net_feature_stats.json")
     save_feature_stats(stats, stats_path)
+    # Versioned champion snapshot (round-9): A/B experiments need champion
+    # artifacts addressable by version just like fine-tune challengers.
+    import shutil
+    shutil.copyfile(wpath, os.path.join(weights_dir, f"{model_name}_net_{version}.pt"))
+    shutil.copyfile(stats_path, os.path.join(weights_dir, f"{model_name}_net_{version}_feature_stats.json"))
+    # The companion architecture config must be versioned too: <Model>.load()
+    # derives the config path from the weights path, so a versioned .pt without
+    # its _config.json is unloadable (A/B champion routing broke on this).
+    config_path = wpath.replace(".pt", "_config.json")
+    if os.path.exists(config_path):
+        shutil.copyfile(config_path, os.path.join(
+            weights_dir, f"{model_name}_net_{version}_config.json"))
     payload = {
         "model": model_name, "version": version,
         "trained_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

@@ -24,6 +24,7 @@
  */
 import { sha256Hex } from "./vault";
 import { getAntiwipePool, q } from "./db";
+import { logger } from "../logger";
 
 export const GENESIS_HASH = sha256Hex("genesis");
 
@@ -310,8 +311,22 @@ async function postAnchorToAuditChain(anchor: {
     const body = await res.json().catch(() => null);
     return { mirrored: true, base, response: body };
   } catch (err) {
-    // Graceful degradation: external anchor is corroboration, not the root of trust.
-    return { mirrored: false, error: err instanceof Error ? err.message : String(err) };
+    // External anchor failure is an ALERT condition, not a silent degrade:
+    // the whole point of cross-system anchoring is that a wiped local ledger
+    // is detectable. Local anchors still persist (they are the primary
+    // record), but operators must know corroboration stopped.
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ anchorDate: anchor.anchorDate, err: message }, "[ANTWIPE] external anchor mirror FAILED — ledger corroboration degraded");
+    const webhook = process.env.ALERT_WEBHOOK_URL;
+    if (webhook) {
+      fetch(webhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alert: "antiwipe_external_anchor_failure", anchorDate: anchor.anchorDate, error: message }),
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => undefined);
+    }
+    return { mirrored: false, error: message };
   } finally {
     clearTimeout(timer);
   }

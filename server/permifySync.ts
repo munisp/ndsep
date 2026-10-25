@@ -8,12 +8,61 @@ import { logger } from "./logger";
 
 const PERMIFY_ENABLED = process.env.PERMIFY_ENABLED !== "false";
 
+interface RetryItem { entityType: string; entityId: string; relation: string; subjectId: string; attempts: number; nextAttemptAt: number }
+
+// Round-9: tuple-write failures were debug-logged and DROPPED, leaving ReBAC
+// silently stale. Now: error-level log + bounded in-memory retry queue with
+// exponential backoff; items that exhaust retries are logged as CRITICAL for
+// operator reconciliation (Permify has no persistent queue of its own here).
+const RETRY_QUEUE: RetryItem[] = [];
+const MAX_RETRY_ATTEMPTS = 5;
+let retryTimer: ReturnType<typeof setInterval> | null = null;
+
+export function getPermifyRetryQueueDepth(): number {
+  return RETRY_QUEUE.length;
+}
+
+function enqueueRetry(item: Omit<RetryItem, "attempts" | "nextAttemptAt">): void {
+  RETRY_QUEUE.push({ ...item, attempts: 0, nextAttemptAt: Date.now() + 5_000 });
+  if (!retryTimer) {
+    retryTimer = setInterval(() => { void drainRetries(); }, 10_000);
+    (retryTimer as { unref?: () => void }).unref?.();
+  }
+}
+
+async function drainRetries(): Promise<void> {
+  const now = Date.now();
+  for (let i = RETRY_QUEUE.length - 1; i >= 0; i--) {
+    const item = RETRY_QUEUE[i];
+    if (item.nextAttemptAt > now) continue;
+    try {
+      await permifyWriteRelationship(item.entityType, item.entityId, item.relation, item.subjectId);
+      RETRY_QUEUE.splice(i, 1);
+      logger.info({ ...item }, "[Permify] retry succeeded — relationship synced");
+    } catch (err) {
+      item.attempts++;
+      if (item.attempts >= MAX_RETRY_ATTEMPTS) {
+        RETRY_QUEUE.splice(i, 1);
+        logger.error({ ...item, err: err instanceof Error ? err.message : String(err) },
+          "[Permify] CRITICAL: relationship write exhausted retries — ReBAC state diverged, manual reconciliation required");
+      } else {
+        item.nextAttemptAt = now + Math.min(300_000, 5_000 * 2 ** item.attempts);
+      }
+    }
+  }
+  if (RETRY_QUEUE.length === 0 && retryTimer) {
+    clearInterval(retryTimer);
+    retryTimer = null;
+  }
+}
+
 async function writeRel(entityType: string, entityId: string, relation: string, subjectId: string): Promise<void> {
   if (!PERMIFY_ENABLED) return;
   try {
     await permifyWriteRelationship(entityType, entityId, relation, subjectId);
   } catch (err) {
-    logger.debug({ err: err instanceof Error ? err.message : String(err) }, `[Permify] write relationship failed: ${entityType}#${entityId}@${relation}`);
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, `[Permify] write relationship failed: ${entityType}#${entityId}@${relation} — queued for retry`);
+    enqueueRetry({ entityType, entityId, relation, subjectId });
   }
 }
 

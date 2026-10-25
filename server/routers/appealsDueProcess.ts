@@ -12,7 +12,7 @@
  *   labels and defaults were corrected.)
  */
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, protectedProcedure, staffProcedure, adminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getPool } from "../db";
 import { logger } from "../logger";
@@ -127,12 +127,14 @@ export const appealsDueProcessRouter = router({
       if (input?.status) { params.push(input.status); where = `WHERE a.status = $${params.length}`; }
       return exec(
         `SELECT a.*,
+                p.enforcement_fine_id AS enforcement_fine_id,
                 COALESCE(a.appeal_deadline, a.created_at + INTERVAL '${APPEAL_WINDOW_DAYS} days') AS effective_deadline,
                 GREATEST(0, CEIL(EXTRACT(EPOCH FROM (COALESCE(a.appeal_deadline, a.created_at + INTERVAL '${APPEAL_WINDOW_DAYS} days') - NOW())) / 86400))::int AS days_remaining,
                 (SELECT COUNT(*) FROM appeal_hearings h WHERE h.appeal_id = a.id) AS hearing_count,
                 (SELECT s.status FROM penalty_stays s WHERE s.appeal_id = a.id ORDER BY s.granted_at DESC LIMIT 1) AS stay_status
-         FROM penalty_appeals a ${where}
-         ORDER BY a.created_at DESC LIMIT 200`,
+         FROM penalty_appeals a
+         LEFT JOIN financial_penalties p ON p.id = a.penalty_id
+         ${where} ORDER BY a.created_at DESC LIMIT 200`,
         params
       );
     }),
@@ -208,14 +210,29 @@ export const appealsDueProcessRouter = router({
     }),
 
   // ─── Stay management ─────────────────────────────────────────────────────
+  // Stays key financial_penalties.id; RRR collection (finePayments) operates
+  // on enforcement_fines. Migration 0101's bridge column
+  // (financial_penalties.enforcement_fine_id) joins the two so a stay is
+  // always reported against — and suspends collection on — the correct fine.
   getStayStatus: protectedProcedure
     .input(z.object({ penaltyId: z.number().int().positive() }))
     .query(async ({ input }) => {
       const [stay] = await exec(
-        `SELECT * FROM penalty_stays WHERE penalty_id = $1 ORDER BY granted_at DESC LIMIT 1`,
+        `SELECT s.*, p.enforcement_fine_id AS enforcement_fine_id,
+                ef.fine_reference AS enforcement_fine_reference,
+                ef.status AS enforcement_fine_status
+         FROM penalty_stays s
+         LEFT JOIN financial_penalties p ON p.id = s.penalty_id
+         LEFT JOIN enforcement_fines ef ON ef.id = p.enforcement_fine_id
+         WHERE s.penalty_id = $1 ORDER BY s.granted_at DESC LIMIT 1`,
         [input.penaltyId]
       );
-      return { penalty_id: input.penaltyId, enforcement_stayed: stay?.status === "active", stay: stay ?? null };
+      return {
+        penalty_id: input.penaltyId,
+        enforcement_fine_id: stay?.enforcement_fine_id ?? null,
+        enforcement_stayed: stay?.status === "active",
+        stay: stay ?? null,
+      };
     }),
 
   liftStay: adminProcedure
@@ -243,9 +260,15 @@ export const appealsDueProcessRouter = router({
       let where = "";
       if (input?.status) { params.push(input.status); where = `WHERE s.status = $${params.length}`; }
       return exec(
-        `SELECT s.*, p.amount AS penalty_amount, p.currency, a.status AS appeal_status
+        `SELECT s.*, p.amount AS penalty_amount, p.currency, a.status AS appeal_status,
+                p.enforcement_fine_id AS enforcement_fine_id,
+                ef.fine_reference AS enforcement_fine_reference,
+                ef.status AS enforcement_fine_status,
+                ef.amount AS enforcement_fine_amount,
+                ef.amount_paid AS enforcement_fine_amount_paid
          FROM penalty_stays s
          LEFT JOIN financial_penalties p ON p.id = s.penalty_id
+         LEFT JOIN enforcement_fines ef ON ef.id = p.enforcement_fine_id
          LEFT JOIN penalty_appeals a ON a.id = s.appeal_id
          ${where} ORDER BY s.granted_at DESC LIMIT 200`,
         params
@@ -253,7 +276,7 @@ export const appealsDueProcessRouter = router({
     }),
 
   // ─── Hearing scheduling ──────────────────────────────────────────────────
-  scheduleAppealHearing: protectedProcedure
+  scheduleAppealHearing: staffProcedure
     .input(z.object({
       appealId: z.number().int().positive(),
       hearingDate: z.string(),
@@ -316,7 +339,7 @@ export const appealsDueProcessRouter = router({
   // review of Commission decisions lie to the Federal High Court. The
   // tribunal_escalations table/column names are retained for compatibility;
   // only labels/defaults reflect the correct forum.
-  escalateToTribunal: protectedProcedure
+  escalateToTribunal: staffProcedure
     .input(z.object({
       appealId: z.number().int().positive(),
       tribunalName: z.string().max(256).optional(),

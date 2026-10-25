@@ -27,22 +27,41 @@ import logging
 import http.server
 import socketserver
 import re
+import threading
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 import psycopg2
 import psycopg2.extras
 import requests
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
-    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+    "DATABASE_URL"))
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 # workerManager sets EPR_KGQA_PORT; KGQA_PORT is the legacy/standalone name.
-PORT = int(os.environ.get("EPR_KGQA_PORT", os.environ.get("KGQA_PORT", "8202")))
+PORT = int(os.environ.get("EPR_KGQA_PORT", os.environ.get("KGQA_PORT", "8214")))  # canonical workerManager port (was 8202, collided with bgp-live-monitor)
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
 LLM_MODEL = os.environ.get("OLLAMA_MODEL", "mistral")
+MAX_BODY_BYTES = int(os.environ.get("KGQA_MAX_BODY_BYTES", str(64 * 1024)))
+MAX_QUESTION_CHARS = int(os.environ.get("KGQA_MAX_QUESTION_CHARS", "4000"))
+# Shared-secret guard for POST endpoints (round-9): when WORKER_AUTH_TOKEN is
+# set, callers must present it via X-Worker-Token (or Bearer). Outside
+# development/test, POSTs fail closed when the token is NOT configured.
+WORKER_AUTH_TOKEN = os.environ.get("WORKER_AUTH_TOKEN")
+_IS_DEV = os.environ.get("NODE_ENV", os.environ.get("NDSEP_ENV", "production")) in ("development", "test")
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [NDSEP-KGQA] %(levelname)s %(message)s",
@@ -55,6 +74,33 @@ _questions_answered = 0
 _errors = 0
 _kg_nodes = 0
 _kg_edges = 0
+
+# ── Embedding model: loaded ONCE at startup (round-9) ─────────────────────────
+# Previously every request constructed a new SentenceTransformer (multi-second
+# model load per query). The model is now a process-level singleton, warmed at
+# startup; requests fail fast when it is unavailable.
+_embed_model = None
+_embed_model_error = None
+
+
+def load_embed_model():
+    """Load the SentenceTransformer singleton (idempotent)."""
+    global _embed_model, _embed_model_error
+    if _embed_model is not None:
+        return _embed_model
+    try:
+        from sentence_transformers import SentenceTransformer
+        _embed_model = SentenceTransformer(EMBED_MODEL)
+        _embed_model_error = None
+        log.info(f"Loaded embedding model: {EMBED_MODEL}")
+    except Exception as e:
+        _embed_model_error = str(e)
+        log.error(f"Embedding model load failed: {e}")
+    return _embed_model
+
+
+def get_embed_model():
+    return _embed_model
 
 # ── Entity types for KGQA ──────────────────────────────────────────────────────
 ENTITY_PATTERNS = {
@@ -162,9 +208,11 @@ def link_entities_to_graph(entities: Dict[str, List[str]]) -> Dict[str, List[Dic
     """Link extracted entities to graph nodes via Qdrant semantic search."""
     linked = {}
     try:
-        from sentence_transformers import SentenceTransformer
         from qdrant_client import QdrantClient
-        model = SentenceTransformer(EMBED_MODEL)
+        model = get_embed_model()
+        if model is None:
+            log.warning(f"Entity linking skipped: embedding model unavailable ({_embed_model_error})")
+            return linked
         client = QdrantClient(url=QDRANT_URL, timeout=5)
 
         for entity_type, entity_values in entities.items():
@@ -207,7 +255,7 @@ def traverse_graph(question: str, entities: Dict[str, List[str]]) -> List[Dict]:
     """Execute graph traversal queries based on extracted entities."""
     results = []
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         # Determine query intent
@@ -269,9 +317,11 @@ def traverse_graph(question: str, entities: Dict[str, List[str]]) -> List[Dict]:
 def semantic_retrieve(question: str, limit: int = 5) -> List[Dict]:
     """Retrieve semantically relevant context from Qdrant."""
     try:
-        from sentence_transformers import SentenceTransformer
         from qdrant_client import QdrantClient
-        model = SentenceTransformer(EMBED_MODEL)
+        model = get_embed_model()
+        if model is None:
+            log.warning(f"Semantic retrieval skipped: embedding model unavailable ({_embed_model_error})")
+            return []
         client = QdrantClient(url=QDRANT_URL, timeout=5)
         vec = model.encode([question]).tolist()[0]
         all_results = []
@@ -399,53 +449,116 @@ def answer_question(question: str) -> Dict[str, Any]:
 # ── HTTP Server ────────────────────────────────────────────────────────────────
 
 
+def _check_dependencies() -> Dict[str, Any]:
+    """Probe PostgreSQL, Qdrant and Ollama with short timeouts."""
+    deps: Dict[str, Any] = {}
+    try:
+        conn = psycopg2.connect(_require_dsn(DB_URL), connect_timeout=3)
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        cur.close()
+        conn.close()
+        deps["postgres"] = "ok"
+    except Exception as e:
+        deps["postgres"] = f"unavailable: {str(e)[:120]}"
+    try:
+        resp = requests.get(f"{QDRANT_URL}/collections", timeout=3)
+        deps["qdrant"] = "ok" if resp.status_code == 200 else f"http_{resp.status_code}"
+    except Exception as e:
+        deps["qdrant"] = f"unavailable: {str(e)[:120]}"
+    try:
+        resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+        deps["ollama"] = "ok" if resp.status_code == 200 else f"http_{resp.status_code}"
+    except Exception as e:
+        deps["ollama"] = f"unavailable: {str(e)[:120]}"
+    deps["embedding_model"] = "ok" if _embed_model is not None else f"unavailable: {_embed_model_error}"
+    return deps
+
+
+def _auth_ok(headers) -> tuple[bool, str]:
+    """Shared-secret check for POST endpoints (fail closed outside dev)."""
+    import hmac
+    presented = headers.get("X-Worker-Token", "")
+    if not presented:
+        auth = headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            presented = auth[7:]
+    if WORKER_AUTH_TOKEN:
+        ok = hmac.compare_digest(presented.encode(), WORKER_AUTH_TOKEN.encode())
+        return ok, "unauthorized" if not ok else ""
+    if _IS_DEV:
+        return True, ""
+    return False, "WORKER_AUTH_TOKEN not configured — refusing POST outside development"
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def _send_json(self, data: Any, status: int = 200):
+        body = json.dumps(data, default=str).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         if self.path == "/health":
-            body = json.dumps({
-                "status": "healthy",
+            deps = _check_dependencies()
+            healthy = all(v == "ok" for v in deps.values())
+            self._send_json({
+                "status": "healthy" if healthy else "unhealthy",
                 "worker": "epr_kgqa_worker",
+                "dependencies": deps,
                 "questions_answered": _questions_answered,
                 "kg_nodes": _kg_nodes,
                 "kg_edges": _kg_edges,
                 "errors": _errors,
                 "uptime_seconds": round(time.time() - _worker_start, 1),
                 "capabilities": ["entity_extraction", "semantic_retrieval", "graph_traversal", "llm_generation"]
-            }).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+            }, status=200 if healthy else 503)
         else:
             self.send_response(404)
             self.end_headers()
 
     def do_POST(self):
-        if self.path == "/ask":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            question = body.get("question", "")
-            if not question:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(b'{"error":"question required"}')
-                return
-            result = answer_question(question)
-            resp = json.dumps(result).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(resp)
-        else:
+        if self.path != "/ask":
             self.send_response(404)
             self.end_headers()
+            return
+        ok, reason = _auth_ok(self.headers)
+        if not ok:
+            status = 401 if reason == "unauthorized" else 503
+            self._send_json({"error": reason}, status=status)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_BODY_BYTES:
+            self._send_json({"error": f"request body must be 1..{MAX_BODY_BYTES} bytes"}, status=413)
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_json({"error": "invalid JSON body"}, status=400)
+            return
+        question = str(body.get("question", ""))
+        if not question:
+            self._send_json({"error": "question required"}, status=400)
+            return
+        if len(question) > MAX_QUESTION_CHARS:
+            self._send_json({"error": f"question exceeds {MAX_QUESTION_CHARS} chars"}, status=413)
+            return
+        result = answer_question(question)
+        self._send_json(result)
 
 
 if __name__ == "__main__":
     log.info("Starting NDSEP EPR-KGQA Worker...")
+    # Warm the embedding model ONCE at startup (not per request).
+    threading.Thread(target=load_embed_model, daemon=True).start()
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         httpd.allow_reuse_address = True
         log.info(f"EPR-KGQA Worker HTTP server on port {PORT}")

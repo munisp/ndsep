@@ -285,7 +285,7 @@ Postgres / lakehouse snapshots / synthetic generator
 |---|---|---|
 | `NEO4J_URI` | `bolt://localhost:7687` | Bolt endpoint |
 | `NEO4J_USER` | `neo4j` | auth user |
-| `NEO4J_PASSWORD` | `ndsep-neo4j-dev` | auth password (dev default — override in compose/prod) |
+| `NEO4J_PASSWORD` | — | auth password (REQUIRED, no default — fail closed since round-9) |
 | `NEO4J_SERVICE_PORT` | `8220` | FastAPI worker port |
 | `NDSEP_GRAPH_SOURCE` | `auto` | force graph source for `load_training_graph()` |
 

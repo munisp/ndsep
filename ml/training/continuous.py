@@ -10,8 +10,11 @@ One evaluation cycle (`--once`, cron-friendly) per model:
        * the current weights are older than --max-staleness-hours
          (default 72h — the platform's model-refresh cadence).
   2. DATA   — the batch comes from fine_tune.get_new_batch: real platform
-       tables via DATABASE_URL when reachable, otherwise a fresh synthetic
-       batch (explicitly labelled as such in the run record).
+       tables via DATABASE_URL when reachable (fraud: nip_transactions,
+       gnn: organizations/violations/enforcement — extracted incrementally
+       via lakehouse watermarks; credit: compliance aggregates), otherwise
+       a fresh synthetic batch (explicitly labelled via `data_source` and
+       `synthetic_fallback: true` in the run record and metrics JSON).
   3. TRAIN  — fine_tune's per-model fine-tuner runs from existing weights
        at a low LR; VERSIONED weights (<model>_net_<version>.pt) are saved
        (canonical weights are NOT overwritten — promote via A/B,
@@ -43,7 +46,8 @@ import pandas as pd
 from ml.data.generate_synthetic import (CREDIT_FEATURES, FRAUD_FEATURES,
                                         NODE_FEATURE_DIM)
 from ml.monitoring import performance_monitor
-from ml.monitoring.drift import drift_report, load_feature_stats
+from ml.monitoring.drift import (consume_retrain_trigger, drift_report,
+                                 load_feature_stats)
 from ml.training import lakehouse
 from ml.training.fine_tune import FINE_TUNERS, get_new_batch
 from ml.training.train import DEFAULT_DATA_DIR, WEIGHTS_DIR
@@ -140,18 +144,37 @@ def run_cycle(models: list[str], force: bool, max_staleness_hours: float,
                 continue
 
             batch, source = get_new_batch(model, data_dir, batch_seed)
+            if batch is None:
+                # Real source unchanged since the last extract (lakehouse
+                # watermark) — retraining on identical data is pointless.
+                rec["reason"] = ("no new data since last extract "
+                                 "(lakehouse watermark unchanged)")
+                rec["data_source"] = source
+                print(f"[continuous] {model}: {rec['reason']} — skipping")
+                _record_run(rec)
+                records.append(rec)
+                continue
+            rec["data_source"] = source
+            rec["synthetic_fallback"] = bool(batch.get("synthetic_fallback"))
             drift = _check_drift(model, batch, weights_dir)
             age_h = _weights_age_hours(model, weights_dir)
             stale = age_h is None or age_h > max_staleness_hours
             drifted = bool(drift.get("drift_detected"))
+            # Alert -> trigger wiring (round-9): open high/critical model-drift
+            # alerts in compliance_drift_alerts force a retrain exactly once
+            # (consume_retrain_trigger marks them retraining_triggered).
+            alert_triggered = consume_retrain_trigger(model)
+            if alert_triggered:
+                print(f"[continuous] {model}: open drift alerts found — retraining triggered")
             rec["drift"] = {k: v for k, v in drift.items() if k != "features"}
             rec["data_source"] = source
             rec["weights_age_hours"] = (round(age_h, 1)
                                         if age_h is not None else None)
 
-            if force or drifted or stale:
+            if force or drifted or stale or alert_triggered:
                 why = ([r for r, c in [("forced", force),
                                        ("drift_detected", drifted),
+                                       ("drift_alert", alert_triggered),
                                        ("weights_stale", stale)] if c])
                 rec["reason"] = "+".join(why)
                 print(f"[continuous] fine-tuning {model} ({rec['reason']}; "

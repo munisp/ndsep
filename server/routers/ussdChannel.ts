@@ -8,33 +8,50 @@
  *     env SMS_GATEWAY_BASE + SMS_GATEWAY_API_KEY. Without BOTH, every
  *     delivery path reports status UNCONFIGURED explicitly — SMS rows are
  *     marked 'unconfigured', never faked as 'sent'.
+ *   - Gateway AUTHENTICATION: handleUssd verifies the caller is the real
+ *     gateway before processing. Set USSD_GATEWAY_SECRET and have the gateway
+ *     send either `x-gateway-secret: <secret>` or an HMAC-SHA256 hex signature
+ *     header `x-ussd-signature: HMAC(secret, "<sessionId>|<msisdn>|<input>")`.
+ *     In production an unset secret FAILS CLOSED; in dev it warns loudly.
  *   - USSD session state machine (see ./ussdStateMachine for the pure logic):
  *     language select (en/ha/yo/ig) → category menu → controller lookup by
  *     short-code/name fragment (organizations.name / registration_number)
  *     → free-text description → NDPC-CMP-YYYY-NNNNNN reference.
- *     Sessions expire after 180s of inactivity; per-MSISDN rate limiting.
+ *     Sessions expire after 180s of inactivity; per-MSISDN rate limiting
+ *     counts only NEW sessions (in-progress continuation is never blocked).
+ *     Session resume is bound to BOTH session_id and msisdn_hmac so a session
+ *     id can never be replayed from a different handset.
  *   - Reference codes come from ndsep_complaint_ref_seq (migration 0092) —
  *     the SAME sequence family web complaint intake uses, so USSD and web
  *     references never collide.
- *   - DUAL-PATH persistence: at submit time the router checks
- *     to_regclass('complaints'). If the platform complaints table exists the
- *     complaint is inserted there directly (sync_target='complaints',
- *     status='synced' bookkeeping row kept in ussd_intake_queue for the
- *     audit trail); otherwise the fully-formed complaint is parked in
- *     ussd_intake_queue (status='pending_sync') for later sync once the web
- *     complaints module lands.
+ *   - PRIMARY persistence path: complaints land directly in public_complaints
+ *     (migration 0081), with the USSD category vocabulary mapped onto the web
+ *     vocabulary via mapUssdCategoryToWeb (services/complaintLogic). A
+ *     bookkeeping row is kept in ussd_intake_queue (sync_target
+ *     'public_complaints', status 'synced'). Only when the primary insert
+ *     FAILS is the complaint parked in ussd_intake_queue as 'pending_sync';
+ *     the syncPendingIntake procedure replays those rows into
+ *     public_complaints (idempotent on reference_code).
+ *   - Duplicate-confirm idempotency: once a session reaches DONE the issued
+ *     complaint_ref is persisted on the session; a retried CONFIRM (network
+ *     replay) re-returns the SAME reference instead of filing a duplicate.
  *   - MSISDN privacy: only HMAC-SHA256(msisdn) + last4 are ever persisted.
+ *     notifyStatusChange derives the recipient HMAC from the intake row and
+ *     never accepts a raw MSISDN as the routing source of truth — a supplied
+ *     MSISDN is only used for immediate delivery AFTER its HMAC matches the
+ *     intake row.
  *   - SMS outbox (sms_outbox) with delivery-status tracking for intake
  *     confirmations and status-change notifications.
  */
-import { createHmac, createHash } from "crypto";
+import { createHmac, createHash, timingSafeEqual } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, adminProcedure } from "../_core/trpc";
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
-import { encryptField } from "../encryption";
+import { encryptField, decryptField } from "../encryption";
+import { mapUssdCategoryToWeb, computeAckSlaDueAt } from "../services/complaintLogic";
 import {
   advance,
   resolveControllerLookup,
@@ -54,9 +71,14 @@ const SMS_GATEWAY_TIMEOUT_MS = Number(process.env.SMS_GATEWAY_TIMEOUT_MS ?? 1000
 const MSISDN_HMAC_KEY = process.env.USSD_HMAC_KEY ?? "";
 const RATE_LIMIT_MAX_SESSIONS = Number(process.env.USSD_RATE_LIMIT_MAX ?? 5);
 const RATE_LIMIT_WINDOW_MINUTES = Number(process.env.USSD_RATE_LIMIT_WINDOW_MINUTES ?? 10);
+// Shared secret / HMAC key the USSD gateway uses to authenticate its callbacks.
+const USSD_GATEWAY_SECRET = process.env.USSD_GATEWAY_SECRET ?? "";
 
 if (!MSISDN_HMAC_KEY) {
   logger.warn("[ussd] USSD_HMAC_KEY is not set — using a derived process key for MSISDN HMAC. Set USSD_HMAC_KEY in production.");
+}
+if (!USSD_GATEWAY_SECRET) {
+  logger.warn("[ussd] USSD_GATEWAY_SECRET is not set — gateway callbacks are unauthenticated outside production. Set USSD_GATEWAY_SECRET.");
 }
 
 function msisdnHmac(msisdn: string): string {
@@ -66,6 +88,49 @@ function msisdnHmac(msisdn: string): string {
 
 function msisdnLast4(msisdn: string): string {
   return msisdn.replace(/\D/g, "").slice(-4).padStart(4, "0");
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+/**
+ * Verify the USSD gateway callback is authentic. Accepts either:
+ *   x-gateway-secret: <USSD_GATEWAY_SECRET>                    (shared secret)
+ *   x-ussd-signature: hex HMAC-SHA256(secret, "sessionId|msisdn|input")
+ * Fails closed in production when the secret is unset; dev mode warns.
+ */
+function verifyGatewayAuth(
+  headers: Record<string, unknown> | undefined,
+  payload: { sessionId: string; msisdn: string; input: string },
+): void {
+  if (!USSD_GATEWAY_SECRET) {
+    if (process.env.NODE_ENV === "production") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "USSD gateway authentication is not configured (USSD_GATEWAY_SECRET unset); refusing callback in production.",
+      });
+    }
+    return; // dev mode — the module-load warning above makes this loud.
+  }
+  const h = headers ?? {};
+  const get = (k: string): string | undefined => {
+    const v = h[k];
+    return typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined;
+  };
+  const shared = get("x-gateway-secret");
+  if (shared && safeEqual(shared, USSD_GATEWAY_SECRET)) return;
+  const sig = get("x-ussd-signature");
+  if (sig) {
+    const expected = createHmac("sha256", USSD_GATEWAY_SECRET)
+      .update(`${payload.sessionId}|${payload.msisdn}|${payload.input}`)
+      .digest("hex");
+    if (safeEqual(sig.toLowerCase(), expected)) return;
+  }
+  throw new TRPCError({ code: "UNAUTHORIZED", message: "USSD gateway authentication failed." });
 }
 
 /** Explicit gateway configuration status — the adapter never pretends. */
@@ -164,16 +229,83 @@ async function lookupControllers(fragment: string): Promise<ControllerOption[]> 
   return rows.map((r) => ({ ref: r.ref, name: r.name }));
 }
 
-// Cached existence check for the dual-path complaints insert.
-let complaintsTableExists: boolean | null = null;
-async function hasComplaintsTable(): Promise<boolean> {
-  if (complaintsTableExists !== null) return complaintsTableExists;
-  const rows = await exec(`SELECT to_regclass('public.complaints') AS t`);
-  complaintsTableExists = rows[0]?.t != null;
-  if (!complaintsTableExists) {
-    logger.info("[ussd] platform 'complaints' table not present — USSD complaints will park in ussd_intake_queue (dual-path design)");
+function toIntOrNull(v: string | number | null | undefined): number | null {
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : parseInt(v, 10);
+  return Number.isInteger(n) && Math.abs(n) < 2147483647 ? n : null;
+}
+
+/**
+ * Land a completed USSD complaint in public_complaints (primary path) and keep
+ * the ussd_intake_queue bookkeeping row, atomically. Returns the sync status.
+ * On primary-insert failure the complaint is parked in the queue as
+ * 'pending_sync' (fallback path) — never dropped.
+ */
+async function landComplaint(args: {
+  complaintRef: string;
+  sessionId: string;
+  hmac: string;
+  last4: string;
+  language: string;
+  ussdCategory: string;
+  controllerRef: string | null;
+  controllerName: string | null;
+  description: string;
+}): Promise<{ syncStatus: "synced" | "pending_sync"; syncTarget: "public_complaints" | "ussd_intake_queue"; queueId: number | null }> {
+  const pool = getPool();
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const webCategory = mapUssdCategoryToWeb(args.ussdCategory) ?? "other";
+  const controllerId = toIntOrNull(args.controllerRef);
+  const ackDue = computeAckSlaDueAt();
+  const subject = `USSD complaint (${args.ussdCategory})${args.controllerName ? ` — ${args.controllerName}` : ""}`.slice(0, 512);
+
+  // ── Primary path: public_complaints + queue bookkeeping in ONE transaction.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const complaint = await client.query(
+      `INSERT INTO public_complaints
+         (reference_code, category, subject, description,
+          controller_id, controller_name, is_anonymous, status, ack_sla_due_at)
+       VALUES ($1,$2,$3,$4,$5,$6,true,'received',$7)
+       ON CONFLICT (reference_code) DO NOTHING
+       RETURNING id`,
+      [args.complaintRef, webCategory, subject, encryptField(args.description), controllerId, args.controllerName, ackDue],
+    );
+    if (complaint.rows[0]) {
+      await client.query(
+        `INSERT INTO complaint_events (complaint_id, event_type, from_status, to_status, actor, details)
+         VALUES ($1, 'submitted', NULL, 'received', 'ussd', $2)`,
+        [complaint.rows[0].id, JSON.stringify({ channel: "ussd", ussd_category: args.ussdCategory, language: args.language })],
+      );
+    }
+    const queue = await client.query(
+      `INSERT INTO ussd_intake_queue
+         (complaint_ref, session_id, msisdn_hmac, msisdn_last4, language, category, controller_ref, controller_name, description, sync_target, status, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'public_complaints', 'synced', NOW())
+       ON CONFLICT (complaint_ref) DO UPDATE SET status = 'synced', sync_target = 'public_complaints', synced_at = NOW()
+       RETURNING id`,
+      [args.complaintRef, args.sessionId, args.hmac, args.last4, args.language, args.ussdCategory, args.controllerRef, args.controllerName, encryptField(args.description)],
+    );
+    await client.query("COMMIT");
+    return { syncStatus: "synced", syncTarget: "public_complaints", queueId: queue.rows[0]?.id ?? null };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    logger.warn({ err, ref: args.complaintRef }, "[ussd] public_complaints landing failed; parking in ussd_intake_queue (fallback path)");
+  } finally {
+    client.release();
   }
-  return complaintsTableExists;
+
+  // ── Fallback path: park the fully-formed complaint for later sync.
+  const queueRows = await exec(
+    `INSERT INTO ussd_intake_queue
+       (complaint_ref, session_id, msisdn_hmac, msisdn_last4, language, category, controller_ref, controller_name, description, sync_target, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'ussd_intake_queue', 'pending_sync')
+     ON CONFLICT (complaint_ref) DO NOTHING
+     RETURNING id`,
+    [args.complaintRef, args.sessionId, args.hmac, args.last4, args.language, args.ussdCategory, args.controllerRef, args.controllerName, encryptField(args.description)],
+  );
+  return { syncStatus: "pending_sync", syncTarget: "ussd_intake_queue", queueId: queueRows[0]?.id ?? null };
 }
 
 /**
@@ -188,12 +320,7 @@ async function enqueueAndDeliver(
   relatedRef: string | null,
   notificationType: "status_change" | "intake_confirmation" | "otp",
 ): Promise<{ outboxId: number | null; delivery: string }> {
-  const rows = await exec(
-    `INSERT INTO sms_outbox (msisdn_hmac, msisdn_last4, message, related_ref, notification_type)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [msisdnHmac(rawMsisdn), msisdnLast4(rawMsisdn), message, relatedRef, notificationType],
-  );
-  const outboxId: number | null = rows[0]?.id ?? null;
+  const outboxId = await enqueuePending(msisdnHmac(rawMsisdn), msisdnLast4(rawMsisdn), message, relatedRef, notificationType);
   const gateway = getGatewayStatus();
   let delivery: string;
   if (gateway.status === "UNCONFIGURED") {
@@ -214,6 +341,22 @@ async function enqueueAndDeliver(
     );
   }
   return { outboxId, delivery };
+}
+
+/** Enqueue an outbox row in 'pending' state (HMAC-only recipient, no delivery attempt). */
+async function enqueuePending(
+  hmac: string,
+  last4: string,
+  message: string,
+  relatedRef: string | null,
+  notificationType: "status_change" | "intake_confirmation" | "otp",
+): Promise<number | null> {
+  const rows = await exec(
+    `INSERT INTO sms_outbox (msisdn_hmac, msisdn_last4, message, related_ref, notification_type)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [hmac, last4, message, relatedRef, notificationType],
+  );
+  return rows[0]?.id ?? null;
 }
 
 function deserializeSession(row: any, nowMs: number): UssdSessionState {
@@ -250,8 +393,9 @@ export const ussdChannelRouter = router({
 
   /**
    * USSD gateway callback (Africa's Talking / Twilio-style webhook).
-   * Returns { response, endSession } — the gateway wrapper maps these onto
-   * "CON ..." / "END ..." wire format.
+   * Authenticated via USSD_GATEWAY_SECRET (shared-secret or HMAC signature
+   * header — see verifyGatewayAuth). Returns { response, endSession } — the
+   * gateway wrapper maps these onto "CON ..." / "END ..." wire format.
    */
   handleUssd: publicProcedure
     .input(z.object({
@@ -259,30 +403,52 @@ export const ussdChannelRouter = router({
       msisdn: z.string().min(7).max(20),
       input: z.string().max(1000).default(""),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      verifyGatewayAuth((ctx as any).req?.headers, input);
+
       const nowMs = Date.now();
       const hmac = msisdnHmac(input.msisdn);
       const last4 = msisdnLast4(input.msisdn);
 
-      // Per-MSISDN rate limiting: count sessions opened in the window.
-      const recent = await exec(
-        `SELECT COUNT(*)::int AS n FROM ussd_sessions
-         WHERE msisdn_hmac = $1 AND created_at > NOW() - ($2 || ' minutes')::interval`,
-        [hmac, String(RATE_LIMIT_WINDOW_MINUTES)],
+      // Session resume is bound to BOTH session_id and msisdn_hmac: a session
+      // id replayed from a different handset never attaches to the original
+      // subscriber's in-flight complaint.
+      const existing = await exec(
+        `SELECT * FROM ussd_sessions WHERE session_id = $1 AND msisdn_hmac = $2`,
+        [input.sessionId, hmac],
       );
-      if ((recent[0]?.n ?? 0) >= RATE_LIMIT_MAX_SESSIONS) {
-        await logAudit("ussd.rate_limited", "ussd_session", null, { msisdn_last4: last4 });
+
+      // Duplicate-confirm idempotency: a session that already completed with an
+      // issued reference returns the SAME reference (network retries of the
+      // final "1. Confirm" must never file a second complaint).
+      if (existing[0]?.state === "DONE" && existing[0]?.complaint_ref) {
         return {
-          response: "Too many sessions. Please wait a few minutes and dial again.",
+          response: `Complaint already received.\nReference: ${existing[0].complaint_ref}\nKeep this code. Status updates will be sent by SMS.`,
           endSession: true,
-          rateLimited: true,
+          state: "DONE",
+          complaintRef: existing[0].complaint_ref,
+          duplicate: true,
         };
       }
 
-      const existing = await exec(
-        `SELECT * FROM ussd_sessions WHERE session_id = $1`,
-        [input.sessionId],
-      );
+      // Per-MSISDN rate limiting applies to NEW sessions only — continuing an
+      // in-progress session must never be blocked by the session-opening cap.
+      if (!existing[0]) {
+        const recent = await exec(
+          `SELECT COUNT(*)::int AS n FROM ussd_sessions
+           WHERE msisdn_hmac = $1 AND created_at > NOW() - ($2 || ' minutes')::interval`,
+          [hmac, String(RATE_LIMIT_WINDOW_MINUTES)],
+        );
+        if ((recent[0]?.n ?? 0) >= RATE_LIMIT_MAX_SESSIONS) {
+          await logAudit("ussd.rate_limited", "ussd_session", null, { msisdn_last4: last4 });
+          return {
+            response: "Too many sessions. Please wait a few minutes and dial again.",
+            endSession: true,
+            rateLimited: true,
+          };
+        }
+      }
+
       let session: UssdSessionState = existing[0]
         ? deserializeSession(existing[0], nowMs)
         : createSession(nowMs);
@@ -303,40 +469,19 @@ export const ussdChannelRouter = router({
         const [seqRow] = await exec(`SELECT nextval('ndsep_complaint_ref_seq') AS n`);
         complaintRef = buildComplaintReference(new Date().getFullYear(), Number(seqRow?.n ?? 1));
 
-        // DUAL PATH: insert into platform complaints table if it exists,
-        // else park in ussd_intake_queue for later sync.
         const p = result.session.payload;
-        const landedInComplaints = await hasComplaintsTable();
-        let syncStatus = "pending_sync";
-        if (landedInComplaints) {
-          try {
-            await exec(
-              `INSERT INTO complaints (reference_number, category, description, channel, language, created_at)
-               VALUES ($1, $2, $3, 'ussd', $4, NOW())`,
-              [complaintRef, p.category ?? "other", encryptField(p.description ?? ""), result.session.language ?? "en"],
-            );
-            syncStatus = "synced";
-          } catch (err) {
-            // complaints table shape mismatch — fall back to the queue.
-            logger.warn({ err }, "[ussd] complaints insert failed; parking in ussd_intake_queue");
-            syncStatus = "pending_sync";
-          }
-        }
-        const queueRows = await exec(
-          `INSERT INTO ussd_intake_queue
-             (complaint_ref, session_id, msisdn_hmac, msisdn_last4, language, category, controller_ref, controller_name, description, sync_target, status, synced_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CASE WHEN $11 = 'synced' THEN NOW() ELSE NULL END)
-           ON CONFLICT (complaint_ref) DO NOTHING
-           RETURNING id, status`,
-          [
-            complaintRef, input.sessionId, hmac, last4,
-            result.session.language ?? "en", p.category ?? "other",
-            p.controllerRef ?? null, p.controllerName ?? null,
-            encryptField(p.description ?? ""),
-            landedInComplaints && syncStatus === "synced" ? "complaints" : "ussd_intake_queue",
-            syncStatus,
-          ],
-        );
+        const landing = await landComplaint({
+          complaintRef,
+          sessionId: input.sessionId,
+          hmac,
+          last4,
+          language: result.session.language ?? "en",
+          ussdCategory: String(p.category ?? "other"),
+          controllerRef: p.controllerRef ?? null,
+          controllerName: p.controllerName ?? null,
+          description: p.description ?? "",
+        });
+
         // Intake-confirmation SMS via the outbox: enqueued + immediate
         // delivery attempt while the raw MSISDN is in memory (HMAC-only at rest).
         const sms = await enqueueAndDeliver(
@@ -345,8 +490,8 @@ export const ussdChannelRouter = router({
           complaintRef,
           "intake_confirmation",
         );
-        await logAudit("ussd.complaint_submitted", "ussd_intake", queueRows[0]?.id ?? null, {
-          complaint_ref: complaintRef, category: p.category, language: result.session.language, msisdn_last4: last4, sync_status: syncStatus,
+        await logAudit("ussd.complaint_submitted", "ussd_intake", landing.queueId, {
+          complaint_ref: complaintRef, category: p.category, language: result.session.language, msisdn_last4: last4, sync_status: landing.syncStatus,
         });
         emitMutationEvent("ndsep.ussd.complaint", { action: "submitted", complaintRef, ts: new Date().toISOString() })
           .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
@@ -354,7 +499,7 @@ export const ussdChannelRouter = router({
           ...result,
           response: `Complaint received.\nReference: ${complaintRef}\nKeep this code. Status updates will be sent by SMS.`,
         };
-        intake = { complaintRef, syncStatus, queueId: queueRows[0]?.id ?? null, smsDelivery: sms.delivery };
+        intake = { complaintRef, syncStatus: landing.syncStatus, queueId: landing.queueId, smsDelivery: sms.delivery };
       }
 
       await persistSession(input.sessionId, hmac, last4, result.session, complaintRef);
@@ -366,7 +511,7 @@ export const ussdChannelRouter = router({
       };
     }),
 
-  /** Officer view of queued (not-yet-synced) USSD complaints. */
+  /** Officer view of queued USSD complaints (descriptions decrypted). */
   listIntakeQueue: adminProcedure
     .input(z.object({
       status: z.enum(["pending_sync", "synced", "failed"]).optional(),
@@ -383,22 +528,121 @@ export const ussdChannelRouter = router({
       }
       params.push(input?.limit ?? 50);
       sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
-      return exec(sql, params);
+      const rows = await exec(sql, params);
+      // description is encrypted at rest (PII); decrypt explicitly for the
+      // officer view. decryptField passes plaintext through when encryption
+      // is disabled or the value was written before encryption landed.
+      return rows.map((r) => ({ ...r, description: decryptField(r.description) }));
     }),
 
   /**
-   * Enqueue a status-change SMS for a complaint. The raw MSISDN is used only
-   * for the immediate delivery attempt; only its HMAC + last4 are persisted.
+   * Replay parked (pending_sync / failed) intake rows into public_complaints.
+   * Idempotent on reference_code; each row is synced in its own transaction so
+   * one bad row never blocks the rest.
+   */
+  syncPendingIntake: adminProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(200).default(50) }).optional())
+    .mutation(async ({ input, ctx }) => {
+      const pending = await exec(
+        `SELECT * FROM ussd_intake_queue WHERE status IN ('pending_sync','failed')
+         ORDER BY created_at ASC LIMIT $1`,
+        [input?.limit ?? 50],
+      );
+      let synced = 0;
+      let failed = 0;
+      const pool = getPool();
+      for (const row of pending) {
+        const webCategory = mapUssdCategoryToWeb(String(row.category)) ?? "other";
+        const client = pool ? await pool.connect() : null;
+        if (!client) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+        try {
+          await client.query("BEGIN");
+          const ins = await client.query(
+            `INSERT INTO public_complaints
+               (reference_code, category, subject, description, controller_id, controller_name, is_anonymous, status, ack_sla_due_at)
+             VALUES ($1,$2,$3,$4,$5,$6,true,'received', COALESCE($7::timestamptz, NOW() + interval '72 hours'))
+             ON CONFLICT (reference_code) DO NOTHING
+             RETURNING id`,
+            [
+              row.complaint_ref,
+              webCategory,
+              `USSD complaint (${row.category})${row.controller_name ? ` — ${row.controller_name}` : ""}`.slice(0, 512),
+              row.description, // already encrypted at rest in the queue
+              toIntOrNull(row.controller_ref),
+              row.controller_name ?? null,
+              computeAckSlaDueAt(new Date(row.created_at)).toISOString(),
+            ],
+          );
+          if (ins.rows[0]) {
+            await client.query(
+              `INSERT INTO complaint_events (complaint_id, event_type, from_status, to_status, actor, details)
+               VALUES ($1, 'submitted', NULL, 'received', 'ussd-sync', $2)`,
+              [ins.rows[0].id, JSON.stringify({ channel: "ussd", synced_from_queue: row.id, ussd_category: row.category })],
+            );
+          }
+          await client.query(
+            `UPDATE ussd_intake_queue SET status = 'synced', sync_target = 'public_complaints', synced_at = NOW(), sync_error = NULL
+             WHERE id = $1`,
+            [row.id],
+          );
+          await client.query("COMMIT");
+          synced++;
+        } catch (err) {
+          await client.query("ROLLBACK");
+          failed++;
+          const msg = err instanceof Error ? err.message : String(err);
+          await exec(
+            `UPDATE ussd_intake_queue SET status = 'failed', sync_error = $2 WHERE id = $1`,
+            [row.id, msg.slice(0, 1000)],
+          );
+        } finally {
+          client.release();
+        }
+      }
+      await logAudit("ussd.intake_synced", "ussd_intake", null, { synced, failed, requested: pending.length, by: String(ctx.user.id) });
+      return { synced, failed, requested: pending.length };
+    }),
+
+  /**
+   * Enqueue a status-change SMS for a USSD-originated complaint. The recipient
+   * is DERIVED from the intake row's stored MSISDN HMAC — a raw MSISDN is
+   * never accepted as the routing source of truth. When the caller supplies a
+   * raw MSISDN it is used ONLY for the immediate delivery attempt, and only
+   * after its HMAC matches the intake row; otherwise the message is parked as
+   * 'pending' for processOutbox (which enforces the same HMAC binding).
    */
   notifyStatusChange: adminProcedure
     .input(z.object({
-      msisdn: z.string().min(7).max(20),
       complaintRef: z.string().regex(/^NDPC-CMP-\d{4}-\d{6}$/),
       newStatus: z.string().min(2).max(64),
+      /** Optional raw MSISDN for immediate delivery — must HMAC-match the intake row. */
+      msisdn: z.string().min(7).max(20).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      const intake = await exec(
+        `SELECT msisdn_hmac, msisdn_last4 FROM ussd_intake_queue
+         WHERE complaint_ref = $1 ORDER BY id DESC LIMIT 1`,
+        [input.complaintRef],
+      );
+      if (!intake[0]) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "No USSD intake found for that complaint reference." });
+      }
       const message = `NDPC: Complaint ${input.complaintRef} status update: ${input.newStatus}.`;
-      const { outboxId, delivery } = await enqueueAndDeliver(input.msisdn, message, input.complaintRef, "status_change");
+      let outboxId: number | null;
+      let delivery: string;
+      if (input.msisdn) {
+        if (msisdnHmac(input.msisdn) !== intake[0].msisdn_hmac) {
+          await logAudit("ussd.notify_msisdn_mismatch", "ussd_intake", null, { ref: input.complaintRef, by: String(ctx.user.id) });
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Supplied MSISDN does not match the intake recipient on record; delivery refused.",
+          });
+        }
+        ({ outboxId, delivery } = await enqueueAndDeliver(input.msisdn, message, input.complaintRef, "status_change"));
+      } else {
+        outboxId = await enqueuePending(intake[0].msisdn_hmac, intake[0].msisdn_last4, message, input.complaintRef, "status_change");
+        delivery = "pending";
+      }
       await logAudit("ussd.sms_enqueued", "sms_outbox", outboxId, { ref: input.complaintRef, delivery, by: String(ctx.user.id) });
       return { success: true, outboxId, delivery, gateway: getGatewayStatus().status };
     }),

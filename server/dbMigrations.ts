@@ -1,4 +1,6 @@
 import path from "node:path";
+import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -25,6 +27,18 @@ export async function applyDatabaseMigrations(): Promise<void> {
       migrationsSchema: "drizzle",
     });
     logger.info("[Database] Drizzle migrations applied successfully");
+
+    // Raw operational migrations (drizzle/migrations/0019+, incl. round-9
+    // 0097/0109/0110/0111) are not in the drizzle journal — run the dedicated
+    // idempotent runner. Failure is fatal here too: the API must not serve
+    // traffic against a partially-migrated schema.
+    const runner = path.resolve(process.cwd(), "scripts/runRawMigrations.mjs");
+    if (fs.existsSync(runner)) {
+      execFileSync(process.execPath, [runner], { stdio: "inherit", env: process.env });
+      logger.info("[Database] Raw SQL migrations applied successfully");
+    } else {
+      logger.warn({ runner }, "[Database] runRawMigrations.mjs not found in deployment image — raw migrations skipped (wire scripts/migrate.sh into the entrypoint)");
+    }
   } catch (error) {
     logger.fatal({ err: error }, "[Database] Drizzle migration failed");
     throw error;

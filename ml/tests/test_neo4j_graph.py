@@ -19,6 +19,10 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))  # repo root on path
 
+# The store fails closed without a password (round-9); the fake driver below
+# never reads it, but connect() requires one to be configured.
+os.environ.setdefault("NEO4J_PASSWORD", "test-only-password")
+
 from ml.graph import neo4j_store
 from ml.graph.neo4j_store import (FEATURE_DIM, Neo4jGraphStore,
                                   Neo4jStoreError, edge_records,
@@ -79,6 +83,9 @@ class FakeDriver:
 
 @pytest.fixture
 def fake_driver(monkeypatch):
+    # The store fails closed without a password (round-9); the fake driver
+    # never reads it, but connect() requires one to be configured.
+    monkeypatch.setenv("NEO4J_PASSWORD", "test-only-password")
     driver = FakeDriver()
     monkeypatch.setattr(neo4j_store.GraphDatabase, "driver",
                         lambda *a, **k: driver)

@@ -2,11 +2,11 @@
  * Penalty Engine — NDPA 2023 s.48 administrative-fine computation.
  *
  * Statutory basis (NDPA 2023):
- *   s.48(7): where the Commission is satisfied that a data controller or data
+ *   s.48(4): where the Commission is satisfied that a data controller or data
  *     processor of MAJOR importance (DCPMI) has violated the Act, the remedial
  *     fee is the GREATER of ₦10,000,000 or 2% of its annual gross revenue in
  *     the preceding financial year.
- *   s.48(8): for any OTHER data controller/processor: the GREATER of
+ *   s.48(5): for any OTHER data controller/processor: the GREATER of
  *     ₦2,000,000 or 2% of annual gross revenue in the preceding financial
  *     year.
  *   s.48(6): in determining the amount the Commission has regard to the
@@ -14,7 +14,7 @@
  *     personal data, number of data subjects, intentional/negligent character,
  *     prior infringements, degree of cooperation, remediation).
  *
- * Model: the s.48(7)/(8) greater-of figure is the STATUTORY CAP. The s.48(6)
+ * Model: the s.48(4)/(5) greater-of figure is the STATUTORY CAP. The s.48(6)
  * factors produce a severity score in [0,1] which maps to a multiplier in
  * [MIN_MULTIPLIER, 1]; the final amount = cap × multiplier, so the computed
  * penalty can never exceed the statutory cap. Every input and intermediate
@@ -255,7 +255,7 @@ function round2(v: number): number {
 /**
  * Compute a s.48 administrative fine.
  *
- *   statutoryCap = max(floor, 2% × verifiedRevenue)     [s.48(7)/(8)]
+ *   statutoryCap = max(floor, 2% × verifiedRevenue)     [s.48(4)/(5)]
  *   multiplier   = MIN_MULTIPLIER + (1 - MIN_MULTIPLIER) × severity
  *   finalAmount  = min(cap, round2(cap × multiplier))   [never exceeds cap]
  *
@@ -286,7 +286,7 @@ export function computeSection48Penalty(input: PenaltyComputationInput): Penalty
   if (finalAmount > statutoryCap) finalAmount = statutoryCap; // hard cap guard
 
   return {
-    legalBasis: input.isDcpmi ? "NDPA 2023 s.48(7) (DCPMI)" : "NDPA 2023 s.48(8) (non-major)",
+    legalBasis: input.isDcpmi ? "NDPA 2023 s.48(4) (DCPMI)" : "NDPA 2023 s.48(5) (non-major)",
     isDcpmi: input.isDcpmi,
     statutoryFloor: floor,
     revenueRate: REVENUE_RATE,
@@ -340,7 +340,8 @@ export async function recomputePenalty(
   const fineRows = await exec(
     `SELECT id, org_id, amount, currency, status, fine_reference
        FROM enforcement_fines
-      WHERE ${isNumericId ? "id = $1" : "fine_reference = $1"}`,
+      WHERE ${isNumericId ? "id = $1" : "fine_reference = $1"}
+      FOR UPDATE`,
     [isNumericId ? Number(fineRef) : String(fineRef)],
   );
   const fine = fineRows[0];
@@ -372,13 +373,14 @@ export async function recomputePenalty(
     })),
   );
 
-  // DCPMI classification: latest prior computation for the org wins; default
-  // non-major (conservative — DCPMI status raises the floor).
-  const priorRows = await exec(
-    `SELECT is_dcpmi FROM penalty_computations WHERE org_id = $1 ORDER BY created_at DESC LIMIT 1`,
+  // DCPMI classification: read from the organisation's REGISTRATION RECORD
+  // (organizations.is_dcpmi, migration 0102) — never from prior penalty
+  // computations, which would silently propagate a stale classification.
+  const orgRows = await exec(
+    `SELECT is_dcpmi FROM organizations WHERE id = $1`,
     [fine.org_id],
   );
-  const isDcpmi = priorRows[0]?.is_dcpmi === true;
+  const isDcpmi = orgRows[0]?.is_dcpmi === true;
 
   const breakdown = computeSection48Penalty({
     isDcpmi,
@@ -434,4 +436,38 @@ export async function recomputePenalty(
     computationId: inserted[0]?.id != null ? Number(inserted[0].id) : null,
     breakdown,
   };
+}
+
+/**
+ * Transactional variant of recomputePenalty: the fine row lock, computation
+ * insert and fine update commit or roll back atomically. Prefer this over the
+ * exec-based entry point when a pool is available.
+ */
+export interface PoolLike {
+  connect(): Promise<{
+    query(text: string, params?: unknown[]): Promise<{ rows: unknown[] }>;
+    release(): void;
+  }>;
+}
+
+export async function recomputePenaltyTransactional(
+  pool: PoolLike,
+  fineRef: number | string,
+  factors: Section48Factors,
+  actor: string,
+): Promise<RecomputeResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const txExec: SqlExec = async (text, params) =>
+      (await client.query(text, params)).rows as unknown[];
+    const result = await recomputePenalty(txExec, fineRef, factors, actor);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
 }

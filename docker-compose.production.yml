@@ -904,7 +904,7 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       APISIX_ADMIN_URL: ${APISIX_ADMIN_URL:-http://apisix:9180}
-      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY must be set}
       PORT: "8141"
     depends_on:
       postgres:
@@ -1314,7 +1314,7 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       NETBOX_URL: ${NETBOX_URL:-http://netbox:8080}
-      NETBOX_TOKEN: ${NETBOX_TOKEN:-0123456789abcdef0123456789abcdef01234567}
+      NETBOX_TOKEN: ${NETBOX_TOKEN:?NETBOX_TOKEN must be set}
       PORT: "8159"
     depends_on:
       postgres:
@@ -1495,7 +1495,7 @@ services:
     environment:
       WORKER_DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-ndsep-jwt-secret-change-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       PORT: "8200"
     depends_on:
       postgres:
@@ -1695,7 +1695,7 @@ services:
     container_name: ndsep-evidence-signer
     environment:
       DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD}@postgres:5432/ndsep_db
-      SIGNING_KEY: ${EVIDENCE_SIGNING_KEY:-ndsep-evidence-signing-key-change-in-prod}
+      SIGNING_KEY: ${EVIDENCE_SIGNING_KEY:?EVIDENCE_SIGNING_KEY must be set}
       PORT: "8301"
     depends_on:
       postgres:

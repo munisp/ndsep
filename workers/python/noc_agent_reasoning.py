@@ -33,12 +33,23 @@ import requests
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("noc-agent-reasoning")
 
 WORKER_NAME = "noc-agent-reasoning"
 HTTP_PORT = 8195
-DB_URL = os.getenv("DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db")
+DB_URL = os.getenv("DATABASE_URL")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 RELAY_URL = os.getenv("RELAY_URL", "http://localhost:4000")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -573,7 +584,7 @@ def learn(event: LearnInput):
 
     # Persist to DB
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO noc_agent_memory (memory_type, category, title, description, context, confidence)

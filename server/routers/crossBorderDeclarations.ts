@@ -110,10 +110,11 @@ async function gatherRegistrySnapshot(
   destinationCountry: string
 ): Promise<RegistrySnapshot> {
   // 1. Adequacy decision for the destination (0030). Latest decision wins.
+  //    ILIKE metacharacters escaped so destination input cannot widen the match.
   const adequacy = await exec(
     `SELECT id, decision_status FROM adequacy_decisions
-     WHERE country ILIKE $1 ORDER BY id DESC LIMIT 1`,
-    [destinationCountry]
+     WHERE country ILIKE $1 ESCAPE '\\' ORDER BY id DESC LIMIT 1`,
+    [destinationCountry.replace(/[\\%_]/g, (ch) => `\\${ch}`)]
   );
   const adequacyDecisionStatus = (adequacy[0]?.decision_status ?? null) as RegistrySnapshot["adequacyDecisionStatus"];
   const adequacyDecisionId = adequacy[0]?.id ?? null;
@@ -128,14 +129,15 @@ async function gatherRegistrySnapshot(
   );
   const bcrStatus = (bcr[0]?.status ?? null) as RegistrySnapshot["bcrStatus"];
 
-  // 3. SCC registry — defensive: the table may not exist yet in all
-  //    environments; absence of table OR row means NO active registration.
+  // 3. SCC registry (0106): only APPROVED, in-effect registrations count as a
+  //    valid safeguard. Defensive: absence of table OR row means NONE.
   let sccRegistrationActive = false;
   const reg = await exec(`SELECT to_regclass('public.scc_registrations') AS reg`);
   if (reg[0]?.reg) {
     const scc = await exec(
       `SELECT id FROM scc_registrations
-       WHERE organization_id = $1 AND status = 'active'
+       WHERE organization_id = $1 AND status = 'approved'
+         AND (effective_from IS NULL OR effective_from <= NOW())
          AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`,
       [organizationId]
     );
@@ -144,8 +146,8 @@ async function gatherRegistrySnapshot(
 
   // 4. Destination risk register (0089).
   const risk = await exec(
-    `SELECT adequacy_status FROM destination_risk_register WHERE country ILIKE $1 LIMIT 1`,
-    [destinationCountry]
+    `SELECT adequacy_status FROM destination_risk_register WHERE country ILIKE $1 ESCAPE '\\' LIMIT 1`,
+    [destinationCountry.replace(/[\\%_]/g, (ch) => `\\${ch}`)]
   );
   const destinationAdequacyStatus = (risk[0]?.adequacy_status ?? null) as RegistrySnapshot["destinationAdequacyStatus"];
 
@@ -390,10 +392,15 @@ export const crossBorderDeclarationsRouter = router({
       notes: z.string().max(5000).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // Normalize on write: trim + collapse whitespace; uniqueness is
+      // case-insensitive via idx_destination_risk_country_lower (0106), so a
+      // case-variant upsert updates the canonical existing row (its stored
+      // casing wins on conflict).
+      const country = input.country.trim().replace(/\s+/g, " ");
       const [row] = await exec(
         `INSERT INTO destination_risk_register (country, iso_code, adequacy_status, risk_score, notes, updated_by)
          VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (country) DO UPDATE SET
+         ON CONFLICT (lower(country)) DO UPDATE SET
            iso_code = COALESCE(EXCLUDED.iso_code, destination_risk_register.iso_code),
            adequacy_status = EXCLUDED.adequacy_status,
            risk_score = EXCLUDED.risk_score,
@@ -401,10 +408,10 @@ export const crossBorderDeclarationsRouter = router({
            updated_by = EXCLUDED.updated_by,
            updated_at = NOW()
          RETURNING *`,
-        [input.country, input.iso_code ?? null, input.adequacy_status, input.risk_score, input.notes ?? null, ctx.user.name ?? String(ctx.user.id)]
+        [country, input.iso_code ?? null, input.adequacy_status, input.risk_score, input.notes ?? null, ctx.user.name ?? String(ctx.user.id)]
       );
       await logAudit("destination_risk_upserted", "destination_risk_register", row?.id, String(ctx.user.id), {
-        country: input.country, adequacy_status: input.adequacy_status, risk_score: input.risk_score,
+        country, adequacy_status: input.adequacy_status, risk_score: input.risk_score,
       });
       fireAndForget("crossBorderDeclarations.upsertDestinationRisk");
       return row;
@@ -494,6 +501,79 @@ export const crossBorderDeclarationsRouter = router({
       });
       fireAndForget("crossBorderDeclarations.revalidateAdequacyCascade");
       return report;
+    }),
+
+  // ─── SCC registrations (0106; NDPA s.41 safeguard) ─────────────────────────
+  submitSccRegistration: protectedProcedure
+    .input(z.object({
+      organization_id: z.number().int().positive(),
+      controller_party: z.string().min(2).max(256),
+      processor_party: z.string().min(2).max(256),
+      clauses_version: z.string().min(1).max(64),
+      document_hash: z.string().regex(/^[0-9a-f]{64}$/, "document_hash must be a lowercase sha256 hex digest"),
+      effective_from: z.string().optional(),
+      expires_at: z.string().optional(),
+      notes: z.string().max(5000).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const [row] = await exec(
+        `INSERT INTO scc_registrations
+           (organization_id, controller_party, processor_party, clauses_version,
+            document_hash, effective_from, expires_at, notes, submitted_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         RETURNING *`,
+        [
+          input.organization_id, input.controller_party, input.processor_party, input.clauses_version,
+          input.document_hash, input.effective_from ?? null, input.expires_at ?? null,
+          input.notes ?? null, ctx.user.name ?? String(ctx.user.id),
+        ]
+      );
+      await logAudit("scc_registration_submitted", "scc_registrations", row?.id, String(ctx.user.id), {
+        organization_id: input.organization_id, clauses_version: input.clauses_version,
+      });
+      fireAndForget("crossBorderDeclarations.submitSccRegistration");
+      return row;
+    }),
+
+  /** Admin review: pending -> approved; approved -> suspended/expired. */
+  reviewSccRegistration: adminProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      decision: z.enum(["approved", "suspended", "expired"]),
+      review_notes: z.string().max(5000).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const fromClause = input.decision === "approved" ? `status = 'pending'` : `status IN ('pending','approved')`;
+      const [row] = await exec(
+        `UPDATE scc_registrations
+         SET status = $2, reviewed_by = $3, reviewed_at = NOW(), review_notes = $4
+         WHERE id = $1 AND ${fromClause}
+         RETURNING *`,
+        [input.id, input.decision, ctx.user.name ?? String(ctx.user.id), input.review_notes ?? null]
+      );
+      if (!row) throw new TRPCError({ code: "CONFLICT", message: `SCC registration not found or cannot transition to '${input.decision}' from its current status` });
+      await logAudit("scc_registration_reviewed", "scc_registrations", input.id, String(ctx.user.id), { decision: input.decision });
+      fireAndForget("crossBorderDeclarations.reviewSccRegistration");
+      return row;
+    }),
+
+  listSccRegistrations: protectedProcedure
+    .input(z.object({
+      organizationId: z.number().int().optional(),
+      status: z.enum(["pending", "approved", "suspended", "expired"]).optional(),
+      limit: z.number().int().min(1).max(200).default(50),
+    }).optional())
+    .query(async ({ input }) => {
+      const params: unknown[] = [];
+      const conds: string[] = [];
+      if (input?.organizationId) { params.push(input.organizationId); conds.push(`organization_id = $${params.length}`); }
+      if (input?.status) { params.push(input.status); conds.push(`status = $${params.length}`); }
+      params.push(input?.limit ?? 50);
+      const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+      return exec(
+        `SELECT * FROM scc_registrations ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+        params
+      );
     }),
 
   stats: protectedProcedure.query(async () => {

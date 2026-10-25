@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: ndsep_db
       POSTGRES_USER: ndsep_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ndsep_secure_2026}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
@@ -67,7 +67,7 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep_db
       KC_DB_USERNAME: ndsep_user
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ndsep_secure_2026}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       KC_HEALTH_ENABLED: "true"
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
@@ -86,7 +86,7 @@ services:
     command: serve
     environment:
       PERMIFY_DATABASE_ENGINE: postgres
-      PERMIFY_DATABASE_URI: ${PERMIFY_DATABASE_URI:-postgres://ndsep_user:ndsep_dev@postgres:5432/ndsep_db}
+      PERMIFY_DATABASE_URI: ${PERMIFY_DATABASE_URI:-postgres://ndsep_user:secret@postgres:5432/ndsep_db}
     ports: ["3476:3476", "3478:3478"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3476/healthz || exit 1"]
@@ -103,7 +103,7 @@ services:
       - DB=postgresql
       - DB_PORT=5432
       - POSTGRES_USER=ndsep_user
-      - POSTGRES_PWD=${POSTGRES_PASSWORD:-ndsep_secure_2026}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       - POSTGRES_SEEDS=postgres
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
     ports: ["7233:7233"]
@@ -215,9 +215,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Apply raw SQL migrations (idempotent, advisory-locked) before booting.
+    # drizzle-kit journal migrations are applied by the app at startup via
+    # server/dbMigrations.ts; the runner covers drizzle/migrations/0019+ which
+    # have no journal entries.
+    command: sh -c "node scripts/runRawMigrations.mjs && node dist/index.js"
     ports: ["5000:5000"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://ndsep_user:ndsep_dev@postgres:5432/ndsep_db}
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-32-chars-minimum!!}
       NODE_ENV: development
@@ -279,7 +284,7 @@ services:
       dockerfile: dlq-processor/Dockerfile
     ports: ["9090:9090"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://ndsep_user:ndsep_dev@postgres:5432/ndsep_db}
+      DATABASE_URL: postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres: { condition: service_healthy }
@@ -329,7 +334,7 @@ services:
       dockerfile: workers/python/Dockerfile
     command: ["python", "-m", "workers.python.ml_breach_predictor"]
     environment:
-      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      DATABASE_URL: "postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db"
       KAFKA_BROKERS: "kafka:9092"
       REDIS_URL: "redis://redis:6379"
     depends_on: [postgres, redis, kafka]
@@ -341,7 +346,7 @@ services:
       dockerfile: workers/python/Dockerfile
     command: ["python", "-m", "workers.python.compliance_analytics"]
     environment:
-      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      DATABASE_URL: "postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db"
       KAFKA_BROKERS: "kafka:9092"
       OPENSEARCH_URL: "http://opensearch:9200"
     depends_on: [postgres, kafka, opensearch]
@@ -353,7 +358,7 @@ services:
       dockerfile: workers/python/Dockerfile
     command: ["python", "-m", "workers.python.dsar_deadline_tracker"]
     environment:
-      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      DATABASE_URL: "postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db"
       REDIS_URL: "redis://redis:6379"
     depends_on: [postgres, redis]
     restart: unless-stopped
@@ -364,7 +369,7 @@ services:
       dockerfile: workers/python/Dockerfile
     command: ["python", "-m", "workers.python.lakehouse_analytics_engine"]
     environment:
-      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      DATABASE_URL: "postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db"
       ICEBERG_REST_URL: "http://iceberg-rest:8181"
       MINIO_ENDPOINT: "http://minio:9000"
     depends_on: [postgres, minio, iceberg-rest]
@@ -376,7 +381,7 @@ services:
       dockerfile: workers/python/Dockerfile
     command: ["python", "-m", "workers.python.siem_correlator"]
     environment:
-      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      DATABASE_URL: "postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db"
       KAFKA_BROKERS: "kafka:9092"
       REDIS_URL: "redis://redis:6379"
       OPENSEARCH_URL: "http://opensearch:9200"
@@ -393,7 +398,7 @@ services:
       dockerfile: workers/python/Dockerfile
     command: ["python", "-m", "workers.python.watchlist_screener_fallback"]
     environment:
-      DATABASE_URL: "postgresql://ndsep:ndsep@postgres:5432/ndsep"
+      DATABASE_URL: "postgresql://ndsep_user:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/ndsep_db"
       REDIS_URL: "redis://redis:6379"
     depends_on: [postgres, redis]
     restart: unless-stopped

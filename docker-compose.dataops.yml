@@ -94,7 +94,7 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: ndsep_db
       POSTGRES_USER: ndsep_user
-      POSTGRES_PASSWORD: ndsep_secure_2026
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - ./dbt:/dbt
       - dbt_packages:/dbt/dbt_packages
@@ -200,7 +200,7 @@ services:
     environment:
       POSTGRES_DB: airflow_db
       POSTGRES_USER: airflow_user
-      POSTGRES_PASSWORD: airflow_pass_2026
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:?AIRFLOW_POSTGRES_PASSWORD must be set}
     volumes:
       - postgres_airflow_data:/var/lib/postgresql/data
     networks:
@@ -214,7 +214,7 @@ services:
     environment:
       POSTGRES_DB: ndsep_analytics
       POSTGRES_USER: analytics_user
-      POSTGRES_PASSWORD: analytics_pass_2026
+      POSTGRES_PASSWORD: ${ANALYTICS_POSTGRES_PASSWORD:?ANALYTICS_POSTGRES_PASSWORD must be set}
     volumes:
       - postgres_analytics_data:/var/lib/postgresql/data
       - ./dbt/init:/docker-entrypoint-initdb.d

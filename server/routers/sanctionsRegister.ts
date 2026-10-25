@@ -6,15 +6,17 @@
  * expiry computed fields.
  */
 import { z } from "zod";
+import crypto from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, publicProcedure, protectedProcedure, staffProcedure, adminProcedure } from "../_core/trpc";
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { logAuditEvent } from "../middlewareHelpers";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
-import { encryptField } from "../encryption";
+import { encryptField, decryptField } from "../encryption";
 import { withCache, CK, TTL } from "../queryCache";
+import { sha256Hex } from "../services/complaintLogic";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -30,6 +32,41 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   } catch (err) {
     logger.error({ err, query: query.slice(0, 200) }, "[sanctions] DB query error");
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
+  }
+}
+
+function safeParams(params: unknown[]): unknown[] {
+  return params.map((p) =>
+    Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
+      ? JSON.stringify(p)
+      : p
+  );
+}
+
+/** Multi-write mutations (publish + consume, consume + insert) run atomically. */
+async function withTransaction<T>(fn: (tx: (q: string, p?: unknown[]) => Promise<any[]>) => Promise<T>): Promise<T> {
+  const pool = getPool();
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const client = (await pool.connect()) as unknown as {
+    query: (q: string, p?: unknown[]) => Promise<{ rows: any[] }>;
+    release: () => void;
+  };
+  const tx = async (q: string, p: unknown[] = []): Promise<any[]> => {
+    const r = await client.query(q, safeParams(p));
+    return autoDecryptRows(q, r.rows ?? []);
+  };
+  try {
+    await client.query("BEGIN");
+    const out = await fn(tx);
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (err instanceof TRPCError) throw err;
+    logger.error({ err }, "[sanctions] transaction failed — rolled back");
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
+  } finally {
+    client.release();
   }
 }
 
@@ -128,7 +165,13 @@ export const sanctionsRegisterRouter = router({
     });
   }),
 
-  /** Public: organisation applies for delisting after remediation */
+  /**
+   * Public: organisation applies for delisting after remediation.
+   * Requires a single-use org-proof token issued by an NDPC admin (see
+   * issueDelistingProof) after verifying the applicant actually represents
+   * the sanctioned organisation — otherwise anyone could delist any org.
+   * The token is consumed atomically with the request insert.
+   */
   requestDelisting: publicProcedure
     .input(z.object({
       noticeId: z.number().int(),
@@ -136,6 +179,7 @@ export const sanctionsRegisterRouter = router({
       applicantEmail: z.string().email(),
       remediationSummary: z.string().min(20).max(5000),
       evidenceRefs: z.array(z.string().max(1024)).max(20).default([]),
+      proofToken: z.string().min(32).max(128),
     }))
     .mutation(async ({ input }) => {
       const notice = await exec(
@@ -143,18 +187,74 @@ export const sanctionsRegisterRouter = router({
         [input.noticeId]
       );
       if (!notice[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Published notice not found." });
+      if (notice[0].organization_id == null) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This notice is not linked to a registered organisation — contact the NDPC directly to request delisting." });
+      }
+      // Validate the org-proof token: hash-only lookup, active, unexpired,
+      // issued for THIS organisation and THIS applicant email.
+      const tokenHash = sha256Hex(input.proofToken);
+      const tokenRows = await exec(
+        `SELECT * FROM delisting_proof_tokens WHERE token_hash = $1`,
+        [tokenHash]
+      );
+      const token = tokenRows[0];
+      if (!token || token.status !== "active" || new Date(token.expires_at) <= new Date()) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Invalid or expired org-proof token. Request one from the NDPC after verifying your representation of the organisation." });
+      }
+      if (Number(token.organization_id) !== Number(notice[0].organization_id)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Org-proof token was not issued for the sanctioned organisation." });
+      }
+      const tokenEmail = typeof token.applicant_email === "string" ? decryptField(token.applicant_email) : null;
+      if (!tokenEmail || tokenEmail.toLowerCase() !== input.applicantEmail.toLowerCase()) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Org-proof token was issued to a different applicant email." });
+      }
       const existing = await exec(
         `SELECT id FROM delisting_requests WHERE notice_id = $1 AND status IN ('pending','under_review')`,
         [input.noticeId]
       );
       if (existing[0]) throw new TRPCError({ code: "CONFLICT", message: "A delisting request is already under review for this notice." });
-      const rows = await exec(
-        `INSERT INTO delisting_requests (notice_id, organization_id, applicant_name, applicant_email, remediation_summary, evidence_refs)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, status, submitted_at`,
-        [input.noticeId, notice[0].organization_id ?? null, encryptField(input.applicantName), encryptField(input.applicantEmail), input.remediationSummary, input.evidenceRefs]
-      );
+      const rows = await withTransaction(async (tx) => {
+        // Consume the token atomically — single-use, replay-proof.
+        const consumed = await tx(
+          `UPDATE delisting_proof_tokens SET status = 'consumed', consumed_at = NOW()
+           WHERE id = $1 AND status = 'active' RETURNING id`,
+          [token.id]
+        );
+        if (!consumed[0]) throw new TRPCError({ code: "CONFLICT", message: "Org-proof token has already been used." });
+        return tx(
+          `INSERT INTO delisting_requests (notice_id, organization_id, applicant_name, applicant_email, remediation_summary, evidence_refs)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, status, submitted_at`,
+          [input.noticeId, notice[0].organization_id ?? null, encryptField(input.applicantName), encryptField(input.applicantEmail), input.remediationSummary, input.evidenceRefs]
+        );
+      });
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "sanctions_delisting_requested", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return rows[0];
+    }),
+
+  /**
+   * Admin: issue a single-use org-proof token for a delisting request. Call
+   * this ONLY after verifying (out of band) that the applicant represents the
+   * sanctioned organisation. The plaintext token is returned exactly once;
+   * only its sha256 hash is stored.
+   */
+  issueDelistingProof: adminProcedure
+    .input(z.object({
+      organizationId: z.number().int().positive(),
+      applicantEmail: z.string().email(),
+      expiresInHours: z.number().int().min(1).max(24 * 30).default(72),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const orgs = await exec(`SELECT id, name FROM organizations WHERE id = $1`, [input.organizationId]);
+      if (!orgs[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Organisation not found." });
+      const token = crypto.randomBytes(24).toString("hex");
+      const rows = await exec(
+        `INSERT INTO delisting_proof_tokens (organization_id, token_hash, applicant_email, issued_by, expires_at)
+         VALUES ($1, $2, $3, $4, NOW() + make_interval(hours => $5))
+         RETURNING id, organization_id, status, expires_at`,
+        [input.organizationId, sha256Hex(token), encryptField(input.applicantEmail), String((ctx as any).user?.id ?? "admin"), input.expiresInHours]
+      );
+      await logAuditEvent("sanctions.delisting_proof_issued", "delisting_proof_token", rows[0]?.id ?? "", String((ctx as any).user?.id ?? ""), { organizationId: input.organizationId });
+      return { ...rows[0], token };
     }),
 
   // ─── NDPC internal: notice lifecycle ────────────────────────────────────
@@ -217,23 +317,113 @@ export const sanctionsRegisterRouter = router({
       return rows[0];
     }),
 
+  /**
+   * Publish a notice to the public register — DUAL CONTROL (maker-checker,
+   * migration 0080 queue + 0102 notice columns):
+   *  - Without dualControlRequestId: queues a 'sanction_publication'
+   *    dual-control request (the requester can never be an approver) and
+   *    records the pending publish on the notice. Nothing goes public yet.
+   *  - With dualControlRequestId: verifies the request is approved,
+   *    unexpired, unconsumed and refers to THIS notice, then publishes and
+   *    consumes the request in one transaction (replay-proof).
+   * Approvals are recorded via insiderThreat.approveDualControl (two DISTINCT
+   * admins, neither being the requester).
+   */
   publishNotice: adminProcedure
-    .input(z.object({ id: z.number().int(), gazetteNumber: z.string().max(64).optional() }))
+    .input(z.object({
+      id: z.number().int(),
+      gazetteNumber: z.string().max(64).optional(),
+      dualControlRequestId: z.number().int().positive().optional(),
+    }))
     .mutation(async ({ input, ctx }) => {
-      const rows = await exec(
-        `UPDATE enforcement_notices
-         SET status = 'published', published_at = NOW(),
-             gazette_number = COALESCE($2, gazette_number), updated_at = NOW()
-         WHERE id = $1 AND status = 'draft' RETURNING id`,
-        [input.id, input.gazetteNumber ?? null]
+      const actor = String((ctx as any).user?.id ?? "");
+      if (input.dualControlRequestId == null) {
+        // ── Step 1: queue the maker-checker request ──────────────────────
+        const notice = await exec(
+          `SELECT id, status FROM enforcement_notices WHERE id = $1 AND status = 'draft'`,
+          [input.id]
+        );
+        if (!notice[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Draft notice not found." });
+        const pending = await exec(
+          `SELECT id FROM dual_control_requests
+           WHERE action_type = 'sanction_publication' AND status = 'pending'
+             AND (payload->>'notice_id')::int = $1`,
+          [input.id]
+        );
+        if (pending[0]) {
+          return { queued: true as const, requestId: pending[0].id, status: "pending" as const };
+        }
+        const rows = await withTransaction(async (tx) => {
+          const req = await tx(
+            `INSERT INTO dual_control_requests (action_type, payload, requested_by, threshold_snapshot)
+             VALUES ('sanction_publication', $1, $2, $3) RETURNING id`,
+            [
+              { kind: "sanction_publication", notice_id: input.id, gazette_number: input.gazetteNumber ?? null },
+              actor,
+              { approvers_required: 2, requester_may_not_approve: true },
+            ]
+          );
+          await tx(
+            `UPDATE enforcement_notices
+             SET publish_requested_by = $2, publish_requested_at = NOW(), publish_expires_at = NOW() + INTERVAL '72 hours',
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [input.id, actor]
+          );
+          return req;
+        });
+        await logAuditEvent("sanctions.notice_publish_requested", "enforcement_notice", input.id, actor, { dualControlRequestId: rows[0]?.id });
+        emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "sanctions_notice_publish_requested", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+        return { queued: true as const, requestId: rows[0]?.id, status: "pending" as const };
+      }
+
+      // ── Step 2: execute after two distinct approvals ────────────────────
+      const reqs = await exec(
+        `SELECT id, action_type, payload, requested_by, first_approver, second_approver, status, expires_at
+         FROM dual_control_requests WHERE id = $1`,
+        [input.dualControlRequestId]
       );
+      const req = reqs[0];
+      if (!req || req.action_type !== "sanction_publication") {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Sanction-publication dual-control request not found." });
+      }
+      if (req.status !== "approved") {
+        throw new TRPCError({ code: "CONFLICT", message: `Dual-control request is '${req.status}' — publication requires an approved request (two distinct approvers).` });
+      }
+      if (new Date(req.expires_at) <= new Date()) {
+        throw new TRPCError({ code: "CONFLICT", message: "Dual-control request has expired — re-request publication." });
+      }
+      const payload = (req.payload ?? {}) as Record<string, unknown>;
+      if (payload.kind !== "sanction_publication" || Number(payload.notice_id) !== input.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Dual-control request does not refer to this notice." });
+      }
+      const gazette = input.gazetteNumber ?? (payload.gazette_number as string | null) ?? null;
+      const rows = await withTransaction(async (tx) => {
+        // Consume the request in the same transaction so it cannot be replayed.
+        const consumed = await tx(
+          `UPDATE dual_control_requests SET status = 'consumed', decided_at = now()
+           WHERE id = $1 AND status = 'approved' RETURNING id`,
+          [input.dualControlRequestId]
+        );
+        if (!consumed[0]) {
+          throw new TRPCError({ code: "CONFLICT", message: "Dual-control request is no longer approved — it may have been consumed already." });
+        }
+        return tx(
+          `UPDATE enforcement_notices
+           SET status = 'published', published_at = NOW(),
+               gazette_number = COALESCE($2, gazette_number),
+               publish_first_approver = $3, publish_second_approver = $4, updated_at = NOW()
+           WHERE id = $1 AND status = 'draft' RETURNING id`,
+          [input.id, gazette, req.first_approver ?? null, req.second_approver ?? null]
+        );
+      });
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Draft notice not found." });
-      await logAuditEvent("sanctions.notice_published", "enforcement_notice", input.id, String((ctx as any).user?.id ?? ""), { gazetteNumber: input.gazetteNumber ?? null });
-      return { success: true };
+      await logAuditEvent("sanctions.notice_published", "enforcement_notice", input.id, actor, { gazetteNumber: gazette, dualControlRequestId: input.dualControlRequestId, firstApprover: req.first_approver, secondApprover: req.second_approver });
+      return { success: true as const, queued: false as const, dualControlRequestId: input.dualControlRequestId };
     }),
 
   // ─── NDPC internal: delisting review workflow ───────────────────────────
-  listDelistingRequests: protectedProcedure
+  listDelistingRequests: staffProcedure
     .input(z.object({ status: z.enum(["pending", "under_review", "approved", "rejected"]).optional() }))
     .query(async ({ input }) => {
       const params: unknown[] = [];

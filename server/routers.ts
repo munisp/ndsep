@@ -10,7 +10,7 @@ import { emitMutationEvent, EVENTS } from "./middlewareIntegration";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, adminProcedure, router, canAccessOrg, deleteProcedure, exportProcedure, approveProcedure } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, adminProcedure, staffProcedure, router, canAccessOrg, deleteProcedure, exportProcedure, approveProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
@@ -257,11 +257,13 @@ import { phantomTideRouter } from "./routers/phantomTide";
 import { wazuhRouter } from "./routers/wazuh";
 import { sigintRouter } from "./routers/sigint";
 import { estoridesRouter } from "./routers/estorides";
+import { adverseMediaRouter } from "./routers/adverseMedia";
 import { crossBorderAdequacyRouter } from "./routers/crossBorderAdequacy";
 import { dsarEdgeCasesRouter } from "./routers/dsarEdgeCases";
 import { minorsConsentRouter } from "./routers/minorsConsent";
 import { breachEdgeCasesRouter } from "./routers/breachEdgeCases";
 import { fieldInspectionRouter } from "./routers/fieldInspection";
+import { aiRuntimeOversightRouter } from "./routers/aiRuntimeOversight";
 import { appealsDueProcessRouter } from "./routers/appealsDueProcess";
 import { whistleblowerChannelRouter } from "./routers/whistleblowerChannel";
 import { regulatorReconciliationRouter } from "./routers/regulatorReconciliation";
@@ -270,6 +272,7 @@ import { finePaymentsRouter } from "./routers/finePayments";
 import { sanctionsRegisterRouter } from "./routers/sanctionsRegister";
 import { foiaRouter } from "./routers/foia";
 import { electionOversightRouter } from "./routers/electionOversight";
+import { enforcementAnalyticsRouter } from "./routers/enforcementAnalytics";
 import { aiRegulationRouter } from "./routers/aiRegulation";
 import { consentPropagationRouter } from "./routers/consentPropagation";
 import { complaintAnalyticsRouter } from "./routers/complaintAnalytics";
@@ -277,7 +280,9 @@ import { complianceScanningRouter } from "./routers/complianceScanning";
 import { crossBorderDeclarationsRouter } from "./routers/crossBorderDeclarations";
 import { dataSovereigntyRouter } from "./routers/dataSovereignty";
 import { insiderThreatRouter } from "./routers/insiderThreat";
+import { internationalCooperationRouter } from "./routers/internationalCooperation";
 import { ninIdentityRouter } from "./routers/ninIdentity";
+import { openDataPortalRouter } from "./routers/openDataPortal";
 import { policyMonitorRouter } from "./routers/policyMonitor";
 import { publicComplaintsRouter } from "./routers/publicComplaints";
 import { publicationWorkbenchRouter } from "./routers/publicationWorkbench";
@@ -358,6 +363,12 @@ export const appRouter = router({
   supervisionRisk: supervisionRiskRouter,
   tribunalBundle: tribunalBundleRouter,
   ussdChannel: ussdChannelRouter,
+  // ── FEAT-E (round-9, migrations 0112-0116) ──
+  adverseMedia: adverseMediaRouter,
+  aiRuntimeOversight: aiRuntimeOversightRouter,
+  enforcementAnalytics: enforcementAnalyticsRouter,
+  internationalCooperation: internationalCooperationRouter,
+  openDataPortal: openDataPortalRouter,
   intelAggregator: router({
     summary: protectedProcedure.query(async () => getIntelSummary()),
     correlations: protectedProcedure.query(async () => getCrossplatformCorrelations()),
@@ -420,14 +431,27 @@ export const appRouter = router({
         const stats = await getDashboardStats();
         const violations = await getComplianceViolations(500);
         const orgs = await getOrganizations(100);
-        const complianceRate = ((stats as Record<string, Record<string, unknown>> | null)?.orgStats?.avgScore as number) ?? 72;
+        // No fabricated fallback: when no scoring data exists the rate is
+        // NULL with an explicit note, never an invented number.
+        const rawRate = (stats as Record<string, Record<string, unknown>> | null)?.orgStats?.avgScore;
+        const complianceRate = typeof rawRate === "number" && Number.isFinite(rawRate) ? rawRate : null;
+        const complianceRateNote = complianceRate == null
+          ? "No organization compliance scoring data available — compliance rate not computed (not estimated)."
+          : null;
+        const complianceRateDisplay = complianceRate == null ? "N/A" : `${Math.round(complianceRate)}%`;
+        const posture = complianceRate == null
+          ? "UNKNOWN — insufficient scoring data."
+          : complianceRate >= 80 ? "The overall posture is **COMPLIANT** with minor gaps requiring attention."
+          : complianceRate >= 60 ? "The overall posture is **PARTIALLY COMPLIANT** and requires remediation actions."
+          : "The overall posture is **NON-COMPLIANT** and requires immediate enforcement action.";
         const criticalCount = (violations as Record<string, unknown>[]).filter((v: Record<string, unknown>) => v.severity === "critical").length;
         const highCount = (violations as Record<string, unknown>[]).filter((v: Record<string, unknown>) => v.severity === "high").length;
         const now = new Date().toISOString().split("T")[0];
         const reportData = {
           framework: input.framework,
           generatedAt: now,
-          complianceRate: Math.round(complianceRate),
+          complianceRate: complianceRate == null ? null : Math.round(complianceRate),
+          complianceRateNote,
           totalOrganizations: (orgs as Record<string, unknown>[]).length,
           totalViolations: (violations as Record<string, unknown>[]).length,
           criticalFindings: criticalCount,
@@ -436,7 +460,7 @@ export const appRouter = router({
             `# NDSEP Framework Compliance Report`,
             `**Framework:** ${input.framework}  `,
             `**Generated:** ${now}  `,
-            `**Authority:** NITDA / National Data Sovereignty Enforcement Platform`,
+            `**Authority:** NDPC (Nigeria Data Protection Commission) / National Data Sovereignty Enforcement Platform — NDPA 2023`,
             ``,
             `---`,
             ``,
@@ -446,7 +470,7 @@ export const appRouter = router({
             ``,
             `| Metric | Value |`,
             `|--------|-------|`,
-            `| Overall Compliance Rate | ${Math.round(complianceRate)}% |`,
+            `| Overall Compliance Rate | ${complianceRateDisplay} |`,
             `| Organizations Monitored | ${(orgs as Record<string, unknown>[]).length} |`,
             `| Open Violations | ${(violations as Record<string, unknown>[]).length} |`,
             `| Critical Findings | ${criticalCount} |`,
@@ -454,10 +478,9 @@ export const appRouter = router({
             ``,
             `## Compliance Status`,
             ``,
-            `The national average compliance score is **${Math.round(complianceRate)}%**. ` +
-            (complianceRate >= 80 ? "The overall posture is **COMPLIANT** with minor gaps requiring attention." :
-              complianceRate >= 60 ? "The overall posture is **PARTIALLY COMPLIANT** and requires remediation actions." :
-              "The overall posture is **NON-COMPLIANT** and requires immediate enforcement action."),
+            complianceRate == null
+              ? `The national average compliance score is **not available** (no scoring data). ${posture}`
+              : `The national average compliance score is **${Math.round(complianceRate)}%**. ` + posture,
             ``,
             `## Critical Findings`,
             ``,
@@ -468,11 +491,11 @@ export const appRouter = router({
             ``,
             `1. Organizations with compliance scores below 60% should be placed under enhanced monitoring.`,
             `2. Cross-border data transfers must be reviewed against ${input.framework} transfer controls.`,
-            `3. All critical violations must be remediated within 30 days per NDPR enforcement guidelines.`,
+            `3. All critical violations must be remediated within 30 days per NDPA 2023 / NDPC enforcement guidelines.`,
             `4. Evidence packages should be generated for all compliant organizations to support audit trails.`,
             ``,
             `---`,
-            `*This report was automatically generated by NDSEP. For official submissions, obtain a certified copy from NITDA.*`,
+            `*This report was automatically generated by NDSEP. For official submissions, obtain a certified copy from the NDPC.*`,
           ].join("\n"),
         };
         // Email the report summary to the platform owner
@@ -481,12 +504,13 @@ export const appRouter = router({
           content: [
             `Framework: ${input.framework}`,
             `Generated: ${now}`,
-            `Overall Compliance Rate: ${Math.round(complianceRate)}%`,
+            `Overall Compliance Rate: ${complianceRateDisplay}`,
+            ...(complianceRateNote ? [`Note: ${complianceRateNote}`] : []),
             `Organizations Monitored: ${(orgs as Record<string, unknown>[]).length}`,
             `Open Violations: ${(violations as Record<string, unknown>[]).length}`,
             `Critical Findings: ${criticalCount}`,
             `High Severity Findings: ${highCount}`,
-            `Status: ${complianceRate >= 80 ? 'COMPLIANT' : complianceRate >= 60 ? 'PARTIALLY COMPLIANT' : 'NON-COMPLIANT'}`,
+            `Status: ${complianceRate == null ? 'UNKNOWN (no scoring data)' : complianceRate >= 80 ? 'COMPLIANT' : complianceRate >= 60 ? 'PARTIALLY COMPLIANT' : 'NON-COMPLIANT'}`,
             ``,
             `Download the full report from the NDSEP Framework Dashboard.`,
           ].join("\n"),
@@ -608,7 +632,7 @@ export const appRouter = router({
     enforcementActions: protectedProcedure
       .input(z.object({ limit: z.number().default(20) }).optional())
       .query(async ({ input }) => getEnforcementActions(input?.limit)),
-    createAction: protectedProcedure
+    createAction: staffProcedure
       .input(z.object({
         organizationId: z.number(),
         violationId: z.number(),
@@ -616,7 +640,7 @@ export const appRouter = router({
         notes: z.string().optional(),
       }))
       .mutation(async ({ input }) => createEnforcementAction(input)),
-    updateStatus: protectedProcedure
+    updateStatus: staffProcedure
       .input(z.object({
         actionId: z.number().int().positive(),
         status: z.enum(["pending", "notice_sent", "audit_scheduled", "penalty_imposed", "settled", "escalated"]),
@@ -628,7 +652,7 @@ export const appRouter = router({
         const { deleteCompliancePolicy } = await import("./db");
         return deleteCompliancePolicy(input.id);
       }),
-    createViolation: protectedProcedure
+    createViolation: staffProcedure
       .input(z.object({
         organizationId: z.number().int().positive(),
         policyId: z.number().int().positive().optional(),
@@ -654,7 +678,7 @@ export const appRouter = router({
         invalidateComplianceCaches(input.organizationId).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
         return result;
       }),
-    resolveViolation: protectedProcedure
+    resolveViolation: staffProcedure
       .input(z.object({ id: z.number().int().positive(), notes: z.string().optional() }))
       .mutation(async ({ input, ctx }) => {
         const { resolveComplianceViolation } = await import("./db");
@@ -664,7 +688,7 @@ export const appRouter = router({
       }),
   }),
   users: router({
-    list: protectedProcedure.query(async () => listUsers()),
+    list: adminProcedure.query(async () => listUsers()),
     updateRole: protectedProcedure
       .input(z.object({
         userId: z.number(),
@@ -2222,7 +2246,14 @@ export const appRouter = router({
     update: adminProcedure
       .input(z.object({
         id: z.number().int().positive(),
-        status: z.enum(["open", "under_investigation", "notice_issued", "escalated_to_nitda", "settled", "closed"]).optional(),
+        // NDPA 2023 established the NDPC (successor to NITDA for data
+        // protection). 'escalated_to_nitda' remains accepted for backward
+        // compatibility with existing rows; prefer 'escalated_to_ndpc'
+        // (enum value added in migration 0118).
+        status: z.enum(["open", "under_investigation", "notice_issued", "escalated_to_ndpc", "escalated_to_nitda", "settled", "closed"]).optional(),
+        /** NDPC reference number for the escalated case (preferred). */
+        ndpcReferenceNumber: z.string().optional(),
+        /** @deprecated Legacy alias of ndpcReferenceNumber — column name retained for compatibility. */
         nitdaReferenceNumber: z.string().optional(),
         resolutionNotes: z.string().optional(),
         assignedOfficerId: z.number().int().positive().optional(),
@@ -2242,7 +2273,7 @@ export const appRouter = router({
             fromStatus: current?.status ?? null,
             toStatus: input.status,
             note: input.note ?? input.resolutionNotes ?? null,
-            nitdaRef: input.nitdaReferenceNumber ?? null,
+            nitdaRef: input.ndpcReferenceNumber ?? input.nitdaReferenceNumber ?? null, // timeline column retained; semantically the NDPC reference
           }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
         }
         createAuditLog({ userId: ctx.user.id, action: "enforcement.update", resourceType: "enforcement_case", resourceId: input.id, details: `Updated enforcement case #${input.id} status: ${input.status ?? 'unchanged'}` }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
@@ -2280,16 +2311,18 @@ export const appRouter = router({
       .query(async () => listOnboardingPhases()),
   }),
   notifications: router({
+    // All notification operations are scoped to the authenticated user —
+    // a caller can only ever see/mark their own notifications.
     list: protectedProcedure
       .input(z.object({ limit: z.number().int().positive().max(100).default(50), onlyUnread: z.boolean().default(false) }))
-      .query(async ({ input }) => getInAppNotifications(input.limit, input.onlyUnread)),
+      .query(async ({ input, ctx }) => getInAppNotifications(ctx.user.id, input.limit, input.onlyUnread)),
     unreadCount: protectedProcedure
-      .query(async () => getUnreadNotificationCount()),
+      .query(async ({ ctx }) => getUnreadNotificationCount(ctx.user.id)),
     markRead: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
-      .mutation(async ({ input }) => { await markNotificationRead(input.id); return { success: true }; }),
+      .mutation(async ({ input, ctx }) => { await markNotificationRead(input.id, ctx.user.id); return { success: true }; }),
     markAllRead: protectedProcedure
-      .mutation(async () => { await markAllNotificationsRead(); return { success: true }; }),
+      .mutation(async ({ ctx }) => { await markAllNotificationsRead(ctx.user.id); return { success: true }; }),
   }),
   notificationSettings: router({
     get: protectedProcedure

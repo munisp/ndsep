@@ -14,7 +14,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure, staffProcedure } from "../_core/trpc";
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { logAuditEvent } from "../middlewareHelpers";
@@ -218,28 +218,44 @@ export const aiRegulationRouter = router({
       return rows[0];
     }),
 
-  recordChecklistResults: protectedProcedure
+  recordChecklistResults: staffProcedure
     .input(z.object({
       id: z.number().int(),
       checklistResults: z.record(z.string(), z.enum(["pass", "fail", "n/a"])),
       overallResult: z.enum(["pass", "conditional", "fail"]),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // Segregation of duties: the assessor must not belong to the applicant
+      // organisation (an org cannot grade its own conformity assessment).
+      const [ca] = await exec(
+        `SELECT ca.organization_id, ca.certificate_issued_at
+           FROM ai_conformity_assessments c
+           JOIN ai_risk_tier_assessments ca ON ca.id = c.assessment_id
+          WHERE c.id = $1`,
+        [input.id]
+      );
+      if (ca) {
+        const [me] = await exec(`SELECT organization_id FROM users WHERE id = $1`, [ctx.user.id]);
+        if (me?.organization_id != null && ca.organization_id != null
+            && Number(me.organization_id) === Number(ca.organization_id)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Assessor must not belong to the applicant organisation (segregation of duties)" });
+        }
+      }
       // The checklist is LOCKED once a certificate has been issued: editing
       // results post-issuance would retroactively falsify the basis of an
       // issued conformity certificate.
       const rows = await exec(
-        `UPDATE ai_conformity_assessments SET checklist_results = $1, overall_result = $2, updated_at = NOW()
+        `UPDATE ai_conformity_assessments SET checklist_results = $1, overall_result = $2, assessor_id = $4, updated_at = NOW()
          WHERE id = $3 AND certificate_issued_at IS NULL RETURNING id`,
-        [input.checklistResults, input.overallResult, input.id]
+        [input.checklistResults, input.overallResult, input.id, Number.isInteger(Number(ctx.user.id)) ? Number(ctx.user.id) : null]
       );
       if (!rows[0]) {
-        const existing = await exec(`SELECT certificate_issued_at FROM ai_conformity_assessments WHERE id = $1`, [input.id]);
-        if (existing[0]?.certificate_issued_at) {
+        if (ca?.certificate_issued_at) {
           throw new TRPCError({ code: "CONFLICT", message: "Checklist is locked: a certificate has already been issued for this conformity assessment." });
         }
         throw new TRPCError({ code: "NOT_FOUND", message: "Conformity assessment not found." });
       }
+      await logAuditEvent("ai_reg.checklist_recorded", "ai_conformity_assessment", input.id, String((ctx as any).user?.id ?? ""), { overallResult: input.overallResult });
       return { success: true };
     }),
 

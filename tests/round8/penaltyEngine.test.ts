@@ -162,7 +162,9 @@ describe("s.48(6) aggravating/mitigating factors and cap behaviour", () => {
     }
     expect(r.revenueFiscalYear).toBe(2024);
     expect(r.verifiedRevenueId).toBe(42);
-    expect(r.legalBasis).toContain("s.48(7)");
+    // Engine cites the correct NDPA 2023 subsection: s.48(4) for DCPMI
+    // (s.48(5) for non-major controllers) — not the superseded s.48(7) cite.
+    expect(r.legalBasis).toContain("s.48(4)");
   });
 });
 

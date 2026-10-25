@@ -29,6 +29,17 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] watchlist_screener: %(message)s",
@@ -38,7 +49,7 @@ logger = logging.getLogger("watchlist_screener")
 
 DB_DSN = os.environ.get(
     "DATABASE_URL",
-    os.environ.get("LOCAL_DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db")
+    os.environ.get("LOCAL_DATABASE_URL")
 )
 WORKER_PORT = int(os.environ.get("WATCHLIST_SCREENER_PORT", "8130"))
 SCREEN_INTERVAL = int(os.environ.get("SCREEN_INTERVAL_SECONDS", "45"))
@@ -210,7 +221,7 @@ def screen_entity(
     }
     try:
         import psycopg2
-        conn = psycopg2.connect(DB_DSN)
+        conn = psycopg2.connect(_require_dsn(DB_DSN))
         cur = conn.cursor()
         cur.execute("""
             SELECT id, primary_name, aliases, category, source, nationality,
@@ -297,7 +308,7 @@ def run_batch_screening() -> None:
     screened = 0
     try:
         import psycopg2
-        conn = psycopg2.connect(DB_DSN)
+        conn = psycopg2.connect(_require_dsn(DB_DSN))
         cur = conn.cursor()
         # Fetch KYC records with DOB and nationality if available
         cur.execute("""

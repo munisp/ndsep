@@ -48,13 +48,23 @@ import socketserver
 import psycopg2
 import requests
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
 DB_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"
+    "DATABASE_URL"
 )
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 PORT = int(os.environ.get("NOC_CORRELATOR_PORT", "8192"))
@@ -179,7 +189,7 @@ TOPOLOGY_GRAPH: dict[str, list[str]] = {
 
 def get_db():
     try:
-        return psycopg2.connect(DB_URL)
+        return psycopg2.connect(_require_dsn(DB_URL))
     except Exception as e:
         log.warning(f"DB connection failed: {e}")
         return None

@@ -73,8 +73,16 @@ def _load(name: str, weights_dir: str = WEIGHTS_DIR,
         version = _version(weights_dir, name)
     cls = {"fraud": FraudNet, "credit": CreditNet, "gnn": GNNNet}[name]
     model = cls.load(path, device=DEVICE)
-    stats_path = os.path.join(weights_dir, f"{name}_net_feature_stats.json")
-    stats = json.load(open(stats_path)) if os.path.exists(stats_path) else {}
+    # Per-version stats first (written by fine_tune since round-9); fall back
+    # to the canonical train-time stats for older versions.
+    stats = {}
+    candidates = [os.path.join(weights_dir, f"{name}_net_{version}_feature_stats.json")] if version and version != "unknown" else []
+    candidates.append(os.path.join(weights_dir, f"{name}_net_feature_stats.json"))
+    for stats_path in candidates:
+        if os.path.exists(stats_path):
+            with open(stats_path) as f:
+                stats = json.load(f)
+            break
     return model, stats, version
 
 

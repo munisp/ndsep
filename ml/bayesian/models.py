@@ -90,10 +90,15 @@ def beta_binomial_rates(frauds, totals, alpha: float = 1.0, beta: float = 300.0,
                 # log posterior of eta=logit(p): binomial likelihood
                 # k*eta - n*log1p(exp(eta)) + beta prior on p + Jacobian
                 ll = k * e - n * np.logaddexp(0.0, e)
-                # prior Beta(a,b) on p -> density in eta: p^a (1-p)^b * p(1-p) / B
+                # prior Beta(a,b) on p: density p^(a-1)(1-p)^(b-1)/B(a,b);
+                # change of variables to eta multiplies by |dp/deta| = p(1-p),
+                # so the eta-space log prior is (a-1)*lp + (b-1)*lq + lp + lq.
+                # (The previous form used alpha*lp + beta*lq + lp + lq, which
+                # double-counted the Jacobian and biased the cross-check
+                # toward the prior mode.)
                 lp = -np.logaddexp(0.0, -e)        # log p
                 lq = -np.logaddexp(0.0, e)         # log (1-p)
-                return ll + alpha * lp + beta * lq + lp + lq
+                return ll + (alpha - 1.0) * lp + (beta - 1.0) * lq + lp + lq
 
             eta0 = np.log((frauds[i] + 0.5) / (totals[i] - frauds[i] + 0.5))
             res = mcmc.adaptive_mh(logpost_eta, np.array([eta0]),

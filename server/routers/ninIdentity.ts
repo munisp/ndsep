@@ -15,7 +15,18 @@
  *     status UNCONFIGURED — no mock "verified" responses ever.
  *   - Assurance levels: none → basic (self-attested, no NIMC) → nin_verified.
  *     Levels attach to subjects via (subject_type, subject_ref) covering
- *     complainants and DSAR requesters.
+ *     complainants and DSAR requesters. subject_ref is additionally stored
+ *     keyed-hashed (subject_ref_hash, migration 0105) for equality lookups.
+ *   - Round-9 hardening:
+ *       * verifyBasic NEVER supersedes an active nin_verified row (a weaker
+ *         self-attestation cannot knock out a stronger verification).
+ *       * verifyBasic / verifyNin require a possession proof for subjectRef.
+ *       * verifyNin is rate limited per-IP AND per-subject (atomic counters).
+ *       * NIN_HMAC_KEY fails closed outside development; the key is never
+ *         derived from DATABASE_URL or other deployment material.
+ *       * checkVerification is staff-only (assurance status is not public).
+ *       * verifyNin revoke+insert runs in ONE transaction with a clean
+ *         CONFLICT response on concurrent verification.
  *   - Re-verification: nin_verified rows expire after NIN_VERIFICATION_TTL_DAYS
  *     (default 365); checkVerification reports (and lazily marks) expiry.
  *   - Every verify/check/revoke writes to verification_audit_log (details must
@@ -23,22 +34,35 @@
  *   - NOTE: biometric / liveness matching against NIMC is an ADAPTER
  *     INTERFACE ONLY and is NOT implemented (verifyBiometric → NOT_IMPLEMENTED).
  */
-import { createHmac, createHash, randomUUID } from "crypto";
+import { createHmac, randomUUID } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, adminProcedure } from "../_core/trpc";
+import { router, publicProcedure, staffProcedure, adminProcedure } from "../_core/trpc";
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
+import {
+  hmacSha256Hex,
+  sha256Hex,
+  requireHmacKey,
+  hashIp,
+  ipHashSalt,
+  extractClientIp,
+  fixedWindowStart,
+  counterExceedsLimit,
+} from "../services/complaintLogic";
 
 const NIMC_API_BASE = process.env.NIMC_API_BASE ?? "";
 const NIMC_API_KEY = process.env.NIMC_API_KEY ?? "";
 const NIMC_TIMEOUT_MS = Number(process.env.NIMC_TIMEOUT_MS ?? 10000);
 const VERIFICATION_TTL_DAYS = Number(process.env.NIN_VERIFICATION_TTL_DAYS ?? 365);
 const NIN_HMAC_KEY = process.env.NIN_HMAC_KEY ?? "";
+const TRUSTED_PROXY_COUNT = Math.max(0, parseInt(process.env.NDSEP_TRUSTED_PROXY_COUNT ?? "0", 10) || 0);
+const VERIFY_NIN_IP_LIMIT_PER_HOUR = Math.max(1, parseInt(process.env.NIN_VERIFY_IP_LIMIT_PER_HOUR ?? "10", 10) || 10);
+const VERIFY_NIN_SUBJECT_LIMIT_PER_DAY = Math.max(1, parseInt(process.env.NIN_VERIFY_SUBJECT_LIMIT_PER_DAY ?? "5", 10) || 5);
 
 if (!NIN_HMAC_KEY) {
-  logger.warn("[nin] NIN_HMAC_KEY is not set — using a derived process key for NIN HMAC. Set NIN_HMAC_KEY in production.");
+  logger.warn("[nin] NIN_HMAC_KEY is not set — NIN HMAC uses a dev-only key outside production. Set NIN_HMAC_KEY.");
 }
 
 /** Explicit adapter configuration status — never a silent mock. */
@@ -53,8 +77,35 @@ export function getNimcAdapterStatus(): { status: "configured" | "UNCONFIGURED";
 }
 
 function ninHmac(nin: string): string {
-  const key = NIN_HMAC_KEY || createHash("sha256").update(`ndsep-nin-dev-key:${process.env.DATABASE_URL ?? "local"}`).digest("hex");
+  // Fail-closed outside development; the fallback key is a fixed dev seed —
+  // NEVER derived from DATABASE_URL or any deployment-specific material.
+  const { key } = requireHmacKey(NIN_HMAC_KEY, "NIN_HMAC_KEY", { devSeed: "nin-identity" });
   return createHmac("sha256", key).update(nin.replace(/\s+/g, "")).digest("hex");
+}
+
+/**
+ * Keyed hash of the subject reference for equality lookups. Legacy rows were
+ * backfilled with unkeyed SHA-256 (migration 0105), so lookups match either.
+ */
+function subjectRefHashes(subjectRef: string): { keyed: string; legacy: string } {
+  const { key } = requireHmacKey(NIN_HMAC_KEY, "NIN_HMAC_KEY", { devSeed: "nin-identity" });
+  const normalized = subjectRef.trim();
+  return { keyed: hmacSha256Hex(key, normalized), legacy: sha256Hex(normalized) };
+}
+
+/** Non-TOCTOU atomic counter rate limit. */
+async function enforceCounterLimit(key: string, maxPerWindow: number, windowMs: number): Promise<void> {
+  const rows = await exec(
+    `INSERT INTO rate_limit_counters (limiter_key, window_start, count, updated_at)
+     VALUES ($1, $2, 1, NOW())
+     ON CONFLICT (limiter_key, window_start)
+     DO UPDATE SET count = rate_limit_counters.count + 1, updated_at = NOW()
+     RETURNING count`,
+    [key, fixedWindowStart(Date.now(), windowMs)],
+  );
+  if (counterExceedsLimit(Number(rows[0]?.count ?? 1), maxPerWindow)) {
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Verification rate limit reached. Please try again later." });
+  }
 }
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
@@ -109,13 +160,14 @@ async function logVerification(
   // Defense in depth: refuse to persist anything shaped like a raw NIN.
   const serialized = JSON.stringify(details);
   if (/\b\d{11}\b/.test(serialized)) {
-    logger.error({ action, subjectType, subjectRef }, "[nin] Refusing to write verification audit details containing an 11-digit value (possible raw NIN)");
+    logger.error({ action, subjectType }, "[nin] Refusing to write verification audit details containing an 11-digit value (possible raw NIN)");
     details = { redacted: true, original_action: action };
   }
+  const { keyed } = subjectRefHashes(subjectRef);
   await exec(
-    `INSERT INTO verification_audit_log (verification_id, action, actor, subject_type, subject_ref, details)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [verificationId, action, actor, subjectType, subjectRef, JSON.stringify(details)],
+    `INSERT INTO verification_audit_log (verification_id, action, actor, subject_type, subject_ref, subject_ref_hash, details)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [verificationId, action, actor, subjectType, subjectRef, keyed, JSON.stringify(details)],
   );
 }
 
@@ -123,11 +175,12 @@ const SUBJECT_TYPES = ["complainant", "dsar_requester", "user"] as const;
 
 /** Lazily expire an active row past its expires_at. Returns the live row. */
 async function currentVerification(subjectType: string, subjectRef: string): Promise<any | null> {
+  const { keyed, legacy } = subjectRefHashes(subjectRef);
   const rows = await exec(
     `SELECT * FROM identity_verifications
-     WHERE subject_type = $1 AND subject_ref = $2 AND status = 'active'
+     WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4)) AND status = 'active'
      ORDER BY created_at DESC LIMIT 1`,
-    [subjectType, subjectRef],
+    [subjectType, keyed, legacy, subjectRef],
   );
   const row = rows[0];
   if (!row) return null;
@@ -143,12 +196,21 @@ async function currentVerification(subjectType: string, subjectRef: string): Pro
 function publicView(row: any) {
   return {
     subjectType: row.subject_type,
-    subjectRef: row.subject_ref,
     assuranceLevel: row.assurance_level,
     status: row.status,
     verifiedAt: row.verified_at,
     expiresAt: row.expires_at,
   };
+}
+
+/**
+ * Possession-proof gate: the caller must demonstrate control of the subject
+ * reference (e.g. the tracking secret / email challenge issued at intake).
+ * The proof is NEVER stored raw — only its keyed HMAC is audited.
+ */
+function auditPossessionProof(proof: string): string {
+  const { key } = requireHmacKey(NIN_HMAC_KEY, "NIN_HMAC_KEY", { devSeed: "nin-identity" });
+  return hmacSha256Hex(key, proof);
 }
 
 export const ninIdentityRouter = router({
@@ -163,28 +225,52 @@ export const ninIdentityRouter = router({
   /**
    * Self-attested 'basic' verification — no NIMC call, no NIN. Used to attach
    * a minimum assurance level to a complainant/DSAR requester when they
-   * declare their identity without document proof.
+   * declare their identity without document proof. A 'basic' attestation can
+   * NEVER supersede an active 'nin_verified' row.
    */
   verifyBasic: publicProcedure
     .input(z.object({
       subjectType: z.enum(SUBJECT_TYPES),
       subjectRef: z.string().min(2).max(128),
+      /** Proof of possession of the subject reference (tracking secret / email challenge). */
+      possessionProof: z.string().min(8).max(256),
       consent: z.literal(true),
     }))
     .mutation(async ({ input, ctx }) => {
+      const { keyed, legacy } = subjectRefHashes(input.subjectRef);
+      // Never let a weaker self-attestation knock out a stronger verification.
+      const strong = await exec(
+        `SELECT id FROM identity_verifications
+         WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4))
+           AND status = 'active' AND assurance_level = 'nin_verified'
+         LIMIT 1`,
+        [input.subjectType, keyed, legacy, input.subjectRef],
+      );
+      if (strong[0]) {
+        await logVerification(strong[0].id, "verify_failed", ctx.user ? String(ctx.user.id) : null, input.subjectType, input.subjectRef, {
+          level: "basic", reason: "active nin_verified row exists; basic self-attestation cannot supersede it",
+        });
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "This subject already holds a stronger NIN-verified identity; basic self-attestation is not applicable.",
+        });
+      }
       await exec(
         `UPDATE identity_verifications SET status = 'revoked', updated_at = NOW()
-         WHERE subject_type = $1 AND subject_ref = $2 AND status = 'active'`,
-        [input.subjectType, input.subjectRef],
+         WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4))
+           AND status = 'active' AND assurance_level = 'basic'`,
+        [input.subjectType, keyed, legacy, input.subjectRef],
       );
       const rows = await exec(
         `INSERT INTO identity_verifications
-           (subject_type, subject_ref, assurance_level, status, adapter, verified_at, expires_at)
-         VALUES ($1, $2, 'basic', 'active', 'self_attested', NOW(), NOW() + ($3 || ' days')::interval)
+           (subject_type, subject_ref, subject_ref_hash, assurance_level, status, adapter, verified_at, expires_at)
+         VALUES ($1, $2, $3, 'basic', 'active', 'self_attested', NOW(), NOW() + ($4 || ' days')::interval)
          RETURNING id`,
-        [input.subjectType, input.subjectRef, String(VERIFICATION_TTL_DAYS)],
+        [input.subjectType, input.subjectRef, keyed, String(VERIFICATION_TTL_DAYS)],
       );
-      await logVerification(rows[0].id, "verify_success", ctx.user ? String(ctx.user.id) : null, input.subjectType, input.subjectRef, { level: "basic", method: "self_attested" });
+      await logVerification(rows[0].id, "verify_success", ctx.user ? String(ctx.user.id) : null, input.subjectType, input.subjectRef, {
+        level: "basic", method: "self_attested", possession_proof_hmac: auditPossessionProof(input.possessionProof),
+      });
       return { verificationId: rows[0].id, assuranceLevel: "basic" as const };
     }),
 
@@ -199,10 +285,18 @@ export const ninIdentityRouter = router({
       nin: z.string().regex(/^\d{11}$/, "NIN must be exactly 11 digits"),
       subjectType: z.enum(SUBJECT_TYPES),
       subjectRef: z.string().min(2).max(128),
+      /** Proof of possession of the subject reference. */
+      possessionProof: z.string().min(8).max(256),
       consent: z.literal(true),
     }))
     .mutation(async ({ input, ctx }) => {
       const actor = ctx.user ? String(ctx.user.id) : null;
+      // Rate limits: per-IP AND per-subject (atomic upsert counters).
+      const ip = extractClientIp((ctx as any).req?.headers, (ctx as any).req?.ip ?? (ctx as any).req?.socket?.remoteAddress, TRUSTED_PROXY_COUNT);
+      await enforceCounterLimit(hashIp(`nin.verify.ip|${ip}`, ipHashSalt()), VERIFY_NIN_IP_LIMIT_PER_HOUR, 3_600_000);
+      const { keyed: subjKeyed } = subjectRefHashes(input.subjectRef);
+      await enforceCounterLimit(`nin.verify.subject|${input.subjectType}|${subjKeyed}`, VERIFY_NIN_SUBJECT_LIMIT_PER_DAY, 86_400_000);
+
       const adapter = getNimcAdapterStatus();
       if (adapter.status === "UNCONFIGURED") {
         await logVerification(null, "verify_unconfigured", actor, input.subjectType, input.subjectRef, { reason: adapter.reason });
@@ -254,27 +348,52 @@ export const ninIdentityRouter = router({
 
       const hmac = ninHmac(input.nin); // input.nin goes out of scope after this mutation — never stored.
       const token = adapterResponse.token ?? randomUUID();
-      await exec(
-        `UPDATE identity_verifications SET status = 'revoked', updated_at = NOW()
-         WHERE subject_type = $1 AND subject_ref = $2 AND status = 'active'`,
-        [input.subjectType, input.subjectRef],
-      );
-      const rows = await exec(
-        `INSERT INTO identity_verifications
-           (subject_type, subject_ref, nin_hmac, verification_token, assurance_level, status, adapter, adapter_ref, verified_at, expires_at)
-         VALUES ($1, $2, $3, $4, 'nin_verified', 'active', 'nimc', $5, NOW(), NOW() + ($6 || ' days')::interval)
-         RETURNING id, verified_at, expires_at`,
-        [input.subjectType, input.subjectRef, hmac, token, adapterResponse.ref ?? null, String(VERIFICATION_TTL_DAYS)],
-      );
-      await logVerification(rows[0].id, "verify_success", actor, input.subjectType, input.subjectRef, { level: "nin_verified", adapter: "nimc", adapter_ref: adapterResponse.ref ?? null });
+
+      // Revoke + insert atomically. The partial unique index on
+      // (subject_type, subject_ref) WHERE status='active' can raise 23505 on
+      // concurrent verification — that maps to a clean CONFLICT, not a 500.
+      const pool = getPool();
+      if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const client = await pool.connect();
+      let inserted: any;
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `UPDATE identity_verifications SET status = 'revoked', updated_at = NOW()
+           WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4)) AND status = 'active'`,
+          [input.subjectType, subjKeyed, subjectRefHashes(input.subjectRef).legacy, input.subjectRef],
+        );
+        const rows = await client.query(
+          `INSERT INTO identity_verifications
+             (subject_type, subject_ref, subject_ref_hash, nin_hmac, verification_token, assurance_level, status, adapter, adapter_ref, verified_at, expires_at)
+           VALUES ($1, $2, $3, $4, $5, 'nin_verified', 'active', 'nimc', $6, NOW(), NOW() + ($7 || ' days')::interval)
+           RETURNING id, verified_at, expires_at`,
+          [input.subjectType, input.subjectRef, subjKeyed, hmac, token, adapterResponse.ref ?? null, String(VERIFICATION_TTL_DAYS)],
+        );
+        inserted = rows.rows[0];
+        await client.query("COMMIT");
+      } catch (err: any) {
+        await client.query("ROLLBACK").catch(() => {});
+        if (err?.code === "23505") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "A verification for this subject completed concurrently; check status instead of retrying blindly.",
+          });
+        }
+        logger.error({ err }, "[nin] verifyNin persistence failed");
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Verification persistence failed" });
+      } finally {
+        client.release();
+      }
+      await logVerification(inserted.id, "verify_success", actor, input.subjectType, input.subjectRef, { level: "nin_verified", adapter: "nimc", adapter_ref: adapterResponse.ref ?? null });
       emitMutationEvent("ndsep.identity.verified", { action: "nin_verified", subjectType: input.subjectType, ts: new Date().toISOString() })
         .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return {
         verified: true as const,
-        verificationId: rows[0].id,
+        verificationId: inserted.id,
         assuranceLevel: "nin_verified" as const,
-        verifiedAt: rows[0].verified_at,
-        expiresAt: rows[0].expires_at,
+        verifiedAt: inserted.verified_at,
+        expiresAt: inserted.expires_at,
         // The opaque token is returned once for the caller's records; the raw
         // NIN never leaves this procedure in any direction.
         verificationToken: token,
@@ -282,20 +401,21 @@ export const ninIdentityRouter = router({
     }),
 
   /**
-   * Current verification status for a subject. Lazily marks expired rows;
-   * re-verification is required once expires_at has passed.
+   * Current verification status for a subject. STAFF-ONLY: assurance status
+   * is operational metadata, not public information. Lazily marks expired
+   * rows; re-verification is required once expires_at has passed.
    */
-  checkVerification: publicProcedure
+  checkVerification: staffProcedure
     .input(z.object({
       subjectType: z.enum(SUBJECT_TYPES),
       subjectRef: z.string().min(2).max(128),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const row = await currentVerification(input.subjectType, input.subjectRef);
       if (!row) {
-        return { subjectType: input.subjectType, subjectRef: input.subjectRef, assuranceLevel: "none" as const, status: "none" as const };
+        return { subjectType: input.subjectType, assuranceLevel: "none" as const, status: "none" as const };
       }
-      await logVerification(row.id, "check", null, input.subjectType, input.subjectRef, { level: row.assurance_level, status: row.status });
+      await logVerification(row.id, "check", String(ctx.user.id), input.subjectType, input.subjectRef, { level: row.assurance_level, status: row.status });
       return publicView(row);
     }),
 
@@ -323,12 +443,13 @@ export const ninIdentityRouter = router({
       limit: z.number().int().min(1).max(100).default(50),
     }))
     .query(async ({ input }) => {
+      const { keyed, legacy } = subjectRefHashes(input.subjectRef);
       return exec(
         `SELECT id, verification_id, action, actor, details, created_at
          FROM verification_audit_log
-         WHERE subject_type = $1 AND subject_ref = $2
-         ORDER BY created_at DESC LIMIT $3`,
-        [input.subjectType, input.subjectRef, input.limit],
+         WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4))
+         ORDER BY created_at DESC LIMIT $5`,
+        [input.subjectType, keyed, legacy, input.subjectRef, input.limit],
       );
     }),
 

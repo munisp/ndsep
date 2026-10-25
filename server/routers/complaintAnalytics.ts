@@ -161,10 +161,20 @@ export const complaintAnalyticsRouter = router({
       const baseline = await exec(`SELECT * FROM surge_baselines WHERE controller_key = $1`, [input.controllerKey]);
       const z = rollingZScore(counts.slice(0, -1), counts[counts.length - 1] ?? 0, cfg.baselineDays - 1, cfg.minBaselineDays);
       const cp = poissonChangepoint(counts, { a: 1.0, b: 0.2 });
+      // Data freshness: the most recent date present in the materialized
+      // daily counts, so the dashboard can flag stale pipelines instead of
+      // silently rendering old data.
+      const freshness = await exec(
+        `SELECT MAX(count_date)::text AS max_count_date, MAX(updated_at) AS counts_updated_at FROM complaint_daily_counts`,
+      );
       return {
         controllerKey: input.controllerKey,
         series: rows.map((r) => ({ d: String(r.d).slice(0, 10), n: Number(r.n) })),
         baseline: baseline[0] ?? null,
+        dataFreshness: {
+          maxCountDate: freshness[0]?.max_count_date ?? null,
+          countsUpdatedAt: freshness[0]?.counts_updated_at ?? null,
+        },
         today: { observed: counts[counts.length - 1] ?? 0, zscore: z?.zscore ?? null, baselineMean: z?.baselineMean ?? null },
         changepoint: {
           mapTau: cp.mapTau,
@@ -237,6 +247,8 @@ export const complaintAnalyticsRouter = router({
       zscoreThreshold: z.number().min(1).max(10).optional(),
       changepointProb: z.number().min(0.5).max(0.999).optional(),
       baselineDays: z.number().int().min(14).max(365).optional(),
+      /** Rebuild the full complaint history, not just the trailing 120 days. */
+      fullHistory: z.boolean().default(false),
     }).optional())
     .mutation(async ({ input, ctx }) => {
       const cfg = {
@@ -245,7 +257,7 @@ export const complaintAnalyticsRouter = router({
         ...(input?.changepointProb != null ? { changepointProb: input.changepointProb } : {}),
         ...(input?.baselineDays != null ? { baselineDays: input.baselineDays } : {}),
       };
-      const counts = await recomputeDailyCounts();
+      const counts = await recomputeDailyCounts(undefined, undefined, { fullHistory: input?.fullHistory ?? false });
       const baselines = await updateBaselines(cfg);
       const detection = await detectSurges(cfg);
       await logAudit("surge_detection_run", null, String(ctx.user.id), {

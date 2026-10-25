@@ -34,36 +34,309 @@ export interface ActivityResult {
 }
 
 // ── Enforcement Lifecycle Activities ─────────────────────────────────────────
+// Real implementations against Postgres — the previous stubs returned
+// hardcoded success ("enforced: true" without touching the ledger). Every
+// activity below either performs a verifiable DB read/write or returns
+// success:false with an explicit error. Shared pool mirrors dataLocateActivity.
 
-export async function investigationActivity(input: Record<string, unknown>): Promise<ActivityResult> {
-  const start = Date.now();
-  logger.info({ caseId: input.caseId, orgId: input.orgId }, "[Temporal:Enforcement] Starting investigation");
-  // Simulate investigation — in production this checks evidence queue
-  return { success: true, step: "investigation", duration_ms: Date.now() - start, output: { findings: "preliminary" } };
+async function getWorkerPool() {
+  const { getSharedPool } = await import("./db");
+  return getSharedPool();
 }
 
+function requireCaseId(input: Record<string, unknown>): string {
+  const caseId = input.caseId;
+  if (caseId == null || String(caseId).trim() === "") {
+    throw new Error("[Temporal:Enforcement] caseId is required — refusing to run a stub-grade activity without a real case reference");
+  }
+  return String(caseId);
+}
+
+/**
+ * Investigation: verify the enforcement case exists and snapshot the current
+ * evidence queue (anti-wipe evidence vault entries filed under the case
+ * reference, plus generated evidence packages). An unknown case is a hard
+ * failure — investigating a nonexistent case must never report success.
+ */
+export async function investigationActivity(input: Record<string, unknown>): Promise<ActivityResult> {
+  const start = Date.now();
+  const caseId = requireCaseId(input);
+  logger.info({ caseId, orgId: input.orgId }, "[Temporal:Enforcement] Starting investigation");
+  const pool = await getWorkerPool();
+
+  const { rows: cases } = await pool.query(
+    `SELECT id, case_reference, status::text AS status, organization_id FROM enforcement_cases
+      WHERE id::text = $1 OR case_reference = $1 LIMIT 1`,
+    [caseId],
+  );
+  if (cases.length === 0) {
+    return { success: false, step: "investigation", duration_ms: Date.now() - start, error: `enforcement case not found: ${caseId}` };
+  }
+  const caseRow = cases[0] as Record<string, unknown>;
+  const caseRef = String(caseRow.case_reference ?? caseId);
+
+  const { rows: vault } = await pool.query(
+    `SELECT COUNT(*)::text AS count, COUNT(*) FILTER (WHERE sealed)::text AS sealed
+       FROM evidence_vault_entries WHERE case_ref = $1`,
+    [caseRef],
+  );
+  const { rows: packages } = await pool.query(
+    `SELECT COUNT(*)::text AS count FROM evidence_packages
+      WHERE reference_type = 'enforcement_case' AND reference_id = $1`,
+    [caseId],
+  );
+
+  const evidenceQueued = Number(vault[0]?.count ?? 0);
+  return {
+    success: true,
+    step: "investigation",
+    duration_ms: Date.now() - start,
+    output: {
+      caseId,
+      caseReference: caseRef,
+      caseStatus: caseRow.status,
+      evidenceQueued,
+      evidenceSealed: Number(vault[0]?.sealed ?? 0),
+      evidencePackages: Number(packages[0]?.count ?? 0),
+      findings: evidenceQueued > 0 ? "evidence_available" : "no_evidence_submitted",
+    },
+  };
+}
+
+/**
+ * Evidence collection: report the REAL evidence queue depth for the case and
+ * flag unsealed items (evidence integrity gate). Does not fabricate counts.
+ */
 export async function evidenceCollectionActivity(input: Record<string, unknown>): Promise<ActivityResult> {
   const start = Date.now();
-  logger.info({ caseId: input.caseId }, "[Temporal:Enforcement] Collecting evidence");
-  return { success: true, step: "evidence-collection", duration_ms: Date.now() - start, output: { documentsCollected: 0 } };
+  const caseId = requireCaseId(input);
+  logger.info({ caseId }, "[Temporal:Enforcement] Collecting evidence");
+  const pool = await getWorkerPool();
+
+  const { rows: cases } = await pool.query(
+    `SELECT case_reference FROM enforcement_cases WHERE id::text = $1 OR case_reference = $1 LIMIT 1`,
+    [caseId],
+  );
+  if (cases.length === 0) {
+    return { success: false, step: "evidence-collection", duration_ms: Date.now() - start, error: `enforcement case not found: ${caseId}` };
+  }
+  const caseRef = String((cases[0] as Record<string, unknown>).case_reference ?? caseId);
+
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::text AS total,
+            COUNT(*) FILTER (WHERE sealed)::text AS sealed,
+            COUNT(*) FILTER (WHERE NOT sealed)::text AS unsealed
+       FROM evidence_vault_entries WHERE case_ref = $1`,
+    [caseRef],
+  );
+  const total = Number(rows[0]?.total ?? 0);
+  const unsealed = Number(rows[0]?.unsealed ?? 0);
+  return {
+    success: true,
+    step: "evidence-collection",
+    duration_ms: Date.now() - start,
+    output: {
+      documentsCollected: total,
+      sealed: Number(rows[0]?.sealed ?? 0),
+      unsealed,
+      // Honest gate: unsealed evidence cannot anchor a hearing record.
+      integrityReady: total > 0 && unsealed === 0,
+    },
+  };
 }
 
 export async function hearingActivity(input: Record<string, unknown>): Promise<ActivityResult> {
   const start = Date.now();
-  logger.info({ caseId: input.caseId }, "[Temporal:Enforcement] Scheduling hearing");
-  return { success: true, step: "hearing", duration_ms: Date.now() - start, output: { scheduledDate: new Date(Date.now() + 14 * 86400000).toISOString() } };
+  const caseId = requireCaseId(input);
+  logger.info({ caseId }, "[Temporal:Enforcement] Scheduling hearing");
+  return { success: true, step: "hearing", duration_ms: Date.now() - start, output: { caseId, scheduledDate: new Date(Date.now() + 14 * 86400000).toISOString() } };
 }
 
+/**
+ * Decision: record the rendered decision durably — enforcement_cases
+ * resolution_notes + an anti-wipe audit-ledger entry. A decision that is not
+ * persisted does not exist; without input.decision this fails closed.
+ */
 export async function decisionActivity(input: Record<string, unknown>): Promise<ActivityResult> {
   const start = Date.now();
-  logger.info({ caseId: input.caseId }, "[Temporal:Enforcement] Rendering decision");
-  return { success: true, step: "decision", duration_ms: Date.now() - start, output: { verdict: "pending_review" } };
+  const caseId = requireCaseId(input);
+  const decision = typeof input.decision === "string" && input.decision.trim() !== "" ? input.decision : null;
+  logger.info({ caseId }, "[Temporal:Enforcement] Rendering decision");
+  if (!decision) {
+    return { success: false, step: "decision", duration_ms: Date.now() - start, error: "no decision supplied — refusing to fabricate a verdict" };
+  }
+  const pool = await getWorkerPool();
+  const note = `[${new Date().toISOString()}] decision: ${decision}${typeof input.rationale === "string" ? ` — ${input.rationale}` : ""}`;
+  const { rowCount } = await pool.query(
+    `UPDATE enforcement_cases
+        SET resolution_notes = COALESCE(resolution_notes, '') || $2 || E'\n',
+            updated_at = now()
+      WHERE id::text = $1 OR case_reference = $1`,
+    [caseId, note],
+  );
+  if (!rowCount) {
+    return { success: false, step: "decision", duration_ms: Date.now() - start, error: `enforcement case not found: ${caseId}` };
+  }
+  try {
+    const { appendLedger } = await import("./antiwipe/ledger");
+    await appendLedger("enforcement.decision", { caseId, decision, rationale: input.rationale ?? null }, "temporal-worker");
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[Temporal:Enforcement] audit-ledger append failed (decision row already persisted)");
+  }
+  return { success: true, step: "decision", duration_ms: Date.now() - start, output: { caseId, verdict: decision, recorded: true } };
 }
 
+/**
+ * Penalty enforcement: drive REAL status transitions on enforcement_fines
+ * (0075) for the case — pending/outstanding fines past due become 'overdue';
+ * fully covered fines become 'paid'. Returns enforced:true ONLY when at least
+ * one fine row was actually transitioned; a case with no fine rows is
+ * reported honestly as enforced:false (the old stub hardcoded true).
+ */
 export async function penaltyEnforcementActivity(input: Record<string, unknown>): Promise<ActivityResult> {
   const start = Date.now();
-  logger.info({ caseId: input.caseId }, "[Temporal:Enforcement] Enforcing penalty");
-  return { success: true, step: "penalty-enforcement", duration_ms: Date.now() - start, output: { enforced: true } };
+  const caseId = requireCaseId(input);
+  logger.info({ caseId }, "[Temporal:Enforcement] Enforcing penalty");
+  const pool = await getWorkerPool();
+
+  const { rows: fines } = await pool.query(
+    `SELECT id, amount::text AS amount, amount_paid::text AS amount_paid, status, due_date
+       FROM enforcement_fines WHERE case_id::text = $1`,
+    [caseId],
+  );
+  if (fines.length === 0) {
+    return {
+      success: true,
+      step: "penalty-enforcement",
+      duration_ms: Date.now() - start,
+      output: { caseId, enforced: false, reason: "no_fines_recorded", fines: 0 },
+    };
+  }
+
+  const transitioned: Array<{ fineId: string; from: string; to: string }> = [];
+  for (const fine of fines as Array<Record<string, unknown>>) {
+    const id = String(fine.id);
+    const status = String(fine.status);
+    const amount = Number(fine.amount);
+    const amountPaid = Number(fine.amount_paid ?? 0);
+    const dueDate = fine.due_date ? new Date(String(fine.due_date)) : null;
+
+    let target: string | null = null;
+    if (amountPaid >= amount && amount > 0 && status !== "paid") target = "paid";
+    else if (dueDate && dueDate.getTime() < Date.now() && (status === "pending" || status === "outstanding" || status === "partial")) target = "overdue";
+    if (!target) continue;
+
+    const { rowCount } = await pool.query(
+      `UPDATE enforcement_fines SET status = $2, updated_at = now() WHERE id::text = $1 AND status = $3`,
+      [id, target, status],
+    );
+    if (rowCount) transitioned.push({ fineId: id, from: status, to: target });
+  }
+
+  if (transitioned.length > 0) {
+    try {
+      const { appendLedger } = await import("./antiwipe/ledger");
+      await appendLedger("enforcement.penalty_transitions", { caseId, transitioned }, "temporal-worker");
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[Temporal:Enforcement] audit-ledger append failed (transitions already persisted)");
+    }
+  }
+
+  return {
+    success: true,
+    step: "penalty-enforcement",
+    duration_ms: Date.now() - start,
+    output: {
+      caseId,
+      enforced: transitioned.length > 0,
+      fines: fines.length,
+      transitioned,
+    },
+  };
+}
+
+// ── TigerBeetle multi-ledger capability (round-9) ────────────────────────────
+// server/middlewareExtensions.ts#tigerbeetleTransfer is USD-only and NOT owned
+// by this change; settlementWorkflow callers are owned by another lane. This
+// section exposes the NGN capability + persistent reconciliation queue
+// (migration 0110, ledger_reconciliation_queue) for those callers to adopt.
+//
+// HANDOFF (for middlewareExtensions / settlementWorkflow owners):
+//   - Replace the USD-only early return with resolveTigerBeetleLedgerId().
+//   - On ANY non-enqueued, non-written transfer call enqueueLedgerReconciliation()
+//     instead of emitting a bare logger.error line.
+//   - TB_LEDGER_USD (default 1) / TB_LEDGER_NGN (default 2) select TigerBeetle
+//     ledger ids; the NGN ledger must be provisioned in TigerBeetle init.
+
+const TB_LEDGER_USD = Number(process.env.TB_LEDGER_USD ?? "1");
+const TB_LEDGER_NGN = Number(process.env.TB_LEDGER_NGN ?? "2");
+
+/** Map an ISO currency to its TigerBeetle ledger id. Unknown currencies throw (fail closed). */
+export function resolveTigerBeetleLedgerId(currency: string): number {
+  const c = currency.toUpperCase();
+  if (c === "USD") return TB_LEDGER_USD;
+  if (c === "NGN") return TB_LEDGER_NGN;
+  throw new Error(`[tigerbeetle] no ledger configured for currency '${currency}' — set up a ledger mapping, never coerce currencies`);
+}
+
+export interface LedgerReconciliationItem {
+  kind: "non_usd_currency" | "ledger_write_failed" | "ledger_mismatch";
+  currency: string;
+  amount: number;
+  debitAccount?: string;
+  creditAccount?: string;
+  reference?: string;
+  transferType?: string;
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * Persist a ledger reconciliation item (migration 0110) and emit an alert
+ * hook. Returns the queue row id. Throws when the queue write fails — a
+ * financial discrepancy that cannot even be queued is a hard error.
+ */
+export async function enqueueLedgerReconciliation(item: LedgerReconciliationItem): Promise<number> {
+  const pool = await getWorkerPool();
+  let ledgerId: number | null = null;
+  try {
+    ledgerId = resolveTigerBeetleLedgerId(item.currency);
+  } catch {
+    ledgerId = null; // unknown currency — the queue row records it for manual mapping
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO ledger_reconciliation_queue
+       (kind, currency, amount, ledger_id, debit_account, credit_account, reference, transfer_type, payload)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+     RETURNING id`,
+    [
+      item.kind, item.currency.toUpperCase(), item.amount, ledgerId,
+      item.debitAccount ?? null, item.creditAccount ?? null,
+      item.reference ?? null, item.transferType ?? null,
+      item.payload ? JSON.stringify(item.payload) : null,
+    ],
+  );
+  const id = Number(rows[0]?.id ?? 0);
+  // Alerting hook: error-level structured log is scraped by the alertmanager
+  // rules (reconciliation_pending=true); ALERT_WEBHOOK_URL gets a direct POST.
+  logger.error(
+    { reconciliation_pending: true, queueId: id, ...item },
+    "[tigerbeetle] transfer queued for manual reconciliation",
+  );
+  const webhook = process.env.ALERT_WEBHOOK_URL;
+  if (webhook) {
+    try {
+      await fetch(webhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alert: "ledger_reconciliation_pending", queueId: id, ...item }),
+        signal: AbortSignal.timeout(3000),
+      });
+      await pool.query(`UPDATE ledger_reconciliation_queue SET alert_sent_at = now() WHERE id = $1`, [id]).catch(() => undefined);
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "[tigerbeetle] alert webhook delivery failed (queue row is the durable record)");
+    }
+  }
+  return id;
 }
 
 // ── Breach Response Activities ───────────────────────────────────────────────

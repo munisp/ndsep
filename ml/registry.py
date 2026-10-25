@@ -17,8 +17,11 @@ and degrades gracefully to file-only when the DB is unreachable.)
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
+import tempfile
 from datetime import datetime
 
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), "weights")
@@ -41,6 +44,42 @@ def _pg_connect():
         return None
 
 
+@contextlib.contextmanager
+def _locked_registry(registry_path: str):
+    """Exclusive advisory lock around read-modify-write of the registry file.
+
+    The previous implementation did read → json.dump(open(path, "w")) with no
+    lock and no atomicity; two concurrent training runs (continuous.py triggers
+    them) interleaved and left registry.json NUL-padded garbage. Now: flock a
+    sidecar lock file for the whole read-modify-write, then write to a temp
+    file and os.replace() (atomic on POSIX).
+    """
+    lock_path = registry_path + ".lock"
+    with open(lock_path, "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            registry = []
+            if os.path.exists(registry_path):
+                with open(registry_path) as f:
+                    raw = f.read().strip()
+                if raw:
+                    registry = json.loads(raw)
+            yield registry
+            dir_name = os.path.dirname(registry_path) or "."
+            fd, tmp_path = tempfile.mkstemp(prefix=".registry.", dir=dir_name)
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(registry, f, indent=2, default=str)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, registry_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def register_run(model: str, metrics: dict, weights_path: str,
                  data_snapshot_id: str | None = None,
                  version: str | None = None,
@@ -61,15 +100,10 @@ def register_run(model: str, metrics: dict, weights_path: str,
         "postgres": "skipped",
     }
 
-    # ---- file registry (always) ---- #
+    # ---- file registry (always, atomic + locked) ---- #
     os.makedirs(os.path.dirname(registry_path), exist_ok=True)
-    registry = []
-    if os.path.exists(registry_path):
-        with open(registry_path) as f:
-            registry = json.load(f)
-    registry.append(entry)
-    with open(registry_path, "w") as f:
-        json.dump(registry, f, indent=2, default=str)
+    with _locked_registry(registry_path) as registry:
+        registry.append(entry)
 
     # ---- Postgres (best-effort) ---- #
     conn = _pg_connect()
@@ -96,17 +130,17 @@ def register_run(model: str, metrics: dict, weights_path: str,
                                VALUES (%s::uuid, %s, %s, 'test', NOW())""",
                             (model_id, name, float(value)))
             entry["postgres"] = f"inserted id={model_id}"
-            # rewrite file entry with pg status
-            registry[-1] = entry
-            with open(registry_path, "w") as f:
-                json.dump(registry, f, indent=2, default=str)
         except Exception as e:  # table missing / perms / etc.
             entry["postgres"] = f"failed: {e}"
-            registry[-1] = entry
-            with open(registry_path, "w") as f:
-                json.dump(registry, f, indent=2, default=str)
         finally:
             conn.close()
+        # rewrite the file entry with the pg status (same locked, atomic path)
+        with _locked_registry(registry_path) as registry:
+            for i in range(len(registry) - 1, -1, -1):
+                if (registry[i].get("model") == model
+                        and registry[i].get("version") == version):
+                    registry[i] = entry
+                    break
     return entry
 
 

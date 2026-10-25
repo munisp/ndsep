@@ -62,11 +62,22 @@ import requests
 DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get("DATABASE_URL", ""))
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 PORT = int(os.environ.get("SCAN_CRAWLER_PORT", os.environ.get("CRAWLER_PORT", "8210")))
+BIND_HOST = os.environ.get("SCAN_CRAWLER_BIND_HOST", "127.0.0.1")  # control plane is local-only by default
 POLL_INTERVAL = float(os.environ.get("SCAN_POLL_INTERVAL_SECONDS", "30"))
 REQUEST_TIMEOUT = float(os.environ.get("SCAN_REQUEST_TIMEOUT_SECONDS", "20"))
 MAX_PAGE_BYTES = int(os.environ.get("SCAN_MAX_PAGE_BYTES", str(2 * 1024 * 1024)))
 MAX_SCRIPT_BYTES = int(os.environ.get("SCAN_MAX_SCRIPT_BYTES", str(1024 * 1024)))
 MAX_EXTERNAL_SCRIPTS = int(os.environ.get("SCAN_MAX_EXTERNAL_SCRIPTS", "25"))
+# Control-plane auth: X-Worker-Token header required on all POSTs. Fail CLOSED
+# when unset outside an explicit dev environment.
+WORKER_AUTH_TOKEN = os.environ.get("WORKER_AUTH_TOKEN", "")
+DEV_MODE = os.environ.get("APP_ENV", "").lower() in ("dev", "development", "test")
+MAX_IN_FLIGHT = int(os.environ.get("SCAN_MAX_IN_FLIGHT", "3"))
+MAX_BODY_BYTES = int(os.environ.get("SCAN_MAX_BODY_BYTES", "16384"))
+# SSRF guard: https required unless explicitly relaxed for intranet targets.
+ALLOW_INSECURE_HTTP = os.environ.get("SCAN_ALLOW_INSECURE_HTTP", "").lower() in ("1", "true", "yes")
+MAX_REDIRECTS = 5
+STALE_RUN_MULTIPLIER = int(os.environ.get("SCAN_STALE_RUN_MULTIPLIER", "3"))
 USER_AGENT = os.environ.get(
     "SCAN_USER_AGENT",
     "NDSEP-ComplianceScanner/1.0 (+https://ndpc.gov.ng; regulatory compliance scan)",
@@ -418,13 +429,11 @@ def analyze_cookies(set_cookie_headers: List[str],
             except (TypeError, ValueError):
                 max_age = None
         sig = match_tracker(signatures, cookie_name=name)
+        # Essential ONLY when the cookie name matches the known strictly-
+        # necessary catalogue and is not a tracker. Unknown cookies — even
+        # session cookies or short Max-Age — are NOT auto-essential: an
+        # unrecognised identifier set pre-consent is a finding, not a pass.
         essential = bool(ESSENTIAL_COOKIE_RE.match(name)) and not sig
-        if not essential and max_age is None:
-            # long-lived via Expires without essential-name match is still suspect;
-            # session cookies with unknown names are treated as low-risk essential
-            essential = "expires" not in attrs
-        elif not essential and max_age is not None and max_age <= ESSENTIAL_MAX_AGE_SECONDS and not sig:
-            essential = True
         results.append({
             "name": name,
             "essential": essential,
@@ -449,12 +458,68 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _fetch(url: str) -> Tuple[bytes, List[str], int, Dict[str, str]]:
-    """GET with size cap; returns (body, set_cookie_headers, status, headers)."""
+# ── SSRF guard ─────────────────────────────────────────────────────────────────
+def _is_forbidden_ip(ip_str: str) -> bool:
+    """Private/loopback/link-local/reserved/multicast addresses are forbidden
+    scan destinations (SSRF protection)."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparseable => not allowed
+    return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+            or ip.is_multicast or ip.is_unspecified)
+
+
+def validate_url_host(url: str) -> str:
+    """Validate scheme + resolve host; reject if ANY resolved IP is forbidden.
+    Returns the hostname. Raises ValueError on rejection."""
+    import socket
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https",) and not (ALLOW_INSECURE_HTTP and parsed.scheme == "http"):
+        raise ValueError(f"scheme {parsed.scheme!r} not allowed (https required; "
+                         "set SCAN_ALLOW_INSECURE_HTTP=true for intranet targets)")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("URL has no host")
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80),
+                                   proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ValueError(f"DNS resolution failed for {host}: {exc}")
+    for info in infos:
+        addr = info[4][0]
+        if _is_forbidden_ip(addr):
+            raise ValueError(f"host {host} resolves to forbidden address {addr}")
+    return host
+
+
+def validate_crawl_path(path: str) -> str:
+    """crawl_paths entries must be same-origin RELATIVE paths: no scheme, no
+    host, no protocol-relative '//', no credentials."""
+    if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+        raise ValueError(f"crawl path must be an absolute path starting with '/': {path!r}")
+    parsed = urlparse(path)
+    if parsed.scheme or parsed.netloc or parsed.username or parsed.password:
+        raise ValueError(f"crawl path must not contain a scheme/host: {path!r}")
+    return path
+
+
+def _fetch(url: str, max_bytes: Optional[int] = None, _redirects: int = 0) -> Tuple[bytes, List[str], int, Dict[str, str]]:
+    """GET with size cap + SSRF guard. Redirects are followed MANUALLY so every
+    hop is re-validated against the SSRF rules at connect time."""
+    validate_url_host(url)
+    limit = max_bytes or MAX_PAGE_BYTES
     with requests.get(url, timeout=REQUEST_TIMEOUT, stream=True,
                       headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,*/*"},
-                      allow_redirects=True) as resp:
-        limit = MAX_PAGE_BYTES
+                      allow_redirects=False) as resp:
+        if resp.is_redirect or resp.is_permanent_redirect:
+            if _redirects >= MAX_REDIRECTS:
+                raise ValueError(f"too many redirects from {url}")
+            location = resp.headers.get("Location", "")
+            nxt = urljoin(url, location)
+            validate_url_host(nxt)  # re-validate EVERY redirect hop
+            return _fetch(nxt, max_bytes=max_bytes, _redirects=_redirects + 1)
         buf = bytearray()
         for chunk in resp.iter_content(chunk_size=65536):
             buf.extend(chunk)
@@ -507,7 +572,7 @@ def load_signatures(conn) -> List[Dict[str, Any]]:
 def load_active_suppressions(conn) -> List[Dict[str, Any]]:
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT id, scope, finding_type, tracker_name, target_id
+            """SELECT id, scope, finding_type, tracker_name, target_id, finding_id
                  FROM scan_suppressions
                 WHERE status = 'approved'
                   AND (expires_at IS NULL OR expires_at > now())"""
@@ -518,7 +583,13 @@ def load_active_suppressions(conn) -> List[Dict[str, Any]]:
 
 def is_suppressed(finding: Dict[str, Any], target_id: int,
                   suppressions: List[Dict[str, Any]]) -> Optional[int]:
+    """All four suppression scopes: finding_type / tracker / target / finding."""
     for s in suppressions:
+        if s["scope"] == "target" and s.get("target_id") == target_id:
+            return s["id"]
+        if s["scope"] == "finding" and finding.get("finding_id") and \
+                s.get("finding_id") == finding["finding_id"]:
+            return s["id"]
         if s["scope"] == "finding_type" and s.get("finding_type") == finding["finding_type"]:
             if s.get("target_id") in (None, target_id):
                 return s["id"]
@@ -585,18 +656,33 @@ def execute_run(run_id: int) -> Dict[str, Any]:
             )
             target = cur.fetchone()
             if not target:
-                conn.rollback()
+                # Target deleted/missing: the run must not stay 'running'
+                # forever — mark it FAILED with an explicit reason.
+                cur.execute(
+                    """UPDATE scan_runs SET status = 'failed', finished_at = now(),
+                            error = 'target missing'
+                        WHERE id = %s AND status = 'running'""",
+                    (run_id,),
+                )
+                conn.commit()
                 return {"run_id": run_id, "status": "failed", "reason": "target missing"}
         conn.commit()
 
         target_id, org_id, controller_name, base_url, crawl_paths, max_pages = target
+        validate_url_host(base_url)  # SSRF guard on the registered target itself
         signatures = load_signatures(conn)
         if not signatures:
             raise RuntimeError("tracker_signatures table is empty — run migration 0083 (no silent fallback)")
         suppressions = load_active_suppressions(conn)
 
-        paths = ["/"] + [p for p in (crawl_paths or []) if isinstance(p, str) and p != "/"]
-        paths = paths[: max(1, int(max_pages or 5))]
+        raw_paths = ["/"] + [p for p in (crawl_paths or []) if isinstance(p, str) and p != "/"]
+        paths = []
+        for p in raw_paths:
+            try:
+                paths.append(validate_crawl_path(p))
+            except ValueError as exc:
+                log.warning("rejecting crawl path %r for target %s: %s", p, target_id, exc)
+        paths = paths[: max(1, int(max_pages or 5))] or ["/"]
 
         findings: List[Dict[str, Any]] = []
         artifacts: List[Dict[str, Any]] = []
@@ -697,17 +783,39 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                 if r:
                     artifact_ids.append(r[0])
 
-            # persist findings (honouring approved suppressions)
+            # persist findings (honouring approved suppressions; deduped across
+            # runs: same target + type + tracker + evidence hash updates
+            # last_seen/occurrence_count instead of inserting a new row)
             written = 0
+            deduped = 0
             for f in findings:
                 sup_id = is_suppressed(f, target_id, suppressions)
                 status = "suppressed" if sup_id else "open"
+                evidence_json = json.dumps(f["evidence"], sort_keys=True)
+                evidence_hash = hashlib.sha256(
+                    f"{f['finding_type']}|{f.get('tracker_name') or ''}|{f['url']}|{evidence_json}".encode()
+                ).hexdigest()
+                cur.execute(
+                    """UPDATE scan_findings
+                          SET last_seen = now(), occurrence_count = occurrence_count + 1,
+                              run_id = %s
+                        WHERE target_id = %s AND finding_type = %s
+                          AND COALESCE(tracker_name, '') = COALESCE(%s, '')
+                          AND evidence_hash = %s
+                          AND status IN ('open', 'acknowledged', 'suppressed')
+                        RETURNING id""",
+                    (run_id, target_id, f["finding_type"], f.get("tracker_name"), evidence_hash),
+                )
+                if cur.fetchone():
+                    deduped += 1
+                    continue
                 cur.execute(
                     """INSERT INTO scan_findings
-                         (run_id, target_id, finding_type, severity, url, tracker_name, evidence, status, suppression_id)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)""",
+                         (run_id, target_id, finding_type, severity, url, tracker_name, evidence,
+                          evidence_hash, status, suppression_id)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)""",
                     (run_id, target_id, f["finding_type"], f["severity"], f["url"],
-                     f.get("tracker_name"), json.dumps(f["evidence"]), status, sup_id),
+                     f.get("tracker_name"), evidence_json, evidence_hash, status, sup_id),
                 )
                 written += 1
 
@@ -718,7 +826,8 @@ def execute_run(run_id: int) -> Dict[str, Any]:
                           run_metadata = run_metadata || %s::jsonb
                     WHERE id = %s""",
                 (pages_scanned, len(trackers_total), written,
-                 json.dumps({"trackers": sorted(trackers_total), "artifacts": len(artifact_ids)}), run_id),
+                 json.dumps({"trackers": sorted(trackers_total), "artifacts": len(artifact_ids),
+                             "findings_deduped": deduped}), run_id),
             )
             cur.execute("UPDATE scan_targets SET last_scanned_at = now(), updated_at = now() WHERE id = %s", (target_id,))
         conn.commit()
@@ -756,6 +865,53 @@ def execute_run(run_id: int) -> Dict[str, Any]:
 
 
 # ── Scheduler loop ─────────────────────────────────────────────────────────────
+def reap_stale_runs() -> int:
+    """Runs stuck in 'running' beyond STALE_RUN_MULTIPLIER × the target's scan
+    interval are crashed/orphaned — mark them failed so they stop masking the
+    queue and the failure is visible."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE scan_runs r
+                      SET status = 'failed', finished_at = now(),
+                          error = 'reaped: stale running row'
+                     FROM scan_targets t
+                    WHERE r.target_id = t.id
+                      AND r.status = 'running'
+                      AND r.started_at < now() - (t.scan_interval_hours * %s || ' hours')::interval
+                    RETURNING r.id""",
+                (STALE_RUN_MULTIPLIER,),
+            )
+            ids = [row[0] for row in cur.fetchall()]
+        conn.commit()
+        if ids:
+            log.warning("reaped %d stale running scan_runs: %s", len(ids), ids[:20])
+        return len(ids)
+    finally:
+        conn.close()
+
+
+def expire_suppressions() -> int:
+    """Time-boxed suppressions past expires_at flip approved -> expired."""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE scan_suppressions
+                      SET status = 'expired', updated_at = now()
+                    WHERE status = 'approved' AND expires_at IS NOT NULL AND expires_at <= now()
+                    RETURNING id""",
+            )
+            ids = [row[0] for row in cur.fetchall()]
+        conn.commit()
+        if ids:
+            log.info("expired %d suppressions: %s", len(ids), ids[:20])
+        return len(ids)
+    finally:
+        conn.close()
+
+
 def claim_due_runs(limit: int = 3) -> List[int]:
     conn = _connect()
     try:
@@ -803,6 +959,8 @@ def _scheduler_loop() -> None:
     while True:
         try:
             if DB_URL:
+                expire_suppressions()
+                reap_stale_runs()
                 schedule_due_targets()
                 for run_id in claim_due_runs():
                     try:
@@ -822,15 +980,32 @@ def health_payload() -> Dict[str, Any]:
         "worker": "scan_crawler",
         "status": status,
         "uptime_seconds": round(time.time() - _worker_start, 1),
-        "database": db,
+        # Never leak raw DB errors to unauthenticated health callers.
+        "database": {"configured": db["configured"], "status": db["status"]},
         "scans_completed": _scans_completed,
         "scans_failed": _scans_failed,
         "findings_written": _findings_written,
-        "last_error": _last_error,
+        "in_flight": _in_flight_sem._value if hasattr(_in_flight_sem, "_value") else None,
         "config": {"poll_interval_s": POLL_INTERVAL, "request_timeout_s": REQUEST_TIMEOUT,
                    "max_page_bytes": MAX_PAGE_BYTES, "user_agent": USER_AGENT},
         "time": utcnow().isoformat(),
     }
+
+
+_in_flight_sem = threading.BoundedSemaphore(MAX_IN_FLIGHT)
+
+
+def _check_worker_token(headers) -> Optional[str]:
+    """X-Worker-Token check. Fails CLOSED when WORKER_AUTH_TOKEN is unset
+    outside an explicit dev environment. Returns None on success, else an
+    error message."""
+    if not WORKER_AUTH_TOKEN:
+        if DEV_MODE:
+            return None
+        return "worker auth not configured (WORKER_AUTH_TOKEN unset)"
+    if headers.get("X-Worker-Token") != WORKER_AUTH_TOKEN:
+        return "invalid worker token"
+    return None
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -853,7 +1028,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length") or 0)
+        # Control-plane auth: X-Worker-Token required (fail closed).
+        auth_err = _check_worker_token(self.headers)
+        if auth_err:
+            self._json(401, {"error": auth_err})
+            return
+        # Request-size cap.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._json(400, {"error": "invalid Content-Length"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._json(413, {"error": "request body too large"})
+            return
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
@@ -866,6 +1054,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             if not DB_URL:
                 self._json(503, {"status": "UNCONFIGURED", "error": "database URL not set"})
+                return
+            if not _in_flight_sem.acquire(blocking=False):
+                self._json(429, {"error": "too many scans in flight"})
                 return
             threading.Thread(target=self._run_safe, args=(run_id,), daemon=True).start()
             self._json(202, {"run_id": run_id, "status": "accepted"})
@@ -889,7 +1080,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 conn.commit()
                 conn.close()
             except Exception as exc:
-                self._json(500, {"error": str(exc)[:300]})
+                log.warning("scan-target insert failed: %s", exc)
+                self._json(500, {"error": "failed to create scan run"})
+                return
+            if not _in_flight_sem.acquire(blocking=False):
+                self._json(429, {"error": "too many scans in flight"})
                 return
             threading.Thread(target=self._run_safe, args=(run_id,), daemon=True).start()
             self._json(202, {"run_id": run_id, "status": "accepted"})
@@ -902,6 +1097,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             execute_run(run_id)
         except Exception:
             pass  # failure state is persisted on the run row
+        finally:
+            _in_flight_sem.release()
 
 
 class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
@@ -910,9 +1107,9 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def main() -> None:
-    log.info("scan crawler worker starting on port %s (db configured: %s)", PORT, bool(DB_URL))
+    log.info("scan crawler worker starting on %s:%s (db configured: %s)", BIND_HOST, PORT, bool(DB_URL))
     threading.Thread(target=_scheduler_loop, daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((BIND_HOST, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

@@ -77,7 +77,7 @@ except ImportError:
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_URL = os.environ.get("DATABASE_URL", os.environ.get("WORKER_DATABASE_URL", ""))
-PORT = int(os.environ.get("ML_WORKER_PORT", "8085"))
+PORT = int(os.environ.get("ML_WORKER_PORT", "8103"))  # canonical workerManager port (was 8085, collided with ml-prediction)
 MODEL_DIR = Path(os.environ.get("ML_MODEL_PATH", "./workers/python/models"))
 LAKEHOUSE_URL = os.environ.get("LAKEHOUSE_URL", "http://localhost:8140")
 REDIS_URL = os.environ.get("REDIS_URL", "localhost:6379")

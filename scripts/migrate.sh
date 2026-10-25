@@ -14,6 +14,8 @@ case "$COMMAND" in
   up)
     echo "Applying canonical Drizzle migrations..."
     pnpm exec drizzle-kit migrate --config drizzle.config.ts
+    echo "Applying raw SQL migrations (drizzle/migrations/0019+; idempotent, order-aware)..."
+    node scripts/runRawMigrations.mjs
     echo "Migrations complete."
     ;;
   version)

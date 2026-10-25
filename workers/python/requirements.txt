@@ -1,5 +1,9 @@
-psycopg2-binary>=2.9.9
-numpy>=1.26.0
-scikit-learn>=1.4.0
-requests>=2.31.0
-fluvio>=0.15.0
+# NDSEP Python workers — pinned dependencies (round-9: reproducible builds)
+psycopg2-binary==2.9.13
+numpy==2.2.5
+scikit-learn==1.7.2
+requests==2.32.3
+fluvio==0.15.0
+# Vector ETL / KGQA workers (cocoindex_etl_worker, epr_kgqa_worker, qdrant_vector_worker)
+qdrant-client==1.12.1
+sentence-transformers==3.3.1

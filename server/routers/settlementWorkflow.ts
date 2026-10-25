@@ -259,19 +259,40 @@ export const settlementWorkflowRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: `invalid terms: ${problems.join("; ")}` });
       }
       const fine = await resolveFine(input.fineReference);
-      const ref = await nextSettlementRef();
-      const rows = await query<{ id: string }>(
-        `INSERT INTO settlements
-           (settlement_ref, case_ref, fine_reference, fine_id, org_id, status,
-            proposed_by, respondent_name, respondent_email, original_amount)
-         VALUES ($1, $2, $3, $4, $5, 'proposal', $6, $7, $8, $9) RETURNING id`,
-        [
-          ref, input.caseRef, input.fineReference ?? null,
-          fine ? Number(fine.id) : null, fine ? Number(fine.org_id) : null,
-          actor, input.respondentName ?? null, input.respondentEmail ?? null,
-          fine ? Number(fine.amount) : null,
-        ],
+      // case_ref must reference a real enforcement case.
+      const caseRows = await query<{ id: number }>(
+        `SELECT id FROM enforcement_cases WHERE case_reference = $1`,
+        [input.caseRef],
       );
+      if (!caseRows[0]) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `enforcement case '${input.caseRef}' not found` });
+      }
+      const ref = await nextSettlementRef();
+      let rows: Array<{ id: string }>;
+      try {
+        rows = await query<{ id: string }>(
+          `INSERT INTO settlements
+             (settlement_ref, case_ref, fine_reference, fine_id, org_id, status,
+              proposed_by, respondent_name, respondent_email, original_amount)
+           VALUES ($1, $2, $3, $4, $5, 'proposal', $6, $7, $8, $9) RETURNING id`,
+          [
+            ref, input.caseRef, input.fineReference ?? null,
+            fine ? Number(fine.id) : null, fine ? Number(fine.org_id) : null,
+            actor, input.respondentName ?? null, input.respondentEmail ?? null,
+            fine ? Number(fine.amount) : null,
+          ],
+        );
+      } catch (err) {
+        // One live settlement per case/fine (unique-live-settlement index):
+        // surface the conflict explicitly instead of a raw 500.
+        if ((err as { code?: string }).code === "23505") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "a live settlement already exists for this case/fine",
+          });
+        }
+        throw err;
+      }
       const settlementId = Number(rows[0].id);
       await query(
         `INSERT INTO settlement_terms
@@ -357,10 +378,11 @@ export const settlementWorkflowRouter = router({
   /**
    * Maker-checker approval. Two DISTINCT approvers, neither the proposer;
    * the approval that ACTIVATES the settlement must be commissioner level
-   * (platform admin). Activation materialises the instalment schedule and
-   * posts each entry to TigerBeetle (explicit ledger_post_status).
+   * (platform admin). Officer-level approvals are taken by any staff role
+   * (staffProcedure); approvalLevelOf maps admin -> commissioner, so the
+   * two-level maker-checker chain is reachable in practice.
    */
-  approveSettlement: adminProcedure
+  approveSettlement: staffProcedure
     .input(z.object({
       settlementId: z.number().int().positive(),
       reason: z.string().max(2000).default(""),
@@ -528,89 +550,108 @@ export const settlementWorkflowRouter = router({
       if (s.status !== "active") {
         throw new TRPCError({ code: "CONFLICT", message: `settlement is '${s.status}' — payments only accepted while active` });
       }
-      const rows = await query(
-        `SELECT * FROM settlement_instalments WHERE settlement_id = $1 AND seq = $2`,
-        [input.settlementId, input.seq],
-      );
-      const inst = rows[0];
-      if (!inst) throw new TRPCError({ code: "NOT_FOUND", message: "instalment not found" });
+      const pool = requirePool();
+      const client = await pool.connect();
+      let outcome: Record<string, unknown>;
+      try {
+        await client.query("BEGIN");
+        // Row lock: concurrent payments against the same instalment serialize.
+        const rows = await client.query(
+          `SELECT * FROM settlement_instalments WHERE settlement_id = $1 AND seq = $2 FOR UPDATE`,
+          [input.settlementId, input.seq],
+        );
+        const inst = rows.rows[0];
+        if (!inst) throw new TRPCError({ code: "NOT_FOUND", message: "instalment not found" });
 
-      // Idempotency: a payment reference may be applied exactly once per
-      // settlement (backed by idx_settlement_instalments_payment_ref).
-      const dupe = await query(
-        `SELECT id, seq FROM settlement_instalments
-         WHERE settlement_id = $1 AND payment_reference = $2`,
-        [input.settlementId, input.paymentReference],
-      );
-      if (dupe[0]) {
-        return {
-          settlementId: input.settlementId,
-          seq: Number(dupe[0].seq),
-          duplicated: true as const,
+        // Idempotency: a payment reference may be applied exactly once per
+        // settlement (backed by idx_settlement_instalments_payment_ref).
+        const dupe = await client.query(
+          `SELECT id, seq FROM settlement_instalments
+           WHERE settlement_id = $1 AND payment_reference = $2`,
+          [input.settlementId, input.paymentReference],
+        );
+        if (dupe.rows[0]) {
+          await client.query("ROLLBACK");
+          return {
+            settlementId: input.settlementId,
+            seq: Number(dupe.rows[0].seq),
+            duplicated: true as const,
+          };
+        }
+
+        const record: InstalmentRecord = {
+          seq: Number(inst.seq),
+          dueDate: String(inst.due_date),
+          amount: Number(inst.amount),
+          status: inst.status as InstalmentStatus,
+          amountPaid: Number(inst.amount_paid),
         };
-      }
+        const { instalment: updated, overpayment } = applyPayment(record, input.amount);
+        await client.query(
+          `UPDATE settlement_instalments
+           SET amount_paid = $3, status = $4,
+               paid_at = CASE WHEN $4 = 'paid' THEN now() ELSE paid_at END,
+               payment_reference = $5, updated_at = now()
+           WHERE id = $1 AND settlement_id = $2`,
+          [inst.id, input.settlementId, updated.amountPaid, updated.status, input.paymentReference],
+        );
 
-      const record: InstalmentRecord = {
-        seq: Number(inst.seq),
-        dueDate: String(inst.due_date),
-        amount: Number(inst.amount),
-        status: inst.status as InstalmentStatus,
-        amountPaid: Number(inst.amount_paid),
-      };
-      const { instalment: updated, overpayment } = applyPayment(record, input.amount);
-      await query(
-        `UPDATE settlement_instalments
-         SET amount_paid = $3, status = $4,
-             paid_at = CASE WHEN $4 = 'paid' THEN now() ELSE paid_at END,
-             payment_reference = $5, updated_at = now()
-         WHERE id = $1 AND settlement_id = $2`,
-        [inst.id, input.settlementId, updated.amountPaid, updated.status, input.paymentReference],
-      );
+        // Mirror onto the linked fine (settlement -> finePayments linkage).
+        // fineUpdated is true ONLY when the mirrored update actually happened;
+        // any failure aborts the whole transaction (no swallowed errors).
+        let fineUpdated = false;
+        if (s.fine_id != null) {
+          await client.query(
+            `UPDATE enforcement_fines
+             SET amount_paid = COALESCE(amount_paid, 0) + $2,
+                 status = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN 'paid' ELSE 'partial' END,
+                 paid_at = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN NOW() ELSE paid_at END,
+                 payment_reference = $3, updated_at = NOW()
+             WHERE id = $1`,
+            [Number(s.fine_id), input.amount - overpayment, input.paymentReference],
+          );
+          fineUpdated = true;
+        }
 
-      // Mirror onto the linked fine (settlement -> finePayments linkage).
-      let fineUpdated = false;
-      if (s.fine_id != null) {
-        await query(
-          `UPDATE enforcement_fines
-           SET amount_paid = COALESCE(amount_paid, 0) + $2,
-               status = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN 'paid' ELSE 'partial' END,
-               paid_at = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN NOW() ELSE paid_at END,
-               payment_reference = $3, updated_at = NOW()
-           WHERE id = $1`,
-          [Number(s.fine_id), input.amount - overpayment, input.paymentReference],
-        ).catch((err: unknown) => {
-          if (isMissingTable(err)) return;
-          throw err;
-        });
-        fineUpdated = true;
+        // Fulfilment check across all instalments.
+        const all = await client.query(
+          `SELECT id, seq, due_date, amount, status, amount_paid FROM settlement_instalments WHERE settlement_id = $1`,
+          [input.settlementId],
+        );
+        const records: InstalmentRecord[] = all.rows.map((r) => ({
+          seq: Number(r.seq), dueDate: String(r.due_date), amount: Number(r.amount),
+          status: (r.id === inst.id ? updated.status : r.status) as InstalmentStatus,
+          amountPaid: r.id === inst.id ? updated.amountPaid : Number(r.amount_paid),
+        }));
+        let fulfilled = false;
+        if (isFulfilled(records, input.obligationsSignedOff)) {
+          assertTransition("active", "fulfilled");
+          const res = await client.query(
+            `UPDATE settlements SET status = 'fulfilled', fulfilled_at = now(), updated_at = now()
+             WHERE id = $1 AND status = 'active' RETURNING id`,
+            [input.settlementId],
+          );
+          fulfilled = Boolean(res.rows[0]);
+        }
+        await client.query("COMMIT");
+        outcome = {
+          settlementId: input.settlementId, seq: input.seq,
+          instalmentStatus: updated.status, amountPaid: updated.amountPaid,
+          overpayment, fulfilled, fineUpdated,
+        };
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
       }
-
-      // Fulfilment check across all instalments.
-      const all = await query(
-        `SELECT id, seq, due_date, amount, status, amount_paid FROM settlement_instalments WHERE settlement_id = $1`,
-        [input.settlementId],
-      );
-      const records: InstalmentRecord[] = all.map((r) => ({
-        seq: Number(r.seq), dueDate: String(r.due_date), amount: Number(r.amount),
-        status: (r.id === inst.id ? updated.status : r.status) as InstalmentStatus,
-        amountPaid: r.id === inst.id ? updated.amountPaid : Number(r.amount_paid),
-      }));
-      let fulfilled = false;
-      if (isFulfilled(records, input.obligationsSignedOff)) {
-        await transition(input.settlementId, "active", "fulfilled", { fulfilled_at: new Date().toISOString() });
-        fulfilled = true;
-      }
-      await audit(fulfilled ? "fulfilled" : "instalment_paid", {
+      await audit(outcome.fulfilled ? "fulfilled" : "instalment_paid", {
         settlementId: input.settlementId, settlementRef: s.settlement_ref, caseRef: s.case_ref,
-        seq: input.seq, amount: input.amount, overpayment,
+        seq: input.seq, amount: input.amount, overpayment: outcome.overpayment,
         paymentReference: input.paymentReference, fineReference: s.fine_reference ?? null,
-        fineUpdated, actor,
+        fineUpdated: outcome.fineUpdated, actor,
       }, actor);
-      return {
-        settlementId: input.settlementId, seq: input.seq,
-        instalmentStatus: updated.status, amountPaid: updated.amountPaid,
-        overpayment, fulfilled, fineUpdated,
-      };
+      return outcome;
     }),
 
   /**
@@ -761,44 +802,82 @@ export const settlementWorkflowRouter = router({
         return { settlementId: input.settlementId, status: "already_applied" as const };
       }
       const reduction = Number(payload.reduction_amount);
-      let remaining = reduction;
-      const open = await query<{ id: number; seq: number; amount: string; status: string }>(
-        `SELECT id, seq, amount, status FROM settlement_instalments
-         WHERE settlement_id = $1 AND status IN ('scheduled', 'posted', 'partial', 'overdue')
-         ORDER BY seq DESC`,
-        [input.settlementId],
-      );
-      const waivedSeqs: number[] = [];
-      for (const inst of open) {
-        if (remaining <= 0) break;
-        const amt = Number(inst.amount);
-        if (amt <= remaining + 0.001) {
-          await query(
-            `UPDATE settlement_instalments SET status = 'waived', updated_at = now() WHERE id = $1`,
-            [inst.id],
-          );
-          waivedSeqs.push(inst.seq);
-          remaining = Math.round((remaining - amt) * 100) / 100;
-        } else {
-          await query(
-            `UPDATE settlement_instalments SET amount = amount - $2, updated_at = now() WHERE id = $1`,
-            [inst.id, remaining],
-          );
-          remaining = 0;
+      const pool = requirePool();
+      const client = await pool.connect();
+      let waivedSeqs: number[] = [];
+      try {
+        await client.query("BEGIN");
+        let remaining = reduction;
+        const open = await client.query(
+          `SELECT id, seq, amount, status FROM settlement_instalments
+           WHERE settlement_id = $1 AND status IN ('scheduled', 'posted', 'partial', 'overdue')
+           ORDER BY seq DESC FOR UPDATE`,
+          [input.settlementId],
+        );
+        for (const inst of open.rows) {
+          if (remaining <= 0) break;
+          const amt = Number(inst.amount);
+          if (amt <= remaining + 0.001) {
+            await client.query(
+              `UPDATE settlement_instalments SET status = 'waived', updated_at = now() WHERE id = $1`,
+              [inst.id],
+            );
+            waivedSeqs.push(Number(inst.seq));
+            remaining = Math.round((remaining - amt) * 100) / 100;
+          } else {
+            await client.query(
+              `UPDATE settlement_instalments SET amount = amount - $2, updated_at = now() WHERE id = $1`,
+              [inst.id, remaining],
+            );
+            remaining = 0;
+          }
         }
+        // Reduce the linked enforcement fine atomically in the SAME
+        // transaction — the waiver must never exist only on the settlement.
+        if (s.fine_id != null) {
+          await client.query(
+            `UPDATE enforcement_fines
+             SET amount = GREATEST(0, amount - $2),
+                 status = CASE
+                   WHEN COALESCE(amount_paid, 0) >= GREATEST(0, amount - $2) THEN 'paid'
+                   ELSE status
+                 END,
+                 updated_at = now()
+             WHERE id = $1`,
+            [Number(s.fine_id), reduction],
+          );
+        }
+        await client.query(
+          `UPDATE settlements
+           SET reduction_amount = COALESCE(reduction_amount, 0) + $2,
+               reduction_legal_basis = $3, updated_at = now()
+           WHERE id = $1`,
+          [input.settlementId, reduction, String(payload.legal_basis)],
+        );
+        // Consume the dual-control request so it cannot be replayed.
+        const consumed = await client.query(
+          `UPDATE dual_control_requests SET status = 'consumed', updated_at = now()
+           WHERE id = $1 AND status = 'approved' RETURNING id`,
+          [input.dualControlRequestId],
+        );
+        if (!consumed.rows[0]) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "dual-control request is no longer in 'approved' status — it may have been consumed already",
+          });
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
       }
-      await query(
-        `UPDATE settlements
-         SET reduction_amount = COALESCE(reduction_amount, 0) + $2,
-             reduction_legal_basis = $3, updated_at = now()
-         WHERE id = $1`,
-        [input.settlementId, reduction, String(payload.legal_basis)],
-      );
       await audit("waiver_executed", {
         settlementId: input.settlementId, settlementRef: s.settlement_ref, caseRef: s.case_ref,
         reductionAmount: reduction, legalBasis: payload.legal_basis,
         waivedInstalmentSeqs: waivedSeqs.sort((a, b) => a - b),
-        dualControlRequestId: input.dualControlRequestId, actor,
+        dualControlRequestId: input.dualControlRequestId, fineReduced: s.fine_id != null, actor,
       }, actor);
       return {
         settlementId: input.settlementId,

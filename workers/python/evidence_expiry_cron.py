@@ -14,10 +14,21 @@ import json
 import psycopg2
 import psycopg2.extras
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [evidence-expiry-cron] %(message)s")
 log = logging.getLogger(__name__)
 
-DB_URL = os.environ.get("WORKER_DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db")
+DB_URL = os.environ.get("WORKER_DATABASE_URL")
 PORT = int(os.environ.get("EXPIRY_CRON_PORT", "8116"))
 INTERVAL_SECONDS = 300  # 5 minutes
 
@@ -27,7 +38,7 @@ last_run_expired = 0
 
 
 def get_conn():
-    return psycopg2.connect(DB_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    return psycopg2.connect(_require_dsn(DB_URL), cursor_factory=psycopg2.extras.RealDictCursor)
 
 
 def run_expiry_check():

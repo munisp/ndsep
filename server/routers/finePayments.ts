@@ -53,6 +53,37 @@ function toIntOrNull(v: string | number | null): number | null {
   return Number.isInteger(n) && Math.abs(n) < 2147483647 ? n : null;
 }
 
+const STAFF_ROLES = new Set(["admin", "government_staff", "regulator", "auditor"]);
+
+/**
+ * Org-scope guard: staff roles see everything; organisation users only fines
+ * belonging to their own organisation (organization_users membership or the
+ * org id on their account).
+ */
+async function assertFineOrgAccess(
+  user: { id: number; role: string; organizationId?: number | null },
+  fineOrgId: number | null | undefined,
+): Promise<void> {
+  if (STAFF_ROLES.has(user.role)) return;
+  if (fineOrgId == null) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Fine is not linked to an organisation" });
+  }
+  if (user.organizationId != null && Number(user.organizationId) === Number(fineOrgId)) return;
+  const rows = await exec(
+    `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+    [user.id, fineOrgId],
+  );
+  if (!rows[0]) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Fine belongs to a different organisation" });
+  }
+}
+
+/** Resolve the org that owns a fine. */
+async function fineOrgId(penaltyId: number): Promise<number | null> {
+  const rows = await exec(`SELECT org_id FROM enforcement_fines WHERE id = $1`, [penaltyId]);
+  return rows[0]?.org_id ?? null;
+}
+
 async function logAudit(
   action: string,
   resourceType: string,
@@ -124,15 +155,60 @@ async function settleRrr(
   rrr: string,
   payerEmail: string | null,
   webhookAmount: number | null = null,
-): Promise<{ receiptNumber?: string; queuedForReview?: boolean }> {
+): Promise<{ receiptNumber?: string; queuedForReview?: boolean; healed?: boolean }> {
   const existing = await exec(
     `SELECT id, penalty_id, amount, currency, status, expires_at FROM payment_rrr_codes WHERE rrr = $1`,
     [rrr],
   );
   const current = existing[0];
   if (current && current.status === "paid") {
-    // Already settled — idempotent no-op.
-    return {};
+    // Already settled — idempotent no-op, but HEAL any missing side-effects
+    // left by a partially-committed earlier settlement (receipt row and/or
+    // fine credit).
+    const receiptRows = await exec(`SELECT receipt_number FROM receipts WHERE rrr = $1 LIMIT 1`, [rrr]);
+    const fineRows = await exec(
+      `SELECT amount, COALESCE(amount_paid, 0) AS amount_paid, status FROM enforcement_fines WHERE id = $1`,
+      [current.penalty_id],
+    );
+    const receiptMissing = !receiptRows[0];
+    const fineUnderCredited = fineRows[0] != null && Number(fineRows[0].amount_paid) < Number(current.amount);
+    if (!receiptMissing && !fineUnderCredited) return {};
+    const healPool = getPool();
+    if (!healPool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+    const healClient = await healPool.connect();
+    try {
+      await healClient.query("BEGIN");
+      let healedReceipt: string | undefined;
+      if (receiptMissing) {
+        healedReceipt = await nextReceiptNumber();
+        await healClient.query(
+          `INSERT INTO receipts (receipt_number, rrr, penalty_id, amount, currency, payer_email)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [healedReceipt, rrr, current.penalty_id, current.amount, current.currency, payerEmail],
+        );
+      }
+      if (fineUnderCredited) {
+        await healClient.query(
+          `UPDATE enforcement_fines
+           SET amount_paid = GREATEST(COALESCE(amount_paid, 0), $2),
+               status = CASE WHEN GREATEST(COALESCE(amount_paid, 0), $2) >= amount THEN 'paid' ELSE status END,
+               paid_at = CASE WHEN GREATEST(COALESCE(amount_paid, 0), $2) >= amount THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [current.penalty_id, current.amount],
+        );
+      }
+      await healClient.query("COMMIT");
+      await logAudit("payment.settlement_healed", "payment_rrr_code", rrr, null, {
+        receipt_healed: receiptMissing, fine_healed: fineUnderCredited,
+      });
+      return { receiptNumber: healedReceipt, healed: true };
+    } catch (err) {
+      await healClient.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      healClient.release();
+    }
   }
   if (current && webhookAmount != null && Number(webhookAmount) !== Number(current.amount)) {
     // Amount mismatch: do not settle. The under/over-payment goes to the
@@ -156,46 +232,64 @@ async function settleRrr(
     );
     return { queuedForReview: true };
   }
-  const rows = await exec(
-    `UPDATE payment_rrr_codes SET status = 'paid', paid_at = NOW()
-     WHERE rrr = $1 AND status = 'generated' AND expires_at > NOW()
-     RETURNING id, penalty_id, amount, currency`,
-    [rrr],
-  );
-  if (!rows[0]) {
-    if (current) {
-      // Generated but past expiry at settlement time — same expired-RRR path.
-      await routeToUnmatchedQueue(
-        rrr,
-        current.penalty_id,
-        webhookAmount ?? Number(current.amount),
-        "Payment received for expired RRR; manual reconciliation required",
-      );
-      return { queuedForReview: true };
+  // Atomic settlement: RRR flip + receipt issue + fine credit commit or roll
+  // back together in one transaction.
+  const pool = getPool();
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const client = await pool.connect();
+  let payment: { id: number; penalty_id: number; amount: string | number; currency: string } | null = null;
+  let receiptNumber = "";
+  try {
+    await client.query("BEGIN");
+    const settled = await client.query(
+      `UPDATE payment_rrr_codes SET status = 'paid', paid_at = NOW()
+       WHERE rrr = $1 AND status = 'generated' AND expires_at > NOW()
+       RETURNING id, penalty_id, amount, currency`,
+      [rrr],
+    );
+    if (!settled.rows[0]) {
+      await client.query("ROLLBACK");
+      if (current) {
+        // Generated but past expiry at settlement time — same expired-RRR path.
+        await routeToUnmatchedQueue(
+          rrr,
+          current.penalty_id,
+          webhookAmount ?? Number(current.amount),
+          "Payment received for expired RRR; manual reconciliation required",
+        );
+        return { queuedForReview: true };
+      }
+      // Unknown RRR — idempotent no-op (callers 404 unknown RRRs upstream).
+      return {};
     }
-    // Unknown RRR — idempotent no-op (callers 404 unknown RRRs upstream).
-    return {};
+    payment = settled.rows[0];
+    receiptNumber = await nextReceiptNumber();
+    // Receipt numbers come from ndsep_receipt_number_seq and are unique by
+    // construction; a conflict here is a real integrity failure, not a skip.
+    await client.query(
+      `INSERT INTO receipts (receipt_number, rrr, penalty_id, amount, currency, payer_email)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [receiptNumber, rrr, payment.penalty_id, payment.amount, payment.currency, payerEmail],
+    );
+    // Reflect the settlement on the fine itself (mirrors phase11 recordPayment semantics).
+    await client.query(
+      `UPDATE enforcement_fines
+       SET status = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN 'paid' ELSE 'partial' END,
+           amount_paid = COALESCE(amount_paid, 0) + $2,
+           paid_at = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN NOW() ELSE paid_at END,
+           payment_reference = $3,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [payment.penalty_id, payment.amount, rrr],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
   }
-  const payment = rows[0];
-  const receiptNumber = await nextReceiptNumber();
-  // Receipt numbers come from ndsep_receipt_number_seq and are unique by
-  // construction; a conflict here is a real integrity failure, not a skip.
-  await exec(
-    `INSERT INTO receipts (receipt_number, rrr, penalty_id, amount, currency, payer_email)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [receiptNumber, rrr, payment.penalty_id, payment.amount, payment.currency, payerEmail],
-  );
-  // Reflect the settlement on the fine itself (mirrors phase11 recordPayment semantics).
-  await exec(
-    `UPDATE enforcement_fines
-     SET status = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN 'paid' ELSE 'partial' END,
-         amount_paid = COALESCE(amount_paid, 0) + $2,
-         paid_at = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN NOW() ELSE paid_at END,
-         payment_reference = $3,
-         updated_at = NOW()
-     WHERE id = $1`,
-    [payment.penalty_id, payment.amount, rrr],
-  );
+  if (!payment) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Settlement state error" });
   const fineRows = await exec(
     `SELECT f.id, o.name AS org_name FROM enforcement_fines f LEFT JOIN organizations o ON o.id = f.org_id WHERE f.id = $1`,
     [payment.penalty_id],
@@ -228,12 +322,29 @@ export const finePaymentsRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const fine = await exec(
-        `SELECT id, amount, COALESCE(amount_paid, 0) AS amount_paid, currency, status FROM enforcement_fines WHERE id = $1`,
+        `SELECT id, org_id, amount, COALESCE(amount_paid, 0) AS amount_paid, currency, status FROM enforcement_fines WHERE id = $1`,
         [input.penaltyId],
       );
       if (!fine[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Penalty not found" });
+      // Org-scope: org users may only raise RRRs against their own org's fines.
+      await assertFineOrgAccess(ctx.user, fine[0].org_id);
       if (fine[0].status === "paid") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Penalty is already fully paid" });
+      }
+      if (fine[0].status === "waived" || fine[0].status === "cancelled") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Penalty is '${fine[0].status}' — no payment can be collected` });
+      }
+      // Penalty-ledger bridge (0101): a stay on the linked financial_penalty
+      // suspends RRR collection on the fine.
+      const stays = await exec(
+        `SELECT ps.id FROM penalty_stays ps
+         JOIN financial_penalties fp ON fp.id = ps.penalty_id
+         WHERE fp.enforcement_fine_id = $1 AND ps.status = 'active'
+         LIMIT 1`,
+        [input.penaltyId],
+      );
+      if (stays[0]) {
+        throw new TRPCError({ code: "CONFLICT", message: "Collection is stayed pending appeal — RRR generation is suspended" });
       }
       // One live RRR per penalty; expire any stale ones first.
       await exec(
@@ -247,7 +358,12 @@ export const finePaymentsRouter = router({
       if (live[0]) return { ...live[0], reused: true };
 
       const gateway = getRemitaGateway();
-      const amount = Number(fine[0].amount) - Number(fine[0].amount_paid) || Number(fine[0].amount);
+      // Outstanding remainder — the old `a - b || a` fallback re-charged the
+      // FULL amount whenever the remainder was exactly 0.
+      const amount = Math.round((Number(fine[0].amount) - Number(fine[0].amount_paid)) * 100) / 100;
+      if (amount <= 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Penalty has no outstanding balance" });
+      }
       const result = await gateway.generateRRR({
         penaltyId: input.penaltyId,
         amount,
@@ -283,13 +399,14 @@ export const finePaymentsRouter = router({
   /** Check RRR status; lazily expires stale codes. */
   getRrrStatus: protectedProcedure
     .input(z.object({ rrr: z.string().min(6) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       await exec(`UPDATE payment_rrr_codes SET status = 'expired' WHERE rrr = $1 AND status = 'generated' AND expires_at <= NOW()`, [input.rrr]);
       const rows = await exec(
         `SELECT rrr, penalty_id, amount, currency, status, expires_at, paid_at FROM payment_rrr_codes WHERE rrr = $1`,
         [input.rrr],
       );
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "RRR not found" });
+      await assertFineOrgAccess(ctx.user, await fineOrgId(rows[0].penalty_id));
       return rows[0];
     }),
 
@@ -481,73 +598,89 @@ export const finePaymentsRouter = router({
       paidAt: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const plans = await exec(
-        `SELECT id, plan_ref, penalty_id, schedule, status, recorded_payments FROM payment_installments WHERE plan_ref = $1`,
-        [input.planRef],
-      );
-      const plan = plans[0];
-      if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Installment plan not found" });
-      if (plan.status !== "active") {
-        throw new TRPCError({ code: "CONFLICT", message: `Plan is '${plan.status}'; payments can only be applied to active plans` });
-      }
-      const recorded = typeof plan.recorded_payments === "string" ? JSON.parse(plan.recorded_payments) : (plan.recorded_payments ?? []);
-      // Idempotency: a reference already applied to this plan returns the
-      // current state instead of double-counting.
-      if (recorded.some((p: { payment_reference?: string }) => p.payment_reference === input.paymentReference)) {
-        return { planRef: plan.plan_ref, status: plan.status, idempotent: true, alreadyApplied: true };
-      }
-      const schedule = (typeof plan.schedule === "string" ? JSON.parse(plan.schedule) : plan.schedule) as Array<{
-        seq: number; due_date: string; amount: number; status: string; paid_at: string | null; paid_amount?: number;
-      }>;
-      let remaining = Math.round(input.amount * 100) / 100;
-      const paidAt = input.paidAt ?? new Date().toISOString();
-      for (const entry of schedule) {
-        if (remaining <= 0) break;
-        if (entry.status === "paid") continue;
-        const alreadyPaid = Number(entry.paid_amount ?? 0);
-        const outstanding = Math.round((Number(entry.amount) - alreadyPaid) * 100) / 100;
-        const applied = Math.min(outstanding, remaining);
-        entry.paid_amount = Math.round((alreadyPaid + applied) * 100) / 100;
-        remaining = Math.round((remaining - applied) * 100) / 100;
-        if (entry.paid_amount >= Number(entry.amount)) {
-          entry.status = "paid";
-          entry.paid_at = paidAt;
+      const pool = getPool();
+      if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const client = await pool.connect();
+      let result: Record<string, unknown>;
+      try {
+        await client.query("BEGIN");
+        // Row lock: concurrent payments against the same plan serialize here.
+        const plans = await client.query(
+          `SELECT id, plan_ref, penalty_id, schedule, status, recorded_payments FROM payment_installments WHERE plan_ref = $1 FOR UPDATE`,
+          [input.planRef],
+        );
+        const plan = plans.rows[0];
+        if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Installment plan not found" });
+        if (plan.status !== "active") {
+          throw new TRPCError({ code: "CONFLICT", message: `Plan is '${plan.status}'; payments can only be applied to active plans` });
         }
-      }
-      if (remaining > 0) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Payment of ${input.amount} exceeds the plan's outstanding balance by ${remaining}`,
+        const recorded = typeof plan.recorded_payments === "string" ? JSON.parse(plan.recorded_payments) : (plan.recorded_payments ?? []);
+        // Idempotency: a reference already applied to this plan returns the
+        // current state instead of double-counting.
+        if (recorded.some((p: { payment_reference?: string }) => p.payment_reference === input.paymentReference)) {
+          await client.query("ROLLBACK");
+          return { planRef: plan.plan_ref, status: plan.status, idempotent: true, alreadyApplied: true };
+        }
+        const schedule = (typeof plan.schedule === "string" ? JSON.parse(plan.schedule) : plan.schedule) as Array<{
+          seq: number; due_date: string; amount: number; status: string; paid_at: string | null; paid_amount?: number;
+        }>;
+        let remaining = Math.round(input.amount * 100) / 100;
+        const paidAt = input.paidAt ?? new Date().toISOString();
+        for (const entry of schedule) {
+          if (remaining <= 0) break;
+          if (entry.status === "paid") continue;
+          const alreadyPaid = Number(entry.paid_amount ?? 0);
+          const outstanding = Math.round((Number(entry.amount) - alreadyPaid) * 100) / 100;
+          const applied = Math.min(outstanding, remaining);
+          entry.paid_amount = Math.round((alreadyPaid + applied) * 100) / 100;
+          remaining = Math.round((remaining - applied) * 100) / 100;
+          if (entry.paid_amount >= Number(entry.amount)) {
+            entry.status = "paid";
+            entry.paid_at = paidAt;
+          }
+        }
+        if (remaining > 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Payment of ${input.amount} exceeds the plan's outstanding balance by ${remaining}`,
+          });
+        }
+        const allPaid = schedule.every((e) => e.status === "paid");
+        recorded.push({ payment_reference: input.paymentReference, amount: input.amount, applied_at: paidAt });
+        const updated = await client.query(
+          `UPDATE payment_installments
+           SET schedule = $1, recorded_payments = $2,
+               status = CASE WHEN $3 THEN 'completed' ELSE status END,
+               updated_at = NOW()
+           WHERE id = $4 RETURNING *`,
+          [JSON.stringify(schedule), JSON.stringify(recorded), allPaid, plan.id],
+        );
+        // Advance the fine cumulatively (mirrors settleRrr / phase11 recordPayment).
+        await client.query(
+          `UPDATE enforcement_fines
+           SET status = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN 'paid' ELSE 'partial' END,
+               amount_paid = COALESCE(amount_paid, 0) + $2,
+               paid_at = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN NOW() ELSE paid_at END,
+               payment_reference = $3,
+               payment_method = 'installment',
+               updated_at = NOW()
+           WHERE id = $1`,
+          [plan.penalty_id, input.amount, input.paymentReference],
+        );
+        await client.query("COMMIT");
+        result = updated.rows[0];
+        await logAudit("payment.installment_payment", "payment_installment", plan.id, String(ctx.user.id), {
+          plan_ref: plan.plan_ref, amount: input.amount, payment_reference: input.paymentReference, completed: allPaid,
         });
+        emitMutationEvent("ndsep.payments.installment", { action: "payment", planRef: plan.plan_ref, ts: new Date().toISOString() })
+          .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
       }
-      const allPaid = schedule.every((e) => e.status === "paid");
-      recorded.push({ payment_reference: input.paymentReference, amount: input.amount, applied_at: paidAt });
-      const updated = await exec(
-        `UPDATE payment_installments
-         SET schedule = $1, recorded_payments = $2,
-             status = CASE WHEN $3 THEN 'completed' ELSE status END,
-             updated_at = NOW()
-         WHERE id = $4 RETURNING *`,
-        [JSON.stringify(schedule), JSON.stringify(recorded), allPaid, plan.id],
-      );
-      // Advance the fine cumulatively (mirrors settleRrr / phase11 recordPayment).
-      await exec(
-        `UPDATE enforcement_fines
-         SET status = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN 'paid' ELSE 'partial' END,
-             amount_paid = COALESCE(amount_paid, 0) + $2,
-             paid_at = CASE WHEN COALESCE(amount_paid, 0) + $2 >= amount THEN NOW() ELSE paid_at END,
-             payment_reference = $3,
-             payment_method = 'installment',
-             updated_at = NOW()
-         WHERE id = $1`,
-        [plan.penalty_id, input.amount, input.paymentReference],
-      );
-      await logAudit("payment.installment_payment", "payment_installment", plan.id, String(ctx.user.id), {
-        plan_ref: plan.plan_ref, amount: input.amount, payment_reference: input.paymentReference, completed: allPaid,
-      });
-      emitMutationEvent("ndsep.payments.installment", { action: "payment", planRef: plan.plan_ref, ts: new Date().toISOString() })
-        .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return updated[0];
+      return result!;
     }),
 
   listInstallmentPlans: protectedProcedure
@@ -567,12 +700,14 @@ export const finePaymentsRouter = router({
   /**
    * Auto-default detection (daily batch): flips schedule entries past their
    * due date to 'overdue', and marks the plan 'defaulted' when any entry has
-   * been overdue beyond the 14-day grace window.
+   * been overdue beyond the grace window. Grace window matches the settlement
+   * engine (services/settlementLogic.DEFAULT_GRACE_DAYS = 7). On default the
+   * linked fine flips back to 'outstanding' and the org is notified.
    */
   detectInstallmentDefaults: adminProcedure
-    .input(z.object({ graceDays: z.number().int().min(0).max(60).default(14) }))
+    .input(z.object({ graceDays: z.number().int().min(0).max(60).default(7) }))
     .mutation(async ({ input, ctx }) => {
-      const plans = await exec(`SELECT id, plan_ref, schedule FROM payment_installments WHERE status = 'active'`);
+      const plans = await exec(`SELECT id, plan_ref, penalty_id, schedule FROM payment_installments WHERE status = 'active'`);
       const today = new Date().toISOString().slice(0, 10);
       const graceCutoff = new Date(Date.now() - input.graceDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       let overdueMarked = 0;
@@ -595,7 +730,25 @@ export const finePaymentsRouter = router({
             [JSON.stringify(schedule), plan.id],
           );
           defaulted++;
-          await logAudit("payment.installment_default", "payment_installment", plan.id, String(ctx.user.id), { plan_ref: plan.plan_ref });
+          // Flip the linked fine back to outstanding (it may have been
+          // 'partial' from collected tranches) and notify the org.
+          const fineRows = await exec(
+            `UPDATE enforcement_fines SET status = 'outstanding', updated_at = NOW()
+             WHERE id = $1 AND status IN ('pending', 'partial', 'overdue')
+             RETURNING org_id`,
+            [plan.penalty_id],
+          );
+          const fineOrg = fineRows[0]?.org_id ?? null;
+          await exec(
+            `INSERT INTO in_app_notifications (title, message, severity, category, organization_id, user_id, created_at)
+             VALUES ($1, $2, 'warning', 'payment', $3, NULL, NOW())`,
+            [
+              `Installment plan ${plan.plan_ref} defaulted`,
+              `The installment plan ${plan.plan_ref} for fine NDSEP-PEN-${String(plan.penalty_id).padStart(6, "0")} has defaulted (instalment overdue beyond the ${input.graceDays}-day grace period). The fine is outstanding in full.`,
+              fineOrg,
+            ],
+          ).catch((e: unknown) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[finePayments] default notification failed"));
+          await logAudit("payment.installment_default", "payment_installment", plan.id, String(ctx.user.id), { plan_ref: plan.plan_ref, fine_outstanding: fineOrg != null });
           emitMutationEvent("ndsep.payments.installment", { action: "defaulted", planRef: plan.plan_ref, ts: new Date().toISOString() })
             .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
         } else if (changed) {
@@ -613,18 +766,29 @@ export const finePaymentsRouter = router({
   /** Fetch a receipt by its NDPC-RCT-YYYY-##### number. */
   getReceipt: protectedProcedure
     .input(z.object({ receiptNumber: z.string().regex(/^NDPC-RCT-\d{4}-\d{5}$/) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const rows = await exec(`SELECT * FROM receipts WHERE receipt_number = $1`, [input.receiptNumber]);
       if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Receipt not found" });
+      await assertFineOrgAccess(ctx.user, await fineOrgId(rows[0].penalty_id));
       return rows[0];
     }),
 
   listReceipts: protectedProcedure
     .input(z.object({ penaltyId: z.number().optional() }))
-    .query(async ({ input }) => {
-      let sql = `SELECT * FROM receipts WHERE 1=1`;
+    .query(async ({ input, ctx }) => {
       const params: unknown[] = [];
-      if (input.penaltyId) { params.push(input.penaltyId); sql += ` AND penalty_id = $${params.length}`; }
+      let sql: string;
+      if (STAFF_ROLES.has(ctx.user.role)) {
+        sql = `SELECT * FROM receipts WHERE 1=1`;
+        if (input.penaltyId) { params.push(input.penaltyId); sql += ` AND penalty_id = $${params.length}`; }
+      } else {
+        // Org users only see receipts for their own organisation's fines.
+        sql = `SELECT r.* FROM receipts r JOIN enforcement_fines f ON f.id = r.penalty_id WHERE 1=1`;
+        if (input.penaltyId) { params.push(input.penaltyId); sql += ` AND r.penalty_id = $${params.length}`; }
+        params.push(ctx.user.id);
+        sql += ` AND (f.org_id = (SELECT organization_id FROM users WHERE id = $${params.length})
+                 OR EXISTS (SELECT 1 FROM organization_users ou WHERE ou.user_id = $${params.length} AND ou.organization_id = f.org_id))`;
+      }
       sql += ` ORDER BY issued_at DESC LIMIT 200`;
       return exec(sql, params);
     }),
@@ -709,18 +873,80 @@ export const finePaymentsRouter = router({
       if (!rows[0]) {
         throw new TRPCError({ code: "CONFLICT", message: `Refund not found or not in '${allowedFrom.join("/")}' status` });
       }
-      // On approval the refunded amount must be reversed out of the fine:
-      // decrement amount_paid and recompute the cumulative status so a
-      // refunded "paid" fine re-opens (paid -> partial/pending) instead of
-      // staying falsely settled.
+      const refund = rows[0];
+      let penaltyId: number | null = refund.penalty_id ?? null;
+      if (penaltyId == null && refund.rrr) {
+        const rrrRows = await exec(`SELECT penalty_id FROM payment_rrr_codes WHERE rrr = $1`, [refund.rrr]);
+        penaltyId = rrrRows[0]?.penalty_id ?? null;
+      }
+
       if (input.decision === "approved") {
-        const refund = rows[0];
-        let penaltyId: number | null = refund.penalty_id ?? null;
-        if (penaltyId == null && refund.rrr) {
-          const rrrRows = await exec(`SELECT penalty_id FROM payment_rrr_codes WHERE rrr = $1`, [refund.rrr]);
-          penaltyId = rrrRows[0]?.penalty_id ?? null;
+        // Queue (or execute) a REAL payout. The fine is NOT reverted here —
+        // it only reverts on 'processed', after the payout is confirmed.
+        if (penaltyId == null) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Refund has no resolvable fine; cannot queue payout" });
         }
+        const fineRows = await exec(`SELECT org_id, currency FROM enforcement_fines WHERE id = $1`, [penaltyId]);
+        await exec(
+          `INSERT INTO refund_payouts (refund_ref, fine_id, organization_id, amount, currency, status, requested_by)
+           VALUES ($1, $2, $3, $4, $5, 'queued', $6)
+           ON CONFLICT (refund_ref) DO NOTHING`,
+          [input.refundRef, penaltyId, fineRows[0]?.org_id ?? null, refund.amount, fineRows[0]?.currency ?? "NGN", String(ctx.user.id)],
+        );
+        // Attempt immediate execution when a payout rail is configured.
+        const payoutUrl = process.env.NDSEP_REFUND_PAYOUT_URL;
+        if (payoutUrl) {
+          try {
+            const res = await fetch(payoutUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                refund_ref: input.refundRef,
+                fine_id: penaltyId,
+                amount: Number(refund.amount),
+                currency: fineRows[0]?.currency ?? "NGN",
+                rrr: refund.rrr ?? null,
+              }),
+              signal: AbortSignal.timeout(10000),
+            });
+            if (res.ok) {
+              const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+              await exec(
+                `UPDATE refund_payouts SET status = 'sent', provider_ref = $2, updated_at = NOW() WHERE refund_ref = $1`,
+                [input.refundRef, String(body.provider_ref ?? body.reference ?? "")],
+              );
+            } else {
+              logger.error({ refundRef: input.refundRef, status: res.status }, "[finePayments] Refund payout rail rejected the instruction — payout remains queued");
+            }
+          } catch (e) {
+            logger.error({ refundRef: input.refundRef, err: e instanceof Error ? e.message : String(e) }, "[finePayments] Refund payout rail unreachable — payout remains queued");
+          }
+        } else {
+          logger.error({ refundRef: input.refundRef }, "[finePayments] NDSEP_REFUND_PAYOUT_URL UNCONFIGURED — payout queued for manual disbursement, fine NOT reverted until payout confirmed");
+        }
+        await logAudit("payment.refund_payout_queued", "refund_request", refund.id, String(ctx.user.id), { refund_ref: input.refundRef, amount: refund.amount });
+      }
+
+      if (input.decision === "processed") {
+        // Payout must be confirmed before money is clawed back from the fine.
+        const payoutRows = await exec(
+          `SELECT status FROM refund_payouts WHERE refund_ref = $1`,
+          [input.refundRef],
+        );
+        if (!payoutRows[0] || !["sent", "confirmed"].includes(payoutRows[0].status)) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Payout for ${input.refundRef} is not confirmed (status: ${payoutRows[0]?.status ?? "missing"}) — the refund cannot be marked processed`,
+          });
+        }
+        await exec(
+          `UPDATE refund_payouts SET status = 'confirmed', confirmed_by = $2, updated_at = NOW() WHERE refund_ref = $1 AND status = 'sent'`,
+          [input.refundRef, String(ctx.user.id)],
+        );
         if (penaltyId != null) {
+          // The refunded amount is reversed out of the fine only now that the
+          // payout is confirmed: decrement amount_paid and recompute the
+          // cumulative status so a refunded "paid" fine re-opens.
           await exec(
             `UPDATE enforcement_fines
              SET amount_paid = GREATEST(0, COALESCE(amount_paid, 0) - $2),
@@ -741,12 +967,34 @@ export const finePaymentsRouter = router({
             refund_ref: input.refundRef, amount: refund.amount,
           });
         } else {
-          logger.warn({ refundRef: input.refundRef }, "[finePayments] Approved refund has no resolvable penalty; fine state not reverted");
+          logger.warn({ refundRef: input.refundRef }, "[finePayments] Processed refund has no resolvable penalty; fine state not reverted");
         }
       }
       await logAudit("payment.refund_decide", "refund_request", rows[0].id, String(ctx.user.id), { refund_ref: input.refundRef, decision: input.decision });
       emitMutationEvent("ndsep.payments.refund", { action: input.decision, refundRef: input.refundRef, ts: new Date().toISOString() })
         .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
+      return rows[0];
+    }),
+
+  /**
+   * Confirm a queued refund payout (manual disbursement channel or provider
+   * callback reconciliation). Only confirmed/sent payouts allow a refund to
+   * reach 'processed'.
+   */
+  confirmRefundPayout: adminProcedure
+    .input(z.object({ refundRef: z.string().min(4), providerRef: z.string().min(3) }))
+    .mutation(async ({ input, ctx }) => {
+      const rows = await exec(
+        `UPDATE refund_payouts
+         SET status = 'confirmed', provider_ref = COALESCE(NULLIF($2, ''), provider_ref), confirmed_by = $3, updated_at = NOW()
+         WHERE refund_ref = $1 AND status IN ('queued', 'sent')
+         RETURNING *`,
+        [input.refundRef, input.providerRef, String(ctx.user.id)],
+      );
+      if (!rows[0]) {
+        throw new TRPCError({ code: "CONFLICT", message: `No queued/sent payout found for ${input.refundRef}` });
+      }
+      await logAudit("payment.refund_payout_confirmed", "refund_payout", rows[0].id, String(ctx.user.id), { refund_ref: input.refundRef, provider_ref: input.providerRef });
       return rows[0];
     }),
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import pg from "pg";
@@ -38,8 +39,102 @@ const NDPA_CONTROLS = [
   { id: "C12", name: "Processor Agreements & Third-party Controls", ref: "§29", description: "Written DPA agreements exist with all processors. Third-party risk assessments are conducted." },
   { id: "C13", name: "Retention Policies & Secure Disposal", ref: "§26(e)", description: "Retention schedules exist. Data is securely deleted at end of retention period." },
   { id: "C14", name: "Automated Decision-making & Profiling Safeguards", ref: "§37", description: "Safeguards exist for automated decisions with significant effects. Human review is available." },
-  { id: "C15", name: "Children's Data & Parental Consent", ref: "§34", description: "Age verification mechanisms exist. Parental consent is obtained for children under 13." },
+  { id: "C15", name: "Children's Data & Parental Consent", ref: "§31", description: "Age verification mechanisms exist. Parental/guardian consent is obtained for children (data subjects under 18, per NDPA 2023 s.31)." },
 ];
+
+// ─── LLM output validation (never trust raw model JSON) ──────────────────────
+const gapAnalysisSchema = z.object({
+  ratings: z.array(z.object({
+    controlId: z.string().min(1),
+    rating: z.enum(["compliant", "partially_compliant", "non_compliant", "not_applicable"]),
+    confidence: z.number().min(0).max(1),
+    rationale: z.string(),
+    keyFindings: z.array(z.string()),
+  })),
+  overallScore: z.number(),
+  executiveSummary: z.string(),
+});
+
+const carNarrativeSchema = z.object({
+  executiveSummary: z.string(),
+  scopeAndMethodology: z.string(),
+  keyFindings: z.string(),
+  recommendations: z.string(),
+  auditorDeclaration: z.string(),
+});
+
+const riskPredictionSchema = z.object({
+  riskScore: z.number().min(0).max(100),
+  riskLevel: z.enum(["low", "medium", "high", "critical"]),
+  primaryRiskFactors: z.array(z.string()),
+  auditPriority: z.enum(["routine", "elevated", "urgent", "immediate"]),
+  recommendedAuditFrequency: z.string(),
+  mitigationActions: z.array(z.string()),
+  dcpmiExposureEstimate: z.string(),
+});
+
+function parseLlmJson<T>(schema: z.ZodType<T>, content: string, what: string): T {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(content);
+  } catch {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `${what}: LLM returned non-JSON content` });
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: `${what}: LLM output failed schema validation (${parsed.error.issues.map((i) => i.path.join(".")).join(", ")})`,
+    });
+  }
+  return parsed.data;
+}
+
+// ─── Org scoping ─────────────────────────────────────────────────────────────
+const AI_STAFF_ROLES = new Set(["admin", "government_staff", "regulator", "auditor"]);
+
+type AiUser = { id: number; role: string; organizationId?: number | null; dpcoOrgId?: number | null };
+
+/** Org users may only run analysis for their own organisation. */
+async function assertOrgAnalysisAccess(user: AiUser, organisationId: number): Promise<void> {
+  if (AI_STAFF_ROLES.has(user.role)) return;
+  if (user.organizationId != null && Number(user.organizationId) === Number(organisationId)) return;
+  const rows = await q(
+    `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+    [user.id, organisationId],
+  );
+  if (!rows[0]) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Analysis target belongs to a different organisation" });
+  }
+}
+
+/**
+ * Engagement scoping: staff may analyse any engagement; otherwise the caller
+ * must be the DPCO running the engagement (ctx.user.dpcoOrgId) or a member of
+ * the client organisation under audit.
+ */
+async function assertEngagementAnalysisAccess(user: AiUser, engagementId: number): Promise<void> {
+  if (AI_STAFF_ROLES.has(user.role)) return;
+  const rows = await q(
+    `SELECT e.dpco_org_id, c.organisation_id AS client_org_id
+     FROM dpco_audit_engagements e
+     LEFT JOIN dpco_clients c ON c.id = e.client_id
+     WHERE e.id = $1`,
+    [engagementId],
+  );
+  const eng = rows[0];
+  if (!eng) throw new TRPCError({ code: "NOT_FOUND", message: "Engagement not found" });
+  if (user.dpcoOrgId != null && Number(user.dpcoOrgId) === Number(eng.dpco_org_id)) return;
+  if (eng.client_org_id != null) {
+    if (user.organizationId != null && Number(user.organizationId) === Number(eng.client_org_id)) return;
+    const membership = await q(
+      `SELECT 1 AS member FROM organization_users WHERE user_id = $1 AND organization_id = $2 LIMIT 1`,
+      [user.id, eng.client_org_id],
+    );
+    if (membership[0]) return;
+  }
+  throw new TRPCError({ code: "FORBIDDEN", message: "Engagement belongs to a different organisation" });
+}
 
 export const dpcoAiRouter = router({
   // ─── AI Gap Analysis ───────────────────────────────────────────────────────
@@ -50,7 +145,8 @@ export const dpcoAiRouter = router({
       organisationName: z.string(),
       sector: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertEngagementAnalysisAccess(ctx.user, input.engagementId);
       const systemPrompt = `You are an expert NDPA 2023 data protection auditor. You will analyse evidence documents provided by a regulated Nigerian organisation and assess their compliance against each of the 15 NDPA 2023 controls. 
 
 For each control, provide:
@@ -112,7 +208,7 @@ Assess compliance against all 15 NDPA 2023 controls. Return a JSON object with a
       const content = response.choices[0]?.message?.content as string;
       if (!content) throw new Error("AI gap analysis returned no content");
 
-      const result = JSON.parse(content);
+      const result = parseLlmJson(gapAnalysisSchema, content, "gap analysis");
 
       // Save AI-generated ratings to the database for auditor review
       await q(
@@ -140,7 +236,8 @@ Assess compliance against all 15 NDPA 2023 controls. Return a JSON object with a
   // ─── Get Saved Gap Analysis ────────────────────────────────────────────────
   getGapAnalysis: protectedProcedure
     .input(z.object({ engagementId: z.number().int() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertEngagementAnalysisAccess(ctx.user, input.engagementId);
       const [row] = await q(
         `SELECT * FROM dpco_ai_gap_analyses WHERE engagement_id = $1`,
         [input.engagementId]
@@ -170,7 +267,8 @@ Assess compliance against all 15 NDPA 2023 controls. Return a JSON object with a
       })),
       overallComplianceScore: z.number().min(0).max(100),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertEngagementAnalysisAccess(ctx.user, input.engagementId);
       const ratingsText = input.controlRatings.map(r => {
         const control = NDPA_CONTROLS.find(c => c.id === r.controlId);
         emitMutationEvent("ndsep.ai.mutation", { action: "dpcoAi", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
@@ -231,7 +329,7 @@ Return as JSON with these section keys.`;
       const content = response.choices[0]?.message?.content as string;
       if (!content) throw new Error("AI CAR narrative generation returned no content");
 
-      const narrative = JSON.parse(content);
+      const narrative = parseLlmJson(carNarrativeSchema, content, "CAR narrative");
 
       // Save to database
       await q(
@@ -262,7 +360,8 @@ Return as JSON with these section keys.`;
   // ─── Get Saved CAR Narrative ───────────────────────────────────────────────
   getCarNarrative: protectedProcedure
     .input(z.object({ engagementId: z.number().int() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertEngagementAnalysisAccess(ctx.user, input.engagementId);
       const [row] = await q(
         `SELECT * FROM dpco_car_narratives WHERE engagement_id = $1`,
         [input.engagementId]
@@ -294,10 +393,11 @@ Return as JSON with these section keys.`;
       processesChildrenData: z.boolean().optional(),
       processesSensitiveData: z.boolean().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await assertOrgAnalysisAccess(ctx.user, input.organisationId);
       const systemPrompt = `You are an NDPA 2023 compliance risk analyst. Analyse the provided organisational profile and predict the data protection compliance risk level. 
 
-Use the DCPMI (Data Compliance Penalty Matrix Index) framework which considers:
+Use the DCPMI (Data Controller/Processor of Major Importance — NDPA 2023 s.44/s.48(4)) framework which considers:
 - Processing volume and sensitivity
 - Historical compliance performance  
 - Sector-specific risk factors
@@ -353,7 +453,7 @@ Provide a risk score (0-100), risk level, primary risk factors, and recommended 
       const content = response.choices[0]?.message?.content as string;
       if (!content) throw new Error("AI risk prediction returned no content");
 
-      const prediction = JSON.parse(content);
+      const prediction = parseLlmJson(riskPredictionSchema, content, "risk prediction");
 
       // Save prediction to database
       await q(
@@ -380,7 +480,8 @@ Provide a risk score (0-100), risk level, primary risk factors, and recommended 
   // ─── Get Latest Risk Prediction ────────────────────────────────────────────
   getLatestRiskPrediction: protectedProcedure
     .input(z.object({ organisationId: z.number().int() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await assertOrgAnalysisAccess(ctx.user, input.organisationId);
       const [row] = await q(
         `SELECT * FROM dpco_risk_predictions WHERE organisation_id = $1 ORDER BY predicted_at DESC LIMIT 1`,
         [input.organisationId]

@@ -81,6 +81,7 @@ let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: InstanceType<typeof Pool> | null = null;
 
 import { getDatabaseUrl } from "./config";
+import { wrapPoolWithGuard } from "./antiwipe/guardedQuery";
 import { logger } from "./logger";
 const PG_URL = getDatabaseUrl();
 
@@ -2227,6 +2228,8 @@ export async function updateEnforcementCase(input: {
   id: number;
   status?: string;
   nitdaReferenceNumber?: string;
+  /** NDPC reference — alias of nitdaReferenceNumber (column name retained for compatibility). */
+  ndpcReferenceNumber?: string;
   resolutionNotes?: string;
   assignedOfficerId?: number;
 }) {
@@ -2235,9 +2238,13 @@ export async function updateEnforcementCase(input: {
   const params: unknown[] = [input.id];
   let i = 2;
   if (input.status) { sets.push(`status = $${i++}::enforcement_case_status`); params.push(input.status); }
-  if (input.status === "escalated_to_nitda") { sets.push(`escalated_at = NOW()`); }
+  // Both the legacy 'escalated_to_nitda' value and the NDPA-2023-correct
+  // 'escalated_to_ndpc' value (migration 0118) mark the escalation timestamp.
+  if (input.status === "escalated_to_nitda" || input.status === "escalated_to_ndpc") { sets.push(`escalated_at = NOW()`); }
   if (input.status === "closed" || input.status === "settled") { sets.push(`closed_at = NOW()`); }
-  if (input.nitdaReferenceNumber) { sets.push(`nitda_reference_number = $${i++}`); params.push(input.nitdaReferenceNumber); }
+  // nitda_reference_number column is retained; semantically the NDPC reference.
+  const regulatorRef = input.ndpcReferenceNumber ?? input.nitdaReferenceNumber;
+  if (regulatorRef) { sets.push(`nitda_reference_number = $${i++}`); params.push(regulatorRef); }
   if (input.resolutionNotes) { sets.push(`resolution_notes = $${i++}`); params.push(input.resolutionNotes); }
   if (input.assignedOfficerId) { sets.push(`assigned_officer_id = $${i}`); params.push(input.assignedOfficerId); }
   const result = await pool.query(
@@ -3323,31 +3330,35 @@ export async function createInAppNotification(data: {
   return result.rows[0];
 }
 
-export async function getInAppNotifications(limit = 50, onlyUnread = false) {
+// Notifications are strictly per-user: every read/write is scoped by user_id
+// so no caller can list or mark another user's notifications (IDOR fix).
+export async function getInAppNotifications(userId: number, limit = 50, onlyUnread = false) {
   const pool = getSharedPool();
-  const where = onlyUnread ? "WHERE n.is_read = FALSE" : "";
+  const where = onlyUnread
+    ? "WHERE n.user_id = $2 AND n.is_read = FALSE"
+    : "WHERE n.user_id = $2";
   const result = await pool.query(
     `SELECT n.*, o.name as org_name FROM in_app_notifications n
      LEFT JOIN organizations o ON n.organization_id = o.id
      ${where} ORDER BY n.created_at DESC LIMIT $1`,
-    [limit]
+    [limit, userId]
   );
   return result.rows;
 }
 
-export async function markNotificationRead(id: number) {
+export async function markNotificationRead(id: number, userId: number) {
   const pool = getSharedPool();
-  await pool.query("UPDATE in_app_notifications SET is_read = TRUE WHERE id = $1", [id]);
+  await pool.query("UPDATE in_app_notifications SET is_read = TRUE WHERE id = $1 AND user_id = $2", [id, userId]);
 }
 
-export async function markAllNotificationsRead() {
+export async function markAllNotificationsRead(userId: number) {
   const pool = getSharedPool();
-  await pool.query("UPDATE in_app_notifications SET is_read = TRUE WHERE is_read = FALSE");
+  await pool.query("UPDATE in_app_notifications SET is_read = TRUE WHERE is_read = FALSE AND user_id = $1", [userId]);
 }
 
-export async function getUnreadNotificationCount() {
+export async function getUnreadNotificationCount(userId: number) {
   const pool = getSharedPool();
-  const result = await pool.query("SELECT COUNT(*)::int AS count FROM in_app_notifications WHERE is_read = FALSE");
+  const result = await pool.query("SELECT COUNT(*)::int AS count FROM in_app_notifications WHERE is_read = FALSE AND user_id = $1", [userId]);
   return result.rows[0]?.count ?? 0;
 }
 
@@ -3892,5 +3903,10 @@ export function getSharedPool(): InstanceType<typeof Pool> {
       connectionTimeoutMillis: 5000,
     });
   }
-  return _pool;
+  // Round-9 anti-wipe wiring (FIX-D): screen every raw statement through
+  // server/antiwipe/guardedQuery.ts (assertNotDestructive). Protected evidence
+  // tables are hard-guarded; unqualified DELETE on non-protected tables is
+  // permitted-but-logged for legacy demo-reset paths.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return wrapPoolWithGuard(_pool) as any;
 }

@@ -14,6 +14,11 @@ const OPA_TOKEN = process.env.OPA_TOKEN;
 const OPA_DECISION_PATH = process.env.OPA_DECISION_PATH ?? "/v1/data/ndsep/authz/allow";
 const OPA_ENABLED = process.env.OPA_ENABLED === "true";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+// Fail-closed unless OPA_OPTIONAL=true is set EXPLICITLY (round-9): the
+// previous dev-mode "allow when unconfigured" leaked into any environment
+// that forgot OPA_URL. Now an unconfigured OPA denies unless the operator
+// has explicitly opted out.
+const OPA_OPTIONAL = process.env.OPA_OPTIONAL === "true";
 const OPA_TIMEOUT_MS = Number(process.env.OPA_TIMEOUT_MS ?? "1500");
 
 export type OpaAction = "admin" | "approve" | "delete" | "export" | "write";
@@ -46,12 +51,12 @@ function opaConfigured(): boolean {
 export async function opaAllows(input: OpaDecisionInput): Promise<boolean> {
   const startedAt = performance.now();
   if (!opaConfigured()) {
-    if (IS_PRODUCTION) {
-      logger.error("[opa] Production authorization is not configured; denying privileged action");
+    if (!OPA_OPTIONAL) {
+      logger.error("[opa] Authorization policy engine not configured and OPA_OPTIONAL!=true; denying privileged action (fail closed)");
       recordOpaDecision("unconfigured", performance.now() - startedAt);
       return false;
     }
-    // Local development and isolated unit tests use the in-process PBAC layer.
+    // Explicitly opted-out local development only.
     return true;
   }
 

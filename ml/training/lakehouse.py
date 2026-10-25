@@ -146,5 +146,46 @@ def save_metrics_snapshot(metrics: dict, model: str,
     return save_snapshot(row, f"training_metrics_{model}", root=root)
 
 
+# --------------------------------------------------------------------------- #
+# Ingestion watermarks (round-9)
+# --------------------------------------------------------------------------- #
+# Continuous-training batches are extracted INCREMENTALLY from the platform
+# tables (nip_transactions, compliance_violations, ...). The high-water mark
+# per source is persisted next to the manifest, following the same JSON-file
+# catalog pattern, so a restarted trainer resumes where it stopped instead of
+# re-reading the full table.
+def _watermarks_path(root: str) -> str:
+    return os.path.join(root, "_watermarks.json")
+
+
+def load_watermarks(root: str = DEFAULT_ROOT) -> dict:
+    path = _watermarks_path(root)
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return {}
+
+
+def load_watermark(name: str, root: str = DEFAULT_ROOT):
+    """Return the persisted high-water mark for a source (None = never run)."""
+    return load_watermarks(root).get(name)
+
+
+def save_watermark(name: str, value, root: str = DEFAULT_ROOT) -> None:
+    """Atomically persist the high-water mark for a source."""
+    os.makedirs(root, exist_ok=True)
+    marks = load_watermarks(root)
+    marks[name] = value
+    tmp = _watermarks_path(root) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(marks, f, indent=2, default=str)
+    os.replace(tmp, _watermarks_path(root))
+
+
 if __name__ == "__main__":
     print(json.dumps(_read_manifest(DEFAULT_ROOT), indent=2, default=str))

@@ -68,6 +68,27 @@ REFERENCE_REFRESH_S = float(os.environ.get("EGRESS_REFERENCE_REFRESH_S", "300"))
 MAX_CONSECUTIVE_FAILURES = int(os.environ.get("EGRESS_MAX_CONSECUTIVE_FAILURES", "12"))
 CHANGEPOINT_RECENCY = 10  # MAP tau must be within the last N windows to alarm
 CHANGEPOINT_MIN_WINDOWS = 12  # need at least this much history
+POSTERIOR_DRAWS_MAX = int(os.environ.get("EGRESS_POSTERIOR_DRAWS_MAX", "5000"))  # cap posterior sampling cost
+# Sustained high share of UNCLASSIFIED egress is itself a residency-visibility
+# violation (violation_type 'unknown_classification_share', migration 0107):
+UNKNOWN_SHARE_MAX = float(os.environ.get("EGRESS_UNKNOWN_SHARE_MAX", "0.5"))
+UNKNOWN_STREAK_WINDOWS = int(os.environ.get("EGRESS_UNKNOWN_STREAK_WINDOWS", "6"))
+HEALTH_HOST = os.environ.get("EGRESS_HEALTH_HOST", "127.0.0.1")
+HEALTH_PORT = int(os.environ.get("EGRESS_HEALTH_PORT", "8092"))
+
+
+def normalize_window_minutes(value) -> int:
+    """Window minutes MUST divide 60 evenly so windows align on the hour;
+    non-divisors would drift and misalign rollups. Falls back loudly."""
+    try:
+        w = int(value)
+    except (TypeError, ValueError):
+        w = 0
+    if w <= 0 or 60 % w != 0:
+        logger.error("window_minutes=%r is not a positive divisor of 60 — using default %d",
+                     value, WINDOW_MINUTES_DEFAULT)
+        return WINDOW_MINUTES_DEFAULT
+    return w
 
 
 def validate_config() -> None:
@@ -112,7 +133,9 @@ def poisson_changepoint(counts, a: float = 1.0, b: float = 0.2,
 
     Returns tau posterior grid, MAP change-point, P(lam2 > lam1) and rate
     summaries. Raises ValueError for series shorter than 4 periods.
+    Posterior draws are capped (POSTERIOR_DRAWS_MAX) to bound CPU per window.
     """
+    n_rate_draws = max(200, min(int(n_rate_draws), POSTERIOR_DRAWS_MAX))
     y = [float(v) for v in counts]
     T = len(y)
     if T < 4:
@@ -384,8 +407,8 @@ def create_consumer_instance() -> str:
         json={
             "name": name,
             "format": "json",
-            "auto.offset.reset": "latest",
-            "enable.auto.commit": "true",
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": "false",
         },
         timeout=15,
     )
@@ -424,7 +447,7 @@ def window_start_for(ts: datetime, window_minutes: int) -> datetime:
 class WindowBucket:
     __slots__ = ("total_flows", "total_bytes", "domestic_flows", "domestic_bytes",
                  "foreign_flows", "foreign_bytes", "unknown_flows", "unknown_bytes",
-                 "foreign_dests")
+                 "private_flows", "private_bytes", "foreign_dests")
 
     def __init__(self):
         self.total_flows = 0
@@ -435,6 +458,8 @@ class WindowBucket:
         self.foreign_bytes = 0
         self.unknown_flows = 0
         self.unknown_bytes = 0
+        self.private_flows = 0   # dst in RFC1918/loopback/link-local
+        self.private_bytes = 0
         self.foreign_dests = defaultdict(lambda: {"bytes": 0, "flows": 0, "classification": {}})
 
     def add(self, nbytes: int, classification: dict, dst_ip: str, sni: str | None):
@@ -444,6 +469,9 @@ class WindowBucket:
         if verdict == "domestic":
             self.domestic_flows += 1
             self.domestic_bytes += nbytes
+            if classification.get("reason") == "private_range":
+                self.private_flows += 1
+                self.private_bytes += nbytes
         elif verdict == "foreign":
             self.foreign_flows += 1
             self.foreign_bytes += nbytes
@@ -462,8 +490,14 @@ class WindowBucket:
             self.unknown_bytes += nbytes
 
     def foreign_ratio(self) -> float:
-        denom = self.foreign_bytes + self.domestic_bytes
+        # Private/private flows (RFC1918 etc.) are excluded from BOTH sides of
+        # the ratio: internal chatter would otherwise inflate the denominator
+        # and mask real foreign egress.
+        denom = self.foreign_bytes + (self.domestic_bytes - self.private_bytes)
         return (self.foreign_bytes / denom) if denom > 0 else 0.0
+
+    def unknown_share(self) -> float:
+        return (self.unknown_bytes / self.total_bytes) if self.total_bytes > 0 else 0.0
 
     def top_foreign(self, n: int = 10):
         items = sorted(self.foreign_dests.items(), key=lambda kv: kv[1]["bytes"], reverse=True)[:n]
@@ -473,30 +507,153 @@ class WindowBucket:
         ]
 
 
-def upsert_rollup(entity_ref: str, ws: datetime, window_minutes: int, bucket: WindowBucket):
-    payload = {
-        "entity_ref": entity_ref,
-        "window_start": ws.isoformat(),
-        "window_end": (ws + timedelta(minutes=window_minutes)).isoformat(),
-        "total_flows": bucket.total_flows,
-        "total_bytes": bucket.total_bytes,
-        "domestic_flows": bucket.domestic_flows,
-        "domestic_bytes": bucket.domestic_bytes,
-        "foreign_flows": bucket.foreign_flows,
-        "foreign_bytes": bucket.foreign_bytes,
-        "unknown_flows": bucket.unknown_flows,
-        "unknown_bytes": bucket.unknown_bytes,
-        "foreign_ratio": round(bucket.foreign_ratio(), 6),
-        "top_foreign_destinations": bucket.top_foreign(),
-    }
-    resp = SESSION.post(
-        f"{DB_API_URL}/egress_flow_rollups",
-        json=payload,
-        headers={"Prefer": "resolution=merge-duplicates"},
-        params={"on_conflict": "entity_ref,window_start"},
-        timeout=15,
-    )
+ROLLUP_ADDITIVE_FIELDS = (
+    "total_flows", "total_bytes", "domestic_flows", "domestic_bytes",
+    "foreign_flows", "foreign_bytes", "unknown_flows", "unknown_bytes",
+)
+
+
+def upsert_rollup(entity_ref: str, ws: datetime, window_minutes: int, bucket: WindowBucket,
+                  max_retries: int = 3):
+    """ADDITIVE rollup upsert: late/arrived-twice flows must ACCUMULATE into the
+    window (bytes = existing + new), never overwrite a partial rollup written by
+    an earlier flush. Read-modify-write with retry on conflict."""
+    window_end = (ws + timedelta(minutes=window_minutes)).isoformat()
+    for attempt in range(1, max_retries + 1):
+        q = SESSION.get(
+            f"{DB_API_URL}/egress_flow_rollups",
+            params={
+                "entity_ref": f"eq.{entity_ref}",
+                "window_start": f"eq.{ws.isoformat()}",
+                "select": ",".join(["id", *ROLLUP_ADDITIVE_FIELDS, "foreign_ratio"]),
+            },
+            timeout=15,
+        )
+        q.raise_for_status()
+        existing = q.json()
+        if not existing:
+            payload = {
+                "entity_ref": entity_ref,
+                "window_start": ws.isoformat(),
+                "window_end": window_end,
+                **{f: getattr(bucket, f) for f in ROLLUP_ADDITIVE_FIELDS},
+                "foreign_ratio": round(bucket.foreign_ratio(), 6),
+                "top_foreign_destinations": bucket.top_foreign(),
+            }
+            resp = SESSION.post(
+                f"{DB_API_URL}/egress_flow_rollups",
+                json=payload,
+                headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+                params={"on_conflict": "entity_ref,window_start"},
+                timeout=15,
+            )
+            # 409 => concurrent insert; loop re-reads and adds.
+            if resp.status_code == 409 and attempt < max_retries:
+                continue
+            resp.raise_for_status()
+            return
+        row = existing[0]
+        merged = {f: int(row.get(f) or 0) + getattr(bucket, f) for f in ROLLUP_ADDITIVE_FIELDS}
+        denom = merged["foreign_bytes"] + merged["domestic_bytes"]
+        payload = {
+            **merged,
+            "window_end": window_end,
+            # Ratio over merged bytes; private flows are not recoverable from
+            # the stored row, so the stored domestic bytes (incl. private) are
+            # the documented approximation on merge.
+            "foreign_ratio": round(merged["foreign_bytes"] / denom, 6) if denom > 0 else 0.0,
+            "top_foreign_destinations": bucket.top_foreign(),
+        }
+        resp = SESSION.patch(
+            f"{DB_API_URL}/egress_flow_rollups",
+            params={"id": f"eq.{row['id']}"},
+            json=payload,
+            timeout=15,
+        )
+        if resp.status_code == 409 and attempt < max_retries:
+            continue
+        resp.raise_for_status()
+        return
+
+
+# ─── Manual offset commit machinery ───────────────────────────────────────────
+# Offsets are committed ONLY after every rollup flush for the cycle succeeded.
+# Each consumed record's (partition, offset) is bound to its aggregation window;
+# a partition offset becomes commitable once all records at or below it belong
+# to flushed windows.
+
+class OffsetTracker:
+    def __init__(self):
+        # partition -> sorted list of (offset, window_key) awaiting flush
+        self.pending: dict[int, list[tuple[int, tuple]]] = defaultdict(list)
+        self.consumed_max: dict[int, int] = {}
+
+    def record(self, partition: int, offset: int, window_key: tuple):
+        self.pending[partition].append((offset, window_key))
+        self.consumed_max[partition] = max(self.consumed_max.get(partition, -1), offset)
+
+    def flush_done(self, window_key: tuple):
+        for part in list(self.pending):
+            self.pending[part] = [(o, k) for (o, k) in self.pending[part] if k != window_key]
+
+    def commitable(self) -> list[dict]:
+        """Next-read offset per partition = smallest still-pending offset, or
+        consumed_max + 1 when nothing is pending."""
+        out = []
+        for part, maxoff in self.consumed_max.items():
+            pending = self.pending.get(part) or []
+            next_off = min(o for o, _ in pending) if pending else maxoff + 1
+            if next_off > 0:
+                out.append({"topic": KAFKA_TOPIC, "partition": part, "offset": next_off})
+        return out
+
+
+def commit_offsets(base_uri: str, tracker: OffsetTracker) -> None:
+    offsets = tracker.commitable()
+    if not offsets:
+        return
+    resp = SESSION.post(f"{base_uri}/offsets", json={"offsets": offsets}, timeout=15)
     resp.raise_for_status()
+
+
+# ─── Health endpoint ──────────────────────────────────────────────────────────
+
+HEALTH_STATE = {"last_ok_poll": 0.0, "db_ok": False, "started_at": time.time()}
+
+
+def start_health_server():
+    """Minimal /health: 200 when the poll loop is alive and the DB API answered
+    recently, else 503. Never leaks raw dependency errors."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != "/health":
+                self.send_response(404)
+                self.end_headers()
+                return
+            alive = (time.time() - HEALTH_STATE["last_ok_poll"]) < max(120.0, POLL_TIMEOUT_S * 12)
+            ok = alive and HEALTH_STATE["db_ok"]
+            body = json.dumps({
+                "status": "ok" if ok else "degraded",
+                "poll_alive": alive,
+                "db_ok": HEALTH_STATE["db_ok"],
+                "uptime_s": int(time.time() - HEALTH_STATE["started_at"]),
+            }).encode()
+            self.send_response(200 if ok else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence default stderr access log
+            pass
+
+    server = HTTPServer((HEALTH_HOST, HEALTH_PORT), Handler)
+    t = threading.Thread(target=server.serve_forever, daemon=True, name="egress-health")
+    t.start()
+    logger.info("Health endpoint listening on http://%s:%d/health", HEALTH_HOST, HEALTH_PORT)
 
 
 # ─── Main loop ────────────────────────────────────────────────────────────────
@@ -508,13 +665,17 @@ def run() -> int:
     thresholds = load_thresholds()
     scope = ScopeCache()
     scope.refresh()
+    start_health_server()
 
     base_uri = create_consumer_instance()
     # per (entity, window_start_iso) -> bucket
     buckets: dict[tuple[str, str], WindowBucket] = {}
     # per entity -> deque of (window_start_iso, foreign_bytes)
     series: dict[str, deque] = defaultdict(lambda: deque(maxlen=SERIES_LEN))
+    # per entity -> consecutive windows with unknown share above threshold
+    unknown_streak: dict[str, int] = defaultdict(int)
     flushed_windows: set[str] = set()
+    offsets = OffsetTracker()
     failures = 0
 
     logger.info("Egress monitor started: proxy=%s db_api=%s topic=%s",
@@ -529,8 +690,11 @@ def run() -> int:
                     scope.refresh()
                 records = poll_records(base_uri)
                 failures = 0
+                HEALTH_STATE["last_ok_poll"] = time.time()
+                HEALTH_STATE["db_ok"] = True
             except requests.RequestException as e:
                 failures += 1
+                HEALTH_STATE["db_ok"] = False
                 logger.error("Poll cycle failed (%d/%d): %s",
                              failures, MAX_CONSECUTIVE_FAILURES, e)
                 if failures >= MAX_CONSECUTIVE_FAILURES:
@@ -559,26 +723,60 @@ def run() -> int:
                 except ValueError:
                     ts = now_utc
                 thr = threshold_for(thresholds, entity)
-                wmin = int(thr.get("window_minutes") or WINDOW_MINUTES_DEFAULT)
+                wmin = normalize_window_minutes(thr.get("window_minutes") or WINDOW_MINUTES_DEFAULT)
                 ws = window_start_for(ts, wmin)
                 key = (entity, ws.isoformat())
                 bucket = buckets.setdefault(key, WindowBucket())
                 classification = ref.classify(dst_ip)
                 bucket.add(nbytes, classification, dst_ip, value.get("sni"))
+                try:
+                    offsets.record(int(rec.get("partition", 0)), int(rec.get("offset", 0)), key)
+                except (TypeError, ValueError):
+                    pass
 
-            # Flush windows that have fully closed.
+            # Flush windows that have fully closed. Offsets are committed only
+            # when EVERY flush this cycle succeeded (manual commit semantics).
+            flush_ok = True
             for (entity, ws_iso), bucket in list(buckets.items()):
                 ws = datetime.fromisoformat(ws_iso)
                 thr = threshold_for(thresholds, entity)
-                wmin = int(thr.get("window_minutes") or WINDOW_MINUTES_DEFAULT)
+                wmin = normalize_window_minutes(thr.get("window_minutes") or WINDOW_MINUTES_DEFAULT)
                 if ws + timedelta(minutes=wmin) >= now_utc:
                     continue  # window still open
                 if not thr.get("enabled", True):
                     del buckets[(entity, ws_iso)]
+                    offsets.flush_done((entity, ws_iso))
                     continue
-                upsert_rollup(entity, ws, wmin, bucket)
+                try:
+                    upsert_rollup(entity, ws, wmin, bucket)
+                except Exception as e:
+                    flush_ok = False
+                    logger.error("Rollup upsert failed for %s@%s (will retry; offsets NOT committed): %s",
+                                 entity, ws_iso, e)
+                    continue
                 del buckets[(entity, ws_iso)]
+                offsets.flush_done((entity, ws_iso))
                 series[entity].append((ws_iso, bucket.foreign_bytes))
+
+                # Sustained high unknown-classification share is its own
+                # violation (migration 0107): we cannot attest residency for
+                # traffic we cannot classify.
+                share = bucket.unknown_share()
+                if share > UNKNOWN_SHARE_MAX:
+                    unknown_streak[entity] += 1
+                else:
+                    unknown_streak[entity] = 0
+                if unknown_streak[entity] >= UNKNOWN_STREAK_WINDOWS:
+                    raise_violation(entity, "unknown_classification_share", "medium", {
+                        "window_start": ws_iso,
+                        "unknown_share": round(share, 6),
+                        "unknown_share_threshold": UNKNOWN_SHARE_MAX,
+                        "consecutive_windows": unknown_streak[entity],
+                        "unknown_bytes": bucket.unknown_bytes,
+                        "total_bytes": bucket.total_bytes,
+                        "legal_basis": "CBN Circular PSS/DIR/PUB/CIR/001/004 — residency cannot be attested for unclassifiable egress; extend asn_geo_reference",
+                    })
+                    unknown_streak[entity] = 0  # re-arm after raising
 
                 if thr.get("in_scope_only", True) and not scope.in_scope(entity):
                     continue
@@ -623,6 +821,11 @@ def run() -> int:
                         })
             if len(flushed_windows) > 10000:
                 flushed_windows.clear()
+            if flush_ok:
+                try:
+                    commit_offsets(base_uri, offsets)
+                except requests.RequestException as e:
+                    logger.error("Offset commit failed (records will be replayed): %s", e)
     finally:
         delete_consumer_instance(base_uri)
 

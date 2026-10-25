@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, publicProcedure, deleteProcedure } from "../_core/trpc";
 import { getDb, getSharedPool } from "../db";
 import { sql } from "drizzle-orm";
+import { computeSection48Penalty, selectBestRevenue } from "../services/penaltyEngine";
 import { emitEvent, logAuditEvent, broadcastEvent, cacheGetJson, cacheSetJson, cacheDel, triggerWorkflow } from "../middlewareHelpers";
 import { emitComplianceEvent, opensearchIndex, lakehouseIngest, daprPublish, fluvioPublish, permifyCheck } from "../middlewareExtensions";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
@@ -329,23 +331,47 @@ export const publicRegistryRouter = router({
 
 // ─── Penalty Calculator ───────────────────────────────────────────────────────
 export const penaltyCalculatorRouter = router({
+  /**
+   * NDPA 2023 s.48 administrative-fine computation — thin wrapper over
+   * services/penaltyEngine. The previous ad-hoc base×multiplier model
+   * (arbitrary base penalties, revenue CAP that shrank large-org penalties)
+   * was statutorily wrong and has been removed.
+   */
   calculate: protectedProcedure
-    .input(z.object({ violationType: z.string(), sector: z.string(), severity: z.enum(['low','medium','high','critical']), organizationRevenue: z.number().optional(), affectedIndividuals: z.number().int().default(0), isRepeatOffender: z.boolean().default(false), hasCooperated: z.boolean().default(true), mitigatingFactors: z.array(z.string()).default([]), aggravatingFactors: z.array(z.string()).default([]) }))
+    .input(z.object({
+      orgId: z.number().int().positive(),
+      factors: z.object({
+        natureGravityDuration: z.number().min(0).max(1),
+        categoriesOfData: z.number().min(0).max(1),
+        dataSubjectCount: z.number().int().min(0),
+        intent: z.enum(["intentional", "negligent", "unintentional"]),
+        priorInfringements: z.number().int().min(0),
+        cooperationDegree: z.number().min(0).max(1),
+        remediation: z.enum(["none", "partial", "full"]),
+      }),
+    }))
     .mutation(async ({ input }) => {
-      const basePenalties: Record<string, number> = { low: 2000000, medium: 10000000, high: 50000000, critical: 100000000 };
-      const basePenalty = basePenalties[input.severity];
-      let multiplier = 1.0;
-      const revenueCap = input.organizationRevenue ? input.organizationRevenue * 0.02 : null;
-      if (input.isRepeatOffender) multiplier += 0.5;
-      if (!input.hasCooperated) multiplier += 0.3;
-      if (input.affectedIndividuals > 10000) multiplier += 0.5;
-      else if (input.affectedIndividuals > 1000) multiplier += 0.25;
-      multiplier -= input.mitigatingFactors.length * 0.1;
-      multiplier = Math.max(0.5, multiplier);
-      const calculatedPenalty = Math.round(basePenalty * multiplier);
-      const finalPenalty = revenueCap ? Math.min(calculatedPenalty, revenueCap) : calculatedPenalty;
+      // DCPMI classification from the organisation's registration record.
+      const [orgRows] = await exec(sql`SELECT is_dcpmi FROM organizations WHERE id = ${input.orgId}`);
+      const isDcpmi = ((orgRows as any[])[0]?.is_dcpmi) === true;
+      // Best-available verified revenue (never invented).
+      const [revRows] = await exec(
+        sql`SELECT id, org_id, source, amount, currency, fiscal_year, status, verified_at FROM verified_revenues WHERE org_id = ${input.orgId} AND status = 'verified' ORDER BY created_at DESC`
+      );
+      const best = selectBestRevenue((revRows as any[]).map((r: any) => ({
+        id: r.id, orgId: r.org_id, source: r.source, amount: Number(r.amount),
+        currency: r.currency, fiscalYear: r.fiscal_year, status: r.status, verifiedAt: r.verified_at,
+      })));
+      const breakdown = computeSection48Penalty({
+        isDcpmi,
+        verifiedRevenue: best ? best.amount : null,
+        revenueSource: best ? best.source : "none",
+        revenueFiscalYear: best ? best.fiscalYear : null,
+        verifiedRevenueId: best ? best.id : null,
+        factors: input.factors,
+      });
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "compliance_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return { basePenalty, multiplier, calculatedPenalty, revenueCap, finalPenalty, regulatoryBasis: 'NDPA 2023 Section 48 - Administrative Fines', appealPeriod: '30 days from penalty notice' };
+      return { ...breakdown, appealPeriod: '30 days from penalty notice' };
     }),
   history: protectedProcedure.input(z.object({ limit: z.number().int().min(1).max(50).default(20) })).query(async ({ input }) => {
     const [rows] = await execRaw(`SELECT fp.*, o.name as org_name, o.sector FROM financial_penalties fp LEFT JOIN organizations o ON fp.organization_id = o.id ORDER BY fp.created_at DESC LIMIT $1`, [input.limit]);
@@ -487,19 +513,42 @@ export const notificationCenterRouter = router({
       const unread = await execRaw(`SELECT COUNT(*) as count FROM in_app_notifications n WHERE (n.user_id = ${ctx.user.id} OR n.user_id IS NULL) AND n.is_read = false`);
       return { data: rows as any[], total: parseInt((cnt as any[])[0]?.total ?? '0'), unreadCount: parseInt((unread as any[])[0]?.count ?? '0') };
     }),
-  markRead: protectedProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ input }) => {
-    await exec(sql`UPDATE in_app_notifications SET is_read = true WHERE id = ${input.id}`);
+  markRead: protectedProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ input, ctx }) => {
+    // Ownership check (IDOR fix): a user may only mark THEIR OWN notification
+    // read. Broadcast rows (user_id IS NULL) are shared and cannot be marked
+    // per-user with this schema — reject rather than mutating everyone's copy.
+    const [rows] = await exec(sql`UPDATE in_app_notifications SET is_read = true WHERE id = ${input.id} AND user_id = ${ctx.user.id} RETURNING id`);
+    if (!(rows as any[])[0]) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Notification not found or not owned by you" });
+    }
     emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "compliance_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
     return { success: true };
   }),
   markAllRead: protectedProcedure.mutation(async ({ ctx }) => {
-    await exec(sql`UPDATE in_app_notifications SET is_read = true WHERE user_id = ${ctx.user.id} OR user_id IS NULL`);
+    await exec(sql`UPDATE in_app_notifications SET is_read = true WHERE user_id = ${ctx.user.id}`);
     emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "compliance_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
     return { success: true };
   }),
   create: protectedProcedure
     .input(z.object({ title: z.string().min(1), message: z.string().min(1), severity: z.enum(['info','warning','error','success']).default('info'), category: z.string().default('system'), organizationId: z.number().int().optional(), userId: z.number().int().optional(), actionUrl: z.string().optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // Scope check: non-staff callers may only create notifications for
+      // themselves (or a broadcast within their own organisation).
+      const isStaff = ["admin", "government_staff", "regulator", "auditor"].includes(ctx.user.role);
+      if (!isStaff) {
+        if (input.userId != null && input.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Cannot create notifications for another user" });
+        }
+        if (input.organizationId != null) {
+          const callerOrg = (ctx.user as any).organizationId ?? null;
+          if (callerOrg == null || Number(callerOrg) !== Number(input.organizationId)) {
+            const membership = await exec(sql`SELECT 1 FROM organization_users WHERE user_id = ${ctx.user.id} AND organization_id = ${input.organizationId} LIMIT 1`);
+            if (!(membership[0] as any[])[0]) {
+              throw new TRPCError({ code: "FORBIDDEN", message: "Cannot create notifications for another organisation" });
+            }
+          }
+        }
+      }
       const [result] = await exec(sql`INSERT INTO in_app_notifications (title, message, severity, category, organization_id, user_id, action_url) VALUES (${input.title}, ${input.message}, ${input.severity}, ${input.category}, ${input.organizationId ?? null}, ${input.userId ?? null}, ${input.actionUrl ?? null}) RETURNING *`);
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "compliance_feature", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return (result as any[])[0];

@@ -33,12 +33,23 @@ import psycopg2
 import psycopg2.extras
 import requests
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
-    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+    "DATABASE_URL"))
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-PORT = int(os.environ.get("COCOINDEX_PORT", "8201"))
+PORT = int(os.environ.get("COCOINDEX_PORT", "8205"))  # canonical workerManager port (was 8201, collided with apisix-manager)
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
 CHUNK_SIZE = 512   # characters per chunk
 CHUNK_OVERLAP = 64  # overlap between chunks
@@ -168,41 +179,44 @@ def embed(texts: List[str]) -> Optional[List[List[float]]]:
 
 
 def upsert_to_qdrant(collection: str, points: List[Dict]) -> int:
+    """Upsert points into Qdrant. Raises on failure (round-9): callers must
+    NOT advance their watermark when the sink write did not happen — the
+    previous version swallowed errors and advanced anyway, silently losing
+    documents from the index."""
     if not points:
         return 0
-    try:
-        from qdrant_client import QdrantClient
-        from qdrant_client.models import PointStruct, Distance, VectorParams
-        client = QdrantClient(url=QDRANT_URL, timeout=10)
-        # Ensure collection exists
-        existing = {c.name for c in client.get_collections().collections}
-        if collection not in existing:
-            client.create_collection(
-                collection_name=collection,
-                vectors_config=VectorParams(size=384, distance=Distance.COSINE)
-            )
-        qdrant_points = [
-            PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"])
-            for p in points
-        ]
-        client.upsert(collection_name=collection, points=qdrant_points)
-        return len(points)
-    except Exception as e:
-        log.error(f"Qdrant upsert failed: {e}")
-        return 0
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import PointStruct, Distance, VectorParams
+    client = QdrantClient(url=QDRANT_URL, timeout=10)
+    # Ensure collection exists
+    existing = {c.name for c in client.get_collections().collections}
+    if collection not in existing:
+        client.create_collection(
+            collection_name=collection,
+            vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+        )
+    qdrant_points = [
+        PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"])
+        for p in points
+    ]
+    client.upsert(collection_name=collection, points=qdrant_points)
+    return len(points)
 
 # ── ETL Sources ────────────────────────────────────────────────────────────────
 
 
 def etl_policies(conn) -> int:
-    """ETL compliance policies with incremental watermark."""
+    """ETL compliance policies with incremental watermark on
+    GREATEST(created_at, updated_at); the watermark advances ONLY after a
+    successful Qdrant upsert."""
     watermark = _watermarks.get("policies", "1970-01-01")
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
-            SELECT id::text, name, description, policy_type, status, sector, created_at::text
+            SELECT id::text, name, description, policy_type, status, sector,
+                   GREATEST(created_at, COALESCE(updated_at, created_at))::text AS last_modified
             FROM compliance_policies
-            WHERE created_at > %s
-            ORDER BY created_at
+            WHERE GREATEST(created_at, COALESCE(updated_at, created_at)) > %s
+            ORDER BY last_modified
             LIMIT 200
         """, (watermark,))
         rows = cur.fetchall()
@@ -241,9 +255,13 @@ def etl_policies(conn) -> int:
                     "etl_timestamp": datetime.now(timezone.utc).isoformat()
                 }
             })
-    if rows:
-        _watermarks["policies"] = rows[-1]["created_at"]
-    count = upsert_to_qdrant("ndsep_policies", all_points)
+    if not all_points:
+        # Every row failed to embed — do NOT advance the watermark so the
+        # rows are retried next run.
+        log.warning(f"CocoIndex ETL: 0/{len(rows)} policy rows embedded — watermark NOT advanced")
+        return 0
+    count = upsert_to_qdrant("ndsep_policies", all_points)  # raises on failure
+    _watermarks["policies"] = rows[-1]["last_modified"]  # advance ONLY after successful upsert
     log.info(f"CocoIndex ETL: {count} policy chunks indexed")
     return count
 
@@ -253,12 +271,13 @@ def etl_violations(conn) -> int:
     watermark = _watermarks.get("violations", "1970-01-01")
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
-            SELECT cv.id::text, cv.violation_type, cv.description, cv.severity,
-                   cv.status, o.name as org_name, o.sector, cv.detected_at::text
+            SELECT cv.id::text, cv.title AS violation_type, cv.description, cv.severity,
+                   cv.status, o.name as org_name, o.sector,
+                   GREATEST(cv.detected_at, cv.created_at)::text AS last_modified
             FROM compliance_violations cv
             LEFT JOIN organizations o ON o.id = cv.organization_id
-            WHERE cv.detected_at > %s
-            ORDER BY cv.detected_at
+            WHERE GREATEST(cv.detected_at, cv.created_at) > %s
+            ORDER BY last_modified
             LIMIT 200
         """, (watermark,))
         rows = cur.fetchall()
@@ -300,9 +319,11 @@ def etl_violations(conn) -> int:
                     "etl_timestamp": datetime.now(timezone.utc).isoformat()
                 }
             })
-    if rows:
-        _watermarks["violations"] = rows[-1]["detected_at"]
+    if not all_points:
+        log.warning(f"CocoIndex ETL: 0/{len(rows)} violation rows embedded — watermark NOT advanced")
+        return 0
     count = upsert_to_qdrant("ndsep_violations", all_points)
+    _watermarks["violations"] = rows[-1]["last_modified"]
     log.info(f"CocoIndex ETL: {count} violation chunks indexed")
     return count
 
@@ -314,11 +335,11 @@ def etl_enforcement_actions(conn) -> int:
         cur.execute("""
             SELECT ea.id::text, ea.action_type, ea.description, ea.status,
                    ea.severity, o.name as org_name, o.sector,
-                   ea.created_at::text
+                   GREATEST(ea.created_at, COALESCE(ea.updated_at, ea.created_at))::text AS last_modified
             FROM enforcement_actions ea
             LEFT JOIN organizations o ON o.id = ea.organization_id
-            WHERE ea.created_at > %s
-            ORDER BY ea.created_at
+            WHERE GREATEST(ea.created_at, COALESCE(ea.updated_at, ea.created_at)) > %s
+            ORDER BY last_modified
             LIMIT 200
         """, (watermark,))
         rows = cur.fetchall()
@@ -361,9 +382,11 @@ def etl_enforcement_actions(conn) -> int:
                     "etl_timestamp": datetime.now(timezone.utc).isoformat()
                 }
             })
-    if rows:
-        _watermarks["enforcement"] = rows[-1]["created_at"]
+    if not all_points:
+        log.warning(f"CocoIndex ETL: 0/{len(rows)} enforcement rows embedded — watermark NOT advanced")
+        return 0
     count = upsert_to_qdrant("ndsep_enforcement_actions", all_points)
+    _watermarks["enforcement"] = rows[-1]["last_modified"]
     log.info(f"CocoIndex ETL: {count} enforcement action chunks indexed")
     return count
 
@@ -410,9 +433,11 @@ def etl_audit_logs(conn) -> int:
                     "etl_timestamp": datetime.now(timezone.utc).isoformat()
                 }
             })
-    if rows:
-        _watermarks["audit_logs"] = rows[-1]["created_at"]
+    if not all_points:
+        log.warning(f"CocoIndex ETL: 0/{len(rows)} audit log rows embedded — watermark NOT advanced")
+        return 0
     count = upsert_to_qdrant("ndsep_audit_logs", all_points)
+    _watermarks["audit_logs"] = rows[-1]["created_at"]
     log.info(f"CocoIndex ETL: {count} audit log chunks indexed")
     return count
 
@@ -424,10 +449,10 @@ def etl_organizations(conn) -> int:
         cur.execute("""
             SELECT id::text, name, sector, country, city,
                    compliance_score::text, compliance_status, risk_score::text,
-                   updated_at::text
+                   GREATEST(updated_at, created_at)::text AS last_modified
             FROM organizations
-            WHERE updated_at > %s
-            ORDER BY updated_at
+            WHERE GREATEST(updated_at, created_at) > %s
+            ORDER BY last_modified
             LIMIT 200
         """, (watermark,))
         rows = cur.fetchall()
@@ -462,9 +487,11 @@ def etl_organizations(conn) -> int:
                     "etl_timestamp": datetime.now(timezone.utc).isoformat()
                 }
             })
-    if rows:
-        _watermarks["organizations"] = rows[-1]["updated_at"]
+    if not all_points:
+        log.warning(f"CocoIndex ETL: 0/{len(rows)} organization rows embedded — watermark NOT advanced")
+        return 0
     count = upsert_to_qdrant("ndsep_organizations", all_points)
+    _watermarks["organizations"] = rows[-1]["last_modified"]
     log.info(f"CocoIndex ETL: {count} organization chunks indexed")
     return count
 
@@ -473,14 +500,19 @@ def run_etl():
     global _last_etl_time, _etl_runs, _errors, _total_chunks_indexed
     log.info(f"Starting CocoIndex ETL run #{_etl_runs + 1}...")
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         try:
             total = 0
-            total += etl_policies(conn)
-            total += etl_violations(conn)
-            total += etl_enforcement_actions(conn)
-            total += etl_audit_logs(conn)
-            total += etl_organizations(conn)
+            # Per-source isolation: a failed upsert must neither advance that
+            # source's watermark (handled inside etl_*) nor abort the others.
+            for source_etl in (etl_policies, etl_violations,
+                               etl_enforcement_actions, etl_audit_logs,
+                               etl_organizations):
+                try:
+                    total += source_etl(conn)
+                except Exception as e:
+                    _errors += 1
+                    log.error(f"{source_etl.__name__} failed (watermark NOT advanced): {e}")
             save_watermarks()
             _total_chunks_indexed += total
             _etl_runs += 1

@@ -19,6 +19,17 @@ import urllib.error
 import psycopg2
 import psycopg2.extras
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [monthly-report-scheduler] %(levelname)s: %(message)s",
@@ -27,14 +38,15 @@ logging.basicConfig(
 log = logging.getLogger("monthly-report-scheduler")
 
 PORT = 8117
-PG_DSN = "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"
+PG_DSN = (os.environ.get("WORKER_DATABASE_URL") or os.environ.get("NDSEP_PG_URL")
+          or os.environ.get("DATABASE_URL"))
 
 FRAMEWORKS = ["NDPR", "GDPR", "ISO 27001", "SOC 2"]
 
 
 def get_db():
     try:
-        conn = psycopg2.connect(PG_DSN)
+        conn = psycopg2.connect(_require_dsn(PG_DSN))
         return conn
     except Exception as e:
         log.warning(f"DB connection failed: {e}")

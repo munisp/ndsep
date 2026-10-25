@@ -91,6 +91,24 @@ Postgres at runtime.
 
 ## Honest limits
 
+- **Classification phases.** The access phase classifies via Host-header
+  suffix rules and literal-IP hosts only (no balancer IP exists yet). An
+  unresolved verdict stays `unknown` and is **re-classified in the log phase**
+  using the balancer-selected upstream IP (`ctx.balancer_ip` captured in the
+  balancer phase, else the final entry of `ctx.var.upstream_addr`). When no
+  upstream IP is available the verdict remains `unknown` — never guessed.
+  `ctx.var.server_addr` is deliberately **not** used: it is the gateway's own
+  address and would mislabel every route.
+  - Consequence: in `enforce` mode, IP-based blocking applies to literal-IP
+    hosts and host-suffix rules; hostname destinations that only resolve to a
+    foreign IP at balancer time are recorded as `foreign` in the emitted event
+    but are not 403-blocked in the access phase. Use explicit
+    `allowed_host_suffixes`/deny-lists for enforce-mode hostnames.
+- **Event transport.** Kafka events use a **shared producer** per broker-list
+  (lrucache-cached) with an explicit `flush()` after each send. The HTTP
+  fallback counts a delivery **only on a 2xx** response.
+- **Schema validation.** `check_schema` compiles `allowed_cidrs` through
+  `apisix.core.ipmatcher` so malformed CIDRs are rejected at config time.
 - **No TLS payload inspection.** Classification uses SNI/Host header and the
   upstream node address only. Encrypted payload contents are never examined.
 - **IP/SNI metadata classification.** CDN-fronted foreign services behind

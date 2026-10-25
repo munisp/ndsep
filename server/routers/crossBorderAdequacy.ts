@@ -13,6 +13,23 @@ import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
+import { revalidateDeclarationsForAdequacy } from "../services/transferAnomaly";
+
+/** Escape ILIKE metacharacters so user input can never act as a wildcard. */
+function escapeLikePattern(s: string): string {
+  return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** NDPA 2023 s.43(1) paragraph reference for each derogation ground. */
+export const DEROGATION_SECTION_REFS = {
+  explicit_consent: "s.43(a)",
+  contract_performance: "s.43(b)",
+  data_subject_benefit: "s.43(c)",
+  public_interest: "s.43(d)",
+  legal_claims: "s.43(e)",
+  vital_interests: "s.43(f)",
+  public_register: "s.43(g)",
+} as const;
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -63,13 +80,16 @@ function fireAndForget(action: string): void {
 }
 
 const ADEQUACY_STATUSES = ["proposed", "in_force", "suspended", "revoked"] as const;
+// Unified NDPA 2023 s.43(1)(a)-(g) vocabulary (migration 0106 aligns the DB
+// CHECK constraints in 0030/0089 and maps legacy rows).
 const DEROGATION_TYPES = [
-  "explicit_consent",
-  "contract_performance",
-  "public_interest",
-  "legal_claims",
-  "vital_interests",
-  "legitimate_interests",
+  "explicit_consent",       // s.43(1)(a) — requires informed-of-risks attestation
+  "contract_performance",   // s.43(1)(b)
+  "data_subject_benefit",   // s.43(1)(c)
+  "public_interest",        // s.43(1)(d)
+  "legal_claims",           // s.43(1)(e)
+  "vital_interests",        // s.43(1)(f)
+  "public_register",        // s.43(1)(g)
 ] as const;
 
 export const crossBorderAdequacyRouter = router({
@@ -80,7 +100,7 @@ export const crossBorderAdequacyRouter = router({
       const conditions: string[] = [];
       const params: unknown[] = [];
       if (input?.status) { params.push(input.status); conditions.push(`decision_status = $${params.length}`); }
-      if (input?.country) { params.push(`%${input.country}%`); conditions.push(`country ILIKE $${params.length}`); }
+      if (input?.country) { params.push(`%${escapeLikePattern(input.country)}%`); conditions.push(`country ILIKE $${params.length} ESCAPE '\\'`); }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       return exec(`SELECT * FROM adequacy_decisions ${where} ORDER BY country ASC`, params);
     }),
@@ -131,13 +151,17 @@ export const crossBorderAdequacyRouter = router({
       );
       if (!row) throw new TRPCError({ code: "CONFLICT", message: "Only an in-force decision can be suspended" });
       await logAudit("adequacy_decision_suspended", "adequacy_decisions", input.id, String(ctx.user.id), { reason: input.reason });
+      // Cascade revalidation: every active declaration relying on this (formerly
+      // in-force) decision loses its safeguard and gets a cascade finding.
+      const cascade = await revalidateDeclarationsForAdequacy(exec, input.id);
       fireAndForget("crossBorderAdequacy.suspendAdequacyDecision");
-      return row;
+      return { ...row, cascade };
     }),
 
   revokeAdequacyDecision: adminProcedure
     .input(z.object({ id: z.number().int().positive(), reason: z.string().min(10) }))
     .mutation(async ({ input, ctx }) => {
+      const prior = await exec(`SELECT decision_status FROM adequacy_decisions WHERE id = $1`, [input.id]);
       const [row] = await exec(
         `UPDATE adequacy_decisions
          SET decision_status = 'revoked', revoked_at = NOW(), revocation_reason = $2, updated_at = NOW()
@@ -146,8 +170,13 @@ export const crossBorderAdequacyRouter = router({
       );
       if (!row) throw new TRPCError({ code: "CONFLICT", message: "Decision not found or already revoked" });
       await logAudit("adequacy_decision_revoked", "adequacy_decisions", input.id, String(ctx.user.id), { reason: input.reason });
+      // Cascade revalidation only when the decision was previously in_force;
+      // suspended decisions already cascaded at suspension time.
+      const cascade = prior[0]?.decision_status === "in_force"
+        ? await revalidateDeclarationsForAdequacy(exec, input.id)
+        : { adequacyDecisionId: input.id, adequacyStatus: "revoked", declarationsRevalidated: 0, cascadeFindingsCreated: 0, affectedDeclarationIds: [] as number[] };
       fireAndForget("crossBorderAdequacy.revokeAdequacyDecision");
-      return row;
+      return { ...row, cascade };
     }),
 
   reinstateAdequacyDecision: adminProcedure
@@ -246,30 +275,55 @@ export const crossBorderAdequacyRouter = router({
       transfer_reference: z.string().max(128).optional(),
       data_subject_count: z.number().int().min(0).optional(),
       transfer_date: z.string().optional(),
+      informed_of_risks_confirmed: z.boolean().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      // Check whether an in-force adequacy decision exists for the destination;
-      // if so a derogation is recorded but flagged as not strictly required.
+      // s.43(1)(a): consent-based derogations are only valid after the data
+      // subject has been informed of the possible risks — attestation required.
+      if (input.derogation_type === "explicit_consent" && input.informed_of_risks_confirmed !== true) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "NDPA s.43(1)(a): informed_of_risks_confirmed must be true for explicit_consent derogations (data subject must have been informed of the possible risks of the transfer)",
+        });
+      }
+      // Only an IN-FORCE adequacy decision counts as an adequate destination;
+      // proposed/suspended/revoked decisions provide no safeguard. Wildcards in
+      // the destination input are escaped so they cannot widen the match.
       const adequacy = await exec(
-        `SELECT id, decision_status FROM adequacy_decisions WHERE country ILIKE $1 ORDER BY id DESC LIMIT 1`,
-        [input.destination_country]
+        `SELECT id, decision_status FROM adequacy_decisions
+         WHERE decision_status = 'in_force' AND country ILIKE $1 ESCAPE '\\'
+         ORDER BY id DESC LIMIT 1`,
+        [escapeLikePattern(input.destination_country)]
       );
       const adequacyId = adequacy[0]?.id ?? null;
+      const destinationAdequate = adequacy[0]?.decision_status === "in_force";
+      // Derogations are exceptions for destinations WITHOUT adequacy. Using one
+      // for an adequate destination requires a documented (non-trivial)
+      // justification so the exception is not used to bypass the regime.
+      if (destinationAdequate && input.justification.trim().length < 50) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Destination has an in-force adequacy decision; a derogation here requires a documented justification (>= 50 characters) explaining why the exception is relied upon",
+        });
+      }
       const [row] = await exec(
         `INSERT INTO cross_border_derogations
            (organization_id, transfer_reference, destination_country, adequacy_decision_id,
-            derogation_type, data_subject_count, justification, transfer_date, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, NOW()), $9)
+            derogation_type, data_subject_count, justification, transfer_date, created_by,
+            informed_of_risks_confirmed, legal_section_ref)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, NOW()), $9, $10, $11)
          RETURNING *`,
         [
           input.organization_id, input.transfer_reference ?? null, input.destination_country,
           adequacyId, input.derogation_type, input.data_subject_count ?? null,
           input.justification, input.transfer_date ?? null, ctx.user.name ?? String(ctx.user.id),
+          input.derogation_type === "explicit_consent" ? true : input.informed_of_risks_confirmed ?? null,
+          DEROGATION_SECTION_REFS[input.derogation_type],
         ]
       );
       await logAudit("derogation_recorded", "cross_border_derogations", row?.id, String(ctx.user.id), {
         destination: input.destination_country, type: input.derogation_type,
-        adequate_destination: adequacy[0]?.decision_status === "in_force",
+        adequate_destination: destinationAdequate,
       });
       fireAndForget("crossBorderAdequacy.recordDerogation");
       return { ...row, adequacy_status_at_destination: adequacy[0]?.decision_status ?? "none" };
@@ -281,7 +335,7 @@ export const crossBorderAdequacyRouter = router({
       const conditions: string[] = [];
       const params: unknown[] = [];
       if (input?.organizationId) { params.push(input.organizationId); conditions.push(`d.organization_id = $${params.length}`); }
-      if (input?.country) { params.push(`%${input.country}%`); conditions.push(`d.destination_country ILIKE $${params.length}`); }
+      if (input?.country) { params.push(`%${escapeLikePattern(input.country)}%`); conditions.push(`d.destination_country ILIKE $${params.length} ESCAPE '\\'`); }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
       return exec(
         `SELECT d.*, a.decision_status AS adequacy_status
@@ -332,5 +386,74 @@ export const crossBorderAdequacyRouter = router({
          ${where} ORDER BY l.created_at DESC LIMIT 200`,
         params
       );
+    }),
+
+  /** Org-scoped adequacy posture: decisions relevant to one organisation's
+   *  declared destinations plus its derogation count per decision. */
+  listOrganizationAdequacyPosture: protectedProcedure
+    .input(z.object({ organizationId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const decisions = await exec(
+        `SELECT a.*,
+                COUNT(DISTINCT d.id) FILTER (WHERE d.status IN ('submitted','under_review','accepted')) AS active_declarations,
+                COUNT(DISTINCT g.id) AS derogations
+         FROM adequacy_decisions a
+         LEFT JOIN transfer_declarations d ON d.adequacy_decision_id = a.id AND d.organization_id = $1
+         LEFT JOIN cross_border_derogations g ON g.adequacy_decision_id = a.id AND g.organization_id = $1
+         WHERE a.decision_status = 'in_force'
+            OR d.id IS NOT NULL OR g.id IS NOT NULL
+         GROUP BY a.id
+         ORDER BY a.country ASC`,
+        [input.organizationId]
+      );
+      return decisions;
+    }),
+
+  /**
+   * SLA sweep: declarations sitting in pending_review (compliance_status)
+   * longer than slaDays get an escalated finding so the review backlog is
+   * visible and auditable. Idempotent per declaration while a finding is open.
+   */
+  sweepDeclarationReviewSla: adminProcedure
+    .input(z.object({ slaDays: z.number().int().min(1).max(365).default(30), limit: z.number().int().min(1).max(1000).default(200) }).optional())
+    .mutation(async ({ input, ctx }) => {
+      const slaDays = input?.slaDays ?? 30;
+      const limit = input?.limit ?? 200;
+      const overdue = await exec(
+        `SELECT id, organization_id, created_at
+         FROM transfer_declarations
+         WHERE compliance_status = 'pending_review'
+           AND status IN ('submitted','under_review')
+           AND created_at < NOW() - ($1 || ' days')::interval
+         ORDER BY created_at ASC
+         LIMIT $2`,
+        [slaDays, limit]
+      );
+      let findingsCreated = 0;
+      for (const d of overdue) {
+        const inserted = await exec(
+          `INSERT INTO transfer_findings
+             (declaration_id, organization_id, finding_type, severity, description, evidence, enforcement_referral, created_by)
+           SELECT $1, $2, 'manual', 'medium', $3, $4, FALSE, $5
+           WHERE NOT EXISTS (
+             SELECT 1 FROM transfer_findings
+             WHERE declaration_id = $1
+               AND evidence->>'rule' = 'declaration_review_sla'
+               AND status IN ('open','referred','under_investigation')
+           )
+           RETURNING id`,
+          [
+            d.id, d.organization_id,
+            `Declaration #${d.id} has been pending review for more than ${slaDays} days (SLA breach).`,
+            JSON.stringify({ rule: "declaration_review_sla", slaDays, submittedAt: d.created_at }),
+            "system:sla-sweep",
+          ]
+        );
+        if (inserted[0]) findingsCreated += 1;
+      }
+      await logAudit("declaration_review_sla_sweep", "transfer_declarations", null, String(ctx.user.id), {
+        slaDays, overdue: overdue.length, findingsCreated,
+      });
+      return { overdue: overdue.length, findingsCreated, slaDays };
     }),
 });

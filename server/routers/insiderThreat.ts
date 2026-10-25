@@ -49,6 +49,8 @@ export const MAKER_CHECKER_ACTIONS = [
   "dpco_approval",
   "role_grant",
   "vault_sealing_override",
+  // Round-9 FIN-1: sanctions register publish dual control (migration 0117).
+  "sanction_publication",
 ] as const;
 export type MakerCheckerAction = (typeof MAKER_CHECKER_ACTIONS)[number];
 

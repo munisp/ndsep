@@ -20,6 +20,17 @@ from collections import defaultdict
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Any
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
 log = logging.getLogger("audit-aggregator")
 
@@ -27,7 +38,7 @@ PORT = int(os.environ.get("MIDDLEWARE_AUDIT_PORT", "8142"))
 KAFKA_REST_URL = os.environ.get("KAFKA_REST_URL", "http://localhost:8082")
 KAFKA_TOPIC = "ndsep.audit.log"
 KAFKA_GROUP = "ndsep-audit-aggregator"
-PG_URL = os.environ.get("NDSEP_PG_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db")
+PG_URL = os.environ.get("NDSEP_PG_URL")
 ANOMALY_THRESHOLD = int(os.environ.get("AUDIT_ANOMALY_THRESHOLD", "100"))
 
 # ─── In-memory stats ─────────────────────────────────────────────────────────
@@ -88,7 +99,7 @@ def write_to_pg(event: Dict[str, Any]) -> None:
     """Write aggregated audit event to PostgreSQL."""
     try:
         import psycopg2  # type: ignore
-        conn = psycopg2.connect(PG_URL)
+        conn = psycopg2.connect(_require_dsn(PG_URL))
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO audit_log_aggregates

@@ -25,7 +25,7 @@
 import { createHash } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure, staffProcedure } from "../_core/trpc";
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
@@ -43,10 +43,13 @@ import {
   ackSlaState,
   slaHoursRemaining,
   hashIp,
-  isRateLimited,
   toPublicTrackingView,
   canMergeInto,
   canBeMerged,
+  ipHashSalt,
+  extractClientIp,
+  fixedWindowStart,
+  counterExceedsLimit,
   type ComplaintStatus,
 } from "../services/complaintLogic";
 import { notifyComplainant, notificationChannelStatus } from "../services/complaintNotify";
@@ -114,33 +117,46 @@ function decryptPii<T extends Record<string, any>>(row: T): T {
 }
 
 // ─── Rate limiting ───────────────────────────────────────────────────────────
-function rateLimitConfig(): { maxPerHour: number; salt: string } {
+function rateLimitConfig(): { maxPerHour: number; trackPerHour: number; salt: string } {
   return {
     maxPerHour: Math.max(1, parseInt(process.env.COMPLAINT_SUBMIT_RATE_LIMIT_PER_HOUR ?? "5", 10) || 5),
-    // Stable default keeps limiting functional without config; operators
-    // should set COMPLAINT_IP_HASH_SALT in production so hashes are not
-    // cross-deployment comparable.
-    salt: process.env.COMPLAINT_IP_HASH_SALT ?? "ndsep-complaints",
+    trackPerHour: Math.max(1, parseInt(process.env.COMPLAINT_TRACK_RATE_LIMIT_PER_HOUR ?? "30", 10) || 30),
+    // Mandatory env salt: FAILS CLOSED in production when unset (unsalted IP
+    // hashes are dictionary-reversible); deterministic dev salt otherwise.
+    salt: ipHashSalt(),
   };
 }
 
+const TRUSTED_PROXY_COUNT = Math.max(0, parseInt(process.env.NDSEP_TRUSTED_PROXY_COUNT ?? "0", 10) || 0);
+
 function clientIp(req: any): string {
-  const fwd = req?.headers?.["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
-  return req?.ip ?? req?.socket?.remoteAddress ?? "unknown";
+  // Trusted-proxy-aware extraction: XFF is only honoured for as many hops as
+  // we actually control (NDSEP_TRUSTED_PROXY_COUNT); with 0 the socket
+  // address is authoritative and XFF is ignored as spoofable.
+  return extractClientIp(req?.headers, req?.ip ?? req?.socket?.remoteAddress, TRUSTED_PROXY_COUNT);
 }
 
-async function enforceSubmitRateLimit(ipHash: string): Promise<void> {
-  const { maxPerHour } = rateLimitConfig();
+/**
+ * Non-TOCTOU rate limit: a single atomic upsert increments the fixed-window
+ * counter and returns the new value (INSERT ... ON CONFLICT DO UPDATE
+ * RETURNING) — concurrent requests can no longer both pass a check-then-
+ * insert race.
+ */
+async function enforceCounterRateLimit(req: any, action: string, maxPerWindow: number, windowMs: number): Promise<void> {
+  const key = hashIp(`${action}|${clientIp(req)}`, rateLimitConfig().salt);
+  const windowStart = fixedWindowStart(Date.now(), windowMs);
   const rows = await exec(
-    `SELECT COUNT(*)::int AS n FROM public_complaints
-     WHERE submitter_ip_hash = $1 AND received_at > NOW() - INTERVAL '1 hour'`,
-    [ipHash],
+    `INSERT INTO rate_limit_counters (limiter_key, window_start, count, updated_at)
+     VALUES ($1, $2, 1, NOW())
+     ON CONFLICT (limiter_key, window_start)
+     DO UPDATE SET count = rate_limit_counters.count + 1, updated_at = NOW()
+     RETURNING count`,
+    [key, windowStart],
   );
-  if (isRateLimited(Number(rows[0]?.n ?? 0), maxPerHour)) {
+  if (counterExceedsLimit(Number(rows[0]?.count ?? 1), maxPerWindow)) {
     throw new TRPCError({
       code: "TOO_MANY_REQUESTS",
-      message: "Submission rate limit reached. Please try again later.",
+      message: "Rate limit reached. Please try again later.",
     });
   }
 }
@@ -225,7 +241,7 @@ export const publicComplaintsRouter = router({
       }
 
       const ipHash = hashIp(clientIp(ctx.req), rateLimitConfig().salt);
-      await enforceSubmitRateLimit(ipHash);
+      await enforceCounterRateLimit(ctx.req, "complaints.submit", rateLimitConfig().maxPerHour, 3_600_000);
 
       // Pre-validate attachments (decode + hash-verify) BEFORE inserting the
       // complaint so a bad attachment never leaves an orphan row or consumes
@@ -341,7 +357,10 @@ export const publicComplaintsRouter = router({
       referenceCode: z.string().min(10).max(32),
       complainantEmail: z.string().email().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // Reference-code tracking is a credential-guessing surface: rate limit
+      // by (action, IP-hash) with the atomic counter upsert.
+      await enforceCounterRateLimit((ctx as any).req, "complaints.track", rateLimitConfig().trackPerHour, 3_600_000);
       const code = input.referenceCode.trim().toUpperCase();
       if (!isValidReferenceCode(code)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid complaint reference format (NDPC-CMP-YYYY-NNNNNN)." });
@@ -351,12 +370,16 @@ export const publicComplaintsRouter = router({
       if (!row) {
         throw new TRPCError({ code: "NOT_FOUND", message: "No complaint found with that reference code." });
       }
-      // Privacy rule (mirrors foia.track): if the complaint carries a contact
-      // email, the tracker must prove knowledge of it. Fully anonymous
-      // complaints are trackable by reference code alone.
-      if (row.complainant_email) {
+      // Privacy rule: when ANY identity field was supplied at submission the
+      // tracker must prove knowledge of the contact email. Fully anonymous
+      // complaints (no name, email or phone) are trackable by reference code
+      // alone. A complaint with identity data but no email on record cannot
+      // be tracked publicly at all.
+      const hasIdentity = !!(row.complainant_email || row.complainant_name || row.complainant_phone);
+      if (hasIdentity) {
         const supplied = input.complainantEmail?.toLowerCase();
-        if (!supplied || supplied !== String(row.complainant_email).toLowerCase()) {
+        const onRecord = row.complainant_email ? String(row.complainant_email).toLowerCase() : null;
+        if (!onRecord || !supplied || supplied !== onRecord) {
           throw new TRPCError({
             code: "NOT_FOUND",
             message: "No complaint found with that reference code and email.",
@@ -367,7 +390,9 @@ export const publicComplaintsRouter = router({
     }),
 
   // ─── Admin: triage queue ───────────────────────────────────────────────────
-  list: protectedProcedure
+  // staffProcedure (not protectedProcedure): complainant PII must never reach
+  // org accounts — only NDPC staff / auditors may read the triage queue.
+  list: staffProcedure
     .input(z.object({
       status: z.enum(COMPLAINT_STATUSES).optional(),
       category: z.enum(COMPLAINT_CATEGORIES).optional(),
@@ -409,7 +434,7 @@ export const publicComplaintsRouter = router({
       return { data: rows.map((r) => withSlaFields(decryptPii(r))), total: Number(cnt[0]?.total ?? 0), page, limit };
     }),
 
-  get: protectedProcedure
+  get: staffProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ input }) => {
       const rows = await exec(`SELECT * FROM public_complaints WHERE id = $1`, [input.id]);
@@ -561,11 +586,17 @@ export const publicComplaintsRouter = router({
       if (!canBeMerged(duplicate[0])) {
         throw new TRPCError({ code: "CONFLICT", message: "Duplicate complaint is already merged." });
       }
-      await exec(
+      // Race-safe guard: the UPDATE itself refuses a row that was merged by a
+      // concurrent request between the existence check and this write.
+      const mergedRows = await exec(
         `UPDATE public_complaints SET merged_into_id = $1, status = 'closed', closed_at = NOW(), updated_at = NOW()
-         WHERE id = $2`,
+         WHERE id = $2 AND merged_into_id IS NULL
+         RETURNING id`,
         [input.canonicalId, input.duplicateId],
       );
+      if (!mergedRows[0]) {
+        throw new TRPCError({ code: "CONFLICT", message: "Duplicate complaint was merged by a concurrent operation." });
+      }
       // Carry the duplicate's attachments and timeline forward so evidence stays reachable.
       await exec(`UPDATE complaint_attachments SET complaint_id = $1 WHERE complaint_id = $2`, [input.canonicalId, input.duplicateId]);
       await addEvent(input.duplicateId, "merged", String(ctx.user.id), { into: input.canonicalId, reason: input.reason }, duplicate[0].status, "closed");

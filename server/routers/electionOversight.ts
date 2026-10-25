@@ -15,6 +15,7 @@ import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import { encryptField } from "../encryption";
 import { withCache, CK, TTL } from "../queryCache";
+import { hashIp, ipHashSalt, fixedWindowStart, counterExceedsLimit, extractClientIp } from "../services/complaintLogic";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -32,6 +33,84 @@ async function exec(query: string, params: unknown[] = []): Promise<any[]> {
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
   }
 }
+
+function safeParams(params: unknown[]): unknown[] {
+  return params.map((p) =>
+    Array.isArray(p) || (p !== null && typeof p === "object" && !(p instanceof Date))
+      ? JSON.stringify(p)
+      : p
+  );
+}
+
+/** Referral insert + linked-report status flip must be atomic. */
+async function withTransaction<T>(fn: (tx: (q: string, p?: unknown[]) => Promise<any[]>) => Promise<T>): Promise<T> {
+  const pool = getPool();
+  if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const client = (await pool.connect()) as unknown as {
+    query: (q: string, p?: unknown[]) => Promise<{ rows: any[] }>;
+    release: () => void;
+  };
+  const tx = async (q: string, p: unknown[] = []): Promise<any[]> => {
+    const r = await client.query(q, safeParams(p));
+    return autoDecryptRows(q, r.rows ?? []);
+  };
+  try {
+    await client.query("BEGIN");
+    const out = await fn(tx);
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (err instanceof TRPCError) throw err;
+    logger.error({ err }, "[election] transaction failed — rolled back");
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database error" });
+  } finally {
+    client.release();
+  }
+}
+
+// ─── Intake rate limiting (shared counter table + complaintLogic helpers) ────
+const PMR_RATE_LIMIT_PER_HOUR = Math.max(1, parseInt(process.env.ELECTION_PMR_RATE_LIMIT_PER_HOUR ?? "10", 10) || 10);
+const TRUSTED_PROXY_COUNT = Math.max(0, parseInt(process.env.NDSEP_TRUSTED_PROXY_COUNT ?? "0", 10) || 0);
+
+/**
+ * Non-TOCTOU fixed-window rate limit on the public microtargeting intake:
+ * one atomic upsert increments the counter and returns the new value.
+ * Keyed by salted IP hash (never a raw IP).
+ */
+async function enforceIntakeRateLimit(req: any, action: string): Promise<void> {
+  const ip = extractClientIp(req?.headers, req?.ip ?? req?.socket?.remoteAddress, TRUSTED_PROXY_COUNT);
+  const key = hashIp(`${action}|${ip}`, ipHashSalt());
+  const windowStart = fixedWindowStart(Date.now(), 3_600_000);
+  const rows = await exec(
+    `INSERT INTO rate_limit_counters (limiter_key, window_start, count, updated_at)
+     VALUES ($1, $2, 1, NOW())
+     ON CONFLICT (limiter_key, window_start)
+     DO UPDATE SET count = rate_limit_counters.count + 1, updated_at = NOW()
+     RETURNING count`,
+    [key, windowStart],
+  );
+  if (counterExceedsLimit(Number(rows[0]?.count ?? 1), PMR_RATE_LIMIT_PER_HOUR)) {
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit reached. Please try again later." });
+  }
+}
+
+/**
+ * Microtargeting review transition guard (0052 statuses):
+ *   received         -> under_review | escalated | dismissed | closed
+ *   under_review     -> escalated | dismissed | closed
+ *   escalated        -> closed      (referral to INEC flips to referred_to_inec)
+ *   referred_to_inec -> closed
+ *   dismissed/closed -> TERMINAL (never reopen)
+ */
+const PMR_TRANSITIONS: Record<string, readonly string[]> = {
+  received: ["under_review", "escalated", "dismissed", "closed"],
+  under_review: ["escalated", "dismissed", "closed"],
+  escalated: ["closed"],
+  referred_to_inec: ["closed"],
+  dismissed: [],
+  closed: [],
+};
 
 // Keyword set identifying political-data complaints in citizen_requests
 const POLITICAL_FILTER = `(cr.description ~* '\\m(political|election|campaign|voter|voting|party|pvc|inec)\\M')`;
@@ -77,7 +156,8 @@ export const electionOversightRouter = router({
       reporterEmail: z.string().email().optional(),
       isAnonymous: z.boolean().default(false),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await enforceIntakeRateLimit((ctx as any).req, "election.pmr.submit");
       const period = await getActiveScrutinyPeriod();
       if (!period) {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Microtargeting intake is only open during a proclaimed election period with heightened scrutiny." });
@@ -194,13 +274,28 @@ export const electionOversightRouter = router({
       reviewNotes: z.string().max(5000).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // Transition guard: terminal states (dismissed/closed) can never be
+      // reopened, and only forward transitions in PMR_TRANSITIONS are legal.
+      const current = await exec(`SELECT id, status FROM political_microtargeting_reports WHERE id = $1`, [input.id]);
+      if (!current[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found." });
+      const from = String(current[0].status);
+      if (!(PMR_TRANSITIONS[from] ?? []).includes(input.status)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: from === "dismissed" || from === "closed"
+            ? `Report is already '${from}' — terminal states cannot be reopened.`
+            : `Illegal transition '${from}' -> '${input.status}'.`,
+        });
+      }
+      // Guarded UPDATE re-checks the source status so a concurrent review
+      // cannot race past the transition table.
       const rows = await exec(
         `UPDATE political_microtargeting_reports SET status = $1, reviewed_by = $2, review_notes = $3, updated_at = NOW()
-         WHERE id = $4 RETURNING id`,
-        [input.status, (ctx as any).user?.id ?? null, input.reviewNotes ?? null, input.id]
+         WHERE id = $4 AND status = $5 RETURNING id`,
+        [input.status, (ctx as any).user?.id ?? null, input.reviewNotes ?? null, input.id, from]
       );
-      if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found." });
-      await logAuditEvent(`election.pmr_${input.status}`, "political_microtargeting_report", input.id, String((ctx as any).user?.id ?? ""), {});
+      if (!rows[0]) throw new TRPCError({ code: "CONFLICT", message: "Report state changed concurrently — re-attempt review." });
+      await logAuditEvent(`election.pmr_${input.status}`, "political_microtargeting_report", input.id, String((ctx as any).user?.id ?? ""), { fromStatus: from });
       return { success: true };
     }),
 
@@ -214,19 +309,41 @@ export const electionOversightRouter = router({
       summary: z.string().min(20).max(10000),
     }))
     .mutation(async ({ input, ctx }) => {
-      const seq = await exec("SELECT nextval('inec_referral_ref_seq') AS n");
-      const ref = `INEC-${new Date().getFullYear()}-${String(Number(seq[0]?.n ?? 0)).padStart(5, "0")}`;
-      const rows = await exec(
-        `INSERT INTO inec_referrals (case_reference, election_period_id, microtargeting_report_id, complaint_reference, subject, summary, referred_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [ref, input.electionPeriodId ?? null, input.microtargetingReportId ?? null, input.complaintReference ?? null,
-         input.subject, input.summary, (ctx as any).user?.id ?? null]
-      );
-      // Linked microtargeting report flips to referred_to_inec
-      if (input.microtargetingReportId) {
-        await exec(`UPDATE political_microtargeting_reports SET status = 'referred_to_inec', updated_at = NOW() WHERE id = $1`, [input.microtargetingReportId]);
-      }
-      await logAuditEvent("election.inec_referral_created", "inec_referral", rows[0]?.id ?? "", String((ctx as any).user?.id ?? ""), { caseReference: ref });
+      const actor = String((ctx as any).user?.id ?? "");
+      // Transactional: the referral row and the linked report's status flip
+      // commit or roll back together — a referral without the flip (or vice
+      // versa) is never persisted.
+      const rows = await withTransaction(async (tx) => {
+        if (input.microtargetingReportId) {
+          const report = await tx(
+            `SELECT id, status FROM political_microtargeting_reports WHERE id = $1 FOR UPDATE`,
+            [input.microtargetingReportId]
+          );
+          if (!report[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Linked microtargeting report not found." });
+          if (["dismissed", "closed", "referred_to_inec"].includes(String(report[0].status))) {
+            throw new TRPCError({ code: "CONFLICT", message: `Report is '${report[0].status}' and cannot be referred to INEC.` });
+          }
+        }
+        const seq = await tx("SELECT nextval('inec_referral_ref_seq') AS n");
+        const ref = `INEC-${new Date().getFullYear()}-${String(Number(seq[0]?.n ?? 0)).padStart(5, "0")}`;
+        const inserted = await tx(
+          `INSERT INTO inec_referrals (case_reference, election_period_id, microtargeting_report_id, complaint_reference, subject, summary, referred_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+          [ref, input.electionPeriodId ?? null, input.microtargetingReportId ?? null, input.complaintReference ?? null,
+           input.subject, input.summary, actor]
+        );
+        // Linked microtargeting report flips to referred_to_inec (guarded:
+        // only from a referable state, re-checked inside the transaction).
+        if (input.microtargetingReportId) {
+          await tx(
+            `UPDATE political_microtargeting_reports SET status = 'referred_to_inec', updated_at = NOW()
+             WHERE id = $1 AND status NOT IN ('dismissed','closed','referred_to_inec')`,
+            [input.microtargetingReportId]
+          );
+        }
+        return inserted;
+      });
+      await logAuditEvent("election.inec_referral_created", "inec_referral", rows[0]?.id ?? "", actor, { caseReference: rows[0]?.case_reference });
       return rows[0];
     }),
 

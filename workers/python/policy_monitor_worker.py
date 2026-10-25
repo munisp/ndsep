@@ -49,10 +49,20 @@ RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/worker
 LLM_WORKER_URL = os.environ.get("OLLAMA_WORKER_URL", "http://localhost:8203").rstrip("/")
 LLM_TIMEOUT = float(os.environ.get("POLICY_MONITOR_LLM_TIMEOUT_SECONDS", "60"))
 PORT = int(os.environ.get("POLICY_MONITOR_PORT", os.environ.get("POLMON_PORT", "8211")))
+BIND_HOST = os.environ.get("POLICY_MONITOR_BIND_HOST", "127.0.0.1")  # control plane is local-only by default
 POLL_INTERVAL = float(os.environ.get("POLICY_MONITOR_POLL_SECONDS", "60"))
 REQUEST_TIMEOUT = float(os.environ.get("POLICY_MONITOR_REQUEST_TIMEOUT_SECONDS", "20"))
 RETRY_BACKOFF_BASE_MIN = float(os.environ.get("POLICY_MONITOR_RETRY_BACKOFF_MIN", "15"))
 MAX_TEXT_CHARS = int(os.environ.get("POLICY_MONITOR_MAX_TEXT_CHARS", "400000"))
+MAX_BODY_BYTES = int(os.environ.get("POLICY_MONITOR_MAX_BODY_BYTES", "16384"))
+MAX_IN_FLIGHT = int(os.environ.get("POLICY_MONITOR_MAX_IN_FLIGHT", "3"))
+# SequenceMatcher is O(n*m): bound the compared slice so a 400k-char policy
+# cannot stall the worker.
+DIFF_COMPARE_CHARS = int(os.environ.get("POLICY_MONITOR_DIFF_COMPARE_CHARS", "100000"))
+# Control-plane auth: X-Worker-Token header required on all POSTs. Fail CLOSED
+# when unset outside an explicit dev environment.
+WORKER_AUTH_TOKEN = os.environ.get("WORKER_AUTH_TOKEN", "")
+DEV_MODE = os.environ.get("APP_ENV", "").lower() in ("dev", "development", "test")
 USER_AGENT = os.environ.get(
     "POLICY_MONITOR_USER_AGENT",
     "NDSEP-PolicyMonitor/1.0 (+https://ndpc.gov.ng; privacy notice change monitor)",
@@ -146,8 +156,18 @@ def keyword_delta(old_text: str, new_text: str) -> Dict[str, List[str]]:
 def change_ratio(old_text: str, new_text: str) -> float:
     if not old_text and not new_text:
         return 0.0
-    sm = difflib.SequenceMatcher(a=old_text, b=new_text, autojunk=True)
+    # Bound the SequenceMatcher workload: compare at most DIFF_COMPARE_CHARS
+    # per side (head+sampled tail) so huge policies cannot stall the worker.
+    old_c, new_c = _bounded_for_diff(old_text), _bounded_for_diff(new_text)
+    sm = difflib.SequenceMatcher(a=old_c, b=new_c, autojunk=True)
     return round(1.0 - sm.ratio(), 6)
+
+
+def _bounded_for_diff(text: str) -> str:
+    if len(text) <= DIFF_COMPARE_CHARS:
+        return text
+    half = DIFF_COMPARE_CHARS // 2
+    return text[:half] + text[-half:]
 
 
 def heuristic_classify(old_text: str, new_text: str) -> Dict[str, Any]:
@@ -255,8 +275,7 @@ def _connect():
 
 def db_health() -> Dict[str, Any]:
     if not DB_URL:
-        return {"configured": False, "status": "UNCONFIGURED",
-                "detail": "WORKER_DATABASE_URL/DATABASE_URL not set"}
+        return {"configured": False, "status": "UNCONFIGURED"}
     try:
         conn = _connect()
         with conn.cursor() as cur:
@@ -266,8 +285,9 @@ def db_health() -> Dict[str, Any]:
             queued = cur.fetchone()[0]
         conn.close()
         return {"configured": True, "status": "ok", "enabled_policies": policies, "diff_queue_depth": queued}
-    except Exception as exc:
-        return {"configured": True, "status": "unreachable", "detail": str(exc)[:200]}
+    except Exception:
+        # Never leak raw DB errors to unauthenticated health callers.
+        return {"configured": True, "status": "unreachable"}
 
 
 def _relay(event: str, data: Dict[str, Any]) -> None:
@@ -285,12 +305,16 @@ def _next_retry(retry_count: int) -> str:
 
 
 # ── Check pipeline ─────────────────────────────────────────────────────────────
-def _previous_version_text(cur, policy_id: int, exclude_hash: str) -> Tuple[Optional[int], str]:
+def _previous_version_text(cur, policy_id: int, exclude_version_id: int) -> Tuple[Optional[int], str]:
+    """The TRUE predecessor of a version: the most recent OTHER version by
+    fetch order (fetched_at, id). Excluding by content hash was wrong — a
+    reverted/duplicated hash could pick the wrong baseline."""
     cur.execute(
         """SELECT id, content_text FROM policy_versions
-            WHERE policy_id = %s AND content_hash <> %s
-            ORDER BY fetched_at DESC LIMIT 1""",
-        (policy_id, exclude_hash),
+            WHERE policy_id = %s AND id <> %s
+              AND fetched_at <= (SELECT fetched_at FROM policy_versions WHERE id = %s)
+            ORDER BY fetched_at DESC, id DESC LIMIT 1""",
+        (policy_id, exclude_version_id, exclude_version_id),
     )
     row = cur.fetchone()
     return (row[0], row[1] or "") if row else (None, "")
@@ -340,19 +364,24 @@ def _classify_and_record(conn, policy_id: int, version_id: int,
         else:
             # Explicit UNCONFIGURED path: keep the heuristic signal visible,
             # queue the semantic diff for retry — never silently complete.
+            # First failure must use the FIRST backoff step (_next_retry(1)),
+            # not exponent 0.
             classification = heuristic["classification"]
+            cur.execute("SELECT retry_count FROM policy_versions WHERE id = %s", (version_id,))
+            current_retry = int((cur.fetchone() or [0])[0] or 0) + 1
             cur.execute(
                 """UPDATE policy_versions
                       SET change_classification = %s, diff_status = 'UNCONFIGURED',
                           diff_summary = %s, classifier = 'heuristic',
                           diff_detail = %s::jsonb,
-                          retry_count = retry_count + 1,
+                          retry_count = %s,
                           next_retry_at = now() + %s::interval
                     WHERE id = %s""",
                 (classification,
                  f"[heuristic only — LLM diff pending retry] ratio={heuristic['ratio']}; {llm_error}",
                  json.dumps({"heuristic": heuristic, "llm_error": llm_error}),
-                 _next_retry(0), version_id),
+                 current_retry,
+                 _next_retry(current_retry), version_id),
             )
             _llm_failures += 1
             llm_ok = False
@@ -384,10 +413,20 @@ def check_policy(policy_id: int) -> Dict[str, Any]:
         _, controller_name, policy_url, last_hash, interval_hours = row
 
         try:
-            resp = requests.get(policy_url, timeout=REQUEST_TIMEOUT,
+            resp = requests.get(policy_url, timeout=REQUEST_TIMEOUT, stream=True,
                                 headers={"User-Agent": USER_AGENT})
             status = resp.status_code
-            body = resp.text
+            # Size-cap the body: never slurp an unbounded response into memory.
+            chunks = []
+            total = 0
+            cap = 2 * MAX_TEXT_CHARS
+            for chunk in resp.iter_content(chunk_size=65536):
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= cap:
+                    break
+            resp.close()
+            body = b"".join(chunks)[:cap].decode("utf-8", errors="replace")
         except Exception as exc:
             with conn.cursor() as cur:
                 cur.execute(
@@ -402,6 +441,23 @@ def check_policy(policy_id: int) -> Dict[str, Any]:
             conn.commit()
             _last_error = str(exc)[:300]
             return {"policy_id": policy_id, "status": "fetch_error", "error": str(exc)[:300]}
+
+        # Error pages are NOT policy versions: record the failure and move on.
+        if status >= 400:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE monitored_policies
+                          SET last_checked_at = now(), last_http_status = %s,
+                              consecutive_failures = consecutive_failures + 1,
+                              last_error = %s,
+                              next_check_at = now() + (LEAST(check_interval_hours, 6) || ' hours')::interval,
+                              updated_at = now()
+                        WHERE id = %s""",
+                    (status, f"HTTP {status} error page (not stored as a version)", policy_id),
+                )
+            conn.commit()
+            _last_error = f"HTTP {status} for policy {policy_id}"
+            return {"policy_id": policy_id, "status": "http_error", "http_status": status}
 
         normalized = normalize_policy_text(body)
         digest = content_hash(normalized)
@@ -451,7 +507,7 @@ def check_policy(policy_id: int) -> Dict[str, Any]:
                     WHERE id = %s""",
                 (status, digest, interval_hours, policy_id),
             )
-            prev_id, prev_text = _previous_version_text(cur, policy_id, digest)
+            prev_id, prev_text = _previous_version_text(cur, policy_id, version_id)
         conn.commit()
 
         _changes_detected += 1
@@ -499,7 +555,7 @@ def retry_pending_diffs(limit: int = 10) -> Dict[str, Any]:
             rows = cur.fetchall()
         for version_id, policy_id, new_text, retry_count in rows:
             with conn.cursor() as cur:
-                _, prev_text = _previous_version_text(cur, policy_id, "__none__")
+                _, prev_text = _previous_version_text(cur, policy_id, version_id)
             llm_result, llm_error = llm_semantic_diff(prev_text or "", new_text or "")
             with conn.cursor() as cur:
                 if llm_result is not None:
@@ -586,17 +642,32 @@ def health_payload() -> Dict[str, Any]:
         "worker": "policy_monitor",
         "status": status,
         "uptime_seconds": round(time.time() - _worker_start, 1),
-        "database": db,
-        "llm_worker": llm,
+        # Never leak raw DB errors to unauthenticated health callers.
+        "database": {"configured": db["configured"], "status": db["status"]},
+        "llm_worker": {k: v for k, v in llm.items() if k != "detail"},
         "checks_completed": _checks_completed,
         "changes_detected": _changes_detected,
         "diffs_classified": _diffs_classified,
         "llm_failures": _llm_failures,
-        "last_error": _last_error,
         "config": {"poll_interval_s": POLL_INTERVAL, "material_ratio": MATERIAL_CHANGE_RATIO,
                    "llm_worker_url": LLM_WORKER_URL},
         "time": datetime.now(timezone.utc).isoformat(),
     }
+
+
+_in_flight_sem = threading.BoundedSemaphore(MAX_IN_FLIGHT)
+
+
+def _check_worker_token(headers) -> Optional[str]:
+    """X-Worker-Token check. Fails CLOSED when WORKER_AUTH_TOKEN is unset
+    outside an explicit dev environment."""
+    if not WORKER_AUTH_TOKEN:
+        if DEV_MODE:
+            return None
+        return "worker auth not configured (WORKER_AUTH_TOKEN unset)"
+    if headers.get("X-Worker-Token") != WORKER_AUTH_TOKEN:
+        return "invalid worker token"
+    return None
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -619,7 +690,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length") or 0)
+        # Control-plane auth: X-Worker-Token required (fail closed).
+        auth_err = _check_worker_token(self.headers)
+        if auth_err:
+            self._json(401, {"error": auth_err})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._json(400, {"error": "invalid Content-Length"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._json(413, {"error": "request body too large"})
+            return
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
@@ -633,15 +716,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(policy_id, int):
                 self._json(400, {"error": "policy_id (int) required"})
                 return
+            if not _in_flight_sem.acquire(blocking=False):
+                self._json(429, {"error": "too many checks in flight"})
+                return
             try:
                 self._json(200, check_policy(policy_id))
-            except Exception as exc:
-                self._json(500, {"error": str(exc)[:300]})
+            except Exception:
+                log.exception("manual policy check failed")
+                self._json(500, {"error": "policy check failed"})
+            finally:
+                _in_flight_sem.release()
         elif self.path == "/retry":
             try:
-                self._json(200, retry_pending_diffs(limit=int(body.get("limit", 10))))
-            except Exception as exc:
-                self._json(500, {"error": str(exc)[:300]})
+                limit = min(max(int(body.get("limit", 10)), 1), 100)
+                self._json(200, retry_pending_diffs(limit=limit))
+            except Exception:
+                log.exception("retry pass failed")
+                self._json(500, {"error": "retry pass failed"})
         else:
             self._json(404, {"error": "not found"})
 
@@ -652,10 +743,10 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def main() -> None:
-    log.info("policy monitor worker starting on port %s (db configured: %s, llm: %s)",
-             PORT, bool(DB_URL), LLM_WORKER_URL)
+    log.info("policy monitor worker starting on %s:%s (db configured: %s, llm: %s)",
+             BIND_HOST, PORT, bool(DB_URL), LLM_WORKER_URL)
     threading.Thread(target=_scheduler_loop, daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((BIND_HOST, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

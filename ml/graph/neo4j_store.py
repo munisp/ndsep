@@ -8,7 +8,7 @@ can fall back (see ``ml.graph.graph_source``).
 Connection configuration (env or constructor kwargs):
     NEO4J_URI       bolt URI          (default bolt://localhost:7687)
     NEO4J_USER      username          (default neo4j)
-    NEO4J_PASSWORD  password          (default ndsep-neo4j-dev — dev only)
+    NEO4J_PASSWORD  password          (REQUIRED — no default; fail closed)
 
 Graph model (mirrors ml/data/generate_synthetic.py):
     Node labels      Organization, Violation, EnforcementAction, Officer,
@@ -46,7 +46,9 @@ except ImportError:  # driver optional — callers must check HAS_NEO4J
 
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "ndsep-neo4j-dev")
+# Fail closed (round-9): no embedded default password. Callers must set
+# NEO4J_PASSWORD or pass password= explicitly; connect() refuses otherwise.
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
 
 # node_type (as in graph_nodes.node_type) -> Neo4j label. Whitelist: labels
 # are interpolated into Cypher and must never come from untrusted input.
@@ -285,18 +287,28 @@ class Neo4jGraphStore:
     """Connection-managed Neo4j client. Use as a context manager."""
 
     def __init__(self, uri: str = NEO4J_URI, user: str = NEO4J_USER,
-                 password: str = NEO4J_PASSWORD,
+                 password: Optional[str] = None,
                  batch_size: int = DEFAULT_BATCH_SIZE):
         if not HAS_NEO4J:
             raise Neo4jStoreError(
                 "The 'neo4j' Python driver is not installed. "
                 "Install it with: pip install neo4j")
-        self.uri, self.user, self.password = uri, user, password
+        self.uri = uri
+        self.user = user
+        # Resolve env at construction time (not import time) so tests /
+        # late-loaded environments are honoured.
+        self.password = (password if password is not None
+                         else os.environ.get("NEO4J_PASSWORD"))
         self.batch_size = int(batch_size)
         self._driver = None
 
     # -- connection lifecycle --------------------------------------------- #
     def connect(self) -> "Neo4jGraphStore":
+        if not self.password:
+            raise Neo4jStoreError(
+                "Neo4j password not configured: set NEO4J_PASSWORD or pass "
+                "password= explicitly (embedded default removed in round-9 — "
+                "refusing to connect fail-open).")
         try:
             self._driver = GraphDatabase.driver(
                 self.uri, auth=(self.user, self.password))

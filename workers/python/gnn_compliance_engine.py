@@ -22,8 +22,10 @@ Technology: Python · numpy · scipy · psycopg2 · FastAPI
 Port: 8216
 """
 import os
+import sys
 import time
 import random
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -33,6 +35,17 @@ from typing import Any, Optional
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [NDSEP-GNN] %(levelname)s %(message)s",
@@ -62,13 +75,21 @@ except ImportError:
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_URL = os.environ.get("DATABASE_URL",
-                        os.environ.get("WORKER_DATABASE_URL",
-                                       "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
-PORT = int(os.environ.get("GNN_PORT", "8216"))
+                        os.environ.get("WORKER_DATABASE_URL"))
+PORT = int(os.environ.get("GNN_PORT", "8242"))  # canonical workerManager port (was 8216, collided with dapr-state-bridge)
 FALKORDB_URL = os.environ.get("FALKORDB_URL", "redis://localhost:6379")
 LAKEHOUSE_URL = os.environ.get("LAKEHOUSE_URL", "http://localhost:8140")
 EMBEDDING_DIM = int(os.environ.get("GNN_EMBEDDING_DIM", "32"))
 GNN_LAYERS = int(os.environ.get("GNN_LAYERS", "3"))
+
+# Repo root on path so `import ml.models.gnn_net` resolves (round-9: the
+# engine prefers the TRAINED GNNNet weights from ml/weights over the previous
+# random-initialised forward pass).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+ML_WEIGHTS_DIR = os.environ.get("ML_WEIGHTS_DIR",
+                                os.path.join(_REPO_ROOT, "ml", "weights"))
 
 app = FastAPI(title="NDSEP GNN Compliance Engine", version="2.0.0")
 
@@ -188,7 +209,7 @@ def build_graph_from_db():
         return
 
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         # Organizations as nodes
@@ -318,7 +339,7 @@ def _build_graph_from_lakehouse(rows: list[dict]):
     # Fall back to PostgreSQL for entities not in Lakehouse features
     if HAS_PG:
         try:
-            conn = psycopg2.connect(DB_URL)
+            conn = psycopg2.connect(_require_dsn(DB_URL))
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("SELECT id::text, organization_id::text, action_type, status FROM enforcement_actions LIMIT 500")
             for row in cur.fetchall():
@@ -373,7 +394,18 @@ def build_synthetic_graph():
     graph.built_at = datetime.now(timezone.utc).isoformat()
 
 # ── GNN: Message Passing with Learned Weights ─────────────────────────────────
-
+#
+# Round-9: the previous implementation used RANDOM-initialised weight matrices
+# (never trained) and re-sampled a random neighbour subset on EVERY call, so
+# embeddings were non-deterministic and carried no learned signal. Now:
+#   1. The trained GraphSAGE GNN (ml/models/gnn_net.py, weights in
+#      ml/weights/gnn_net.pt) is used when torch + weights are available
+#      (`_embedding_backend == "trained_gnn_net"`).
+#   2. The legacy numpy forward remains as an explicitly-labelled fallback
+#      ("seeded_heuristic") with a FIXED seed and FULL (deterministic)
+#      neighbour mean aggregation — no per-call random sampling.
+#   3. Per-layer aggregates are memoised (_fwd_memo), so computing an
+#      embedding never recomputes the same (node, layer) aggregate twice.
 
 def node_feature_vector(node_id: str) -> np.ndarray:
     """Convert node features to numeric vector."""
@@ -403,15 +435,57 @@ def node_feature_vector(node_id: str) -> np.ndarray:
     return vec
 
 
+def node_feature_vector_20(node_id: str) -> np.ndarray:
+    """20-dim feature vector for the trained GNNNet (NODE_FEATURE_DIM=20).
+
+    The 8 engine features occupy f0..f7; f8..f19 are zero-padded (after
+    train-time standardisation ≈ feature means — a neutral, documented
+    default, same convention as ml/training/fine_tune.py).
+    """
+    v = np.zeros(20, dtype=np.float32)
+    v[:8] = node_feature_vector(node_id)
+    return v
+
+
+# ── Trained GNNNet backend ────────────────────────────────────────────────────
+_trained_gnn: Any = None
+_trained_gnn_version: Optional[str] = None
+_embedding_backend = "seeded_heuristic"
+
+
+def load_trained_gnn() -> bool:
+    """Load the trained GraphSAGE GNN from ml/weights. Returns True on success."""
+    global _trained_gnn, _trained_gnn_version, _embedding_backend
+    try:
+        import torch  # noqa: F401
+        from ml.models.gnn_net import GNNNet
+        path = os.path.join(ML_WEIGHTS_DIR, "gnn_net.pt")
+        if not os.path.exists(path):
+            log.info(f"[GNN] no trained weights at {path} — seeded heuristic backend")
+            _trained_gnn = None
+            _embedding_backend = "seeded_heuristic"
+            return False
+        _trained_gnn = GNNNet.load(path)
+        mpath = os.path.join(ML_WEIGHTS_DIR, "gnn_net_metrics.json")
+        if os.path.exists(mpath):
+            with open(mpath) as f:
+                _trained_gnn_version = json.load(f).get("version")
+        _embedding_backend = "trained_gnn_net"
+        log.info(f"[GNN] loaded trained GNNNet (version={_trained_gnn_version}, "
+                 f"hidden={_trained_gnn.config['hidden_dim']})")
+        return True
+    except Exception as e:
+        log.warning(f"[GNN] trained GNNNet unavailable ({e}) — seeded heuristic backend")
+        _trained_gnn = None
+        _embedding_backend = "seeded_heuristic"
+        return False
+
+
 def initialize_gnn_weights():
-    """Initialize learnable GNN weight matrices."""
-    rng = np.random.default_rng(42)
-    for layer in range(GNN_LAYERS):
-        _gnn_weights[f"W_self_{layer}"] = rng.standard_normal(
-            (EMBEDDING_DIM, 8 if layer == 0 else EMBEDDING_DIM)).astype(np.float32) * 0.1
-        _gnn_weights[f"W_neigh_{layer}"] = rng.standard_normal(
-            (EMBEDDING_DIM, 8 if layer == 0 else EMBEDDING_DIM)).astype(np.float32) * 0.1
-        _gnn_weights[f"b_{layer}"] = np.zeros(EMBEDDING_DIM, dtype=np.float32)
+    """(Re)load scoring weights: trained GNNNet preferred, seeded heuristic
+    fallback. Kept under the historical name for callers (init_graph,
+    /graph/build)."""
+    load_trained_gnn()
 
 
 def relu(x: np.ndarray) -> np.ndarray:
@@ -423,39 +497,105 @@ def l2_normalize(x: np.ndarray) -> np.ndarray:
     return x / max(norm, 1e-8)
 
 
-def gnn_forward(node_id: str, depth: int = GNN_LAYERS) -> np.ndarray:
-    """GraphSAGE-style forward pass with learned aggregation."""
-    if depth == 0:
-        return node_feature_vector(node_id)
+def _seeded_layer_weights(layer: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Deterministic (fixed-seed) fallback weights for one layer."""
+    key = f"layer_{layer}"
+    if key not in _gnn_weights:
+        rng = np.random.default_rng(42 + layer)
+        in_dim = 8 if layer == 0 else EMBEDDING_DIM
+        _gnn_weights[f"W_self_{layer}"] = rng.standard_normal(
+            (EMBEDDING_DIM, in_dim)).astype(np.float32) * 0.1
+        _gnn_weights[f"W_neigh_{layer}"] = rng.standard_normal(
+            (EMBEDDING_DIM, in_dim)).astype(np.float32) * 0.1
+        _gnn_weights[f"b_{layer}"] = np.zeros(EMBEDDING_DIM, dtype=np.float32)
+    return (_gnn_weights[f"W_self_{layer}"], _gnn_weights[f"W_neigh_{layer}"],
+            _gnn_weights[f"b_{layer}"])
 
-    # Self features
+
+# Memo of (node_id, depth) -> aggregate. Cleared on every graph rebuild.
+_fwd_memo: dict = {}
+
+
+def gnn_forward(node_id: str, depth: int = GNN_LAYERS) -> np.ndarray:
+    """Deterministic GraphSAGE-style forward pass (seeded heuristic backend).
+
+    FULL neighbour mean aggregation (no per-call random sampling) and
+    memoised per (node, layer): repeated calls never resample or recompute
+    the same aggregate."""
+    key = (node_id, depth)
+    if key in _fwd_memo:
+        return _fwd_memo[key]
+    if depth == 0:
+        h = node_feature_vector(node_id)
+        _fwd_memo[key] = h
+        return h
+
     h_self = gnn_forward(node_id, depth - 1)
 
-    # Aggregate neighbor features (mean aggregation)
+    # Aggregate ALL neighbor features (deterministic mean; no sampling)
     neighbors = graph.adj.get(node_id, [])
     if not neighbors:
         h_neigh = np.zeros_like(h_self)
     else:
-        # Sample up to 10 neighbors for efficiency
-        sampled = random.sample(neighbors, min(10, len(neighbors)))
-        h_neighbors = np.stack([gnn_forward(nid, depth - 1) for nid, _ in sampled])
+        h_neighbors = np.stack([gnn_forward(nid, depth - 1) for nid, _ in neighbors])
         h_neigh = np.mean(h_neighbors, axis=0)
 
     layer = depth - 1
-    W_self = _gnn_weights.get(f"W_self_{layer}", np.eye(EMBEDDING_DIM, h_self.shape[0]))
-    W_neigh = _gnn_weights.get(f"W_neigh_{layer}", np.eye(EMBEDDING_DIM, h_neigh.shape[0]))
-    b = _gnn_weights.get(f"b_{layer}", np.zeros(EMBEDDING_DIM))
-
-    # Combine: h = ReLU(W_self * h_self + W_neigh * h_neigh + b)
+    W_self, W_neigh, b = _seeded_layer_weights(layer)
     h = relu(W_self @ h_self + W_neigh @ h_neigh + b)
-    return l2_normalize(h)
+    h = l2_normalize(h)
+    _fwd_memo[key] = h
+    return h
+
+
+def _compute_embeddings_trained() -> int:
+    """Vectorised full-graph forward through the trained GNNNet.
+
+    Per-layer aggregates are computed exactly once per layer (single sparse
+    matmul per layer), which is the memoisation requirement by construction.
+    Node embeddings = final hidden layer activations (before the classifier
+    head), so the API embedding dimension becomes the trained hidden dim.
+    """
+    import torch
+    from ml.models.gnn_net import build_adjacency
+
+    node_ids = list(graph.nodes.keys())
+    idx = {nid: i for i, nid in enumerate(node_ids)}
+    X = torch.tensor(np.stack([node_feature_vector_20(n) for n in node_ids]),
+                     dtype=torch.float32)
+    edges = [(idx[s], idx[d]) for s, d, _rel in graph.edges
+             if s in idx and d in idx]
+    if edges:
+        adj = build_adjacency(len(node_ids), edges)
+    else:
+        adj = torch.sparse_coo_tensor((len(node_ids), len(node_ids)))
+    with torch.no_grad():
+        h = X
+        for layer in _trained_gnn.layers:
+            # SAGELayer.forward: relu(norm(self_lin(h) + neigh_lin(adj @ h)))
+            h = layer(h, adj)
+        H = h.numpy()
+    graph.embeddings.clear()
+    for nid, vec in zip(node_ids, H):
+        graph.embeddings[nid] = l2_normalize(vec.astype(np.float32))
+    return len(graph.embeddings)
 
 
 def compute_all_embeddings():
-    """Compute GNN embeddings for all nodes."""
+    """Compute GNN embeddings for all nodes (trained backend preferred)."""
+    _fwd_memo.clear()
+    if _trained_gnn is not None:
+        try:
+            n = _compute_embeddings_trained()
+            log.info(f"Computed {n} GNN embeddings via trained GNNNet "
+                     f"(dim={_trained_gnn.config['hidden_dim']}, version={_trained_gnn_version})")
+            return
+        except Exception as e:
+            log.error(f"[GNN] trained embedding pass failed ({e}) — seeded heuristic fallback")
     for node_id in graph.nodes:
         graph.embeddings[node_id] = gnn_forward(node_id, depth=min(2, GNN_LAYERS))
-    log.info(f"Computed {len(graph.embeddings)} GNN embeddings (dim={EMBEDDING_DIM})")
+    log.info(f"Computed {len(graph.embeddings)} GNN embeddings via seeded "
+             f"heuristic backend (dim={EMBEDDING_DIM}) — NOT a trained model")
 
 # ── Link Prediction ────────────────────────────────────────────────────────────
 
@@ -582,7 +722,9 @@ def health():
         "has_sklearn": HAS_SKLEARN,
         "graph": graph.stats(),
         "gnn_layers": GNN_LAYERS,
-        "embedding_dim": EMBEDDING_DIM,
+        "embedding_dim": _trained_gnn.config["hidden_dim"] if _trained_gnn is not None else EMBEDDING_DIM,
+        "embedding_backend": _embedding_backend,
+        "gnn_model_version": _trained_gnn_version,
         "link_predictor_trained": _link_predictor is not None,
         "training_metrics": _training_metrics,
         "uptime_seconds": round(time.time() - _start_time),
@@ -619,6 +761,7 @@ def api_get_embedding(req: EmbeddingRequest):
         "embedding": [round(float(x), 6) for x in emb],
         "dimension": len(emb),
         "node_type": graph.nodes[req.node_id]["type"],
+        "embedding_backend": _embedding_backend,
     }
 
 
@@ -631,7 +774,9 @@ def api_all_embeddings():
             "embedding": [round(float(x), 6) for x in emb],
             "type": graph.nodes[nid]["type"],
         }
-    return {"embeddings": result, "count": len(result), "dimension": EMBEDDING_DIM}
+    return {"embeddings": result, "count": len(result),
+            "dimension": len(next(iter(result.values()))["embedding"]) if result else 0,
+            "embedding_backend": _embedding_backend}
 
 
 @app.post("/predict/link")

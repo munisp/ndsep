@@ -12,7 +12,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, protectedProcedure, adminProcedure, staffProcedure } from "../_core/trpc";
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
@@ -101,11 +101,37 @@ async function callerRegulatorCode(userId: number | string): Promise<string | nu
   return rows[0]?.regulator_code ?? null;
 }
 
+/**
+ * Verify the caller belongs to the RECEIVING regulator of a referral.
+ * Admins pass; regulator-role users must be bound (users.regulator_code) to
+ * the referral's to_regulator. Returns the referral row.
+ */
+async function requireReceivingRegulator(
+  ctx: { user: { id: number | string; role?: string; email?: string | null } },
+  referralRef: string,
+  fromStatuses: string[],
+): Promise<any> {
+  const rows = await exec(`SELECT * FROM case_referrals WHERE referral_ref = $1`, [referralRef]);
+  if (!rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Referral not found" });
+  if (ctx.user.role === "admin" || ctx.user.role === "government_staff") return rows[0];
+  const bound = await callerRegulatorCode(ctx.user.id);
+  if (!bound) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Your account is not bound to a regulator code" });
+  }
+  if (bound !== rows[0].to_regulator) {
+    throw new TRPCError({ code: "FORBIDDEN", message: `This referral is addressed to regulator '${rows[0].to_regulator}'` });
+  }
+  if (!fromStatuses.includes(rows[0].status)) {
+    throw new TRPCError({ code: "CONFLICT", message: `Referral is in '${rows[0].status}' status` });
+  }
+  return rows[0];
+}
+
 export const regulatorReconciliationRouter = router({
   // ─── Jurisdiction conflicts ───────────────────────────────────────────────
 
   /** NDPC officer: raise a dual-jurisdiction conflict record for a matter. */
-  raiseConflict: protectedProcedure
+  raiseConflict: staffProcedure
     .input(z.object({
       matterRef: z.string().min(3).max(100),
       regulators: z.array(regulatorEnum).min(2),
@@ -129,13 +155,15 @@ export const regulatorReconciliationRouter = router({
     .input(z.object({
       status: z.enum(["raised", "under_review", "resolved", "escalated"]).optional(),
       matterRef: z.string().optional(),
+      limit: z.number().int().min(1).max(200).default(50),
     }))
     .query(async ({ input }) => {
       let sql = `SELECT * FROM jurisdiction_conflicts WHERE 1=1`;
       const params: unknown[] = [];
       if (input.status) { params.push(input.status); sql += ` AND status = $${params.length}`; }
       if (input.matterRef) { params.push(input.matterRef); sql += ` AND matter_ref = $${params.length}`; }
-      sql += ` ORDER BY created_at DESC`;
+      params.push(input.limit);
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
       return exec(sql, params);
     }),
 
@@ -204,6 +232,7 @@ export const regulatorReconciliationRouter = router({
     .input(z.object({ referralRef: z.string().min(4) }))
     .mutation(async ({ input, ctx }) => {
       requireStaffOrRegulator(ctx);
+      await requireReceivingRegulator(ctx, input.referralRef, ["sent"]);
       const rows = await exec(
         `UPDATE case_referrals SET status = 'acknowledged', acknowledged_at = NOW(), updated_at = NOW()
          WHERE referral_ref = $1 AND status = 'sent' RETURNING *`,
@@ -223,6 +252,7 @@ export const regulatorReconciliationRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       requireStaffOrRegulator(ctx);
+      await requireReceivingRegulator(ctx, input.referralRef, ["sent", "acknowledged"]);
       const rows = await exec(
         `UPDATE case_referrals
          SET status = $1, notes = COALESCE($2, notes), responded_by = $3, responded_at = NOW(), updated_at = NOW()
@@ -257,6 +287,7 @@ export const regulatorReconciliationRouter = router({
     .input(z.object({
       regulator: regulatorEnum.optional(),
       status: z.enum(["sent", "acknowledged", "accepted", "declined", "resolved"]).optional(),
+      limit: z.number().int().min(1).max(200).default(50),
     }))
     .query(async ({ input }) => {
       let sql = `SELECT * FROM case_referrals WHERE 1=1`;
@@ -266,7 +297,8 @@ export const regulatorReconciliationRouter = router({
         sql += ` AND (from_regulator = $${params.length} OR to_regulator = $${params.length})`;
       }
       if (input.status) { params.push(input.status); sql += ` AND status = $${params.length}`; }
-      sql += ` ORDER BY created_at DESC`;
+      params.push(input.limit);
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
       return exec(sql, params);
     }),
 
@@ -283,9 +315,15 @@ export const regulatorReconciliationRouter = router({
       await requireRegulatorRead(ctx);
       // Dashboard scoping: a regulator-role caller bound to a regulator code
       // (users.regulator_code) may only view its own slice; admins see all.
+      // Dashboard scoping: a regulator-role caller MUST be bound
+      // (users.regulator_code) and may only view its own slice. Unbound
+      // regulator accounts fail CLOSED; admins see all.
       if (ctx.user.role !== "admin") {
         const bound = await callerRegulatorCode(ctx.user.id);
-        if (bound && bound !== input.regulator) {
+        if (!bound) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Your account is not bound to a regulator code — dashboard access denied" });
+        }
+        if (bound !== input.regulator) {
           throw new TRPCError({ code: "FORBIDDEN", message: `Your account is bound to regulator '${bound}'` });
         }
       }

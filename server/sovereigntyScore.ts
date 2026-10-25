@@ -43,7 +43,15 @@ export type ReadinessTier =
   | "on_track"
   | "at_risk"
   | "critical"
-  | "non_compliant";
+  | "non_compliant"
+  /** Telemetry coverage below the minimum: the score is provisional and the
+   *  tier is capped here until enough windows are observed. */
+  | "partial";
+
+/** Telemetry coverage gate: at least 20 of the trailing 24 aggregation
+ *  windows must have data, otherwise the tier is capped at "partial". */
+export const TELEMETRY_WINDOW_COUNT = 24;
+export const MIN_TELEMETRY_WINDOWS = 20;
 
 export interface SovereigntyScoreInputs {
   /** 0..1 — fraction of observed egress destinations covered by the
@@ -54,10 +62,16 @@ export interface SovereigntyScoreInputs {
   attestationDaysToExpiry: number | null;
   /** Open residency violations (detected/acknowledged/under_remediation). */
   openViolations: number;
-  /** Violations resolved/dismissed in the trailing 180 days. */
+  /** Violations with status 'resolved' in the trailing 180 days. DISMISSED
+   *  violations do NOT count here — a dismissal is not a remediation and must
+   *  neither improve nor penalise the score. */
   recentlyResolvedViolations: number;
   /** 0..1 — foreign share of egress bytes over the recent aggregation window. */
   foreignEgressRatio: number;
+  /** Telemetry coverage for the scoring window. When fewer than
+   *  MIN_TELEMETRY_WINDOWS of TELEMETRY_WINDOW_COUNT windows have data, the
+   *  readiness tier is capped at "partial" (insufficient evidence). */
+  telemetryCoverage?: { availableWindows: number; expectedWindows?: number };
   /** Weights override (must be non-negative; renormalised if sum != 1). */
   weights?: Partial<SovereigntyWeights>;
   /** Reference instant; defaults to now. */
@@ -82,6 +96,10 @@ export interface SovereigntyScoreResult {
   daysToDeadline: number;
   explanation: ScoreExplanationFactor[];
   summary: string;
+  /** FALSE when telemetry coverage was insufficient and the tier was capped
+   *  at "partial". */
+  telemetryCoverageSufficient: boolean;
+  coverageNote?: string;
 }
 
 /** Clamp to [0, 1] and guard against NaN/Infinity from bad telemetry. */
@@ -209,12 +227,31 @@ export function computeSovereigntyScore(input: SovereigntyScoreInputs): Sovereig
 
   const rawScore = explanation.reduce((acc, f) => acc + f.contribution, 0);
   const score = clamp01(Math.round(rawScore * 1000) / 1000);
-  const tier = readinessTier(score, daysToDeadline);
+  let tier = readinessTier(score, daysToDeadline);
+
+  // Telemetry coverage gate: a score computed from sparse windows is
+  // provisional. Cap the tier at "partial" and explain.
+  let telemetryCoverageSufficient = true;
+  let coverageNote: string | undefined;
+  if (input.telemetryCoverage) {
+    const expected = input.telemetryCoverage.expectedWindows ?? TELEMETRY_WINDOW_COUNT;
+    const required = Math.min(MIN_TELEMETRY_WINDOWS, expected);
+    const available = Math.max(0, input.telemetryCoverage.availableWindows);
+    if (available < required) {
+      telemetryCoverageSufficient = false;
+      tier = "partial";
+      coverageNote =
+        `Insufficient telemetry coverage: ${available}/${expected} aggregation windows had data ` +
+        `(minimum ${required}). Score is provisional and the readiness tier is capped at "partial" ` +
+        `until enough windows are observed.`;
+    }
+  }
 
   const weakest = explanation[0];
   const summary =
     `Sovereignty score ${score.toFixed(3)} (${tier.replace(/_/g, " ")}); ` +
     `${daysToDeadline} day(s) to the CBN localisation deadline (2027-01-01). ` +
+    (coverageNote ? coverageNote + " " : "") +
     (weakest && weakest.contribution < weakest.weight * 0.5
       ? `Weakest factor: ${weakest.factor.replace(/_/g, " ")} — ${weakest.detail}`
       : "All factors within acceptable bands.");
@@ -227,5 +264,7 @@ export function computeSovereigntyScore(input: SovereigntyScoreInputs): Sovereig
     daysToDeadline,
     explanation,
     summary,
+    telemetryCoverageSufficient,
+    coverageNote,
   };
 }

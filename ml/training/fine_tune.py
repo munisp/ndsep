@@ -39,8 +39,10 @@ import torch
 import torch.nn as nn
 
 from ml.data.generate_synthetic import (CREDIT_FEATURES, FRAUD_FEATURES,
-                                        NODE_FEATURE_DIM, generate)
-from ml.monitoring.drift import drift_report, load_feature_stats
+                                        NODE_FEATURE_DIM, SECTORS, generate)
+from ml.monitoring.drift import (compute_feature_stats, drift_report,
+                                 load_feature_stats, persist_drift_alerts,
+                                 save_feature_stats)
 from ml.models.credit_net import CreditNet
 from ml.models.fraud_net import FraudNet
 from ml.models.gnn_net import GNNNet, build_adjacency
@@ -108,25 +110,44 @@ def fetch_credit_from_db() -> pd.DataFrame | None:
         return None
     try:
         with conn, conn.cursor() as cur:
+            # LABEL LEAKAGE FIX (round-9): the previous label
+            #   default_24m = (penalties_count_24m > 2)
+            # was a deterministic function of an INPUT FEATURE — the model
+            # "learned" the threshold and evaluation metrics were meaningless.
+            # Now the windows are DISJOINT: all input features are computed on
+            # the PRIOR window (24–48 months ago) and the label on the OUTCOME
+            # window (most recent 24 months). The label can never be derived
+            # from any feature because the feature set contains no
+            # outcome-window aggregates.
             cur.execute("""
                 SELECT o.id::text, o.sector,
-                       COALESCE(v.cnt, 0)  AS violations_count_24m,
-                       COALESCE(p.cnt, 0)  AS penalties_count_24m,
-                       COALESCE(p.total, 0) AS total_fines,
-                       COALESCE(b.cnt, 0)  AS breach_incidents_24m
+                       COALESCE(v.cnt, 0)     AS violations_count_24m,
+                       COALESCE(p_feat.cnt, 0)  AS penalties_count_24m,
+                       COALESCE(p_feat.total, 0) AS total_fines,
+                       COALESCE(b.cnt, 0)     AS breach_incidents_24m,
+                       COALESCE(p_out.cnt, 0) AS outcome_penalties_24m
                 FROM organizations o
+                -- feature window: 24–48 months ago (prior behaviour)
                 LEFT JOIN (SELECT organization_id, COUNT(*) cnt
                            FROM compliance_violations
-                           WHERE created_at >= NOW() - INTERVAL '24 months'
+                           WHERE created_at >= NOW() - INTERVAL '48 months'
+                             AND created_at <  NOW() - INTERVAL '24 months'
                            GROUP BY organization_id) v ON v.organization_id = o.id
                 LEFT JOIN (SELECT organization_id, COUNT(*) cnt, SUM(amount) total
                            FROM financial_penalties
-                           WHERE created_at >= NOW() - INTERVAL '24 months'
-                           GROUP BY organization_id) p ON p.organization_id = o.id
+                           WHERE created_at >= NOW() - INTERVAL '48 months'
+                             AND created_at <  NOW() - INTERVAL '24 months'
+                           GROUP BY organization_id) p_feat ON p_feat.organization_id = o.id
                 LEFT JOIN (SELECT organization_id, COUNT(*) cnt
                            FROM breach_incidents
-                           WHERE created_at >= NOW() - INTERVAL '24 months'
+                           WHERE created_at >= NOW() - INTERVAL '48 months'
+                             AND created_at <  NOW() - INTERVAL '24 months'
                            GROUP BY organization_id) b ON b.organization_id = o.id
+                -- outcome window: most recent 24 months (the label source)
+                LEFT JOIN (SELECT organization_id, COUNT(*) cnt
+                           FROM financial_penalties
+                           WHERE created_at >= NOW() - INTERVAL '24 months'
+                           GROUP BY organization_id) p_out ON p_out.organization_id = o.id
             """)
             rows = cur.fetchall()
             cols = [d[0] for d in cur.description]
@@ -135,7 +156,10 @@ def fetch_credit_from_db() -> pd.DataFrame | None:
             print(f"[fine_tune] only {len(df)} orgs in DB — too few, "
                   "using synthetic batch")
             return None
-        df["default_24m"] = (df["penalties_count_24m"] > 2).astype(int)  # proxy label
+        # Outcome label from the disjoint future window — NOT derivable from
+        # any input feature (features are all prior-window aggregates).
+        df["default_24m"] = (df["outcome_penalties_24m"] > 2).astype(int)
+        df = df.drop(columns=["outcome_penalties_24m"])  # never feed label source as a feature
         # The platform tables do not carry every model feature; unmapped
         # features are zero-filled and logged (they are standardised at
         # train time, so 0 ~ train-mean — a neutral, documented default).
@@ -154,16 +178,293 @@ def fetch_credit_from_db() -> pd.DataFrame | None:
         conn.close()
 
 
-def get_new_batch(model: str, data_dir: str, batch_seed: int) -> tuple[dict, str]:
-    """Return dict of DataFrames for the requested model + source label."""
+MIN_ROWS_REAL_BATCH = 30  # below this a real extract is not trainable
+
+
+def _db_connect():
+    """Connect to the platform DB (fail closed — no embedded credentials)."""
+    dsn = (os.environ.get("DATABASE_URL") or os.environ.get("WORKER_DATABASE_URL"))
+    if not dsn:
+        return None
+    import psycopg2
+    return psycopg2.connect(dsn, connect_timeout=3)
+
+
+def fetch_fraud_from_db() -> tuple[pd.DataFrame, int] | None:
+    """Extract NEW NIP transactions (id > watermark) as a fraud batch.
+
+    READ-ONLY, incremental via the lakehouse watermark 'nip_transactions'
+    (max id already extracted). Features are engineered with the SAME
+    function used at train time (engineer_fraud_features) so distributions
+    match training. Labels come from the platform's fraud_flagged column.
+
+    Returns (df, new_watermark) — the caller advances the watermark ONLY
+    after the fine-tune run has been persisted successfully. Returns None
+    when the DB is unreachable or yields too few new rows (caller falls
+    back to a labelled synthetic batch).
+    """
+    from ml.data.generate_synthetic import engineer_fraud_features
+    watermark = lakehouse.load_watermark("nip_transactions") or 0
+    try:
+        conn = _db_connect()
+        if conn is None:
+            print("[fine_tune] DATABASE_URL not set — fraud: synthetic batch")
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, amount, channel_code, fraud_flagged, status,
+                           sender_account_number, receiver_account_number,
+                           created_at
+                    FROM nip_transactions
+                    WHERE id > %s
+                    ORDER BY id
+                    LIMIT 50000
+                """, (int(watermark),))
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[fine_tune] fraud DB extract failed ({e}) — synthetic batch")
+        return None
+    if len(rows) < MIN_ROWS_REAL_BATCH:
+        print(f"[fine_tune] only {len(rows)} new nip_transactions since "
+              f"watermark {watermark} — too few, synthetic batch")
+        return None
+    df = pd.DataFrame(rows, columns=cols)
+    new_watermark = int(df["id"].max())
+    tx = pd.DataFrame({
+        "tx_id": df["id"].astype(str).map(lambda s: f"NIP-{s}"),
+        "timestamp": pd.to_datetime(df["created_at"]),
+        "sender_org": df["sender_account_number"].fillna("unknown"),
+        "receiver_org": df["receiver_account_number"].fillna("unknown"),
+        "amount_naira": df["amount"].astype(float) / 100.0,  # kobo → naira
+        "channel": df["channel_code"].fillna("other"),
+        "is_fraud": df["fraud_flagged"].fillna(False).astype(int),
+    })
+    tx = engineer_fraud_features(tx)
+    # Features with no platform source are zero-filled (≈ train-mean after
+    # standardisation — documented neutral default).
+    for f in ["new_device", "new_location", "mule_hop", "is_insider_ring"]:
+        if f not in tx.columns:
+            tx[f] = 0.0
+    print(f"[fine_tune] fraud: {len(tx)} real NIP transactions "
+          f"(id {watermark}..{new_watermark}, "
+          f"fraud rate={tx['is_fraud'].mean():.4%})")
+    return tx, new_watermark
+
+
+_SECTOR_MAP = {"bank": "bank", "fintech": "fintech", "telco": "telco",
+               "telecom": "telco", "insurance": "insurance", "mfb": "mfb",
+               "microfinance": "mfb", "psp": "psp", "payment": "psp"}
+_SEVERITY_NUM = {"critical": 2.0, "high": 1.4, "medium": 1.0, "low": 0.5}
+
+
+def _map_sector(sector: str | None) -> str | None:
+    s = (sector or "").lower()
+    for key, canon in _SECTOR_MAP.items():
+        if key in s:
+            return canon
+    return None
+
+
+def fetch_gnn_from_db() -> tuple[dict, str] | str | None:
+    """Build graph_nodes/graph_edges/graph_labels frames from real platform
+    tables (organizations, compliance_violations, enforcement_actions).
+
+    Feature semantics mirror generate_synthetic.gen_graph:
+      f0..f3   node-type one-hot (org / violation / enforcement / officer)
+      f4..f13  standardised CREDIT_FEATURES (org nodes); severity otherwise
+      f14..f19 sector one-hot over SECTORS
+
+    Watermark 'graph_tables' = max created_at across the source tables;
+    when nothing changed since the last extract, returns the string
+    "no_new_data" so the caller can SKIP the cycle instead of retraining
+    on identical data. Returns None on DB failure (synthetic fallback).
+    """
+    try:
+        conn = _db_connect()
+        if conn is None:
+            print("[fine_tune] DATABASE_URL not set — gnn: synthetic batch")
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT GREATEST(
+                        (SELECT MAX(created_at) FROM organizations),
+                        (SELECT MAX(created_at) FROM compliance_violations),
+                        (SELECT MAX(created_at) FROM enforcement_actions)
+                    )::text
+                """)
+                max_ts = cur.fetchone()[0]
+                if max_ts is None:
+                    return None
+                watermark = lakehouse.load_watermark("graph_tables")
+                if watermark and str(max_ts) <= str(watermark):
+                    print(f"[fine_tune] gnn: no new graph data since "
+                          f"{watermark} — skipping extract")
+                    return "no_new_data"
+
+                # Org credit features (same aggregates as fetch_credit_from_db,
+                # 24-month window — these are FEATURES here, not labels).
+                cur.execute("""
+                    SELECT o.id, o.sector, o.compliance_score,
+                           COALESCE(v.cnt, 0) AS violations_count_24m,
+                           COALESCE(p.cnt, 0) AS penalties_count_24m,
+                           COALESCE(p.total, 0) AS total_fines,
+                           COALESCE(b.cnt, 0) AS breach_incidents_24m
+                    FROM organizations o
+                    LEFT JOIN (SELECT organization_id, COUNT(*) cnt
+                               FROM compliance_violations
+                               WHERE created_at >= NOW() - INTERVAL '24 months'
+                               GROUP BY organization_id) v
+                        ON v.organization_id = o.id
+                    LEFT JOIN (SELECT organization_id, COUNT(*) cnt, SUM(amount) total
+                               FROM financial_penalties
+                               WHERE created_at >= NOW() - INTERVAL '24 months'
+                               GROUP BY organization_id) p
+                        ON p.organization_id = o.id
+                    LEFT JOIN (SELECT organization_id, COUNT(*) cnt
+                               FROM breach_incidents
+                               WHERE created_at >= NOW() - INTERVAL '24 months'
+                               GROUP BY organization_id) b
+                        ON b.organization_id = o.id
+                    ORDER BY o.id LIMIT 20000
+                """)
+                orgs = cur.fetchall()
+
+                cur.execute("""
+                    SELECT id, organization_id, severity, created_at::text
+                    FROM compliance_violations ORDER BY id LIMIT 50000
+                """)
+                violations = cur.fetchall()
+                cur.execute("""
+                    SELECT id, organization_id, created_at::text
+                    FROM enforcement_actions ORDER BY id LIMIT 50000
+                """)
+                enforcements = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[fine_tune] gnn DB extract failed ({e}) — synthetic batch")
+        return None
+
+    if len(orgs) < MIN_ROWS_REAL_BATCH:
+        print(f"[fine_tune] only {len(orgs)} orgs in DB — gnn: synthetic batch")
+        return None
+
+    org_ids = [o[0] for o in orgs]
+    org_idx = {oid: i for i, oid in enumerate(org_ids)}
+    # Standardised credit-style features per org (f4..f13)
+    Xc = np.zeros((len(orgs), 10))
+    for i, (_oid, _sec, cscore, vcnt, pcnt, ptotal, bcnt) in enumerate(orgs):
+        Xc[i] = [np.log1p(max(vcnt, 0)), pcnt, np.log1p(max(ptotal or 0, 0)),
+                 float(cscore or 50), vcnt, bcnt, 0.0, 0.0, 0.0, 0.0]
+    Xc = (Xc - Xc.mean(axis=0)) / (Xc.std(axis=0) + 1e-9)
+
+    nodes, edges, labels = [], [], []
+    for i, (oid, sector, *_rest) in enumerate(orgs):
+        feat = np.zeros(NODE_FEATURE_DIM)
+        feat[0] = 1.0
+        feat[4:14] = Xc[i]
+        canon = _map_sector(sector)
+        if canon in SECTORS:
+            feat[14 + SECTORS.index(canon)] = 1.0
+        nodes.append({"node_id": i, "ref_id": f"ORG-{oid}",
+                      "node_type": "organization",
+                      **{f"f{j}": float(feat[j]) for j in range(NODE_FEATURE_DIM)}})
+
+    node_idx = len(orgs)
+    risk_latent = np.zeros(len(orgs))
+    for vid, oid, severity, _ts in violations:
+        if oid not in org_idx:
+            continue
+        feat = np.zeros(NODE_FEATURE_DIM)
+        feat[1] = 1.0
+        feat[4] = _SEVERITY_NUM.get((severity or "medium").lower(), 1.0)
+        nodes.append({"node_id": node_idx, "ref_id": f"VIO-{vid}",
+                      "node_type": "violation",
+                      **{f"f{j}": float(feat[j]) for j in range(NODE_FEATURE_DIM)}})
+        edges.append({"src": org_idx[oid], "dst": node_idx,
+                      "edge_type": "HAS_VIOLATION"})
+        risk_latent[org_idx[oid]] += 1.0
+        node_idx += 1
+    for eid, oid, _ts in enforcements:
+        if oid not in org_idx:
+            continue
+        feat = np.zeros(NODE_FEATURE_DIM)
+        feat[2] = 1.0
+        feat[4] = 1.4
+        nodes.append({"node_id": node_idx, "ref_id": f"ENF-{eid}",
+                      "node_type": "enforcement_action",
+                      **{f"f{j}": float(feat[j]) for j in range(NODE_FEATURE_DIM)}})
+        edges.append({"src": node_idx, "dst": org_idx[oid],
+                      "edge_type": "ENFORCED_BY"})
+        risk_latent[org_idx[oid]] += 2.5
+        node_idx += 1
+
+    for i, oid in enumerate(org_ids):
+        # Label from the org's OWN recorded enforcement/violation burden —
+        # the same neighbourhood-derived signal the synthetic generator uses.
+        labels.append({"org_id": f"ORG-{oid}", "node_id": i,
+                       "high_risk": int(risk_latent[i] >= 2.5),
+                       "risk_latent": float(risk_latent[i])})
+
+    print(f"[fine_tune] gnn: real graph from platform tables — "
+          f"{len(nodes)} nodes, {len(edges)} edges, "
+          f"high-risk rate={np.mean([l['high_risk'] for l in labels]):.2%}")
+    return {"graph_nodes": pd.DataFrame(nodes),
+            "graph_edges": pd.DataFrame(edges),
+            "graph_labels": pd.DataFrame(labels)}, str(max_ts)
+
+
+def _advance_watermark(model: str, batch: dict) -> None:
+    """Persist extraction watermarks AFTER a successful fine-tune run, so a
+    failed run re-reads the same rows next cycle (no data loss)."""
+    wm = batch.get("_watermark")
+    if not wm:
+        return
+    name, value = wm
+    lakehouse.save_watermark(name, value)
+    print(f"[fine_tune] watermark advanced: {name} -> {value}")
+
+
+def get_new_batch(model: str, data_dir: str, batch_seed: int) -> tuple[dict | None, str]:
+    """Return dict of DataFrames for the requested model + source label.
+
+    Real platform tables (PostgreSQL) are preferred, extracted incrementally
+    via lakehouse watermarks. Returns (None, "no_new_data") when the real
+    source has not changed since the last extract. Only when the real source
+    is UNREACHABLE (or too small) does it fall back to a synthetic batch —
+    always explicitly labelled synthetic_batch_seed_<seed> and flagged via
+    the `synthetic_fallback` key so metrics consumers can tell.
+    """
     if model == "credit":
         db_df = fetch_credit_from_db()
         if db_df is not None:
-            return {"credit_features": db_df}, "postgres"
+            return {"credit_features": db_df,
+                    "synthetic_fallback": False}, "postgres:compliance_tables"
+    elif model == "fraud":
+        res = fetch_fraud_from_db()
+        if res is not None:
+            df, wm = res
+            return {"transactions": _merge_real_cases(df),
+                    "synthetic_fallback": False,
+                    "_watermark": ("nip_transactions", wm)}, "postgres:nip_transactions"
+    elif model == "gnn":
+        res = fetch_gnn_from_db()
+        if res == "no_new_data":
+            return None, "no_new_data"
+        if res is not None:
+            batch, max_ts = res
+            batch["synthetic_fallback"] = False
+            batch["_watermark"] = ("graph_tables", max_ts)
+            return batch, "postgres:graph_tables"
     # synthetic "new" batch: same generator, different seed
     tmp_dir = os.path.join(data_dir, f"_ft_{batch_seed}")
     generate(tmp_dir, n_transactions=40_000, n_orgs=600, seed=batch_seed)
-    out = {}
+    out = {"synthetic_fallback": True}
     need = {"fraud": ["transactions"],
             "credit": ["credit_features"],
             "gnn": ["graph_nodes", "graph_edges", "graph_labels"]}[model]
@@ -187,9 +488,14 @@ def _log_drift(model: str, stats_path: str, df: pd.DataFrame,
     rep = drift_report(load_feature_stats(stats_path), df, features)
     print(f"[fine_tune] drift check ({model}): "
           f"{rep['n_drifted']}/{rep['n_features']} features drifted")
+    # Persist drift alerts (migration 0109); continuous.py consumes them as
+    # retraining triggers via consume_retrain_trigger().
     for f, r in rep["features"].items():
         if r.get("status") == "drifted":
             print(f"    DRIFT  {f}: psi={r['psi']} ks_p={r['ks_pvalue']}")
+    n_alerts = persist_drift_alerts(model, rep)
+    if n_alerts:
+        print(f"[fine_tune] persisted {n_alerts} drift alert(s) to compliance_drift_alerts")
     return rep
 
 
@@ -259,7 +565,11 @@ def fine_tune_fraud(batch: dict, source: str, epochs: int, lr: float,
           if "sample_weight" in tx.columns else None)
     metrics = fine_tune_tabular(model, X, y, epochs, lr, pos_weight,
                                 sample_weight=sw)
-    return _save_versioned(model, "fraud", metrics, source, drift, weights_dir)
+    payload = _save_versioned(model, "fraud", metrics, source, drift, weights_dir,
+                              stats_df=tx, stats_features=FRAUD_FEATURES,
+                              synthetic_fallback=bool(batch.get("synthetic_fallback")))
+    _advance_watermark("fraud", batch)
+    return payload
 
 
 def fine_tune_credit(batch: dict, source: str, epochs: int, lr: float,
@@ -274,7 +584,11 @@ def fine_tune_credit(batch: dict, source: str, epochs: int, lr: float,
     pos_weight = max((len(y) - y.sum()) / max(y.sum(), 1), 1.0)
     metrics = fine_tune_tabular(model, X, y, epochs, lr, pos_weight,
                                 batch_size=min(128, max(8, len(y) // 4)))
-    return _save_versioned(model, "credit", metrics, source, drift, weights_dir)
+    payload = _save_versioned(model, "credit", metrics, source, drift, weights_dir,
+                              stats_df=cr, stats_features=[f for f in CREDIT_FEATURES if f in cr.columns],
+                              synthetic_fallback=bool(batch.get("synthetic_fallback")))
+    _advance_watermark("credit", batch)
+    return payload
 
 
 def fine_tune_gnn(batch: dict, source: str, epochs: int, lr: float,
@@ -309,16 +623,44 @@ def fine_tune_gnn(batch: dict, source: str, epochs: int, lr: float,
     with torch.no_grad():
         prob = torch.sigmoid(model(X, adj)[torch.tensor(va)]).numpy()
     metrics = _metrics(y_va, prob)
-    return _save_versioned(model, "gnn", metrics, source, drift, weights_dir)
+    feat_cols = [f"f{i}" for i in range(NODE_FEATURE_DIM)]
+    org_feats = nodes[nodes["node_type"] == "organization"]
+    payload = _save_versioned(model, "gnn", metrics, source, drift, weights_dir,
+                              stats_df=org_feats, stats_features=feat_cols,
+                              synthetic_fallback=bool(batch.get("synthetic_fallback")))
+    _advance_watermark("gnn", batch)
+    return payload
 
 
 def _save_versioned(model, name: str, metrics: dict, source: str,
-                    drift: dict, weights_dir: str) -> dict:
+                    drift: dict, weights_dir: str,
+                    stats_df: pd.DataFrame | None = None,
+                    stats_features: list[str] | None = None,
+                    synthetic_fallback: bool | None = None) -> dict:
     version = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     wpath = os.path.join(weights_dir, f"{name}_net_{version}.pt")
     model.save(wpath)
+    # Per-version feature stats (round-9): inference must standardise with the
+    # stats of the version actually serving, not the (possibly stale) canonical
+    # stats — A/B challengers previously inherited the champion's stats.
+    if stats_df is not None and stats_features:
+        vstats = compute_feature_stats(stats_df, stats_features)
+        for f in stats_features:
+            col = pd.to_numeric(stats_df[f], errors="coerce").dropna()
+            if len(col):
+                vstats.setdefault("feature_means", {})[f] = float(col.mean())
+                vstats.setdefault("feature_stds", {})[f] = float(col.std() + 1e-9)
+        save_feature_stats(vstats, os.path.join(
+            weights_dir, f"{name}_net_{version}_feature_stats.json"))
     payload = {"model": name, "version": version, "mode": "fine_tune",
-               "data_source": source, "metrics": metrics,
+               "data_source": source,
+               # Explicit synthetic-fallback flag (round-9): metrics consumers
+               # must be able to tell a real platform batch from a synthetic
+               # one without parsing the source label.
+               "synthetic_fallback": (bool(synthetic_fallback)
+                                      if synthetic_fallback is not None
+                                      else source.startswith("synthetic")),
+               "metrics": metrics,
                "drift_summary": {k: v for k, v in drift.items()
                                  if k != "features"} if drift else None,
                "weights_path": wpath,

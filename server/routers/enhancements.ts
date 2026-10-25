@@ -14,7 +14,7 @@ import { emitComplianceEvent, opensearchIndex, lakehouseIngest, daprPublish, flu
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { syncEnforcementCase, syncComplianceAudit } from "../permifySync";
 import { autoDecryptRows } from "../encryptionMiddleware";
-import { encryptField, isEncryptionEnabled } from "../encryption";
+import { encryptField, decryptField, isEncryptionEnabled } from "../encryption";
 import { getPgSslConfig } from "../dbSslConfig";
 import { getDatabaseUrl } from "../config";
 import { logger } from "../logger";
@@ -128,7 +128,10 @@ export const dsarRouter = router({
       );
       const match = rows.find(
         (r: Record<string, unknown>) =>
-          (r.citizen_email as string)?.toLowerCase() === input.citizenEmail.toLowerCase()
+          // Explicit decryptField fallback in addition to the pool Proxy's
+          // autoDecryptRows — tracking must work whenever encryption is on,
+          // even if table-name extraction misses the query shape.
+          (decryptField(r.citizen_email as string) as string)?.toLowerCase() === input.citizenEmail.toLowerCase()
       );
       if (!match) {
         throw new TRPCError({
@@ -1035,7 +1038,7 @@ export const dpcoAuditLogsRouter = router({
     if (input.dpcoOrgId) return query("SELECT * FROM dpco_audit_logs WHERE dpco_org_id=$1 ORDER BY created_at DESC LIMIT $2",[input.dpcoOrgId,input.limit]);
     return query("SELECT * FROM dpco_audit_logs ORDER BY created_at DESC LIMIT $1",[input.limit]);
   }),
-  create: protectedProcedure.input(z.object({ dpco_org_id: z.number(), actor_id: z.number().optional(), action: z.string(), details: z.record(z.string(), z.any()).optional() })).mutation(async ({ input }) => {
+  create: staffProcedure.input(z.object({ dpco_org_id: z.number(), actor_id: z.number().optional(), action: z.string(), details: z.record(z.string(), z.any()).optional() })).mutation(async ({ input }) => {
     const r = await query(`INSERT INTO dpco_audit_logs (dpco_org_id,actor_id,action,details,created_at) VALUES ($1,$2,$3,$4,NOW()) RETURNING *`,[input.dpco_org_id,input.actor_id??null,input.action,JSON.stringify(input.details??{})]); return r[0];
   }),
 });
@@ -1043,7 +1046,7 @@ export const dpcoAuditLogsRouter = router({
 export const dpcoPerformanceMetricsRouter = router({
   list: protectedProcedure.input(z.object({ dpcoOrgId: z.number() })).query(async ({ input }) =>
     query("SELECT * FROM dpco_performance_metrics WHERE dpco_org_id=$1 ORDER BY period_start DESC LIMIT 24",[input.dpcoOrgId])),
-  upsert: protectedProcedure.input(z.object({ dpco_org_id: z.number(), period_start: z.string(), period_end: z.string(), cases_handled: z.number().default(0), avg_resolution_days: z.number().default(0), client_satisfaction_score: z.number().default(0), compliance_rate: z.number().default(0), revenue_ngn: z.number().default(0), active_clients: z.number().default(0) })).mutation(async ({ input }) => {
+  upsert: staffProcedure.input(z.object({ dpco_org_id: z.number(), period_start: z.string(), period_end: z.string(), cases_handled: z.number().default(0), avg_resolution_days: z.number().default(0), client_satisfaction_score: z.number().default(0), compliance_rate: z.number().default(0), revenue_ngn: z.number().default(0), active_clients: z.number().default(0) })).mutation(async ({ input }) => {
     const r = await query(`INSERT INTO dpco_performance_metrics (dpco_org_id,period_start,period_end,cases_handled,avg_resolution_days,client_satisfaction_score,compliance_rate,revenue_ngn,active_clients,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) ON CONFLICT (dpco_org_id,period_start) DO UPDATE SET cases_handled=EXCLUDED.cases_handled,avg_resolution_days=EXCLUDED.avg_resolution_days,client_satisfaction_score=EXCLUDED.client_satisfaction_score,compliance_rate=EXCLUDED.compliance_rate,revenue_ngn=EXCLUDED.revenue_ngn,active_clients=EXCLUDED.active_clients RETURNING *`,
       [input.dpco_org_id,input.period_start,input.period_end,input.cases_handled,input.avg_resolution_days,input.client_satisfaction_score,input.compliance_rate,input.revenue_ngn,input.active_clients]); return r[0];
   }),
@@ -1076,11 +1079,40 @@ export const evidencePackagesRouter = router({
   }),
   generate: protectedProcedure.input(z.object({ organizationId: z.number().optional(), packageType: z.string().default("compliance_audit"), referenceType: z.string().optional() })).mutation(async ({ input, ctx }) => {
     const crypto = await import('crypto');
-    const contentHash = `sha256-${crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex')}`;
-    const hmacKey = process.env.JWT_SECRET;
-    if (!hmacKey) throw new Error("JWT_SECRET is required for HMAC signing");
-    const hmacSignature = `hmac-${crypto.createHmac('sha256', hmacKey).update(contentHash).digest('hex').slice(0, 32)}`;
-    const r = await query(`INSERT INTO evidence_packages (org_id,package_type,reference_type,content_hash,hmac_signature,status,generated_by,created_at) VALUES ($1,$2,$3,$4,$5,'ready',$6,NOW()) RETURNING *`,[input.organizationId??null,input.packageType,input.referenceType??null,contentHash,hmacSignature,ctx.user.id]); return r[0];
+    // Hash REAL evidence bytes gathered from the database — never the request params.
+    // The package covers the organisation's actual compliance record snapshot.
+    const orgId = input.organizationId ?? null;
+    const [violations, breaches, penalties, evidenceItems] = await Promise.all([
+      orgId
+        ? query(`SELECT id, title, severity, status, created_at FROM compliance_violations WHERE organization_id = $1 ORDER BY id`, [orgId])
+        : Promise.resolve([]),
+      orgId
+        ? query(`SELECT id, title, severity, breach_incident_status, detected_at FROM breach_incidents WHERE organization_id = $1 ORDER BY id`, [orgId])
+        : Promise.resolve([]),
+      orgId
+        ? query(`SELECT id, amount, currency, status, created_at FROM financial_penalties WHERE organization_id = $1 ORDER BY id`, [orgId])
+        : Promise.resolve([]),
+      orgId
+        ? query(`SELECT id, file_name, sha256_hash, file_size_bytes FROM dpco_evidence_items WHERE dpco_org_id = $1 ORDER BY id`, [String(orgId)])
+        : Promise.resolve([]),
+    ]);
+    const manifest = {
+      organizationId: orgId,
+      packageType: input.packageType,
+      referenceType: input.referenceType ?? null,
+      generatedBy: ctx.user.id,
+      violations, breaches, penalties, evidenceItems,
+    };
+    const manifestBytes = Buffer.from(JSON.stringify(manifest), "utf8");
+    const contentHash = `sha256-${crypto.createHash('sha256').update(manifestBytes).digest('hex')}`;
+    // Dedicated package-signing key — JWT_SECRET is an auth credential and must
+    // not double as an evidence HMAC key.
+    const hmacKey = process.env.EVIDENCE_HMAC_SECRET;
+    if (!hmacKey) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "EVIDENCE_HMAC_SECRET is not configured — evidence package signing is disabled" });
+    }
+    const hmacSignature = `hmac-${crypto.createHmac('sha256', hmacKey).update(manifestBytes).digest('hex').slice(0, 32)}`;
+    const r = await query(`INSERT INTO evidence_packages (org_id,package_type,reference_type,content_hash,hmac_signature,status,generated_by,created_at) VALUES ($1,$2,$3,$4,$5,'ready',$6,NOW()) RETURNING *`,[orgId,input.packageType,input.referenceType??null,contentHash,hmacSignature,ctx.user.id]); return r[0];
   }),
   verify: protectedProcedure.input(z.object({ contentHash: z.string(), hmacSignature: z.string() })).query(async ({ input }) => {
     const r = await query("SELECT * FROM evidence_packages WHERE content_hash=$1 AND hmac_signature=$2",[input.contentHash,input.hmacSignature]);
@@ -1108,11 +1140,63 @@ export const penaltyAppealsRouter = router({
     if (input.penaltyId) return query("SELECT * FROM penalty_appeals WHERE penalty_id=$1 ORDER BY created_at DESC",[input.penaltyId]);
     return query("SELECT * FROM penalty_appeals ORDER BY created_at DESC LIMIT 200", []);
   }),
-  create: protectedProcedure.input(z.object({ penalty_id: z.number(), appellant_org_id: z.number(), grounds: z.string(), supporting_docs: z.array(z.string()).optional(), contact_email: z.string().email().optional() })).mutation(async ({ input }) => {
-    const r = await query(`INSERT INTO penalty_appeals (penalty_id,appellant_org_id,grounds,supporting_docs,contact_email,status,created_at) VALUES ($1,$2,$3,$4,$5,'submitted',NOW()) RETURNING *`,[input.penalty_id,input.appellant_org_id,input.grounds,JSON.stringify(input.supporting_docs??[]),input.contact_email??null]); return r[0];
+  create: protectedProcedure.input(z.object({ penalty_id: z.number(), appellant_org_id: z.number(), grounds: z.string().min(10), supporting_docs: z.array(z.string()).optional(), contact_email: z.string().email().optional() })).mutation(async ({ input, ctx }) => {
+    // Aligned with canonical penalty_appeals DDL (organization_id / submitted_by /
+    // grounds_for_appeal / contact_email are NOT NULL).
+    const contactEmail = input.contact_email ?? (ctx.user.email as string | undefined);
+    if (!contactEmail) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "contact_email is required (no email on the authenticated account)" });
+    }
+    const r = await query(
+      `INSERT INTO penalty_appeals (penalty_id, organization_id, submitted_by, contact_email, grounds_for_appeal, evidence_urls, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'submitted',NOW(),NOW()) RETURNING *`,
+      [input.penalty_id, input.appellant_org_id, String(ctx.user.id), contactEmail, input.grounds, JSON.stringify(input.supporting_docs ?? [])]
+    );
+    return r[0];
   }),
-  updateStatus: adminProcedure.input(z.object({ id: z.number(), status: z.enum(["submitted","under_review","upheld","dismissed","withdrawn"]), reviewer_notes: z.string().optional() })).mutation(async ({ input }) => {
-    const r = await query(`UPDATE penalty_appeals SET status=$2,reviewer_notes=$3,reviewed_at=NOW() WHERE id=$1 RETURNING *`,[input.id,input.status,input.reviewer_notes??null]); return r[0];
+  // Appeal status state machine: submitted -> under_review -> upheld|dismissed; withdrawn from submitted|under_review.
+  updateStatus: adminProcedure.input(z.object({ id: z.number(), status: z.enum(["submitted","under_review","upheld","dismissed","withdrawn"]), reviewer_notes: z.string().optional() })).mutation(async ({ input, ctx }) => {
+    const ALLOWED: Record<string, string[]> = {
+      submitted: ["under_review", "withdrawn"],
+      under_review: ["upheld", "dismissed", "withdrawn"],
+      upheld: [],
+      dismissed: [],
+      withdrawn: [],
+    };
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const cur = await client.query(`SELECT id, penalty_id, status FROM penalty_appeals WHERE id = $1 FOR UPDATE`, [input.id]);
+      const appeal = cur.rows[0];
+      if (!appeal) throw new TRPCError({ code: "NOT_FOUND", message: "Appeal not found" });
+      if (!(ALLOWED[appeal.status] ?? []).includes(input.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Invalid appeal transition ${appeal.status} → ${input.status}` });
+      }
+      const r = await client.query(
+        `UPDATE penalty_appeals SET status=$2, review_notes=$3, reviewed_by=$4, reviewed_at=NOW(), updated_at=NOW() WHERE id=$1 RETURNING *`,
+        [input.id, input.status, input.reviewer_notes ?? null, ctx.user.id]
+      );
+      // A decided appeal (upheld/dismissed) lifts any active stay on the penalty.
+      let staysLifted = 0;
+      if (input.status === "upheld" || input.status === "dismissed") {
+        const lifted = await client.query(
+          `UPDATE penalty_stays
+           SET status = 'lifted', lifted_at = NOW(), lifted_by = $2,
+               lift_reason = $3, updated_at = NOW()
+           WHERE penalty_id = $1 AND status = 'active'`,
+          [appeal.penalty_id, String(ctx.user.id), `appeal #${input.id} decided: ${input.status}`]
+        );
+        staysLifted = lifted.rowCount ?? 0;
+      }
+      await client.query("COMMIT");
+      return { ...(r.rows[0] as Record<string, unknown>), staysLifted };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
   }),
 });
 

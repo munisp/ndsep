@@ -69,10 +69,15 @@ _pool_lock = threading.Lock()
 
 
 def get_db_url() -> str:
-    return os.environ.get(
-        "WORKER_DATABASE_URL",
-        "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"
-    )
+    """Fail closed (round-9): no embedded default DSN. The worker database
+    URL must come from WORKER_DATABASE_URL (or DATABASE_URL as fallback)."""
+    url = os.environ.get("WORKER_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "WORKER_DATABASE_URL (or DATABASE_URL) is not set; embedded "
+            "default credentials were removed in round-9 — refusing to "
+            "connect with implicit defaults.")
+    return url
 
 
 def init_db(

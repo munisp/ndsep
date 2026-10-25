@@ -33,19 +33,7 @@ from typing import Dict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-try:
-    from db_helper import get_db_connection, publish_event
-except ImportError:
-    import psycopg2
-
-    def get_db_connection():
-        return psycopg2.connect(
-            os.environ.get('LOCAL_DATABASE_URL',
-                           'postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db')
-        )
-
-    def publish_event(event_type: str, payload: dict):
-        logging.info(f"[EVENT] {event_type}: {json.dumps(payload)}")
+from db_helper import get_db_connection, publish_event  # fail-closed: requires WORKER_DATABASE_URL/DATABASE_URL (round-9)
 
 logging.basicConfig(
     level=logging.INFO,

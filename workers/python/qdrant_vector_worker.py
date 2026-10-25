@@ -30,11 +30,22 @@ import psycopg2
 import psycopg2.extras
 import requests
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
-    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+    "DATABASE_URL"))
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
 PORT = int(os.environ.get("QDRANT_WORKER_PORT", "8200"))
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "all-MiniLM-L6-v2")
@@ -121,7 +132,7 @@ NDPA_KNOWLEDGE_BASE = [{"id": "ndpa-s1",
 
 
 def get_db():
-    return psycopg2.connect(DB_URL)
+    return psycopg2.connect(_require_dsn(DB_URL))
 
 
 def fetch_policies(conn) -> List[Dict]:

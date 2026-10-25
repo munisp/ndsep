@@ -37,11 +37,22 @@ import numpy as np
 import psycopg2
 import psycopg2.extras
 
+
+def _require_dsn(dsn):
+    """Fail closed (round-9): embedded default DB credentials were removed.
+    A DSN must come from WORKER_DATABASE_URL / DATABASE_URL / NDSEP_PG_URL."""
+    if not dsn:
+        raise RuntimeError(
+            "PostgreSQL DSN not configured: set WORKER_DATABASE_URL or "
+            "DATABASE_URL (embedded default credentials removed in round-9) — "
+            "refusing to connect with implicit defaults.")
+    return dsn
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 DB_URL = os.environ.get("WORKER_DATABASE_URL", os.environ.get(
-    "DATABASE_URL", "postgresql://ndsep_user:ndsep_secure_2026@localhost:5432/ndsep_db"))
+    "DATABASE_URL"))
 RELAY_URL = os.environ.get("WORKER_RELAY_URL", "http://localhost:3000/api/workers/event")
-PORT = int(os.environ.get("FEATURE_STORE_PORT", "8205"))
+PORT = int(os.environ.get("ML_FEATURE_STORE_PORT", os.environ.get("FEATURE_STORE_PORT", "8223")))  # canonical: ML_FEATURE_STORE_PORT (workerManager); FEATURE_STORE_PORT legacy
 MODEL_DIR = Path(os.environ.get("ML_MODEL_PATH", "./workers/python/models"))
 FEATURE_DIR = Path(os.environ.get("ML_FEATURE_PATH", "./workers/python/features"))
 RETRAIN_INTERVAL = 3600  # 1 hour
@@ -283,7 +294,7 @@ def run_retrain():
     global _last_retrain, _errors
     log.info("Starting ML model retrain pipeline...")
     try:
-        conn = psycopg2.connect(DB_URL)
+        conn = psycopg2.connect(_require_dsn(DB_URL))
         try:
             X, y, org_ids = extract_compliance_features(conn)
         finally:

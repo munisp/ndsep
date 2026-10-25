@@ -46,7 +46,7 @@ export default function PublicSanctionsRegister() {
   const [noticeType, setNoticeType] = useState("all");
   const [status, setStatus] = useState("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [delistForm, setDelistForm] = useState({ applicantName: "", applicantEmail: "", remediationSummary: "", evidenceRefs: "" });
+  const [delistForm, setDelistForm] = useState({ applicantName: "", applicantEmail: "", remediationSummary: "", evidenceRefs: "", proofToken: "" });
   const [showDelistForm, setShowDelistForm] = useState(false);
 
   const { data: list } = trpc.sanctionsRegister.search.useQuery({
@@ -65,7 +65,7 @@ export default function PublicSanctionsRegister() {
     onSuccess: () => {
       toast.success("Delisting request submitted. NDPC will review your remediation evidence.");
       setShowDelistForm(false);
-      setDelistForm({ applicantName: "", applicantEmail: "", remediationSummary: "", evidenceRefs: "" });
+      setDelistForm({ applicantName: "", applicantEmail: "", remediationSummary: "", evidenceRefs: "", proofToken: "" });
     },
     onError: (err) => toast.error(err.message),
   });
@@ -79,6 +79,7 @@ export default function PublicSanctionsRegister() {
       applicantEmail: delistForm.applicantEmail,
       remediationSummary: delistForm.remediationSummary,
       evidenceRefs: delistForm.evidenceRefs.split("\n").map((s) => s.trim()).filter(Boolean),
+      proofToken: delistForm.proofToken.trim(),
     });
   };
 
@@ -138,6 +139,10 @@ export default function PublicSanctionsRegister() {
                     <div><Label>Contact email *</Label><Input required type="email" value={delistForm.applicantEmail} onChange={(e) => setDelistForm({ ...delistForm, applicantEmail: e.target.value })} /></div>
                   </div>
                   <div><Label>Remediation summary * (min 20 chars)</Label><Textarea required rows={4} value={delistForm.remediationSummary} onChange={(e) => setDelistForm({ ...delistForm, remediationSummary: e.target.value })} /></div>
+                  <div>
+                    <Label>Org-proof token * (issued by the NDPC after verifying your representation of the organisation)</Label>
+                    <Input required minLength={32} value={delistForm.proofToken} onChange={(e) => setDelistForm({ ...delistForm, proofToken: e.target.value })} placeholder="Single-use token from the NDPC" />
+                  </div>
                   <div><Label>Evidence references (one URL/key per line)</Label><Textarea rows={3} value={delistForm.evidenceRefs} onChange={(e) => setDelistForm({ ...delistForm, evidenceRefs: e.target.value })} /></div>
                   <Button type="submit" disabled={delistMutation.isPending}>{delistMutation.isPending ? "Submitting…" : "Submit delisting request"}</Button>
                 </form>

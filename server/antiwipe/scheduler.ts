@@ -64,11 +64,23 @@ export function startAntiwipeScheduler(options: {
   });
 
   every(anchorMs, async () => {
-    // Anchor YESTERDAY (complete UTC day) once per day.
+    // Default cadence: anchor YESTERDAY (complete UTC day) once per day.
+    // ANTIWIPE_ANCHOR_HOURLY=true opts into anchoring the CURRENT partial day
+    // hourly (finer detection granularity; anchor rows are upsert-idempotent
+    // per date so later complete-day anchors replace partial ones only after
+    // operator review — the daily row for a date is written once).
+    const hourly = process.env.ANTIWIPE_ANCHOR_HOURLY === "true";
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     if (state.lastAnchorDate === yesterday) return;
     const anchor = await anchorLedger(yesterday);
     state.lastAnchorDate = anchor.anchorDate;
+    if (hourly) {
+      // Intraday snapshot anchor under a suffixed key never collides with the
+      // canonical daily anchor (ledger_anchors.anchor_date is a DATE column;
+      // intraday snapshots go to the ledger as evidence entries instead).
+      const { appendLedger } = await import("./ledger");
+      await appendLedger("antiwipe.hourly_anchor_snapshot", anchor, "antiwipe-scheduler");
+    }
   });
 
   every(tailVerifyMs, async () => {

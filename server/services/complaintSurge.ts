@@ -69,10 +69,30 @@ export const CONTROLLER_KEY_SQL = `
 // ─── 1. Daily counts ─────────────────────────────────────────────────────────
 
 /**
- * Rebuild daily counts for [fromDate, toDate] (default: last 120 days) from
- * source-of-truth public_complaints. Upsert keeps the call idempotent.
+ * Rebuild daily counts from source-of-truth public_complaints. Default mode
+ * covers [fromDate, toDate] (default: last 120 days). Full-history mode
+ * (options.fullHistory) rebuilds EVERY date present in public_complaints —
+ * used after backfills/imports so early history is not permanently absent
+ * from the materialized series. Upsert keeps both modes idempotent.
  */
-export async function recomputeDailyCounts(fromDate?: string, toDate?: string): Promise<{ days: number; rows: number }> {
+export async function recomputeDailyCounts(
+  fromDate?: string,
+  toDate?: string,
+  options: { fullHistory?: boolean } = {},
+): Promise<{ days: number | null; rows: number; fullHistory: boolean }> {
+  if (options.fullHistory) {
+    const rows = await q(
+      `INSERT INTO complaint_daily_counts (count_date, controller_key, complaint_count, updated_at)
+       SELECT received_at::date, ${CONTROLLER_KEY_SQL}, COUNT(*)::int, now()
+       FROM public_complaints
+       WHERE merged_into_id IS NULL
+       GROUP BY received_at::date, ${CONTROLLER_KEY_SQL}
+       ON CONFLICT (count_date, controller_key)
+       DO UPDATE SET complaint_count = EXCLUDED.complaint_count, updated_at = now()
+       RETURNING id`,
+    );
+    return { days: null, rows: rows.length, fullHistory: true };
+  }
   const from = fromDate ?? new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10);
   const to = toDate ?? new Date().toISOString().slice(0, 10);
   const rows = await q(
@@ -87,7 +107,7 @@ export async function recomputeDailyCounts(fromDate?: string, toDate?: string): 
      RETURNING id`,
     [from, to],
   );
-  return { days: Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1, rows: rows.length };
+  return { days: Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1, rows: rows.length, fullHistory: false };
 }
 
 // ─── 2. Baselines ────────────────────────────────────────────────────────────
@@ -182,6 +202,9 @@ export async function detectSurges(cfg: SurgeConfig = surgeConfig()): Promise<{ 
     if (!isSurge || !method) continue;
 
     // Do not re-alert a controller+method that already has an open alert.
+    // The SELECT pre-check is backed by a UNIQUE partial index (migration
+    // 0104) + ON CONFLICT, so a concurrent detector run cannot double-alert
+    // even if both pass the pre-check.
     const open = await q(
       `SELECT id FROM surge_alerts WHERE controller_key = $1 AND method = $2 AND status = 'open' LIMIT 1`,
       [key, method],
@@ -194,6 +217,7 @@ export async function detectSurges(cfg: SurgeConfig = surgeConfig()): Promise<{ 
          (controller_key, controller_id, controller_name, alert_date, method, observed_count,
           baseline_mean, zscore, changepoint, severity)
        VALUES ($1, $2, $3, CURRENT_DATE, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (controller_key, method) WHERE status = 'open' DO NOTHING
        RETURNING id`,
       [
         key,
@@ -216,6 +240,8 @@ export async function detectSurges(cfg: SurgeConfig = surgeConfig()): Promise<{ 
         severityForZscore(z?.zscore ?? null),
       ],
     );
+    // ON CONFLICT DO NOTHING: a concurrent run already opened this alert.
+    if (!inserted[0]) continue;
     alerts.push({
       controllerKey: key,
       controllerId: Number.isInteger(controllerId) ? controllerId : null,
