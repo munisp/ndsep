@@ -384,6 +384,10 @@ export const insuranceRouter = router({
       page: z.number().default(1),
     }).optional())
     .query(async ({ input }) => {
+      // NOTE (round-10): insurance_policies.policyholder_nin is registered in
+      // PII_FIELDS so this read auto-decrypts. TODO-ENCRYPT-AT-WRITE: no app
+      // write path exists today (only comprehensiveSeed.ts seeds this table);
+      // add encryptField at the writer when a policy-creation endpoint lands.
       const rows = await q(
         `SELECT p.*, c.company_name FROM insurance_policies p
          LEFT JOIN insurance_companies c ON p.company_id = c.id

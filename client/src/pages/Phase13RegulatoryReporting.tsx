@@ -19,7 +19,7 @@ export default function Phase13RegulatoryReporting() {
   const [open, setOpen] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<any>(null);
-  const [submitTo, setSubmitTo] = useState("NITDA");
+  const [submitTo, setSubmitTo] = useState("NDPC");
   const [form, setForm] = useState({
     report_name: "", report_type: "quarterly_national" as ReportType,
     reporting_period_start: "", reporting_period_end: ""
@@ -77,7 +77,7 @@ export default function Phase13RegulatoryReporting() {
               <FileBarChart className="h-6 w-6 text-emerald-600" />
               Regulatory Reporting Engine
             </h1>
-            <p className="text-muted-foreground mt-1">Generate and submit NDPA compliance reports to NITDA and regulatory bodies</p>
+            <p className="text-muted-foreground mt-1">Generate and submit NDPA compliance reports to the NDPC and other regulatory bodies</p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -220,7 +220,7 @@ export default function Phase13RegulatoryReporting() {
               <Select value={submitTo} onValueChange={setSubmitTo}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="NITDA">NITDA (National Information Technology Development Agency)</SelectItem>
+                  <SelectItem value="NDPC">NDPC (Nigeria Data Protection Commission)</SelectItem>
                   <SelectItem value="CBN">CBN (Central Bank of Nigeria)</SelectItem>
                   <SelectItem value="NCC">NCC (Nigerian Communications Commission)</SelectItem>
                   <SelectItem value="NDPC">NDPC (Nigeria Data Protection Commission)</SelectItem>

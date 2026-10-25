@@ -157,10 +157,10 @@ function OnboardingWizard({ orgId, onComplete }: { orgId: number; onComplete: ()
         {step === 2 && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Your asset has been registered. Now run a compliance self-assessment to identify any gaps against the NDPR framework.
+              Your asset has been registered. Now run a compliance self-assessment to identify any gaps against the NDPA 2023 framework.
             </p>
             <div className="rounded-lg border border-border/50 p-4 space-y-3">
-              <p className="text-xs font-semibold text-foreground">NDPR Quick Self-Assessment Checklist</p>
+              <p className="text-xs font-semibold text-foreground">NDPA 2023 Quick Self-Assessment Checklist</p>
               {[
                 "We have appointed a Data Protection Officer (DPO)",
                 "We have a documented data processing register",
@@ -193,7 +193,7 @@ function OnboardingWizard({ orgId, onComplete }: { orgId: number; onComplete: ()
         {step === 3 && !evidenceCreated && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Generate your first HMAC-signed evidence package. This creates a tamper-evident compliance record that can be submitted to NITDA.
+              Generate your first HMAC-signed evidence package. This creates a tamper-evident compliance record that can be submitted to the NDPC.
             </p>
             <Button
               size="sm"
@@ -387,7 +387,7 @@ export default function MyOrg() {
                         {v.severity ?? "medium"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{v.framework ?? "NDPR"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{v.framework ?? "NDPA 2023"}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-xs">{v.status ?? "open"}</Badge>
                     </TableCell>

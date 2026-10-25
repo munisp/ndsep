@@ -30,7 +30,7 @@ const MANDATE_ITEMS = [
   { ref: "NDPA §33", title: "Conduct Data Protection Audits", desc: "Annual and ad-hoc audits of Data Controllers and Processors", done: true },
   { ref: "NDPA §44", title: "File Compliance Audit Returns", desc: "Submit CAR to NDPC by 31 March each year", done: true },
   { ref: "NDPA §33(3)", title: "Issue Verification Statements", desc: "Accompany all NDPC filings with DPCO Verification Statement", done: true },
-  { ref: "NDPR 4.1(4)", title: "Outsourced DPO Services", desc: "Provide DPO services to organisations without in-house DPO", done: true },
+  { ref: "NDPA 2023 s.65", title: "Outsourced DPO Services", desc: "Provide DPO services to organisations without in-house DPO", done: true },
   { ref: "NDPA §32", title: "Staff Training & Certification", desc: "Deliver NDPA-compliant data protection training programs", done: true },
   { ref: "NDPA §40", title: "Breach Incident Support", desc: "Assist organisations in breach assessment and NDPC notification", done: true },
   { ref: "NDPA §43", title: "Policy & Contract Drafting", desc: "Draft DPAs, DSAs, privacy policies, BCRs, and SARs", done: true },

@@ -7,7 +7,7 @@
 ///
 /// Or against production:
 ///   flutter test test/integration/api_integration_test.dart \
-///     --dart-define=NDSEP_API_URL=https://ndsep.nitda.gov.ng
+///     --dart-define=NDSEP_API_URL=https://ndsep.ndpc.gov.ng
 library;
 
 import 'dart:convert';

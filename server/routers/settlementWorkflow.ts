@@ -32,10 +32,13 @@
  *
  * TigerBeetle bridge (server/middlewareExtensions.ts#tigerbeetleTransfer):
  * every materialised instalment is posted with transferType 'settlement'.
- * The bridge is USD-only and may be absent — outcomes are recorded
- * EXPLICITLY per instalment (ledger_post_status = posted | skipped_non_usd |
- * UNCONFIGURED | failed). A posting failure never blocks activation and is
- * never reported as a success; it surfaces in default/ledger queues for
+ * The bridge is multi-ledger (USD -> ledger 1, NGN -> ledger 2 via
+ * resolveTigerBeetleLedgerId) and may be absent — outcomes are recorded
+ * EXPLICITLY per instalment (ledger_post_status = posted | failed |
+ * UNCONFIGURED; 'skipped_non_usd' is legacy-only from before the NGN ledger
+ * existed). A posting failure never blocks activation and is never reported
+ * as a success: the transfer is also persisted to ledger_reconciliation_queue
+ * (migration 0110) with alerting, and surfaces in default/ledger queues for
  * manual reconciliation.
  *
  * Every mutation emits an audit event (emitMutationEvent) and appends to
@@ -48,7 +51,7 @@ import { router, staffProcedure, adminProcedure } from "../_core/trpc";
 import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
-import { tigerbeetleTransfer } from "../middlewareExtensions";
+import { tigerbeetleTransfer, resolveTigerBeetleLedgerId, enqueueLedgerReconciliation } from "../middlewareExtensions";
 import { appendLedger } from "../antiwipe/ledger";
 import { requireDualControl } from "./insiderThreat";
 import {
@@ -184,6 +187,13 @@ const SETTLEMENT_CLEARING_ACCOUNT = "ndpc-settlement-clearing";
  * Post one instalment to the TigerBeetle ledger via the middlewareExtensions
  * bridge. Returns the explicit ledger_post_status; never throws (posting
  * failure must not roll back settlement activation) and never fakes success.
+ *
+ * NGN instalments post to the NGN ledger (TB_LEDGER_NGN, default id 2) — the
+ * pre-Round-10 'skipped_non_usd' path is gone for NGN. A currency with no
+ * ledger mapping is enqueued into ledger_reconciliation_queue (0110) and
+ * recorded as 'failed' with the queue id in ledger_error; a bridge failure is
+ * likewise enqueued (inside tigerbeetleTransfer) before the status is
+ * recorded here.
  */
 async function postInstalmentToLedger(params: {
   instalmentId: number;
@@ -192,16 +202,34 @@ async function postInstalmentToLedger(params: {
   amount: number;
   currency: string;
   orgAccount: string;
-}): Promise<{ status: "posted" | "skipped_non_usd" | "UNCONFIGURED" | "failed"; ref: string; error: string | null }> {
+}): Promise<{ status: "posted" | "UNCONFIGURED" | "failed"; ref: string; error: string | null }> {
   const ref = `${params.settlementRef}-INST-${params.seq}`;
-  if (params.currency.toUpperCase() !== "USD") {
-    // The Go ledger proxy is USD-only (middlewareExtensions). Record the
-    // skip explicitly for manual reconciliation — never coerce currencies.
-    logger.error(
-      { reconciliation_pending: true, ref, currency: params.currency, amount: params.amount },
-      "[settlement] instalment NOT posted to USD-only TigerBeetle ledger — manual reconciliation required",
-    );
-    return { status: "skipped_non_usd", ref, error: `ledger is USD-only; currency ${params.currency} requires manual reconciliation` };
+  try {
+    resolveTigerBeetleLedgerId(params.currency);
+  } catch {
+    // No ledger mapping for this currency: durable reconciliation item +
+    // alert, never a currency coercion. ('skipped_non_usd' remains only as a
+    // legacy value on pre-Round-10 rows.)
+    const queueId = await enqueueLedgerReconciliation({
+      kind: "non_usd_currency",
+      currency: params.currency,
+      amount: params.amount,
+      debitAccount: params.orgAccount,
+      creditAccount: SETTLEMENT_CLEARING_ACCOUNT,
+      reference: ref,
+      transferType: "settlement",
+    }).catch((err: unknown) => {
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err), ref },
+        "[settlement] CRITICAL: unknown-currency instalment could not be queued for reconciliation",
+      );
+      return 0;
+    });
+    return {
+      status: "failed",
+      ref,
+      error: `no ledger mapping for currency ${params.currency}; queued for reconciliation (queue id ${queueId})`,
+    };
   }
   try {
     await tigerbeetleTransfer({
@@ -217,7 +245,7 @@ async function postInstalmentToLedger(params: {
     const message = err instanceof Error ? err.message : String(err);
     logger.error(
       { err: message, ref },
-      "[settlement] TigerBeetle bridge UNCONFIGURED/unreachable — instalment recorded but NOT posted to the ledger",
+      "[settlement] TigerBeetle bridge UNCONFIGURED/unreachable — instalment recorded but NOT posted to the ledger (enqueued to ledger_reconciliation_queue)",
     );
     return {
       status: /unavailable|ECONNREFUSED|abort/i.test(message) ? "UNCONFIGURED" : "failed",

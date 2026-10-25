@@ -1,0 +1,126 @@
+name: policy-gates
+
+# Round-10 auditor-recommended policy gates:
+#   - pii-registry-check:    PII_FIELDS registry vs migration chain (both directions)
+#   - orphan-router-check:   every server/routers/*.ts router is mounted in server/routers.ts
+#   - env-example-check:     .env.example covers every process.env reference
+#   - migration-dry-run:     full migration chain on a real Postgres service
+#                            (journal track, then scripts/runRawMigrations.mjs,
+#                            then a second runner pass to prove idempotency)
+#   - typecheck / unit-tests / py-tests: tsc --noEmit, vitest, pytest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pii-registry-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/ci/piiRegistryCheck.mjs
+
+  orphan-router-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/ci/orphanRouterCheck.mjs
+
+  env-example-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/envExampleGen.mjs --check
+
+  migration-dry-run:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ndsep_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: ndsep_ci
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ndsep_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies (pg driver for the migration runner)
+        run: npm ci --ignore-scripts
+      - name: Apply drizzle journal migrations (0000-0034, journal order)
+        run: scripts/ci/applyJournalMigrations.sh
+      - name: Apply raw migrations (drizzle/migrations 0019+, with order overrides)
+        run: node scripts/runRawMigrations.mjs
+      - name: Re-run raw migration runner (idempotency proof)
+        run: |
+          out=$(node scripts/runRawMigrations.mjs)
+          echo "$out"
+          echo "$out" | grep -q "0 applied" || {
+            echo "::error::second runner pass applied migrations — not idempotent"
+            exit 1
+          }
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx tsc --noEmit
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx vitest run
+
+  py-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest (+ pinned project requirements if present)
+        run: |
+          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - run: python -m pytest tests -q

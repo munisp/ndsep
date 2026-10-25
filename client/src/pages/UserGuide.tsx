@@ -124,7 +124,7 @@ const TUTORIALS = [
 
 const DOCS = [
   { title: "NDPA 2023 Full Text", description: "Nigeria Data Protection Act 2023 — complete legislation", category: "Legal", icon: FileText, url: "https://ndpc.gov.ng/NDPA_2023.pdf" },
-  { title: "NDPR Implementation Framework", description: "NITDA's implementation framework for data protection", category: "Legal", icon: FileText, url: "https://nitda.gov.ng/ndpr" },
+  { title: "NDPA 2023 Implementation Directive", description: "NDPC's implementation framework for data protection", category: "Legal", icon: FileText, url: "https://ndpc.gov.ng" },
   { title: "CBN Data Localisation Circular", description: "CBN BSD/DIR/CON/LAB/14/052 — financial data localisation", category: "Banking", icon: Building2, url: "#" },
   { title: "DPCO Licensing Guidelines", description: "NDPC guidelines for Data Protection Compliance Organisations", category: "DPCO", icon: Award, url: "#" },
   { title: "Breach Notification Template", description: "NDPC-approved breach notification letter template", category: "Templates", icon: AlertTriangle, url: "#" },

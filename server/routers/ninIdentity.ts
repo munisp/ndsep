@@ -15,8 +15,10 @@
  *     status UNCONFIGURED — no mock "verified" responses ever.
  *   - Assurance levels: none → basic (self-attested, no NIMC) → nin_verified.
  *     Levels attach to subjects via (subject_type, subject_ref) covering
- *     complainants and DSAR requesters. subject_ref is additionally stored
- *     keyed-hashed (subject_ref_hash, migration 0105) for equality lookups.
+ *     complainants and DSAR requesters. The plaintext subject_ref is RETIRED
+ *     (0122 redacted all values; 0126 drops the column) — the keyed hash
+ *     subject_ref_hash (0105, matching legacy unkeyed SHA-256 too) is the sole
+ *     lookup path.
  *   - Round-9 hardening:
  *       * verifyBasic NEVER supersedes an active nin_verified row (a weaker
  *         self-attestation cannot knock out a stronger verification).
@@ -165,9 +167,9 @@ async function logVerification(
   }
   const { keyed } = subjectRefHashes(subjectRef);
   await exec(
-    `INSERT INTO verification_audit_log (verification_id, action, actor, subject_type, subject_ref, subject_ref_hash, details)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [verificationId, action, actor, subjectType, subjectRef, keyed, JSON.stringify(details)],
+    `INSERT INTO verification_audit_log (verification_id, action, actor, subject_type, subject_ref_hash, details)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [verificationId, action, actor, subjectType, keyed, JSON.stringify(details)],
   );
 }
 
@@ -178,9 +180,9 @@ async function currentVerification(subjectType: string, subjectRef: string): Pro
   const { keyed, legacy } = subjectRefHashes(subjectRef);
   const rows = await exec(
     `SELECT * FROM identity_verifications
-     WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4)) AND status = 'active'
+     WHERE subject_type = $1 AND subject_ref_hash IN ($2, $3) AND status = 'active'
      ORDER BY created_at DESC LIMIT 1`,
-    [subjectType, keyed, legacy, subjectRef],
+    [subjectType, keyed, legacy],
   );
   const row = rows[0];
   if (!row) return null;
@@ -241,10 +243,10 @@ export const ninIdentityRouter = router({
       // Never let a weaker self-attestation knock out a stronger verification.
       const strong = await exec(
         `SELECT id FROM identity_verifications
-         WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4))
+         WHERE subject_type = $1 AND subject_ref_hash IN ($2, $3)
            AND status = 'active' AND assurance_level = 'nin_verified'
          LIMIT 1`,
-        [input.subjectType, keyed, legacy, input.subjectRef],
+        [input.subjectType, keyed, legacy],
       );
       if (strong[0]) {
         await logVerification(strong[0].id, "verify_failed", ctx.user ? String(ctx.user.id) : null, input.subjectType, input.subjectRef, {
@@ -257,16 +259,16 @@ export const ninIdentityRouter = router({
       }
       await exec(
         `UPDATE identity_verifications SET status = 'revoked', updated_at = NOW()
-         WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4))
+         WHERE subject_type = $1 AND subject_ref_hash IN ($2, $3)
            AND status = 'active' AND assurance_level = 'basic'`,
-        [input.subjectType, keyed, legacy, input.subjectRef],
+        [input.subjectType, keyed, legacy],
       );
       const rows = await exec(
         `INSERT INTO identity_verifications
-           (subject_type, subject_ref, subject_ref_hash, assurance_level, status, adapter, verified_at, expires_at)
-         VALUES ($1, $2, $3, 'basic', 'active', 'self_attested', NOW(), NOW() + ($4 || ' days')::interval)
+           (subject_type, subject_ref_hash, assurance_level, status, adapter, verified_at, expires_at)
+         VALUES ($1, $2, 'basic', 'active', 'self_attested', NOW(), NOW() + ($3 || ' days')::interval)
          RETURNING id`,
-        [input.subjectType, input.subjectRef, keyed, String(VERIFICATION_TTL_DAYS)],
+        [input.subjectType, keyed, String(VERIFICATION_TTL_DAYS)],
       );
       await logVerification(rows[0].id, "verify_success", ctx.user ? String(ctx.user.id) : null, input.subjectType, input.subjectRef, {
         level: "basic", method: "self_attested", possession_proof_hmac: auditPossessionProof(input.possessionProof),
@@ -350,8 +352,8 @@ export const ninIdentityRouter = router({
       const token = adapterResponse.token ?? randomUUID();
 
       // Revoke + insert atomically. The partial unique index on
-      // (subject_type, subject_ref) WHERE status='active' can raise 23505 on
-      // concurrent verification — that maps to a clean CONFLICT, not a 500.
+      // (subject_type, subject_ref_hash) WHERE status='active' can raise 23505
+      // on concurrent verification — that maps to a clean CONFLICT, not a 500.
       const pool = getPool();
       if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const client = await pool.connect();
@@ -360,15 +362,15 @@ export const ninIdentityRouter = router({
         await client.query("BEGIN");
         await client.query(
           `UPDATE identity_verifications SET status = 'revoked', updated_at = NOW()
-           WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4)) AND status = 'active'`,
-          [input.subjectType, subjKeyed, subjectRefHashes(input.subjectRef).legacy, input.subjectRef],
+           WHERE subject_type = $1 AND subject_ref_hash IN ($2, $3) AND status = 'active'`,
+          [input.subjectType, subjKeyed, subjectRefHashes(input.subjectRef).legacy],
         );
         const rows = await client.query(
           `INSERT INTO identity_verifications
-             (subject_type, subject_ref, subject_ref_hash, nin_hmac, verification_token, assurance_level, status, adapter, adapter_ref, verified_at, expires_at)
-           VALUES ($1, $2, $3, $4, $5, 'nin_verified', 'active', 'nimc', $6, NOW(), NOW() + ($7 || ' days')::interval)
+             (subject_type, subject_ref_hash, nin_hmac, verification_token, assurance_level, status, adapter, adapter_ref, verified_at, expires_at)
+           VALUES ($1, $2, $3, $4, 'nin_verified', 'active', 'nimc', $5, NOW(), NOW() + ($6 || ' days')::interval)
            RETURNING id, verified_at, expires_at`,
-          [input.subjectType, input.subjectRef, subjKeyed, hmac, token, adapterResponse.ref ?? null, String(VERIFICATION_TTL_DAYS)],
+          [input.subjectType, subjKeyed, hmac, token, adapterResponse.ref ?? null, String(VERIFICATION_TTL_DAYS)],
         );
         inserted = rows.rows[0];
         await client.query("COMMIT");
@@ -447,9 +449,9 @@ export const ninIdentityRouter = router({
       return exec(
         `SELECT id, verification_id, action, actor, details, created_at
          FROM verification_audit_log
-         WHERE subject_type = $1 AND (subject_ref_hash IN ($2, $3) OR (subject_ref_hash IS NULL AND subject_ref = $4))
-         ORDER BY created_at DESC LIMIT $5`,
-        [input.subjectType, keyed, legacy, input.subjectRef, input.limit],
+         WHERE subject_type = $1 AND subject_ref_hash IN ($2, $3)
+         ORDER BY created_at DESC LIMIT $4`,
+        [input.subjectType, keyed, legacy, input.limit],
       );
     }),
 

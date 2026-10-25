@@ -112,7 +112,7 @@ void main() {
 
   // ─── URL construction ─────────────────────────────────────────────────────────
   group('URL construction', () {
-    const baseUrl = 'https://ndsep.nitda.gov.ng';
+    const baseUrl = 'https://ndsep.ndpc.gov.ng';
 
     test('query URL is constructed correctly', () {
       const procedure = 'banking.kyc.list';
@@ -122,7 +122,7 @@ void main() {
       final uri = Uri.parse(
         '$baseUrl/api/trpc/$procedure?batch=1&input=$inputParam',
       );
-      expect(uri.host, 'ndsep.nitda.gov.ng');
+      expect(uri.host, 'ndsep.ndpc.gov.ng');
       expect(uri.path, '/api/trpc/banking.kyc.list');
       expect(uri.queryParameters['batch'], '1');
       expect(uri.queryParameters.containsKey('input'), isTrue);

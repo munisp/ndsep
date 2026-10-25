@@ -216,7 +216,7 @@ export default function Phase13PenaltyCalculator() {
                         <td className="py-2 px-3 text-muted-foreground">{r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}</td>
                         <td className="py-2 px-3">
                           {r.status === "draft" && (
-                            <Button size="sm" variant="ghost" onClick={() => approve.mutate({ id: r.id, approved_by: "NITDA Officer" })}>
+                            <Button size="sm" variant="ghost" onClick={() => approve.mutate({ id: r.id, approved_by: "NDPC Officer" })}>
                               <CheckCircle className="h-3 w-3 text-green-600" />
                             </Button>
                           )}

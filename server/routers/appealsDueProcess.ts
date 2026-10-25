@@ -18,6 +18,7 @@ import { getPool } from "../db";
 import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
+import { encryptField } from "../encryption";
 import { sendAppealUpdate } from "../emailNotification";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
@@ -179,7 +180,10 @@ export const appealsDueProcessRouter = router({
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'submitted',$9,NOW(),NOW())
          RETURNING *`,
         [
-          input.penaltyId, input.organizationId, input.submittedBy, input.contactEmail,
+          input.penaltyId, input.organizationId, input.submittedBy,
+          // contact_email is PII (round-10 registry) — encrypted at write;
+          // reads auto-decrypt via exec()→autoDecryptRows (no-op on legacy plaintext).
+          encryptField(input.contactEmail),
           input.groundsForAppeal, input.evidenceSummary ?? null, input.evidenceUrls ?? [],
           input.requestedOutcome ?? "reduction", penalty.deadline,
         ]

@@ -236,6 +236,86 @@ export async function startWorkflow(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Schedules (cron) — server-side Temporal Schedule registry
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ScheduleSpec {
+  /** Stable schedule id (also used as the spawned workflowId prefix). */
+  scheduleId: string;
+  /** Standard 5-field cron expression (server timezone). */
+  cronSchedule: string;
+  /** Workflow type started on each tick. */
+  workflowType: string;
+  /** Task queue (defaults to TEMPORAL_TASK_QUEUE). */
+  taskQueue?: string;
+  /** Serialisable workflow input. */
+  input?: Record<string, unknown>;
+}
+
+export interface ScheduleEnsureResult {
+  ok: boolean;
+  scheduleId: string;
+  created: boolean;
+  alreadyExisted: boolean;
+  error?: string;
+}
+
+/**
+ * Create a Temporal Schedule (durable cron) via the SDK schedule client.
+ * Idempotent: an existing schedule with the same id is left in place and
+ * reported as alreadyExisted — re-registration on every worker boot is safe.
+ * Throws only when Temporal is unreachable or the SDK is unavailable AND the
+ * schedule did not already exist (fail closed, matching startWorkflow).
+ */
+export async function ensureSchedule(spec: ScheduleSpec): Promise<ScheduleEnsureResult> {
+  const client = await getTemporalClient();
+  if (!client) {
+    throw new Error("Temporal SDK is unavailable; schedule registration cannot be acknowledged");
+  }
+  try {
+    await client.schedule.create(spec.scheduleId, {
+      spec: { cronExpressions: [spec.cronSchedule] },
+      action: {
+        type: "startWorkflow",
+        workflowType: spec.workflowType,
+        taskQueue: spec.taskQueue ?? TEMPORAL_TASK_QUEUE,
+        args: spec.input ? [spec.input] : [],
+      },
+      policies: {
+        // One missed window is replayed; concurrent runs of the same
+        // scheduled workflow are skipped (jobs are idempotent sweeps).
+        catchupWindow: "1h",
+        overlap: "SKIP",
+        pauseOnFailure: false,
+      },
+    });
+    logger.info({ scheduleId: spec.scheduleId, cronSchedule: spec.cronSchedule }, "[Temporal] Schedule created");
+    return { ok: true, scheduleId: spec.scheduleId, created: true, alreadyExisted: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/already exists/i.test(msg)) {
+      logger.info({ scheduleId: spec.scheduleId }, "[Temporal] Schedule already registered — leaving existing schedule in place");
+      return { ok: true, scheduleId: spec.scheduleId, created: false, alreadyExisted: true };
+    }
+    logger.error({ err, scheduleId: spec.scheduleId }, "[Temporal] Schedule registration failed");
+    throw new Error(`Temporal schedule ${spec.scheduleId} was not registered: ${msg}`, { cause: err });
+  }
+}
+
+/**
+ * List registered schedules (health/inspection). Empty array when none.
+ */
+export async function listSchedules(): Promise<Array<{ scheduleId: string }>> {
+  const client = await getTemporalClient();
+  if (!client) throw new Error("Temporal SDK is unavailable; schedule list cannot be determined");
+  const out: Array<{ scheduleId: string }> = [];
+  for await (const s of client.schedule.list()) {
+    out.push({ scheduleId: s.scheduleId });
+  }
+  return out;
+}
+
 /**
  * Describe a workflow execution by workflowId (and optional runId).
  * Returns null if not found or Temporal is unreachable.

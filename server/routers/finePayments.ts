@@ -19,6 +19,10 @@ import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
 import { getRemitaGateway, verifyGatewaySignature } from "../services/remitaAdapter";
 import { sendPaymentReceipt } from "../services/paymentReceiptEmail";
+import { tigerbeetleTransfer } from "../middlewareExtensions";
+
+/** TigerBeetle collections account receiving settled fine payments. */
+const FINE_COLLECTIONS_ACCOUNT = "ndpc-fine-collections";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -155,7 +159,7 @@ async function settleRrr(
   rrr: string,
   payerEmail: string | null,
   webhookAmount: number | null = null,
-): Promise<{ receiptNumber?: string; queuedForReview?: boolean; healed?: boolean }> {
+): Promise<{ receiptNumber?: string; queuedForReview?: boolean; healed?: boolean; ledgerPosted?: boolean }> {
   const existing = await exec(
     `SELECT id, penalty_id, amount, currency, status, expires_at FROM payment_rrr_codes WHERE rrr = $1`,
     [rrr],
@@ -291,9 +295,34 @@ async function settleRrr(
   }
   if (!payment) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Settlement state error" });
   const fineRows = await exec(
-    `SELECT f.id, o.name AS org_name FROM enforcement_fines f LEFT JOIN organizations o ON o.id = f.org_id WHERE f.id = $1`,
+    `SELECT f.id, f.org_id, o.name AS org_name FROM enforcement_fines f LEFT JOIN organizations o ON o.id = f.org_id WHERE f.id = $1`,
     [payment.penalty_id],
   );
+  // TigerBeetle mirror (Round-10 NGN ledger wiring): the settled amount must
+  // also exist in the double-entry ledger (NGN -> ledger TB_LEDGER_NGN via
+  // middlewareExtensions). This runs AFTER the Postgres commit and never
+  // blocks settlement: a bridge failure is enqueued into
+  // ledger_reconciliation_queue (0110) with alerting inside
+  // tigerbeetleTransfer, and logged here. Runs exactly once per RRR — the
+  // idempotency guard above (status 'paid' early-return / heal path) never
+  // reaches this code, so replays cannot double-post.
+  let ledgerPosted = false;
+  try {
+    await tigerbeetleTransfer({
+      debitAccountId: fineRows[0]?.org_id != null ? `org:${fineRows[0].org_id}` : `penalty:${payment.penalty_id}`,
+      creditAccountId: FINE_COLLECTIONS_ACCOUNT,
+      amount: Number(payment.amount),
+      currency: payment.currency,
+      reference: receiptNumber,
+      transferType: "fine",
+    });
+    ledgerPosted = true;
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err), rrr, receiptNumber },
+      "[finePayments] TigerBeetle ledger post failed — settlement stands, transfer enqueued to ledger_reconciliation_queue",
+    );
+  }
   if (payerEmail) {
     sendPaymentReceipt({
       to: payerEmail,
@@ -306,9 +335,9 @@ async function settleRrr(
       paidAt: new Date(),
     }).catch((e: unknown) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[finePayments] Receipt email failed"));
   }
-  emitMutationEvent("ndsep.payments.settlement", { action: "rrrPaid", rrr, receiptNumber, ts: new Date().toISOString() })
+  emitMutationEvent("ndsep.payments.settlement", { action: "rrrPaid", rrr, receiptNumber, ledgerPosted, ts: new Date().toISOString() })
     .catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-  return { receiptNumber };
+  return { receiptNumber, ledgerPosted };
 }
 
 export const finePaymentsRouter = router({

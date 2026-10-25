@@ -45,7 +45,7 @@ export default function RegulatoryReportsScreen() {
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>Regulatory Reports</Text>
-      <Text style={styles.subtitle}>NITDA/NCC periodic compliance submissions</Text>
+      <Text style={styles.subtitle}>NDPC/NCC periodic compliance submissions</Text>
 
       {/* Report Type Selector */}
       <Text style={styles.sectionLabel}>Report Type</Text>

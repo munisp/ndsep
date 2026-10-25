@@ -364,7 +364,7 @@ export default function FinancialEnforcement() {
               <div className="bg-muted/30 rounded-lg p-4 border border-border/50">
                 <p className="text-sm font-medium mb-2">CSV Format</p>
                 <p className="text-xs text-muted-foreground font-mono">orgName, amount, currency, description, dueDate(optional)</p>
-                <p className="text-xs text-muted-foreground mt-1">Example: First Bank Nigeria, 50000, USD, NDPR Article 2.3 violation, 2026-04-30</p>
+                <p className="text-xs text-muted-foreground mt-1">Example: First Bank Nigeria, 50000, USD, NDPA 2023 s.25 violation, 2026-04-30</p>
               </div>
               <input
                 ref={csvInputRef}
@@ -379,7 +379,7 @@ export default function FinancialEnforcement() {
                   size="sm"
                   className="font-mono text-xs"
                   onClick={() => {
-                    const template = "orgName,amount,currency,description,dueDate\nFirst Bank Nigeria,50000,USD,NDPR Article 2.3 violation,2026-04-30\nGTBank,25000,USD,Data residency non-compliance,2026-05-15";
+                    const template = "orgName,amount,currency,description,dueDate\nFirst Bank Nigeria,50000,USD,NDPA 2023 s.25 violation,2026-04-30\nGTBank,25000,USD,Data residency non-compliance,2026-05-15";
                     const blob = new Blob([template], { type: "text/csv" });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement("a");

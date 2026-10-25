@@ -14,8 +14,10 @@
 -- indexes so the file runs inside the migration runner's transaction; the
 -- affected tables are operational-scale, not bulk-event-scale.
 
-CREATE INDEX IF NOT EXISTS idx_adverse_media_entity_matches_item_id
-  ON adverse_media_entity_matches (item_id);
+-- NOTE (round-10 fix): idx_adverse_media_entity_matches_item_id was removed
+-- from this file — adverse_media_entity_matches is created later by
+-- 0112_adverse_media.sql, so indexing it here broke fresh-database applies.
+-- The index now lives in 0123_fk_indexes_adverse_media_fixforward.sql.
 
 CREATE INDEX IF NOT EXISTS idx_ai_conformity_assessments_permit_id
   ON ai_conformity_assessments (permit_id);

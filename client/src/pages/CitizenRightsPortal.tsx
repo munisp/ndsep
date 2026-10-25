@@ -194,7 +194,7 @@ export default function CitizenRightsPortal() {
                   </div>
                   <div><Label className="text-muted-foreground text-sm">Description <span className="text-red-400">*</span></Label><Textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="bg-card border-border mt-1 text-foreground" rows={4} placeholder="Describe your request in detail..." /></div>
                   <div className="bg-teal-900/20 border border-teal-500/20 rounded-lg p-3 text-xs text-teal-300">
-                    Organisations must acknowledge within 24 hours and respond within 30 days. Non-compliance may result in NITDA regulatory action.
+                    Organisations must acknowledge within 24 hours and respond within 30 days. Non-compliance may result in NDPC regulatory action.
                   </div>
                   <div className="flex gap-3 pt-1">
                     <Button variant="outline" onClick={() => setShowSubmit(false)} className="border-border text-muted-foreground">Cancel</Button>
@@ -242,7 +242,7 @@ export default function CitizenRightsPortal() {
             </div>
             <div className="mt-5 bg-background border border-border rounded-xl p-4">
               <h3 className="text-sm font-medium text-foreground mb-2">Need Help?</h3>
-              <p className="text-xs text-muted-foreground">If unresolved within 30 days, escalate to <strong className="text-teal-300">NITDA</strong> at <a href="mailto:complaints@nitda.gov.ng" className="text-teal-400 underline">complaints@nitda.gov.ng</a>.</p>
+              <p className="text-xs text-muted-foreground">If unresolved within 30 days, escalate to <strong className="text-teal-300">NDPC</strong> at <a href="mailto:complaints@ndpc.gov.ng" className="text-teal-400 underline">complaints@ndpc.gov.ng</a>.</p>
             </div>
           </div>
         )}

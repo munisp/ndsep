@@ -36,7 +36,7 @@ export default function CarAutomation() {
   });
 
   const submitMutation = trpc.carAutomation.submit.useMutation({
-    onSuccess: () => { toast.success("CAR submitted to NITDA"); refetch(); },
+    onSuccess: () => { toast.success("CAR submitted to NDPC"); refetch(); },
     onError: (err) => toast.error(err.message),
   });
 
@@ -89,7 +89,7 @@ export default function CarAutomation() {
                 </Button>
                 {generatedReport.id && (
                   <Button size="sm" onClick={() => submitMutation.mutate({ id: generatedReport.id })} disabled={submitMutation.isPending} className="bg-green-600 hover:bg-green-700 text-xs">
-                    {submitMutation.isPending ? "Submitting..." : "Submit to NITDA"}
+                    {submitMutation.isPending ? "Submitting..." : "Submit to NDPC"}
                   </Button>
                 )}
               </div>

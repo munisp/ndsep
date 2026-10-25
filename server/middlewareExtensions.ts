@@ -6,6 +6,14 @@
 
 import { permifyCheck as checkPermifyPermission } from "./permify";
 import { logger } from "./logger";
+import {
+  resolveTigerBeetleLedgerId,
+  enqueueLedgerReconciliation,
+} from "./temporalWorker";
+
+// Re-exported so ledger callers (settlementWorkflow, finePayments) use one
+// canonical currency->ledger mapping and reconciliation queue.
+export { resolveTigerBeetleLedgerId, enqueueLedgerReconciliation };
 
 // ─── Service URLs ────────────────────────────────────────────────────────────
 
@@ -135,10 +143,19 @@ export async function lakehouseIngest(table: string, records: object[]): Promise
 
 /**
  * Record a financial transaction in TigerBeetle.
- * Targets the Go tigerbeetle_ledger proxy: POST /transaction with
- * { org_id, penalty_id, amount_usd, currency, type, description, issued_by, timestamp }.
- * The Go service only accepts type in {penalty, fine, escrow, settlement, refund}
- * and currently only supports the USD ledger.
+ * Targets the Go tigerbeetle_ledger proxy: POST /transaction.
+ *
+ * Multi-ledger (Round-10): the currency is resolved to its TigerBeetle ledger
+ * id via resolveTigerBeetleLedgerId (USD -> TB_LEDGER_USD=1, NGN ->
+ * TB_LEDGER_NGN=2; the NGN ledger is provisioned in TigerBeetle init) and sent
+ * as `ledger_id`. Amounts are NEVER coerced across currencies:
+ *  - unknown currency (no ledger mapping): the transfer is NOT written; it is
+ *    persisted to ledger_reconciliation_queue (migration 0110) with an alert,
+ *    and this function returns without throwing (callers record explicit
+ *    per-row outcomes such as ledger_post_status).
+ *  - bridge failure (unreachable / HTTP error): the transfer is enqueued into
+ *    ledger_reconciliation_queue with an alert, then the error is RETHROWN so
+ *    callers can record the failure state explicitly.
  */
 export async function tigerbeetleTransfer(params: {
   debitAccountId: string;
@@ -148,35 +165,59 @@ export async function tigerbeetleTransfer(params: {
   reference: string;
   transferType?: string;
 }): Promise<void> {
-  // The Go tigerbeetle_ledger proxy only supports the USD ledger. Previously a
-  // non-USD amount was silently forwarded as if it were USD, falsifying the
-  // ledger. Now: record a reconciliation_pending marker loudly and skip the
-  // ledger write — amounts are NEVER silently coerced across currencies.
-  if (params.currency.toUpperCase() !== "USD") {
-    logger.error(
-      {
-        reconciliation_pending: true,
-        reason: "non_usd_currency",
-        currency: params.currency,
-        amount: params.amount,
-        reference: params.reference,
-        debitAccountId: params.debitAccountId,
-        creditAccountId: params.creditAccountId,
-      },
-      "[tigerbeetle] reconciliation_pending: non-USD transfer NOT written to the USD-only ledger — manual reconciliation required",
-    );
+  let ledgerId: number;
+  try {
+    ledgerId = resolveTigerBeetleLedgerId(params.currency);
+  } catch {
+    // Unknown currency: durable reconciliation item + alert instead of a bare
+    // log line (round-9 handoff). Returns normally: the caller decides how to
+    // surface the non-posted outcome; nothing was written to any ledger.
+    await enqueueLedgerReconciliation({
+      kind: "non_usd_currency",
+      currency: params.currency,
+      amount: params.amount,
+      debitAccount: params.debitAccountId,
+      creditAccount: params.creditAccountId,
+      reference: params.reference,
+      transferType: params.transferType,
+    });
     return;
   }
-  await postJSON(`${TIGERBEETLE_LEDGER_URL}/transaction`, {
-    org_id: params.debitAccountId,
-    penalty_id: params.reference,
-    amount_usd: params.amount,
-    currency: params.currency,
-    type: toLedgerTransactionType(params.transferType),
-    description: `Transfer ${params.debitAccountId} -> ${params.creditAccountId} (${params.reference})`,
-    issued_by: "ndsep-platform",
-    timestamp: new Date().toISOString(),
-  });
+  try {
+    await postJSON(`${TIGERBEETLE_LEDGER_URL}/transaction`, {
+      org_id: params.debitAccountId,
+      penalty_id: params.reference,
+      amount: params.amount,
+      // Legacy USD field kept for the Go proxy's USD path; omitted for NGN so
+      // a NGN amount can never be misinterpreted as USD.
+      ...(params.currency.toUpperCase() === "USD" ? { amount_usd: params.amount } : {}),
+      currency: params.currency.toUpperCase(),
+      ledger_id: ledgerId,
+      type: toLedgerTransactionType(params.transferType),
+      description: `Transfer ${params.debitAccountId} -> ${params.creditAccountId} (${params.reference}) [ledger ${ledgerId} ${params.currency.toUpperCase()}]`,
+      issued_by: "ndsep-platform",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    // Durable queue + alert BEFORE rethrowing: the caller records its own
+    // explicit failure state, the queue guarantees the discrepancy is worked.
+    await enqueueLedgerReconciliation({
+      kind: "ledger_write_failed",
+      currency: params.currency,
+      amount: params.amount,
+      debitAccount: params.debitAccountId,
+      creditAccount: params.creditAccountId,
+      reference: params.reference,
+      transferType: params.transferType,
+      payload: { bridgeError: err instanceof Error ? err.message : String(err) },
+    }).catch((queueErr: unknown) => {
+      logger.error(
+        { err: queueErr instanceof Error ? queueErr.message : String(queueErr), reference: params.reference },
+        "[tigerbeetle] CRITICAL: ledger write failed AND reconciliation enqueue failed — manual capture required",
+      );
+    });
+    throw err;
+  }
 }
 
 /**

@@ -367,8 +367,10 @@ export const PII_FIELDS: Record<string, string[]> = {
   ussd_intake_queue: ["msisdn_hmac", "msisdn_last4", "description"],
   sms_outbox: ["msisdn_hmac", "msisdn_last4", "message"],
   // NIN identity verification pseudonymous identifiers (migration 0093).
-  identity_verifications: ["nin_hmac", "verification_token", "subject_ref"],
-  verification_audit_log: ["actor", "subject_ref", "details"],
+  // NOTE: the plaintext subject_ref columns were retired (0122 redact +
+  // write-block, 0126 DROP COLUMN) and are no longer listed here.
+  identity_verifications: ["nin_hmac", "verification_token"],
+  verification_audit_log: ["actor", "details"],
   // Data sovereignty officer identities (migrations 0094–0096).
   hosting_declarations: ["submitted_by", "reviewed_by", "admin_access_locations"],
   residency_attestations: ["attesting_officer_name", "attesting_officer_title", "revoked_by"],
@@ -396,6 +398,19 @@ export const PII_FIELDS: Record<string, string[]> = {
   open_data_access_log: ["accessor_hash"],
   // ── FIN-1 (round-9): delisting org-proof token applicant (migration 0117) ──
   delisting_proof_tokens: ["applicant_email"],
+  // ── Round-10 registry-gap closure (previously GAP(round-10) allowlist) ──
+  // Reads auto-decrypt via autoDecryptRows (decryptField is a symmetric no-op
+  // on legacy plaintext rows). Write-side encryption is in place for
+  // dpco_training_participants.participant_email and penalty_appeals.contact_email;
+  // the remaining fields carry TODO-ENCRYPT-AT-WRITE markers at their write
+  // sites because Python workers (kyc_analysis_worker, watchlist_screener_fallback,
+  // aml_scoring_worker) consume them in plaintext and have no decrypt path yet.
+  kyc_records: ["bvn", "date_of_birth", "email", "full_name", "nin", "phone_number"],
+  aml_cases: ["subject_bvn"],
+  watchlist_entries: ["date_of_birth"],
+  insurance_policies: ["policyholder_nin"],
+  penalty_appeals: ["contact_email"],
+  dpco_training_participants: ["participant_email"],
 };
 
 /**

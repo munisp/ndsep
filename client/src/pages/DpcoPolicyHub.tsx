@@ -48,7 +48,7 @@ const POLICY_TEMPLATES: PolicyTemplate[] = [
 **Last Updated:** [Date]
 
 ## 1. Introduction
-[Organisation Name] ("we", "our", "us") is committed to protecting your personal data in accordance with the Nigeria Data Protection Act 2023 (NDPA) and the Nigeria Data Protection Regulation 2019 (NDPR).
+[Organisation Name] ("we", "our", "us") is committed to protecting your personal data in accordance with the Nigeria Data Protection Act 2023 (NDPA).
 
 ## 2. Data Controller Information
 - **Name:** [Organisation Name]
@@ -952,7 +952,7 @@ export default function DpcoPolicyHub() {
         <div className="bg-muted/30 border border-border/50 rounded-lg p-4 flex items-start gap-3">
           <ExternalLink className="w-4 h-4 text-primary shrink-0 mt-0.5" />
           <p className="text-muted-foreground text-xs leading-relaxed">
-            These templates are based on the Nigeria Data Protection Act 2023 (NDPA) and Nigeria Data Protection Regulation 2019 (NDPR).
+            These templates are based on the Nigeria Data Protection Act 2023 (NDPA).
             They are provided as starting points and should be reviewed by qualified legal counsel before use.
             For official NDPC guidance, visit <span className="text-primary">ndpc.gov.ng</span>.
           </p>

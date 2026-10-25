@@ -85,9 +85,14 @@ export function isTemporalConfigured(): boolean {
 }
 
 /**
- * Register all round-9 schedules. Explicit skip (warn log per schedule) when
- * Temporal is unconfigured; per-schedule failures are collected and logged —
+ * Register all round-9 schedules as durable Temporal Schedules (server-side
+ * cron registry — the schedules survive worker restarts and fire the mapped
+ * workflow on cadence). Explicit skip (warn log per schedule) when Temporal
+ * is unconfigured; per-schedule failures are collected and logged —
  * registration of the remaining schedules continues.
+ *
+ * Called from workers/temporal/worker.ts at worker startup. Registration is
+ * idempotent (an existing schedule id is left in place, not duplicated).
  */
 export async function registerRound9Schedules(): Promise<{
   registered: string[];
@@ -98,18 +103,20 @@ export async function registerRound9Schedules(): Promise<{
     for (const s of ROUND9_SCHEDULES) {
       logger.warn(
         { workflowId: s.workflowId, cronSchedule: s.cronSchedule },
-        "[round9Schedules] Temporal not configured (TEMPORAL_ADDRESS/API_KEY/TLS unset) — schedule SKIPPED explicitly. Wire the exported job function to a cron runner instead.",
+        "[round9Schedules] Temporal not configured (TEMPORAL_ADDRESS/API_KEY/TLS unset) — schedule SKIPPED explicitly. Wire the exported job function to a cron runner instead (see runRound9Job).",
       );
     }
     return { registered: [], skipped: ROUND9_SCHEDULES.map((s) => s.workflowId), failed: [] };
   }
-  const { startWorkflow } = await import("../temporal");
+  const { ensureSchedule } = await import("../temporal");
   const registered: string[] = [];
   const failed: Array<{ workflowId: string; error: string }> = [];
   for (const schedule of ROUND9_SCHEDULES) {
     try {
-      await startWorkflow(schedule.workflowType, {
-        workflowId: schedule.workflowId,
+      await ensureSchedule({
+        scheduleId: schedule.workflowId,
+        cronSchedule: schedule.cronSchedule,
+        workflowType: schedule.workflowType,
         taskQueue: schedule.taskQueue,
         input: { ...schedule.input, cronSchedule: schedule.cronSchedule },
       });
@@ -122,6 +129,28 @@ export async function registerRound9Schedules(): Promise<{
     }
   }
   return { registered, skipped: [], failed };
+}
+
+/** Map from schedule workflowId to the job function a cron runner should invoke. */
+export const ROUND9_JOB_RUNNERS: Record<string, () => Promise<unknown>> = {
+  "round9-complaint-surge-daily": () => runComplaintSurgeDaily(),
+  "round9-minors-consent-refresh-daily": () => runMinorsConsentRefreshDaily(),
+  "round9-consent-flag-overdue-hourly": () => runConsentFlagOverdueHourly(),
+  "round9-whistleblower-token-expiry": () => runWhistleblowerTokenExpiry(),
+  "round9-foia-overdue-sweep": () => runFoiaOverdueSweep(),
+};
+
+/**
+ * Cron fallback entry point for non-Temporal deployments. Example crontab:
+ *   10 2 * * *  node -e 'require("./round9Schedules").runRound9Job("round9-complaint-surge-daily")'
+ * Unknown ids throw — a mistyped schedule name must never no-op silently.
+ */
+export async function runRound9Job(workflowId: string): Promise<unknown> {
+  const runner = ROUND9_JOB_RUNNERS[workflowId];
+  if (!runner) {
+    throw new Error(`[round9Schedules] unknown schedule id '${workflowId}' — expected one of: ${Object.keys(ROUND9_JOB_RUNNERS).join(", ")}`);
+  }
+  return runner();
 }
 
 // ─── Job implementations (invoked by the Temporal workflows or a cron runner) ─

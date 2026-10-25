@@ -163,7 +163,7 @@ export default function RegulatoryReports() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Regulatory Reports</h1>
-            <p className="text-muted-foreground text-sm mt-1">Generate and export compliance data for NITDA/NCC periodic submissions</p>
+            <p className="text-muted-foreground text-sm mt-1">Generate and export compliance data for NDPC/NCC periodic submissions</p>
           </div>
           <div className="flex gap-2">
             <Button onClick={handleGenerateReport} size="sm" disabled={generateMutation.isPending} className="bg-blue-600 hover:bg-blue-700 text-foreground">
@@ -180,7 +180,7 @@ export default function RegulatoryReports() {
             </Button>
             <Button onClick={() => {
               const ts = new Date().toISOString().slice(0, 10);
-              const allData = { violations: rows, generatedAt: ts, platform: "NDSEP", framework: "NDPR" };
+              const allData = { violations: rows, generatedAt: ts, platform: "NDSEP", framework: "NDPA 2023" };
               const blob = new Blob([JSON.stringify(allData, null, 2)], { type: "application/json" });
               const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `ndsep-full-report-${ts}.json`; a.click();
               toast.success("Full report downloaded");

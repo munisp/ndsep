@@ -27,8 +27,8 @@ export async function getComplianceSummary(): Promise<ComplianceSummary> {
       SELECT
         (SELECT COUNT(*) FROM organizations) as total_orgs,
         (SELECT COUNT(*) FROM organizations WHERE compliance_score >= 70) as compliant_orgs,
-        (SELECT COUNT(*) FROM compliance_audit_returns WHERE status = 'in_progress') as pending_audits,
-        (SELECT COUNT(*) FROM compliance_audit_returns WHERE status = 'overdue') as overdue_audits,
+        (SELECT COUNT(*) FROM compliance_audit_returns WHERE car_status IN ('draft', 'submitted', 'under_review')) as pending_audits,
+        (SELECT COUNT(*) FROM compliance_audit_returns WHERE car_status NOT IN ('accepted') AND audit_period_end < NOW()) as overdue_audits,
         (SELECT COALESCE(AVG(compliance_score), 0) FROM organizations) as avg_score
     `);
     const row = result.rows[0];

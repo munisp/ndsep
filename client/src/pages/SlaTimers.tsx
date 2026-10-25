@@ -10,9 +10,9 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 // Nigerian regulatory SLA definitions (in hours)
 const REGULATORY_SLAS = [
-  { id: "ndpa_breach_72h", label: "NDPA Data Breach Notification", sector: "NDPA", hours: 72, description: "Notify NITDA within 72 hours of discovering a personal data breach (NDPA §40)" },
+  { id: "ndpa_breach_72h", label: "NDPA Data Breach Notification", sector: "NDPA", hours: 72, description: "Notify the NDPC within 72 hours of discovering a personal data breach (NDPA §40)" },
   { id: "ndpa_dsar_30d", label: "DSAR Response", sector: "NDPA", hours: 720, description: "Respond to Data Subject Access Requests within 30 days (NDPA §34)" },
-  { id: "ndpa_dpia_14d", label: "DPIA Submission", sector: "NDPA", hours: 336, description: "Submit DPIA to NITDA 14 days before high-risk processing (NDPA §27)" },
+  { id: "ndpa_dpia_14d", label: "DPIA Submission", sector: "NDPA", hours: 336, description: "Submit DPIA to the NDPC 14 days before high-risk processing (NDPA §27)" },
   { id: "cbn_str_24h", label: "CBN Suspicious Transaction Report", sector: "Banking", hours: 24, description: "File STR with NFIU within 24 hours of detecting suspicious activity (MLPA §6)" },
   { id: "cbn_ctr_7d", label: "CBN Cash Transaction Report", sector: "Banking", hours: 168, description: "File CTR for transactions above ₦5M within 7 days (CBN AML Guidelines)" },
   { id: "cbn_kyc_30d", label: "KYC Tier Upgrade", sector: "Banking", hours: 720, description: "Complete KYC tier upgrade within 30 days of customer request (CBN KYC Manual)" },
@@ -25,7 +25,7 @@ const REGULATORY_SLAS = [
   { id: "naicom_claim_30d", label: "NAICOM Claims Settlement", sector: "Insurance", hours: 720, description: "Settle valid insurance claims within 30 days of proof of loss (NAICOM Guidelines)" },
   { id: "naicom_breach_24h", label: "NAICOM Data Breach Report", sector: "Insurance", hours: 24, description: "Report data breach to NAICOM within 24 hours (NAICOM Data Protection Circular)" },
   { id: "cbn_fintech_7d", label: "CBN Fintech Incident Report", sector: "Fintech", hours: 168, description: "Report security incidents to CBN within 7 days (CBN Fintech Regulatory Sandbox Guidelines)" },
-  { id: "dpco_car_14d", label: "DPCO Corrective Action Report", sector: "DPCO", hours: 336, description: "Submit CAR to NITDA within 14 days of audit finding (DPCO Operational Guidelines)" },
+  { id: "dpco_car_14d", label: "DPCO Corrective Action Report", sector: "DPCO", hours: 336, description: "Submit CAR to the NDPC within 14 days of audit finding (DPCO Operational Guidelines)" },
   { id: "dpco_renewal_30d", label: "DPCO Licence Renewal", sector: "DPCO", hours: 720, description: "Renew DPCO licence 30 days before expiry (DPCO Registration Guidelines)" },
   { id: "ndpa_penalty_appeal_30d", label: "Penalty Appeal Window", sector: "NDPA", hours: 720, description: "File penalty appeal within 30 days of enforcement notice (NDPA §50)" },
 ];

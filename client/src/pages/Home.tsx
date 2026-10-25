@@ -69,7 +69,7 @@ export default function Home() {
           Enforcement Platform
         </h1>
         <p className="text-muted-foreground text-lg max-w-2xl mb-10 leading-relaxed">
-          Real-time compliance monitoring, cross-border data flow enforcement, and automated regulatory action under NDPR, GDPR, ISO 27001, and SOC 2.
+          Real-time compliance monitoring, cross-border data flow enforcement, and automated regulatory action under NDPA 2023, GDPR, ISO 27001, and SOC 2.
         </p>
         <div className="flex gap-4 flex-wrap justify-center">
           <Button size="lg" onClick={() => window.location.href = getLoginUrl()} className="bg-emerald-600 hover:bg-emerald-500 text-foreground px-8">
@@ -162,8 +162,8 @@ export default function Home() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16 max-w-4xl w-full text-left">
           {[
-            { icon: Globe, title: "Cross-Border Enforcement", desc: "Real-time monitoring of 2,158+ cross-border data flows with automated blocking and NITDA reporting.", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
-            { icon: BarChart3, title: "Multi-Framework Compliance", desc: "Simultaneous NDPR, GDPR, ISO 27001, and SOC 2 compliance scoring with article-level breakdowns.", color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
+            { icon: Globe, title: "Cross-Border Enforcement", desc: "Real-time monitoring of 2,158+ cross-border data flows with automated blocking and NDPC reporting.", color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/20" },
+            { icon: BarChart3, title: "Multi-Framework Compliance", desc: "Simultaneous NDPA 2023, GDPR, ISO 27001, and SOC 2 compliance scoring with article-level breakdowns.", color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20" },
             { icon: Lock, title: "Tamper-Evident Evidence", desc: "Rust-signed HMAC-SHA256 evidence packages with cryptographic verification for court submissions.", color: "text-purple-400", bg: "bg-purple-500/10 border-purple-500/20" },
           ].map(({ icon: Icon, title, desc, color, bg }) => (
             <div key={title} className={`rounded-xl border p-5 ${bg}`}>
@@ -175,7 +175,7 @@ export default function Home() {
         </div>
       </main>
       <footer className="border-t border-border px-6 py-4 text-center text-xs text-muted-foreground">
-        NDSEP · National Information Technology Development Agency (NITDA) · Nigeria Data Protection Regulation
+        NDSEP · Nigeria Data Protection Commission (NDPC) · Nigeria Data Protection Act 2023
       </footer>
     </div>
   );

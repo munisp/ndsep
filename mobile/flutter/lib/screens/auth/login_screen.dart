@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-const String _apiUrl = String.fromEnvironment('NDSEP_API_URL', defaultValue: 'https://ndsep.nitda.gov.ng');
+const String _apiUrl = String.fromEnvironment('NDSEP_API_URL', defaultValue: 'https://ndsep.ndpc.gov.ng');
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -31,10 +31,10 @@ class _LoginScreenState extends State<LoginScreen> {
         SizedBox(width: double.infinity, child: ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00D4FF), foregroundColor: const Color(0xFF0A0E1A), padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
           onPressed: _loading ? null : _login,
-          child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0A0E1A))) : const Text('Sign In with NITDA SSO', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+          child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0A0E1A))) : const Text('Sign In with NDPC SSO', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
         )),
         const SizedBox(height: 16),
-        const Text('Access restricted to authorised NITDA officers\nand registered data controllers.', style: TextStyle(color: Color(0xFF475569), fontSize: 11, height: 1.6), textAlign: TextAlign.center),
+        const Text('Access restricted to authorised NDPC officers\nand registered data controllers.', style: TextStyle(color: Color(0xFF475569), fontSize: 11, height: 1.6), textAlign: TextAlign.center),
       ]),
     )),
   );

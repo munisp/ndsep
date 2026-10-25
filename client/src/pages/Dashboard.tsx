@@ -185,7 +185,7 @@ export default function Dashboard() {
   const bottom5 = [...leaderboardList].sort((a: any, b: any) => (a.complianceScore ?? 0) - (b.complianceScore ?? 0)).slice(0, 5);
   const enfCasesList = (enfCases as any[]) ?? [];
   const enfOpen = enfCasesList.filter((c: any) => c.status === "open").length;
-  const enfNitda = enfCasesList.filter((c: any) => c.status === "escalated_to_nitda").length;
+  const enfNitda = enfCasesList.filter((c: any) => ["escalated_to_ndpc", "escalated_to_nitda"].includes(c.status)).length;
   const enfSettled = enfCasesList.filter((c: any) => c.status === "settled" || c.status === "closed").length;
 
   return (
@@ -551,7 +551,7 @@ export default function Dashboard() {
             {[
               { label: "Total Cases",        value: enfCasesList.length, color: "text-foreground" },
               { label: "Open / Active",       value: enfOpen,            color: "text-red-400" },
-              { label: "Escalated to NITDA", value: enfNitda,           color: "text-yellow-400" },
+              { label: "Escalated to NDPC", value: enfNitda,           color: "text-yellow-400" },
               { label: "Settled / Closed",   value: enfSettled,         color: "text-green-400" },
             ].map((item) => (
               <div key={item.label} className="text-center p-3 rounded-lg bg-muted/40 border border-border/40">

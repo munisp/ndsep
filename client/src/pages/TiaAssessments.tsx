@@ -297,7 +297,7 @@ export default function TiaAssessments() {
                 <p className="text-sm font-medium text-blue-300">Transfer Impact Assessment (TIA)</p>
                 <p className="text-xs text-blue-400/80 mt-1">
                   A TIA evaluates the legal and technical safeguards in place when transferring personal data to third countries.
-                  Required under NDPR Article 43 and GDPR Chapter V. Each assessment must document the legal basis, data categories,
+                  Required under NDPA 2023 (cross-border transfer provisions) and GDPR Chapter V. Each assessment must document the legal basis, data categories,
                   destination country's adequacy status, and technical safeguards applied.
                 </p>
               </div>

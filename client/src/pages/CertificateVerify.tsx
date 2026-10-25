@@ -67,7 +67,7 @@ function CertificatePrintView({ data }: {
         <div style={{ display: "flex", justifyContent: "space-around", marginTop: "24px", paddingTop: "12px", borderTop: "1px solid #ccc", fontSize: "11px", color: "#444", position: "relative", zIndex: 1 }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ borderTop: "1px solid #1a3a6b", width: "120px", marginBottom: "4px" }} />
-            <div style={{ fontWeight: "bold" }}>Director General, NITDA</div>
+            <div style={{ fontWeight: "bold" }}>Director General, NDPC</div>
             <div>National Information Technology Development Agency</div>
           </div>
           <div style={{ textAlign: "center" }}>
@@ -258,7 +258,7 @@ export default function CertificateVerify() {
 
         {/* Footer */}
         <div className="mt-10 text-center text-xs text-muted-foreground max-w-md">
-          <p>This verification service is operated by the Nigerian National Information Technology Development Agency (NITDA) under the Nigeria Data Protection Act 2023.</p>
+          <p>This verification service is operated by the Nigeria Data Protection Commission (NDPC) under the Nigeria Data Protection Act 2023.</p>
           <p className="mt-1">For bulk verification or API access, contact the NDSEP Integration Team.</p>
         </div>
       </div>

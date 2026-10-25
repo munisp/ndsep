@@ -6,6 +6,7 @@ export * from "./vault";
 export * from "./ledger";
 export * from "./guards";
 export * from "./backupGuard";
+export * from "./externalAnchor";
 export { antiwipeRouter } from "./router";
 export {
   startAntiwipeScheduler,

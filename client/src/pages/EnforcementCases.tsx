@@ -22,12 +22,13 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string; ic
   open:                   { label: "Open",                  color: "text-red-400",    bg: "border-red-500/40 bg-red-950/20",    icon: AlertTriangle },
   under_investigation:    { label: "Under Investigation",   color: "text-yellow-400", bg: "border-yellow-500/40 bg-yellow-950/20", icon: Clock },
   notice_issued:          { label: "Notice Issued",         color: "text-orange-400", bg: "border-orange-500/40 bg-orange-950/20", icon: FileText },
-  escalated_to_nitda:     { label: "Escalated to NITDA",    color: "text-purple-400", bg: "border-purple-500/40 bg-purple-950/20", icon: ChevronRight },
+  escalated_to_ndpc:      { label: "Escalated to NDPC",     color: "text-purple-400", bg: "border-purple-500/40 bg-purple-950/20", icon: ChevronRight },
+  escalated_to_nitda:     { label: "Escalated to NDPC",     color: "text-purple-400", bg: "border-purple-500/40 bg-purple-950/20", icon: ChevronRight },
   settled:                { label: "Settled",               color: "text-green-400",  bg: "border-green-500/40 bg-green-950/20",  icon: CheckCircle2 },
   closed:                 { label: "Closed",                color: "text-muted-foreground", bg: "border-border/40 bg-muted/10", icon: XCircle },
 };
 
-const STATUS_ORDER = ["open", "under_investigation", "notice_issued", "escalated_to_nitda", "settled", "closed"];
+const STATUS_ORDER = ["open", "under_investigation", "notice_issued", "escalated_to_ndpc", "settled", "closed"];
 
 function StatusBadge({ status }: { status: string }) {
   const m = STATUS_META[status] ?? STATUS_META["open"];
@@ -126,7 +127,7 @@ export default function EnforcementCases() {
 
   function handleUpdate() {
     if (!selected) return;
-    if (newStatus === "escalated_to_nitda" && selected.status !== "escalated_to_nitda") {
+    if (newStatus === "escalated_to_ndpc" && !["escalated_to_ndpc", "escalated_to_nitda"].includes(selected.status)) {
       setNitdaTargetCase(selected);
       setNitdaConfirmRef(nitdaRef || "");
       setNitdaConfirmSummary(resolutionNotes || "");
@@ -143,11 +144,11 @@ export default function EnforcementCases() {
 
   function handleNitdaConfirm() {
     if (!nitdaTargetCase || !nitdaConfirmRef.trim()) {
-      toast.error("NITDA Reference Number is required before escalating.");
+      toast.error("NDPC Reference Number is required before escalating.");
       return;
     }
     updateCase.mutate(
-      { id: nitdaTargetCase.id, status: "escalated_to_nitda", nitdaReferenceNumber: nitdaConfirmRef.trim(), resolutionNotes: nitdaConfirmSummary || undefined },
+      { id: nitdaTargetCase.id, status: "escalated_to_ndpc", nitdaReferenceNumber: nitdaConfirmRef.trim(), resolutionNotes: nitdaConfirmSummary || undefined },
       { onSuccess: () => { setNitdaConfirmOpen(false); setNitdaConfirmRef(""); setNitdaConfirmSummary(""); setNitdaTargetCase(null); } }
     );
   }
@@ -158,7 +159,7 @@ export default function EnforcementCases() {
   const stats = {
     open: allCases.filter((c: any) => c.status === "open").length,
     under_investigation: allCases.filter((c: any) => c.status === "under_investigation").length,
-    escalated: allCases.filter((c: any) => c.status === "escalated_to_nitda").length,
+    escalated: allCases.filter((c: any) => ["escalated_to_ndpc", "escalated_to_nitda"].includes(c.status)).length,
     settled: allCases.filter((c: any) => c.status === "settled").length,
   };
 
@@ -170,11 +171,11 @@ export default function EnforcementCases() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="layer-badge">ENF</span>
-            <span className="data-label">NITDA · Penalty Escalation · Case Management</span>
+            <span className="data-label">NDPC · Penalty Escalation · Case Management</span>
           </div>
           <h1 className="text-2xl font-bold text-foreground">Enforcement Cases</h1>
           <p className="text-muted-foreground mono text-sm mt-0.5">
-            Escalated penalty cases · NITDA referrals · Resolution tracking
+            Escalated penalty cases · NDPC referrals · Resolution tracking
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -190,7 +191,7 @@ export default function EnforcementCases() {
         {[
           { label: "Open Cases",           value: stats.open,               color: "#ef4444", icon: AlertTriangle },
           { label: "Under Investigation",  value: stats.under_investigation, color: "#f59e0b", icon: Clock },
-          { label: "Escalated to NITDA",   value: stats.escalated,          color: "#8b5cf6", icon: ChevronRight },
+          { label: "Escalated to NDPC",   value: stats.escalated,          color: "#8b5cf6", icon: ChevronRight },
           { label: "Settled / Closed",     value: stats.settled,            color: "#10b981", icon: CheckCircle2 },
         ].map(m => (
           <Card key={m.label} className="border border-border/60 relative overflow-hidden">
@@ -249,7 +250,7 @@ export default function EnforcementCases() {
                     <th className="text-left px-4 py-2.5 data-label">Penalty</th>
                     <th className="text-left px-4 py-2.5 data-label">Status</th>
                     <th className="text-left px-4 py-2.5 data-label">Overdue Days</th>
-                    <th className="text-left px-4 py-2.5 data-label">NITDA Ref</th>
+                    <th className="text-left px-4 py-2.5 data-label">NDPC Ref</th>
                     <th className="text-left px-4 py-2.5 data-label">Opened</th>
                     <th className="text-left px-4 py-2.5 data-label">Actions</th>
                   </tr>
@@ -343,19 +344,19 @@ export default function EnforcementCases() {
         </CardContent>
       </Card>
 
-      {/* NITDA Escalation Confirmation Modal */}
+      {/* NDPC Escalation Confirmation Modal */}
       <Dialog open={nitdaConfirmOpen} onOpenChange={v => { if (!v) { setNitdaConfirmOpen(false); setNitdaConfirmRef(""); setNitdaConfirmSummary(""); setNitdaTargetCase(null); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-purple-400">
               <ChevronRight className="h-4 w-4" />
-              Escalate to NITDA — Confirmation Required
+              Escalate to NDPC — Confirmation Required
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="rounded-lg border border-purple-500/30 bg-purple-950/20 p-3">
-              <p className="text-xs text-purple-300 font-semibold">⚠ This action will formally escalate the case to NITDA.</p>
-              <p className="text-xs text-muted-foreground mt-1">A NITDA Reference Number is mandatory. Ensure the case has been formally filed with NITDA before entering the reference.</p>
+              <p className="text-xs text-purple-300 font-semibold">⚠ This action will formally escalate the case to NDPC.</p>
+              <p className="text-xs text-muted-foreground mt-1">A NDPC Reference Number is mandatory. Ensure the case has been formally filed with NDPC before entering the reference.</p>
             </div>
             {nitdaTargetCase && (
               <div className="rounded-lg border border-border/40 bg-muted/20 p-3 space-y-1">
@@ -365,19 +366,19 @@ export default function EnforcementCases() {
               </div>
             )}
             <div className="space-y-1.5">
-              <Label className="data-label">NITDA Reference Number <span className="text-red-400">*</span></Label>
-              <Input value={nitdaConfirmRef} onChange={e => setNitdaConfirmRef(e.target.value)} placeholder="e.g. NITDA/ENF/2026/001" className="h-8 text-xs mono border-purple-500/40 focus:border-purple-500" />
+              <Label className="data-label">NDPC Reference Number <span className="text-red-400">*</span></Label>
+              <Input value={nitdaConfirmRef} onChange={e => setNitdaConfirmRef(e.target.value)} placeholder="e.g. NDPC/ENF/2026/001" className="h-8 text-xs mono border-purple-500/40 focus:border-purple-500" />
             </div>
             <div className="space-y-1.5">
               <Label className="data-label">Escalation Summary</Label>
-              <Textarea value={nitdaConfirmSummary} onChange={e => setNitdaConfirmSummary(e.target.value)} placeholder="Describe the grounds for NITDA escalation…" className="text-xs min-h-[80px] resize-none" />
+              <Textarea value={nitdaConfirmSummary} onChange={e => setNitdaConfirmSummary(e.target.value)} placeholder="Describe the grounds for NDPC escalation…" className="text-xs min-h-[80px] resize-none" />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => { setNitdaConfirmOpen(false); setNitdaConfirmRef(""); setNitdaConfirmSummary(""); setNitdaTargetCase(null); }}>Cancel</Button>
             <Button size="sm" className="gap-1 bg-purple-600 hover:bg-purple-700 text-foreground" onClick={handleNitdaConfirm} disabled={!nitdaConfirmRef.trim() || updateCase.isPending}>
               {updateCase.isPending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              Confirm Escalation to NITDA
+              Confirm Escalation to NDPC
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -449,7 +450,7 @@ export default function EnforcementCases() {
                               {entry.note && ` — ${entry.note}`}
                             </p>
                             {entry.nitda_ref && (
-                              <p className="mono text-[10px] text-purple-400">NITDA Ref: {entry.nitda_ref}</p>
+                              <p className="mono text-[10px] text-purple-400">NDPC Ref: {entry.nitda_ref}</p>
                             )}
                           </div>
                         </div>
@@ -476,11 +477,11 @@ export default function EnforcementCases() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="data-label">NITDA Reference Number</Label>
+                <Label className="data-label">NDPC Reference Number</Label>
                 <Input
                   value={nitdaRef}
                   onChange={e => setNitdaRef(e.target.value)}
-                  placeholder="e.g. NITDA/ENF/2026/001"
+                  placeholder="e.g. NDPC/ENF/2026/001"
                   className="h-8 text-xs mono"
                 />
               </div>

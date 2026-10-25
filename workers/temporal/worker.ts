@@ -36,6 +36,9 @@ export const temporalConfig = {
     breach: "ndsep-breach",
     car: "ndsep-car",
     dsar: "ndsep-dsar",
+    // Round-9 durable schedules dispatch here (server/services/round9Schedules
+    // TASK_QUEUE default). Must be polled or the schedules never execute.
+    main: process.env.TEMPORAL_TASK_QUEUE ?? "ndsep-main",
   },
 };
 
@@ -79,20 +82,46 @@ export async function startTemporalWorker(): Promise<void> {
     connectionOptions as Parameters<typeof NativeConnection.connect>[0]
   );
 
-  const [accreditationActivities, breachActivities, dsarActivities] = await Promise.all([
+  // ── Round-9 durable schedules (cron) ─────────────────────────────────────
+  // Register into Temporal's server-side schedule registry at worker startup.
+  // Registration is idempotent and fail-visible: when Temporal is not
+  // explicitly configured the registrar logs an explicit SKIP per schedule
+  // (cron fallback via runRound9Job) instead of a silent no-op.
+  try {
+    const { registerRound9Schedules } = await import("../../server/services/round9Schedules");
+    const result = await registerRound9Schedules();
+    logger.info(
+      { registered: result.registered, skipped: result.skipped, failed: result.failed },
+      "[Temporal] Round-9 schedule registration complete"
+    );
+    if (result.failed.length > 0 && process.env.NODE_ENV === "production") {
+      throw new Error(
+        `[Temporal] Round-9 schedule registration failed for: ${result.failed.map((f) => f.workflowId).join(", ")} — refusing to start worker without durable schedules (fail closed)`
+      );
+    }
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") throw error;
+    logger.warn({ err: error instanceof Error ? error.message : String(error) }, "[Temporal] Round-9 schedule registration deferred (non-production)");
+  }
+
+  const [accreditationActivities, breachActivities, dsarActivities, round9Activities] = await Promise.all([
     import("./activities/accreditation"),
     import("./activities/breachNotification"),
     import("./activities/dsarFulfillment"),
+    import("./activities/round9Jobs"),
   ]);
   const workflowsPath = require.resolve("./workflows");
   const workers = await Promise.all([
     Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.accreditation, connection, namespace: TEMPORAL_NAMESPACE, activities: accreditationActivities }),
     Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.breach, connection, namespace: TEMPORAL_NAMESPACE, activities: breachActivities }),
     Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.dsar, connection, namespace: TEMPORAL_NAMESPACE, activities: dsarActivities }),
+    // Round-9 scheduled workflows (complaint_surge_detection, minors_consent_refresh,
+    // consent_flag_overdue, whistleblower_token_expiry, foia_overdue_sweep).
+    Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.main, connection, namespace: TEMPORAL_NAMESPACE, activities: round9Activities }),
   ]);
 
   logger.info(
-    { taskQueues: [temporalConfig.taskQueues.accreditation, temporalConfig.taskQueues.breach, temporalConfig.taskQueues.dsar], namespace: TEMPORAL_NAMESPACE },
+    { taskQueues: [temporalConfig.taskQueues.accreditation, temporalConfig.taskQueues.breach, temporalConfig.taskQueues.dsar, temporalConfig.taskQueues.main], namespace: TEMPORAL_NAMESPACE },
     "[Temporal] Workers started — listening for durable workflow tasks"
   );
   await Promise.all(workers.map((worker) => worker.run()));

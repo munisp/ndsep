@@ -407,7 +407,7 @@ export default function Organizations() {
             ) : (
               <div className="space-y-2">
                 {(orgCases as any[]).map((c: any) => {
-                  const statusColor: Record<string, string> = { open: "#ef4444", under_investigation: "#f59e0b", notice_issued: "#2563eb", escalated_to_nitda: "#8b5cf6", settled: "#10b981", closed: "#6b7280" };
+                  const statusColor: Record<string, string> = { open: "#ef4444", under_investigation: "#f59e0b", notice_issued: "#2563eb", escalated_to_ndpc: "#8b5cf6", escalated_to_nitda: "#8b5cf6", settled: "#10b981", closed: "#6b7280" };
                   const color = statusColor[c.status] ?? "#6b7280";
                   return (
                     <div key={c.id} className="flex items-start gap-3 p-3 rounded-lg border border-border/40 bg-muted/20">

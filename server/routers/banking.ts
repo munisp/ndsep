@@ -247,6 +247,14 @@ const kycRouter = router({
         }
       }
       const refId = genRef("KYC");
+      // TODO-ENCRYPT-AT-WRITE (round-10): kyc_records.bvn/nin/full_name/
+      // date_of_birth/email/phone_number are registered in PII_FIELDS so all
+      // reads via query() auto-decrypt, but write-side encryptField() is
+      // deferred: workers/python/kyc_analysis_worker.py and
+      // watchlist_screener_fallback.py read these columns in plaintext (BVN/NIN
+      // go to the NIBSS/NIMC verification APIs) and the duplicate-BVN lookup
+      // above is an equality match. Requires a Python decrypt helper +
+      // hash-lookup columns before encryption can be switched on here.
       // Business rule: KYC expires after 3 years (CBN requirement)
       const expiresAt = new Date();
       expiresAt.setFullYear(expiresAt.getFullYear() + 3);
@@ -298,6 +306,10 @@ const kycRouter = router({
           pepFlag = true;
           newStatus = "in_review";
           // Auto-create AML case for PEP match
+          // TODO-ENCRYPT-AT-WRITE (round-10): subject_bvn is registered in
+          // PII_FIELDS (reads auto-decrypt) but encrypt-at-write is deferred —
+          // aml_scoring_worker.py reads subject_bvn in plaintext and
+          // listCases search LIKE-matches it.
           await query(`
             INSERT INTO aml_cases (case_ref, bank_id, subject_name, subject_bvn, case_type, status, risk_score, pep_match, narrative)
             VALUES (?, ?, ?, ?, 'pep_match', 'open', 75, 1, ?)
@@ -482,6 +494,10 @@ const amlRouter = router({
       const initialStatus = input.sanctionsMatch ? "escalated" : "open";
       // Business rule: Risk score >= 80 triggers immediate escalation
       const status = input.riskScore >= 80 ? "escalated" : initialStatus;
+      // TODO-ENCRYPT-AT-WRITE (round-10): subject_bvn is registered in
+      // PII_FIELDS (reads auto-decrypt) but encrypt-at-write is deferred —
+      // aml_scoring_worker.py reads subject_bvn in plaintext and listCases
+      // search LIKE-matches it.
       await query(`
         INSERT INTO aml_cases (case_ref, bank_id, subject_name, subject_type, subject_bvn, case_type, status,
           risk_score, pep_match, sanctions_match, adverse_media_match, transaction_amount, transaction_ref,
@@ -635,6 +651,10 @@ const watchlistRouter = router({
     }))
     .mutation(async ({ input }) => {
       const entityId = genRef("WL");
+      // TODO-ENCRYPT-AT-WRITE (round-10): date_of_birth is registered in
+      // PII_FIELDS (reads auto-decrypt) but encrypt-at-write is deferred —
+      // workers/python/watchlist_screener_fallback.py fuzzy-matches on the
+      // plaintext DOB and has no decrypt path.
       await query(`
         INSERT INTO watchlist_entries (entity_id, entity_type, primary_name, aliases, date_of_birth, nationality,
           passport_number, source, category, reason, listing_date, is_active)

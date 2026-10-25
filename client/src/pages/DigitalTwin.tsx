@@ -28,7 +28,7 @@ const SCENARIOS = [
   {
     id: "double_penalties",
     name: "Double Enforcement Penalties",
-    description: "NITDA doubles maximum fines for non-compliance from ₦10M to ₦20M per violation, with sector-specific multipliers for banking and telecom.",
+    description: "NDPC doubles maximum fines for non-compliance from ₦10M to ₦20M per violation, with sector-specific multipliers for banking and telecom.",
     realWorldContext: "Following the MTN Nigeria SIM swap fraud breach affecting 450 subscribers, the National Assembly proposed increasing NDPA penalties to match the scale of harm. This scenario models the deterrent effect on breach rates and compliance investment.",
     defaults: { breach_sla_hours: 72, penalty_multiplier: 2.0, compliance_threshold: 70 },
     duration: 12,

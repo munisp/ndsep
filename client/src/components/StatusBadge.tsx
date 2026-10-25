@@ -80,6 +80,7 @@ export function getStatusVariant(status: string): StatusVariant {
     contained: "warning",
     noticeissued: "warning",
     escalated: "high",
+    escalatedtondpc: "high",
     escalatedtonitda: "high",
     settled: "success",
   };

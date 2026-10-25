@@ -6,7 +6,7 @@ import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Linking, ActivityIndicator } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_URL = process.env.NDSEP_API_URL ?? "https://ndsep.nitda.gov.ng";
+const API_URL = process.env.NDSEP_API_URL ?? "https://ndsep.ndpc.gov.ng";
 
 export default function LoginScreen({ onLogin }: { onLogin?: () => void }) {
   const [loading, setLoading] = useState(false);
@@ -35,17 +35,17 @@ export default function LoginScreen({ onLogin }: { onLogin?: () => void }) {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Sign In</Text>
         <Text style={styles.cardDesc}>
-          Authenticate with your NITDA credentials to access the enforcement platform.
+          Authenticate with your NDPC credentials to access the enforcement platform.
         </Text>
         <TouchableOpacity style={styles.loginBtn} onPress={handleLogin} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#0a0e1a" />
           ) : (
-            <Text style={styles.loginBtnText}>Sign In with NITDA SSO</Text>
+            <Text style={styles.loginBtnText}>Sign In with NDPC SSO</Text>
           )}
         </TouchableOpacity>
         <Text style={styles.disclaimer}>
-          Access restricted to authorised NITDA officers and registered data controllers.
+          Access restricted to authorised NDPC officers and registered data controllers.
         </Text>
       </View>
 

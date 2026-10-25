@@ -253,6 +253,22 @@ const PublicSanctionsRegister = lazy(() => import("@/pages/PublicSanctionsRegist
 const FoiaPublicPortal = lazy(() => import("@/pages/FoiaPublicPortal"));
 const ElectionOversight = lazy(() => import("@/pages/ElectionOversight"));
 const InsiderThreat = lazy(() => import("@/pages/InsiderThreat"));
+// Round-8/9 feature surfaces
+const PublicComplaintPortal = lazy(() => import("@/pages/PublicComplaintPortal"));
+const ComplaintTriage = lazy(() => import("@/pages/ComplaintTriage"));
+const DataSovereigntyDashboard = lazy(() => import("@/pages/DataSovereigntyDashboard"));
+const SupervisionRisk = lazy(() => import("@/pages/SupervisionRisk"));
+const TribunalBundleViewer = lazy(() => import("@/pages/TribunalBundleViewer"));
+const SettlementWorkflow = lazy(() => import("@/pages/SettlementWorkflow"));
+const PublicationWorkbench = lazy(() => import("@/pages/PublicationWorkbench"));
+const AdverseMediaReview = lazy(() => import("@/pages/AdverseMediaReview"));
+const OpenDataPortal = lazy(() => import("@/pages/OpenDataPortal"));
+const AiRuntimeOversight = lazy(() => import("@/pages/AiRuntimeOversight"));
+const CrossBorderDeclarationsReview = lazy(() => import("@/pages/CrossBorderDeclarationsReview"));
+const EnforcementAnalytics = lazy(() => import("@/pages/EnforcementAnalytics"));
+const ComplianceScanning = lazy(() => import("@/pages/ComplianceScanning"));
+const UssdIntakeQueue = lazy(() => import("@/pages/UssdIntakeQueue"));
+const InternationalCooperation = lazy(() => import("@/pages/InternationalCooperation"));
 const TranslatedDsarPortal = lazy(() => import("@/components/i18n/TranslatedDsarPortal"));
 const TranslatedWhistleblowerIntake = lazy(() => import("@/components/i18n/TranslatedWhistleblowerIntake"));
 const TranslatedPublicComplianceRegistry = lazy(() => import("@/components/i18n/TranslatedRegistryHeader"));
@@ -270,6 +286,10 @@ function Router() {
       <Route path="/status/:token" component={OrgStatusTracker} />
       <Route path="/status" component={OrgStatusTracker} />
       <Route path="/home" component={Home} />
+      {/* Round-8/9 public surfaces — no DashboardLayout wrapper */}
+      <Route path="/complaints" component={PublicComplaintPortal} />
+      <Route path="/complaints/track" component={PublicComplaintPortal} />
+      <Route path="/open-data" component={OpenDataPortal} />
       <Route>
     <DashboardLayout>
       <Switch>
@@ -536,6 +556,20 @@ function Router() {
         <Route path="/insider-threat" component={InsiderThreat} />
         {/* Gap 9 — translated public compliance registry shell */}
         <Route path="/registry" component={TranslatedPublicComplianceRegistry} />
+        {/* Round-8/9 staff surfaces — complaints, sovereignty, supervision, tribunal, settlements, publications, adverse media, AI oversight, cross-border, enforcement analytics */}
+        <Route path="/complaint-triage" component={ComplaintTriage} />
+        <Route path="/data-sovereignty" component={DataSovereigntyDashboard} />
+        <Route path="/supervision-risk" component={SupervisionRisk} />
+        <Route path="/tribunal-bundles" component={TribunalBundleViewer} />
+        <Route path="/settlements" component={SettlementWorkflow} />
+        <Route path="/publication-workbench" component={PublicationWorkbench} />
+        <Route path="/adverse-media" component={AdverseMediaReview} />
+        <Route path="/ai-oversight" component={AiRuntimeOversight} />
+        <Route path="/cross-border-declarations" component={CrossBorderDeclarationsReview} />
+        <Route path="/enforcement-analytics" component={EnforcementAnalytics} />
+        <Route path="/compliance-scanning" component={ComplianceScanning} />
+        <Route path="/ussd-intake" component={UssdIntakeQueue} />
+        <Route path="/international-cooperation" component={InternationalCooperation} />
         {/* Catch-all — must be last */}
         <Route component={NotFound} />
       </Switch>

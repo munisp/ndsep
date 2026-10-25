@@ -258,10 +258,25 @@ class ReferenceDB:
         self.loaded_at = 0.0
 
     def refresh(self):
-        resp = SESSION.get(f"{DB_API_URL}/asn_geo_reference", params={"select": "*"}, timeout=15)
+        # Reference-data update path: migration 0120 adds a lifecycle
+        # ``status`` column and supersedes the unverified 0096/0107 seeds, so
+        # only status='active' rows may feed the classifier. The client-side
+        # guard below keeps old schemas (no status column) working during a
+        # rolling deploy: rows without a status key are treated as active.
+        resp = SESSION.get(
+            f"{DB_API_URL}/asn_geo_reference",
+            params={"select": "*", "status": "eq.active"},
+            timeout=15,
+        )
+        if resp.status_code == 400:
+            # Pre-0120 schema has no status column — fall back to unfiltered
+            # read and rely on the client-side guard.
+            resp = SESSION.get(f"{DB_API_URL}/asn_geo_reference", params={"select": "*"}, timeout=15)
         resp.raise_for_status()
         entries = []
         for row in resp.json():
+            if row.get("status", "active") not in (None, "active"):
+                continue  # superseded/revoked reference row — never classify with it
             cidr = row.get("cidr")
             if not cidr:
                 continue  # ASN-only rows are informational (no BGP table consulted)

@@ -126,7 +126,7 @@ function EmailSettingsTab() {
               <CardTitle className="text-sm text-foreground">Priority 1 — SMTP</CardTitle>
               <StatusDot ok={!!emailStatus?.smtp.configured} label={emailStatus?.smtp.configured ? "Configured" : "Not set"} />
             </div>
-            <CardDescription className="text-xs">Custom mail server (nitda.gov.ng)</CardDescription>
+            <CardDescription className="text-xs">Custom mail server (ndpc.gov.ng)</CardDescription>
           </CardHeader>
           <CardContent className="space-y-1">
             <InfoRow label="Host" value={emailStatus?.smtp.host ?? "Not configured"} mono />
@@ -197,7 +197,7 @@ function EmailSettingsTab() {
         <div className="flex gap-2">
           <Input
             type="email"
-            placeholder="admin@nitda.gov.ng"
+            placeholder="admin@ndpc.gov.ng"
             value={testTo}
             onChange={(e) => setTestTo(e.target.value)}
             className="bg-card border-border text-foreground flex-1"
@@ -231,14 +231,14 @@ function EmailSettingsTab() {
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-muted-foreground">
           <div>
-            <p className="font-medium text-muted-foreground mb-1">NITDA / Government SMTP</p>
+            <p className="font-medium text-muted-foreground mb-1">NDPC / Government SMTP</p>
             <code className="block bg-card rounded p-2 text-cyan-600">
-              SMTP_HOST=smtp.nitda.gov.ng<br />
+              SMTP_HOST=smtp.ndpc.gov.ng<br />
               SMTP_PORT=587<br />
               SMTP_SECURE=false<br />
-              SMTP_USER=noreply@ndsep.nitda.gov.ng<br />
+              SMTP_USER=noreply@ndsep.ndpc.gov.ng<br />
               SMTP_PASS=&lt;your-password&gt;<br />
-              SMTP_FROM=NDSEP Platform &lt;noreply@ndsep.nitda.gov.ng&gt;
+              SMTP_FROM=NDSEP Platform &lt;noreply@ndsep.ndpc.gov.ng&gt;
             </code>
           </div>
           <div>

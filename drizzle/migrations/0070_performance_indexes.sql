@@ -312,15 +312,19 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_citizen_requests_fts
     to_tsvector('english', coalesce(citizen_name, '') || ' ' || coalesce(description, ''))
   );
 
--- phase11Features.dsar.getByOrg / dashboard: WHERE org_id = $1.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_dsar_requests_org
-  ON dsar_requests (org_id);
-
--- phase11Features.dsar.dashboard: WHERE d.status NOT IN
--- ('completed','rejected','withdrawn') ORDER BY d.deadline_at ASC.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_dsar_requests_open_deadline
-  ON dsar_requests (deadline_at)
-  WHERE status NOT IN ('completed', 'rejected', 'withdrawn');
+-- REMOVED (round-10 fix): idx_dsar_requests_org and
+-- idx_dsar_requests_open_deadline indexed the legacy dsar_requests table,
+-- which no migration ever creates — 0071_dsar_status_vocabulary.sql (F-14)
+-- repointed all DSAR queries from legacy dsar_requests onto citizen_requests,
+-- which already carries the equivalent indexes (idx_citizen_requests_open_deadline
+-- above, idx_citizen_requests_status_deadline in 0071). The two statements
+-- failed with `relation "dsar_requests" does not exist` on fresh databases.
+-- This is the minimal in-place patch; the removed statements were:
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_dsar_requests_org
+--     ON dsar_requests (org_id);
+--   CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_dsar_requests_open_deadline
+--     ON dsar_requests (deadline_at)
+--     WHERE status NOT IN ('completed', 'rejected', 'withdrawn');
 
 -- ─── NDPA gap-closure tables (server/db.ts getDashboardStats, phase11/13) ────
 
@@ -330,10 +334,13 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_breach_incidents_detected
   ON breach_incidents (detected_at DESC);
 
 -- phase11 breach stats: 72-hour notification overdue check
--- (notified_at IS NULL AND detected_at < NOW() - INTERVAL '72 hours').
+-- (ndpc_notified_at IS NULL AND detected_at < NOW() - INTERVAL '72 hours').
+-- ROUND-10 FIX: predicate originally referenced `notified_at`, which does not
+-- exist on breach_incidents (drizzle/0008 creates `ndpc_notified_at` for the
+-- NDPC-notification timestamp; see also breachEdgeCases.ts). Corrected.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_breach_incidents_unnotified
   ON breach_incidents (detected_at)
-  WHERE notified_at IS NULL;
+  WHERE ndpc_notified_at IS NULL;
 
 -- phase13 dpoRegistry.list: LEFT JOIN organizations o ON da.organization_id.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_dpo_appointments_org
@@ -343,9 +350,16 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_dpo_appointments_org
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_consent_records_status
   ON consent_records (consent_status);
 
--- enhancements.generateAnnualAuditReturn: upsert/lookup per org + year.
+-- enhancements.generateAnnualAuditReturn: upsert/lookup per org + period.
+-- ROUND-10 FIX: originally indexed (org_id, reporting_year) — neither column
+-- exists on the canonical compliance_audit_returns table (drizzle/0024:
+-- organization_id, audit_period_start, audit_period_end). Re-pointed at the
+-- canonical columns. NOTE: server/routers/enhancements.ts (~L789/L822) still
+-- queries org_id/reporting_year and server/db/compliance.ts queries `status`
+-- (canonical column is car_status) — pre-existing code/schema mismatches
+-- tracked as a round-10 open issue, out of migration scope.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_compliance_audit_returns_org_year
-  ON compliance_audit_returns (org_id, reporting_year);
+  ON compliance_audit_returns (organization_id, audit_period_start);
 
 -- phase11 compliance.leaderboard / getOrgScoreHistory:
 -- WHERE org_id = $1 ORDER BY recorded_at DESC and recorded_at > NOW() - 30d
@@ -353,9 +367,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_compliance_audit_returns_org_year
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_compliance_score_history_org_time
   ON compliance_score_history (org_id, recorded_at DESC);
 
--- phase11 webhooks.listByUser / subscribe dedup: WHERE user_id = $1.
+-- phase11 webhooks.list / subscribe dedup: WHERE org_id = $1.
+-- ROUND-10 FIX: originally indexed (user_id), which does not exist on the
+-- canonical webhook_subscriptions table (drizzle/0029); the actual filter
+-- column used by enhancements.ts webhooks.list is org_id (and dpco_org_id).
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_webhook_subscriptions_user
-  ON webhook_subscriptions (user_id);
+  ON webhook_subscriptions (org_id);
 
 -- phase12 lineage traversal: WHERE target_node_id = $1 (upstream) and
 -- WHERE source_node_id = $1 (downstream).
@@ -404,7 +421,8 @@ ANALYZE dpco_verification_statements;
 ANALYZE dpco_evidence_items;
 ANALYZE dpco_accreditation_applications;
 ANALYZE citizen_requests;
-ANALYZE dsar_requests;
+-- ROUND-10 FIX: removed `ANALYZE dsar_requests;` — the legacy table does not
+-- exist (consolidated onto citizen_requests per 0071).
 ANALYZE breach_incidents;
 ANALYZE dpo_appointments;
 ANALYZE consent_records;

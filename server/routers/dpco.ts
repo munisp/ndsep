@@ -25,7 +25,8 @@ function getPool(): InstanceType<typeof Pool> {
 
 // ─── Helper: raw query ────────────────────────────────────────────────────────
 // PII columns owned by this router's tables that are encrypted at rest via
-// encryptField() but are NOT registered in the platform PII_FIELDS map (the
+// encryptField(). participant_email is registered in the platform PII_FIELDS
+// map (round-10); the rest are covered by this local decrypt set (the
 // encryption module is owned elsewhere). decryptField is a no-op on plaintext,
 // so this is safe when encryption is disabled.
 const DPCO_PII_COLUMNS = new Set([

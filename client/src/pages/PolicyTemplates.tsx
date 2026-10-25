@@ -13,8 +13,9 @@ import { Label } from "@/components/ui/label";
 import { FileText, Plus, Zap, Search, Filter , Trash2 } from "lucide-react";
 
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-const FRAMEWORKS = ["All", "NDPR", "GDPR", "PIPL", "DPDP", "HIPAA", "SOC2", "ISO27001", "DOJ_EO_14117", "CUSTOM"];
+const FRAMEWORKS = ["All", "NDPA 2023", "NDPR", "GDPR", "PIPL", "DPDP", "HIPAA", "SOC2", "ISO27001", "DOJ_EO_14117", "CUSTOM"];
 const FRAMEWORK_COLORS: Record<string, string> = {
+  "NDPA 2023": "bg-green-500/20 text-green-400 border-green-500/30",
   NDPR: "bg-green-500/20 text-green-400 border-green-500/30",
   GDPR: "bg-blue-500/20 text-blue-400 border-blue-500/30",
   PIPL: "bg-red-500/20 text-red-400 border-red-500/30",
@@ -32,13 +33,13 @@ export default function PolicyTemplates() {
   const [showCreate, setShowCreate] = useState(false);
   const [showInstantiate, setShowInstantiate] = useState<number | null>(null);
   const [orgId, setOrgId] = useState("");
-  const [newTemplate, setNewTemplate] = useState({ name: "", framework: "NDPR", description: "", policyDefinition: "", version: "1.0" });
+  const [newTemplate, setNewTemplate] = useState({ name: "", framework: "NDPA 2023", description: "", policyDefinition: "", version: "1.0" });
 
   const { data: templates = [], refetch } = trpc.policyTemplates.list.useQuery({ framework: framework === "All" ? undefined : framework });
   const { data: orgs = [] } = trpc.organizations.list.useQuery({ limit: 100 });
 
   const createMutation = trpc.policyTemplates.create.useMutation({
-    onSuccess: () => { toast.success("Policy template created"); setShowCreate(false); refetch(); setNewTemplate({ name: "", framework: "NDPR", description: "", policyDefinition: "", version: "1.0" }); },
+    onSuccess: () => { toast.success("Policy template created"); setShowCreate(false); refetch(); setNewTemplate({ name: "", framework: "NDPA 2023", description: "", policyDefinition: "", version: "1.0" }); },
     onError: (e) => toast.error((e instanceof Error ? e.message : String(e))),
   });
   const instantiateMutation = trpc.policyTemplates.instantiate.useMutation({

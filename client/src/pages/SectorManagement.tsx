@@ -74,7 +74,7 @@ export default function SectorManagement() {
             <div><Label>Name</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} className="bg-card border-border mt-1" placeholder="e.g. Financial Services" /></div>
             <div><Label>Code</Label><Input value={form.code} onChange={e => setForm(p => ({ ...p, code: e.target.value }))} className="bg-card border-border mt-1 font-mono" placeholder="e.g. FIN" /></div>
             <div><Label>Description</Label><Input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} className="bg-card border-border mt-1" /></div>
-            <div><Label>Regulatory Framework</Label><Input value={form.regulatoryFramework} onChange={e => setForm(p => ({ ...p, regulatoryFramework: e.target.value }))} className="bg-card border-border mt-1" placeholder="e.g. NDPR, BOFIA" /></div>
+            <div><Label>Regulatory Framework</Label><Input value={form.regulatoryFramework} onChange={e => setForm(p => ({ ...p, regulatoryFramework: e.target.value }))} className="bg-card border-border mt-1" placeholder="e.g. NDPA 2023, BOFIA" /></div>
             <div><Label>Parent Sector (optional)</Label>
               <Select value={form.parentId} onValueChange={v => setForm(p => ({ ...p, parentId: v }))}>
                 <SelectTrigger className="bg-card border-border mt-1"><SelectValue placeholder="None (top-level)" /></SelectTrigger>

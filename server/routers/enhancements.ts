@@ -786,7 +786,7 @@ export const carAutomationRouter = router({
     .query(async ({ input }) => {
       const pool = getPool();
       const { rows } = await pool.query(
-        `SELECT * FROM compliance_audit_returns WHERE org_id = $1 ORDER BY reporting_year DESC`,
+        `SELECT * FROM compliance_audit_returns WHERE organization_id = $1 ORDER BY audit_period_start DESC`,
         [input.orgId]
       );
       return rows;
@@ -818,10 +818,24 @@ export const carAutomationRouter = router({
         { title: 'Third-Party Data Processor Management', summary: 'Review of data processing agreements and vendor compliance.' },
         { title: 'International Data Transfers', summary: 'Cross-border data transfer mechanisms and adequacy assessments.' },
       ];
+      // Canonical DDL (drizzle/0024): compliance_audit_returns uses
+      // organization_id / audit_period_start / audit_period_end / car_status;
+      // the legacy title/reporting_year/open_violations/... columns do not
+      // exist, so the generated artefacts ride in findings_summary + metadata.
+      const findingsSummary = sections.map((s) => `${s.title}: ${s.summary}`).join("\n");
+      const metadata = {
+        title: `Compliance Audit Return ${input.year} — ${org.name}`,
+        reportingYear: input.year,
+        openViolations,
+        breachesReported,
+        dsarsResolved,
+        sections,
+        generatedAt: new Date().toISOString(),
+      };
       const { rows } = await pool.query(
-        `INSERT INTO compliance_audit_returns (org_id, reporting_year, title, compliance_score, open_violations, breaches_reported, dsars_resolved, sections, status, generated_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'draft',NOW(),NOW(),NOW()) RETURNING *`,
-        [input.orgId, input.year, `Compliance Audit Return ${input.year} — ${org.name}`, complianceScore, openViolations, breachesReported, dsarsResolved, JSON.stringify(sections)]
+        `INSERT INTO compliance_audit_returns (organization_id, audit_period_start, audit_period_end, car_status, compliance_score, findings_summary, non_conformities, corrective_actions, metadata, created_at, updated_at)
+         VALUES ($1,$2,$3,'draft',$4,$5,'[]'::jsonb,'[]'::jsonb,$6,NOW(),NOW()) RETURNING *`,
+        [input.orgId, `${input.year}-01-01`, `${input.year}-12-31`, complianceScore, findingsSummary, JSON.stringify(metadata)]
       );
       emitMutationEvent(EVENTS.COMPLIANCE_SCORE_UPDATED, { action: "enhancement_event", ts: new Date().toISOString() }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
       return { ...rows[0], organisation: org.name, reportingYear: input.year, complianceScore, openViolations, breachesReported, dsarsResolved, sections };
@@ -832,7 +846,7 @@ export const carAutomationRouter = router({
     .mutation(async ({ input }) => {
       const pool = getPool();
       const { rows } = await pool.query(
-        `UPDATE compliance_audit_returns SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *`,
+        `UPDATE compliance_audit_returns SET car_status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = $1 RETURNING *`,
         [input.id]
       );
       if (!rows[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'CAR not found' });
@@ -1150,7 +1164,9 @@ export const penaltyAppealsRouter = router({
     const r = await query(
       `INSERT INTO penalty_appeals (penalty_id, organization_id, submitted_by, contact_email, grounds_for_appeal, evidence_urls, status, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,'submitted',NOW(),NOW()) RETURNING *`,
-      [input.penalty_id, input.appellant_org_id, String(ctx.user.id), contactEmail, input.grounds, JSON.stringify(input.supporting_docs ?? [])]
+      // contact_email is PII (round-10 registry) — encrypted at write; reads
+      // auto-decrypt via the proxied pool (no-op on legacy plaintext rows).
+      [input.penalty_id, input.appellant_org_id, String(ctx.user.id), encryptField(contactEmail), input.grounds, JSON.stringify(input.supporting_docs ?? [])]
     );
     return r[0];
   }),

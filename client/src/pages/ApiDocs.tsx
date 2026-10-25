@@ -481,7 +481,7 @@ export default function ApiDocs() {
 
         {/* Footer */}
         <div className="mt-8 border-t pt-6 text-center text-xs text-muted-foreground">
-          <p>NDSEP Public API — National Information Technology Development Agency (NITDA) · Federal Republic of Nigeria</p>
+          <p>NDSEP Public API — Nigeria Data Protection Commission (NDPC) · Federal Republic of Nigeria</p>
           <p className="mt-1">For integration support, contact <span className="text-primary">api-support@ndsep.gov.ng</span></p>
         </div>
       </div>

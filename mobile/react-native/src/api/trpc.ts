@@ -1,7 +1,7 @@
 /**
  * NDSEP Mobile — tRPC client
  * Connects to the same backend as the web PWA.
- * Set NDSEP_API_URL in your .env (e.g. https://ndsep.nitda.gov.ng)
+ * Set NDSEP_API_URL in your .env (e.g. https://ndsep.ndpc.gov.ng)
  */
 import { createTRPCReact } from "@trpc/react-query";
 import { httpBatchLink } from "@trpc/client";
@@ -11,7 +11,7 @@ import type { AppRouter } from "../../../../server/routers"; // shared type impo
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const API_URL = process.env.NDSEP_API_URL ?? "https://ndsep.nitda.gov.ng";
+const API_URL = process.env.NDSEP_API_URL ?? "https://ndsep.ndpc.gov.ng";
 
 export function createTRPCClient() {
   return trpc.createClient({

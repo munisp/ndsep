@@ -74,6 +74,22 @@ tags:
     description: Telecommunications sector compliance (NCC)
   - name: system
     description: System health and notifications
+  - name: publicComplaints
+    description: Public complaint intake and tracking (NDPA Part VIII)
+  - name: openData
+    description: Open data portal — published aggregate datasets
+  - name: publications
+    description: Publication workbench — public register of published documents
+  - name: whistleblower
+    description: Anonymous whistleblower channel (token-authenticated follow-up)
+  - name: ussd
+    description: USSD gateway webhook for feature-phone complaint intake
+  - name: identity
+    description: Identity verification (NIN / basic assurance levels)
+  - name: tribunal
+    description: Tribunal bundle verification (court-facing evidence packages)
+  - name: dataSovereigntyPosture
+    description: Data sovereignty posture register (readiness scoring)
 
 components:
   securitySchemes:
@@ -309,6 +325,365 @@ components:
           type: string
         data:
           type: object
+
+    # ─── Round-8/9 public + admin surfaces (round 10) ───────────────────────
+
+    ComplaintCategory:
+      type: string
+      enum: [consent, breach, cross_border, dark_pattern, excessive_collection, minors, other]
+
+    ComplaintStatus:
+      type: string
+      enum: [received, acknowledged, under_review, linked_to_case, resolved, closed]
+
+    ComplaintAttachment:
+      type: object
+      required: [filename]
+      properties:
+        filename:
+          type: string
+        contentType:
+          type: string
+        contentBase64:
+          type: string
+          description: Base64-encoded attachment bytes (optional; hash-only record when omitted)
+        sha256:
+          type: string
+          description: Lowercase hex SHA-256 of the attachment bytes
+
+    ComplaintSubmitResult:
+      type: object
+      required: [referenceCode, status]
+      properties:
+        referenceCode:
+          type: string
+          example: "NDPC-CMP-2026-000123"
+        status:
+          type: string
+          enum: [received]
+        receivedAt:
+          type: string
+          format: date-time
+        ackSlaDueAt:
+          type: string
+          format: date-time
+        controllerLinked:
+          type: boolean
+        attachments:
+          type: array
+          items:
+            type: object
+            properties:
+              filename:
+                type: string
+              sha256:
+                type: string
+              vault_status:
+                type: string
+                enum: [stored, hash_record_only, failed]
+        notifications:
+          type: array
+          items:
+            type: object
+
+    ComplaintTrackingView:
+      type: object
+      properties:
+        reference_code:
+          type: string
+        category:
+          $ref: "#/components/schemas/ComplaintCategory"
+        subject:
+          type: string
+        status:
+          $ref: "#/components/schemas/ComplaintStatus"
+        controller_name:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        ack_sla_due_at:
+          type: string
+          format: date-time
+        ack_sla_state:
+          type: string
+          enum: [on_track, due_soon, breached, acknowledged]
+
+    SanctionsNotice:
+      type: object
+      properties:
+        id:
+          type: integer
+        org_name:
+          type: string
+        notice_type:
+          type: string
+          enum: [final_order, undertaking, administrative_fine, reprimand]
+        title:
+          type: string
+        summary:
+          type: string
+        legal_instrument_ref:
+          type: string
+        gazette_number:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        sanction_start:
+          type: string
+          format: date
+        sanction_end:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [published, remediated, expired]
+        public_note:
+          type: string
+        days_remaining:
+          type: ["integer", "null"]
+
+    PublicationDocumentSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        org_name:
+          type: string
+        doc_type:
+          type: string
+          enum: [final_order, undertaking, administrative_fine, reprimand, decision, guidance, other]
+        title:
+          type: string
+        summary:
+          type: string
+        legal_instrument_ref:
+          type: string
+        gazette_number:
+          type: string
+        status:
+          type: string
+          enum: [published, corrected]
+        public_note:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        corrected_at:
+          type: ["string", "null"]
+          format: date-time
+
+    OpenDatasetMeta:
+      type: object
+      properties:
+        dataset_key:
+          type: string
+          enum: [sanctions_register, complaint_stats, dcpmi_registry, enforcement_outcomes]
+        title:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        changelog:
+          type: array
+          items:
+            type: object
+        published:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+
+    WhistleblowerSubmitResult:
+      type: object
+      required: [reportRef, accessToken]
+      properties:
+        id:
+          type: integer
+        reportRef:
+          type: string
+          example: "WBR-2026-00042"
+        status:
+          type: string
+        accessToken:
+          type: string
+          description: Shown exactly once; only its SHA-256 hash is stored. Required for all follow-up channel calls.
+        message:
+          type: string
+
+    WhistleblowerMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        sender:
+          type: string
+          enum: [reporter, case_officer]
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        read_at:
+          type: ["string", "null"]
+          format: date-time
+
+    UssdWebhookRequest:
+      type: object
+      required: [sessionId, msisdn]
+      properties:
+        sessionId:
+          type: string
+          minLength: 4
+          maxLength: 128
+        msisdn:
+          type: string
+          minLength: 7
+          maxLength: 20
+          description: Subscriber MSISDN; stored HMAC-only at rest
+        input:
+          type: string
+          maxLength: 1000
+          default: ""
+
+    UssdWebhookResponse:
+      type: object
+      required: [response, endSession]
+      properties:
+        response:
+          type: string
+          description: Menu text rendered to the handset
+        endSession:
+          type: boolean
+        state:
+          type: string
+        complaintRef:
+          type: string
+          description: Issued reference on COMPLAINT_ACCEPTED (or duplicate replay)
+        duplicate:
+          type: boolean
+        rateLimited:
+          type: boolean
+        syncStatus:
+          type: string
+        queueId:
+          type: integer
+        smsDelivery:
+          type: string
+
+    NinVerifyRequest:
+      type: object
+      required: [subjectType, subjectRef, possessionProof, consent]
+      properties:
+        nin:
+          type: string
+          pattern: '^\d{11}$'
+          description: Required only for ninIdentity.verifyNin; used in memory for the NIMC adapter call, never stored
+        subjectType:
+          type: string
+          enum: [complainant, dsar_requester, user]
+        subjectRef:
+          type: string
+          minLength: 2
+          maxLength: 128
+        possessionProof:
+          type: string
+          minLength: 8
+          maxLength: 256
+          description: Proof of possession of the subject reference (tracking secret / email challenge)
+        consent:
+          type: boolean
+          enum: [true]
+
+    NinVerifyResult:
+      type: object
+      properties:
+        verificationId:
+          type: integer
+        assuranceLevel:
+          type: string
+          enum: [basic, nin_verified]
+        status:
+          type: string
+
+    TribunalBundleVerification:
+      type: object
+      properties:
+        bundleId:
+          type: integer
+        merkleRoot:
+          type: string
+        ledgerAnchorSeq:
+          type: ["integer", "null"]
+        checks:
+          type: array
+          items:
+            type: object
+            required: [name, ok, detail]
+            properties:
+              name:
+                type: string
+              ok:
+                type: boolean
+              detail:
+                type: string
+        verdict:
+          type: string
+          enum: [valid, invalid]
+
+    SovereigntyScoreEntry:
+      type: object
+      properties:
+        entity_ref:
+          type: string
+        score:
+          type: number
+        readiness_tier:
+          type: string
+          enum: [sovereign_ready, on_track, at_risk, critical, non_compliant]
+        components:
+          type: object
+        computed_at:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
 
 security:
   - sessionCookie: []
@@ -726,33 +1101,705 @@ paths:
         "200":
           description: Healthy
 
-components:
-  responses:
-    Unauthorized:
-      description: Authentication required
-      content:
-        application/json:
+  # ─── Round-8/9 public + admin surfaces (round 10) ────────────────────────
+
+  /publicComplaints.submitComplaint:
+    post:
+      tags: [publicComplaints]
+      summary: Submit a public complaint against a data controller
+      operationId: publicComplaints.submitComplaint
+      security: []
+      description: |
+        Unauthenticated intake. Rate-limited per IP hash. Either
+        controllerRegistrationRef or controllerName is required (400 otherwise).
+        Attachment bytes are hash-verified before the complaint row is written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, subject, description]
+              properties:
+                category:
+                  $ref: "#/components/schemas/ComplaintCategory"
+                subject:
+                  type: string
+                  minLength: 4
+                  maxLength: 512
+                description:
+                  type: string
+                  minLength: 20
+                  maxLength: 20000
+                controllerRegistrationRef:
+                  type: string
+                  maxLength: 64
+                controllerName:
+                  type: string
+                  maxLength: 256
+                state:
+                  type: string
+                  maxLength: 64
+                lga:
+                  type: string
+                  maxLength: 128
+                complainantName:
+                  type: string
+                  maxLength: 256
+                complainantEmail:
+                  type: string
+                  format: email
+                complainantPhone:
+                  type: string
+                  maxLength: 64
+                attachments:
+                  type: array
+                  maxItems: 5
+                  items:
+                    $ref: "#/components/schemas/ComplaintAttachment"
+      responses:
+        "200":
+          description: Complaint received; referenceCode is the tracking key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplaintSubmitResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /publicComplaints.trackComplaint:
+    get:
+      tags: [publicComplaints]
+      summary: Track a complaint by reference code
+      operationId: publicComplaints.trackComplaint
+      security: []
+      description: |
+        When any identity field was supplied at submission, complainantEmail
+        must match the email on record (a mismatch returns 404, not 403, to
+        avoid reference-code enumeration). Fully anonymous complaints track by
+        reference code alone.
+      parameters:
+        - name: input
+          in: query
           schema:
-            $ref: "#/components/schemas/Error"
-    Forbidden:
-      description: Insufficient permissions
-      content:
-        application/json:
+            type: object
+            required: [referenceCode]
+            properties:
+              referenceCode:
+                type: string
+                minLength: 10
+                maxLength: 32
+                example: "NDPC-CMP-2026-000123"
+              complainantEmail:
+                type: string
+                format: email
+      responses:
+        "200":
+          description: Public tracking view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplaintTrackingView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /openDataPortal.listDatasets:
+    get:
+      tags: [openData]
+      summary: List published open-data datasets
+      operationId: openDataPortal.listDatasets
+      security: []
+      responses:
+        "200":
+          description: Dataset metadata catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpenDatasetMeta"
+
+  /openDataPortal.getDataset:
+    get:
+      tags: [openData]
+      summary: Download a published dataset (JSON or CSV, aggregate only)
+      operationId: openDataPortal.getDataset
+      security: []
+      parameters:
+        - name: input
+          in: query
           schema:
-            $ref: "#/components/schemas/Error"
-    NotFound:
-      description: Resource not found
-      content:
-        application/json:
+            type: object
+            required: [dataset]
+            properties:
+              dataset:
+                type: string
+                enum: [sanctions_register, complaint_stats, dcpmi_registry, enforcement_outcomes]
+              format:
+                type: string
+                enum: [json, csv]
+                default: json
+              year:
+                type: integer
+                minimum: 2020
+                maximum: 2100
+      responses:
+        "200":
+          description: Dataset rows (complaint_stats is k-anonymity thresholded)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dataset:
+                    type: string
+                  version:
+                    type: string
+                  format:
+                    type: string
+                    enum: [json, csv]
+                  k_anonymity_threshold:
+                    type: ["integer", "null"]
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                  csv:
+                    type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /sanctionsRegister.search:
+    get:
+      tags: [sanctions]
+      summary: Search the public sanctions register
+      operationId: sanctionsRegister.search
+      security: []
+      parameters:
+        - name: input
+          in: query
           schema:
-            $ref: "#/components/schemas/Error"
-    TooManyRequests:
-      description: Rate limit exceeded
-      headers:
-        Retry-After:
+            type: object
+            properties:
+              query:
+                type: string
+              noticeType:
+                type: string
+                enum: [final_order, undertaking, administrative_fine, reprimand]
+              status:
+                type: string
+                enum: [published, remediated, expired]
+              page:
+                type: integer
+                minimum: 1
+                default: 1
+              limit:
+                type: integer
+                minimum: 1
+                maximum: 50
+                default: 20
+      responses:
+        "200":
+          description: Published notices (never drafts)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SanctionsNotice"
+                  total:
+                    type: integer
+
+  /sanctionsRegister.detail:
+    get:
+      tags: [sanctions]
+      summary: Fetch one published sanction notice
+      operationId: sanctionsRegister.detail
+      security: []
+      parameters:
+        - name: input
+          in: query
           schema:
-            type: integer
-      content:
-        application/json:
+            type: object
+            required: [id]
+            properties:
+              id:
+                type: integer
+      responses:
+        "200":
+          description: Notice detail (authoritative; bypasses search cache)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SanctionsNotice"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /sanctionsRegister.stats:
+    get:
+      tags: [sanctions]
+      summary: Public aggregate statistics for the sanctions register
+      operationId: sanctionsRegister.stats
+      security: []
+      responses:
+        "200":
+          description: Register aggregates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  published:
+                    type: integer
+                  remediated:
+                    type: integer
+                  fines:
+                    type: integer
+                  expired_periods:
+                    type: integer
+                  published_last_12m:
+                    type: integer
+
+  /sanctionsRegister.requestDelisting:
+    post:
+      tags: [sanctions]
+      summary: Apply for delisting after remediation (org-proof token required)
+      operationId: sanctionsRegister.requestDelisting
+      security: []
+      description: |
+        Requires a single-use org-proof token issued by an NDPC admin
+        (sanctionsRegister.issueDelistingProof) after out-of-band verification
+        that the applicant represents the sanctioned organisation. The token is
+        consumed atomically with the request insert.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [noticeId, applicantName, applicantEmail, remediationSummary, proofToken]
+              properties:
+                noticeId:
+                  type: integer
+                applicantName:
+                  type: string
+                  minLength: 2
+                  maxLength: 256
+                applicantEmail:
+                  type: string
+                  format: email
+                remediationSummary:
+                  type: string
+                  minLength: 20
+                  maxLength: 5000
+                evidenceRefs:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: string
+                    maxLength: 1024
+                proofToken:
+                  type: string
+                  minLength: 32
+                  maxLength: 128
+      responses:
+        "200":
+          description: Delisting request recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                  submitted_at:
+                    type: string
+                    format: date-time
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /publicationWorkbench.listPublished:
+    get:
+      tags: [publications]
+      summary: List published/corrected public register documents
+      operationId: publicationWorkbench.listPublished
+      security: []
+      parameters:
+        - name: input
+          in: query
           schema:
-            $ref: "#/components/schemas/Error"
+            type: object
+            properties:
+              query:
+                type: string
+              docType:
+                type: string
+                enum: [final_order, undertaking, administrative_fine, reprimand, decision, guidance, other]
+              page:
+                type: integer
+                minimum: 1
+                default: 1
+              limit:
+                type: integer
+                minimum: 1
+                maximum: 50
+                default: 20
+      responses:
+        "200":
+          description: Published documents (redacted public columns only)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PublicationDocumentSummary"
+                  total:
+                    type: integer
+
+  /publicationWorkbench.getPublished:
+    get:
+      tags: [publications]
+      summary: Fetch one published register document
+      operationId: publicationWorkbench.getPublished
+      security: []
+      parameters:
+        - name: input
+          in: query
+          schema:
+            type: object
+            required: [id]
+            properties:
+              id:
+                type: integer
+      responses:
+        "200":
+          description: Published document (public columns only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicationDocumentSummary"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /dataSovereignty.scoreRegister:
+    get:
+      tags: [dataSovereigntyPosture]
+      summary: Sovereignty posture register — latest readiness score per entity
+      operationId: dataSovereignty.scoreRegister
+      description: |
+        Latest sovereignty score per entity_ref. NOTE: currently exposed as a
+        staffProcedure (session required); publication as an unauthenticated
+        transparency endpoint is a router-lane decision — this document
+        describes the intended public posture surface.
+      parameters:
+        - name: input
+          in: query
+          schema:
+            type: object
+            properties:
+              tier:
+                type: string
+                enum: [sovereign_ready, on_track, at_risk, critical, non_compliant]
+              limit:
+                type: integer
+                minimum: 1
+                maximum: 500
+                default: 200
+      responses:
+        "200":
+          description: Posture register rows (ascending by score)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SovereigntyScoreEntry"
+                  note:
+                    type: ["string", "null"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /whistleblowerChannel.submitWithChannel:
+    post:
+      tags: [whistleblower]
+      summary: Submit a whistleblower report and mint a follow-up channel token
+      operationId: whistleblowerChannel.submitWithChannel
+      security: []
+      description: |
+        Returns the channel access token exactly once — only its SHA-256 hash
+        is persisted. The token authenticates all reporter follow-up calls.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, description]
+              properties:
+                category:
+                  type: string
+                  enum: [data_breach, unlawful_processing, consent_violation, cross_border, bribery]
+                orgId:
+                  type: integer
+                description:
+                  type: string
+                  minLength: 50
+                isAnonymous:
+                  type: boolean
+                  default: true
+                reporterEmail:
+                  type: string
+                  format: email
+                evidenceUrls:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: uri
+      responses:
+        "200":
+          description: Report created with one-time channel token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhistleblowerSubmitResult"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /whistleblowerChannel.getChannelMessages:
+    get:
+      tags: [whistleblower]
+      summary: Read the report message thread (token-authenticated)
+      operationId: whistleblowerChannel.getChannelMessages
+      security: []
+      parameters:
+        - name: input
+          in: query
+          schema:
+            type: object
+            required: [accessToken]
+            properties:
+              accessToken:
+                type: string
+                minLength: 20
+      responses:
+        "200":
+          description: Thread messages (read-only; marking read is markRead)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reportRef:
+                    type: string
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WhistleblowerMessage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /whistleblowerChannel.postReporterMessage:
+    post:
+      tags: [whistleblower]
+      summary: Reply to the case officer (token-authenticated)
+      operationId: whistleblowerChannel.postReporterMessage
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessToken, body]
+              properties:
+                accessToken:
+                  type: string
+                  minLength: 20
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 10000
+      responses:
+        "200":
+          description: Message recorded (encrypted at rest)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    $ref: "#/components/schemas/WhistleblowerMessage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /whistleblowerChannel.markRead:
+    post:
+      tags: [whistleblower]
+      summary: Mark officer messages as read (token-authenticated)
+      operationId: whistleblowerChannel.markRead
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accessToken]
+              properties:
+                accessToken:
+                  type: string
+                  minLength: 20
+      responses:
+        "200":
+          description: Officer messages marked read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  markedRead:
+                    type: integer
+
+  /ussdChannel.handleUssd:
+    post:
+      tags: [ussd]
+      summary: USSD gateway webhook — advance a feature-phone complaint session
+      operationId: ussdChannel.handleUssd
+      security: []
+      description: |
+        Gateway-authenticated webhook (verifyGatewayAuth). Session resume is
+        bound to sessionId + MSISDN HMAC. A completed session replays the SAME
+        complaint reference (idempotent duplicate-confirm). Complaint
+        acceptance lands in the USSD intake queue and enqueues a confirmation
+        SMS via the outbox.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UssdWebhookRequest"
+      responses:
+        "200":
+          description: Next menu render or terminal response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UssdWebhookResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /ninIdentity.verifyBasic:
+    post:
+      tags: [identity]
+      summary: Self-attested (basic assurance) identity verification
+      operationId: ninIdentity.verifyBasic
+      security: []
+      description: |
+        Basic self-attestation never supersedes an active NIN-verified record
+        (CONFLICT in that case). Prior active basic rows for the subject are
+        revoked before the new row is written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NinVerifyRequest"
+      responses:
+        "200":
+          description: Basic verification recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NinVerifyResult"
+
+  /ninIdentity.verifyNin:
+    post:
+      tags: [identity]
+      summary: NIMC-backed NIN verification (11-digit NIN)
+      operationId: ninIdentity.verifyNin
+      security: []
+      description: |
+        The raw NIN is used in memory for the NIMC adapter call and its HMAC,
+        then discarded — never stored or logged. When NIMC credentials are not
+        configured the mutation fails explicitly with PRECONDITION_FAILED
+        (nothing is fabricated). Rate-limited per IP and per subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NinVerifyRequest"
+      responses:
+        "200":
+          description: NIN verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NinVerifyResult"
+        "412":
+          description: NIMC adapter UNCONFIGURED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /tribunalBundle.verifyBundle:
+    get:
+      tags: [tribunal]
+      summary: Verify a sealed tribunal bundle (Merkle root + ledger anchor + artifact re-hash)
+      operationId: tribunalBundle.verifyBundle
+      description: |
+        Verifier-scoped (authenticated) verification: re-hashes vault evidence
+        bytes against their content addresses, re-verifies audit-ledger chain
+        segments end-to-end, recomputes the Merkle root, and optionally matches
+        a court-presented expectedMerkleRoot. Every check is itemised with an
+        ok/detail pair; nothing short of a full pass yields a valid verdict.
+      parameters:
+        - name: input
+          in: query
+          schema:
+            type: object
+            required: [bundleId]
+            properties:
+              bundleId:
+                type: integer
+              expectedMerkleRoot:
+                type: string
+                maxLength: 64
+      responses:
+        "200":
+          description: Itemised verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TribunalBundleVerification"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"

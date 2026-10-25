@@ -7,7 +7,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-const String _defaultApiUrl = 'https://ndsep.nitda.gov.ng';
+const String _defaultApiUrl = 'https://ndsep.ndpc.gov.ng';
 const _storage = FlutterSecureStorage();
 
 class ApiService {

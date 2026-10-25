@@ -20,7 +20,7 @@ export default function WazuhDashboard() {
       <Breadcrumbs items={[{ label: "NOC", href: "/noc-dashboard" }, { label: "Wazuh SIEM" }]} />
       <div>
         <h1 className="text-2xl font-bold">Wazuh — SIEM & Compliance Monitoring</h1>
-        <p className="text-muted-foreground">Endpoint detection, vulnerability management, NDPA/NDPR compliance for regulated entities</p>
+        <p className="text-muted-foreground">Endpoint detection, vulnerability management, NDPA 2023 compliance for regulated entities</p>
       </div>
 
       {/* Stats */}
@@ -133,7 +133,7 @@ export default function WazuhDashboard() {
 
         <TabsContent value="compliance" className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="text-lg">NDPA/NDPR Compliance Checks</CardTitle><CardDescription>Security Configuration Assessment — Nigeria Data Protection compliance</CardDescription></CardHeader>
+            <CardHeader><CardTitle className="text-lg">NDPA 2023 Compliance Checks</CardTitle><CardDescription>Security Configuration Assessment — Nigeria Data Protection compliance</CardDescription></CardHeader>
             <CardContent>
               <div className="flex items-center gap-4 mb-4 p-3 rounded-lg border bg-card">
                 <div className="text-center"><p className="text-2xl font-bold text-emerald-500">{compliance?.passRate ?? 0}%</p><p className="text-[10px] text-muted-foreground">Pass Rate</p></div>
