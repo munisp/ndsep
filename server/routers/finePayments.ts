@@ -20,6 +20,7 @@ import { emitMutationEvent } from "../middlewareIntegration";
 import { getRemitaGateway, verifyGatewaySignature } from "../services/remitaAdapter";
 import { sendPaymentReceipt } from "../services/paymentReceiptEmail";
 import { tigerbeetleTransfer } from "../middlewareExtensions";
+import { runFineReconciliationBatch } from "../services/scheduledSweeps";
 
 /** TigerBeetle collections account receiving settled fine payments. */
 const FINE_COLLECTIONS_ACCOUNT = "ndpc-fine-collections";
@@ -486,65 +487,20 @@ export const finePaymentsRouter = router({
   // ─── Reconciliation ───────────────────────────────────────────────────────
 
   /**
-   * Daily batch: match paid RRR payments to penalties. Already-reconciled RRRs
-   * are skipped. Payments whose penalty no longer exists (or with mismatched
-   * amounts) land in the unmatched queue for manual review.
+   * Reconciliation batch: match paid RRR payments to penalties. Already-
+   * reconciled RRRs are skipped. Payments whose penalty no longer exists (or
+   * with mismatched amounts) land in the unmatched queue for manual review.
+   * The canonical logic lives in services/scheduledSweeps.runFineReconciliationBatch
+   * — the durable round12-fine-reconciliation-batch Temporal schedule (every
+   * 6h) runs the SAME function; this mutation remains as the operator override.
    */
   runReconciliationBatch: adminProcedure
     .input(z.object({ batchDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }))
     .mutation(async ({ input, ctx }) => {
-      const batchDate = input.batchDate ?? new Date().toISOString().slice(0, 10);
-      const paid = await exec(
-        `SELECT p.rrr, p.penalty_id, p.amount, p.paid_at
-         FROM payment_rrr_codes p
-         WHERE p.status = 'paid'
-           AND NOT EXISTS (SELECT 1 FROM payment_reconciliations r WHERE r.rrr = p.rrr)`,
-      );
-      // Perf: batch-load all referenced fines in one query (was one
-      // SELECT per paid RRR row — an N+1 pattern), then insert all
-      // reconciliation rows in a single multi-row INSERT (was one INSERT
-      // per row). For a batch of N payments this cuts 2N round trips to 2.
-      const penaltyIds = [...new Set(paid.map((row) => row.penalty_id).filter((id) => id != null))];
-      // NOTE: uses the pool directly (not the exec() helper) because exec
-      // JSON-stringifies array params; node-pg natively binds a JS array as
-      // a Postgres array for ANY($1).
-      const fineRows = penaltyIds.length
-        ? ((await getPool()!.query(`SELECT id, amount FROM enforcement_fines WHERE id = ANY($1)`, [penaltyIds])).rows ?? [])
-        : [];
-      const finesById = new Map(fineRows.map((f) => [f.id, f]));
-
-      let matched = 0, partial = 0, unmatched = 0;
-      const insertValues: unknown[] = [];
-      const insertPlaceholders: string[] = [];
-      paid.forEach((row, i) => {
-        const fine = finesById.get(row.penalty_id);
-        let status: "matched" | "partial" | "unmatched";
-        let notes: string | null = null;
-        if (!fine) {
-          status = "unmatched";
-          notes = "Penalty record not found for RRR payment";
-          unmatched++;
-        } else if (Number(row.amount) >= Number(fine.amount)) {
-          status = "matched";
-          matched++;
-        } else {
-          status = "partial";
-          notes = `Paid ${row.amount} of ${fine.amount}`;
-          partial++;
-        }
-        const base = i * 6;
-        insertPlaceholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`);
-        insertValues.push(row.rrr, fine?.id ?? null, row.amount, status, batchDate, notes);
+      return runFineReconciliationBatch({
+        batchDate: input.batchDate,
+        actor: String(ctx.user.id),
       });
-      if (insertPlaceholders.length) {
-        await exec(
-          `INSERT INTO payment_reconciliations (rrr, penalty_id, matched_amount, match_status, batch_date, notes)
-           VALUES ${insertPlaceholders.join(", ")}`,
-          insertValues,
-        );
-      }
-      await logAudit("payment.reconciliation_batch", "payment_reconciliation", batchDate, String(ctx.user.id), { matched, partial, unmatched });
-      return { batchDate, processed: paid.length, matched, partial, unmatched };
     }),
 
   /** Unmatched reconciliation queue for manual review. */

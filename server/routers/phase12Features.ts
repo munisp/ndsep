@@ -1239,6 +1239,16 @@ export const stripePaymentsRouter = router({
 
 // ─── Combined Phase 12 Router ─────────────────────────────────────────────────
 // ─── Regulatory Fines Router ──────────────────────────────────────────────────
+// DEPRECATED (Round-12 W3): the payment lifecycle procedures below
+// (initiatePayment in particular) are a parallel, pre-RRR fine-payment path.
+// The canonical fine payment flow is the `finePayments` router
+// (server/routers/finePayments.ts): generateRrr / getRrrStatus / settlement
+// webhook / runReconciliationBatch / refunds / receipts, operating on the same
+// enforcement_fines table. The FinePayments UI now uses finePayments for all
+// payment actions; it still uses listFines/getStats/issueFine/waiveFine here
+// only because finePayments intentionally does not duplicate the fine
+// register. Do not add new payment behaviour here — extend finePayments.
+// Kept (not deleted) for backward compatibility with any external callers.
 export const finesRouter = router({
   listFines: protectedProcedure
     .input(z.object({ orgId: z.number().optional(), status: z.string().optional() }))

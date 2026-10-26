@@ -54,11 +54,11 @@ import { emitMutationEvent } from "../middlewareIntegration";
 import { tigerbeetleTransfer, resolveTigerBeetleLedgerId, enqueueLedgerReconciliation } from "../middlewareExtensions";
 import { appendLedger } from "../antiwipe/ledger";
 import { requireDualControl } from "./insiderThreat";
+import { detectSettlementDefaults } from "../services/scheduledSweeps";
 import {
   assertTransition,
   validateSettlementTerms,
   applyPayment,
-  evaluateDefaults,
   isFulfilled,
   validateWaiver,
   DEFAULT_GRACE_DAYS,
@@ -685,8 +685,10 @@ export const settlementWorkflowRouter = router({
   /**
    * Default detection sweep: any open instalment past due + grace period
    * escalates — the settlement defaults and the enforcement case reopens
-   * (the linked fine flips back to 'outstanding'). Designed to be called by
-   * a scheduler or manually by staff; returns every escalation performed.
+   * (the linked fine flips back to 'outstanding'). The canonical logic lives
+   * in services/scheduledSweeps.detectSettlementDefaults — the durable
+   * round12-settlement-default-detection Temporal schedule (daily) runs the
+   * SAME function; this mutation remains as the operator override.
    */
   detectDefaults: staffProcedure
     .input(z.object({
@@ -695,53 +697,19 @@ export const settlementWorkflowRouter = router({
     }).optional())
     .mutation(async ({ ctx, input }) => {
       const actor = actorOf(ctx.user);
-      const active = await query(
-        `SELECT id, settlement_ref, case_ref, fine_id, fine_reference FROM settlements
-         WHERE status = 'active' AND ($1::bigint IS NULL OR id = $1)`,
-        [input?.settlementId ?? null],
-      );
-      const escalations: Array<{ settlementId: number; overdueSeqs: number[]; reason: string }> = [];
-      for (const s of active) {
-        const rows = await query(
-          `SELECT seq, due_date, amount, status, amount_paid FROM settlement_instalments WHERE settlement_id = $1`,
-          [Number(s.id)],
-        );
-        const records: InstalmentRecord[] = rows.map((r) => ({
-          seq: Number(r.seq), dueDate: String(r.due_date), amount: Number(r.amount),
-          status: r.status as InstalmentStatus, amountPaid: Number(r.amount_paid),
-        }));
-        const verdict = evaluateDefaults("active", records, new Date(), input?.graceDays ?? DEFAULT_GRACE_DAYS);
-        if (!verdict.shouldDefault) continue;
-        await query(
-          `UPDATE settlement_instalments SET status = 'overdue', updated_at = now()
-           WHERE settlement_id = $1 AND seq = ANY($2::int[]) AND status IN ('scheduled', 'posted', 'partial')`,
-          [Number(s.id), verdict.overdueSeqs],
-        );
-        await transition(Number(s.id), "active", "defaulted", {
-          default_reason: verdict.escalationReason, defaulted_at: new Date().toISOString(),
+      try {
+        return await detectSettlementDefaults({
+          settlementId: input?.settlementId ?? null,
+          graceDays: input?.graceDays ?? DEFAULT_GRACE_DAYS,
+          actor,
         });
-        // Case reopens: the settled amount is no longer performing.
-        if (s.fine_id != null) {
-          await query(
-            `UPDATE enforcement_fines SET status = 'outstanding', updated_at = NOW() WHERE id = $1`,
-            [Number(s.fine_id)],
-          ).catch((err: unknown) => {
-            if (isMissingTable(err)) return;
-            throw err;
-          });
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "CONFLICT") {
+          throw new TRPCError({ code, message: err instanceof Error ? err.message : String(err) });
         }
-        await audit("defaulted", {
-          settlementId: Number(s.id), settlementRef: s.settlement_ref, caseRef: s.case_ref,
-          overdueSeqs: verdict.overdueSeqs, reason: verdict.escalationReason,
-          fineReference: s.fine_reference ?? null, caseReopened: s.fine_id != null, actor,
-        }, actor);
-        escalations.push({
-          settlementId: Number(s.id),
-          overdueSeqs: verdict.overdueSeqs,
-          reason: verdict.escalationReason ?? "overdue instalments",
-        });
+        throw err;
       }
-      return { checked: active.length, escalations };
     }),
 
   /**

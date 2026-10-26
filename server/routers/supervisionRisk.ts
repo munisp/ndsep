@@ -43,6 +43,7 @@ import {
   type RawRiskInputs,
   type DataVolumeClass,
 } from "../services/supervisionRiskScoring";
+import { getActiveWeights } from "../services/riskWeights";
 
 // Re-exported so existing consumers/tests can import the pure scoring API
 // from either this router or server/services/supervisionRiskScoring.
@@ -386,8 +387,16 @@ export function renormalizeWeightsForAvailability(
 }
 
 async function loadWeights(): Promise<RiskWeights> {
+  // Round 12 W8 (roadmap P2): the BASE weight vector comes from
+  // services/riskWeights.getActiveWeights() — an ACTIVE, fresh (<30d)
+  // learned_risk_weights row (migration 0137) when one exists, else the
+  // hand-seeded DEFAULT_RISK_WEIGHTS (fail-closed). Admin-tuned rows in the
+  // legacy risk_weights table still layer on top: an explicit human
+  // override outranks the learned model. Everything downstream
+  // (renormalizeWeightsForAvailability, computeCompositeScore) is unchanged.
+  const base = await getActiveWeights();
   const rows = await tryExec(`SELECT key, weight::float8 AS weight FROM risk_weights`);
-  const weights: RiskWeights = { ...DEFAULT_RISK_WEIGHTS };
+  const weights: RiskWeights = { ...base.weights };
   for (const r of rows ?? []) {
     if ((RISK_FACTOR_KEYS as readonly string[]).includes(r.key)) {
       weights[r.key as RiskFactorKey] = Math.max(0, Number(r.weight) || 0);

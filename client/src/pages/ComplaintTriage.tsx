@@ -7,11 +7,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AlertTriangle, Inbox, Loader2, Radar, RefreshCw } from "lucide-react";
+import { SimilarPrecedentsPanel } from "@/components/SimilarPrecedentsPanel";
+import { OfficerPicker, CasePicker, DuplicateComplaintPicker, type PickerOption } from "@/components/pickers";
+import { CopilotDraftModal } from "@/components/CopilotDraftModal";
+import { NextBestActionCard } from "@/components/NextBestActionCard";
+import { AlertTriangle, Bookmark, Inbox, Loader2, Radar, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+
+const TRIAGE_CATEGORIES = ["consent", "breach", "cross_border", "dark_pattern", "excessive_collection", "minors", "other"] as const;
+const TRIAGE_SEVERITIES = ["routine", "elevated", "high", "critical"] as const;
 
 const STATUSES = ["received", "acknowledged", "under_review", "linked_to_case", "resolved", "closed"] as const;
 const STATUS_COLORS: Record<string, string> = {
@@ -51,24 +59,96 @@ export default function ComplaintTriage() {
     onError: (err) => toast.error(err.message),
   });
   const assign = trpc.publicComplaints.assign.useMutation({
-    onSuccess: () => { toast.success("Officer assigned"); refreshAll(); setAssignOfficer(""); },
+    onSuccess: () => { toast.success("Officer assigned"); refreshAll(); setAssignOfficer(null); },
     onError: (err) => toast.error(err.message),
   });
   const linkToCase = trpc.publicComplaints.linkToCase.useMutation({
-    onSuccess: () => { toast.success("Linked to enforcement case"); refreshAll(); setCaseId(""); },
+    onSuccess: () => { toast.success("Linked to enforcement case"); refreshAll(); setSelectedCase(null); },
     onError: (err) => toast.error(err.message),
   });
   const merge = trpc.publicComplaints.mergeDuplicates.useMutation({
-    onSuccess: () => { toast.success("Duplicate merged"); refreshAll(); setMergeId(""); setMergeReason(""); },
+    onSuccess: () => { toast.success("Duplicate merged"); refreshAll(); setMergeTarget(null); setMergeReason(""); },
     onError: (err) => toast.error(err.message),
   });
 
   const [nextStatus, setNextStatus] = useState<string>("acknowledged");
   const [resolutionNotes, setResolutionNotes] = useState("");
-  const [assignOfficer, setAssignOfficer] = useState("");
-  const [caseId, setCaseId] = useState("");
-  const [mergeId, setMergeId] = useState("");
+  const [assignOfficer, setAssignOfficer] = useState<PickerOption | null>(null);
+  const [selectedCase, setSelectedCase] = useState<PickerOption | null>(null);
+  const [mergeTarget, setMergeTarget] = useState<PickerOption | null>(null);
   const [mergeReason, setMergeReason] = useState("");
+
+  // ── Auto-triage assist (round 12 W7) ─────────────────────────────────────
+  const triageSuggestion = trpc.autoTriage.forComplaint.useQuery(
+    { complaintId: selected ?? 0 },
+    { enabled: selected != null },
+  );
+  const runTriage = trpc.autoTriage.suggest.useMutation({
+    onSuccess: (r: any) => {
+      if (r.outcome === "suggested") toast.success(`Suggestion parked for review (confidence ${Number(r.suggestion.confidence).toFixed(2)})`);
+      else toast.info(`Left in the manual queue (${String(r.reason).replaceAll("_", " ")})`);
+      triageSuggestion.refetch();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const decideTriage = trpc.autoTriage.decide.useMutation({
+    onSuccess: (r: any) => { toast.success(`Suggestion ${r.status}`); triageSuggestion.refetch(); setEditMode(false); },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const [editMode, setEditMode] = useState(false);
+  const [editCategory, setEditCategory] = useState<string>("");
+  const [editSeverity, setEditSeverity] = useState<string>("");
+  const [editOfficer, setEditOfficer] = useState<PickerOption | null>(null);
+
+  // ── Copilot drafting + next-best-action (round 12 W7) ────────────────────
+  const [draftOpen, setDraftOpen] = useState(false);
+  const NBA_STATUS_FOR: Record<string, string> = {
+    acknowledge: "acknowledged",
+    start_review: "under_review",
+    link_or_resolve: "resolved",
+    resolve: "resolved",
+    close: "closed",
+  };
+
+  // ── Bulk selection + bulk actions (round 12 W2) ─────────────────────────
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [bulkOfficer, setBulkOfficer] = useState<PickerOption | null>(null);
+  const [bulkStatus, setBulkStatus] = useState<(typeof STATUSES)[number]>("acknowledged");
+
+  const bulkAssign = trpc.bulkOps.bulkAssignComplaints.useMutation({
+    onSuccess: (r: any) => {
+      toast.success(`Bulk assign: ${r.succeeded}/${r.total} assigned${r.failed.length ? ` — ${r.failed.length} failed` : ""}`);
+      setChecked(new Set()); setBulkOfficer(null); refreshAll();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const bulkStatusMut = trpc.bulkOps.bulkSetComplaintStatus.useMutation({
+    onSuccess: (r: any) => {
+      toast.success(`Bulk status: ${r.succeeded}/${r.total} moved${r.failed.length ? ` — ${r.failed.length} skipped (invalid transition)` : ""}`);
+      setChecked(new Set()); refreshAll();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  // ── Saved views for this surface (round 12 W2) ──────────────────────────
+  const TRIAGE_SURFACE = "complaint_triage";
+  const savedViews = trpc.savedViews.list.useQuery({ surface: TRIAGE_SURFACE });
+  const [viewName, setViewName] = useState("");
+  const [appliedViewId, setAppliedViewId] = useState<string>("");
+  const saveView = trpc.savedViews.create.useMutation({
+    onSuccess: () => { toast.success("View saved"); setViewName(""); savedViews.refetch(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const deleteView = trpc.savedViews.remove.useMutation({
+    onSuccess: () => { toast.success("View deleted"); savedViews.refetch(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const applyView = (view: any) => {
+    const f = (view?.filters ?? {}) as { status?: string; search?: string };
+    setStatusFilter(f.status ?? "");
+    setSearch(f.search ?? "");
+    setPage(1);
+  };
 
   // Surge alerts
   const [surgeStatus, setSurgeStatus] = useState<string>("open");
@@ -90,6 +170,7 @@ export default function ComplaintTriage() {
 
   const s: any = stats.data ?? {};
   const det: any = detail.data;
+  const pageRows: any[] = (queue.data as any)?.data ?? [];
   const trendDaily: Array<{ d: string; n: number }> = (trends.data as any)?.daily ?? [];
   const maxN = Math.max(1, ...trendDaily.map((p) => p.n));
 
@@ -134,7 +215,7 @@ export default function ComplaintTriage() {
                 <CardDescription>Sorted with SLA breaches first. Click a row to triage.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search ref / subject / controller" className="max-w-xs" />
                   <Select value={statusFilter || "all"} onValueChange={(v) => { setStatusFilter(v === "all" ? "" : v); setPage(1); }}>
                     <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
@@ -144,9 +225,72 @@ export default function ComplaintTriage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Saved views */}
+                <div className="flex gap-2 items-center flex-wrap border rounded-md px-2 py-1.5">
+                  <Bookmark className="h-4 w-4 text-muted-foreground" />
+                  <Select value={appliedViewId} onValueChange={(id) => { setAppliedViewId(id); const v = ((savedViews.data as any[]) ?? []).find((x: any) => x.id === id); if (v) applyView(v); }}>
+                    <SelectTrigger className="w-48 h-8"><SelectValue placeholder="Apply saved view…" /></SelectTrigger>
+                    <SelectContent>
+                      {((savedViews.data as any[]) ?? []).map((v: any) => (
+                        <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {appliedViewId && (
+                    <Button size="sm" variant="ghost" className="h-8 px-2 text-muted-foreground" title="Delete this view" disabled={deleteView.isPending}
+                      onClick={() => { deleteView.mutate({ id: appliedViewId }); setAppliedViewId(""); }}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  <Input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="New view name" className="w-40 h-8" />
+                  <Button
+                    size="sm" variant="outline" className="h-8"
+                    disabled={saveView.isPending || viewName.trim().length < 1}
+                    onClick={() => saveView.mutate({ surface: TRIAGE_SURFACE, name: viewName.trim(), filters: { status: statusFilter || undefined, search: search || undefined } })}
+                  >Save current filters</Button>
+                </div>
+
+                {/* Bulk action bar */}
+                {checked.size > 0 && (
+                  <div className="flex gap-2 items-center flex-wrap rounded-md border border-primary/40 bg-primary/5 px-3 py-2">
+                    <span className="text-sm font-medium">{checked.size} selected</span>
+                    <div className="w-56"><OfficerPicker value={bulkOfficer} onChange={setBulkOfficer} placeholder="Assign officer…" /></div>
+                    <Button
+                      size="sm" variant="secondary"
+                      disabled={bulkAssign.isPending || !bulkOfficer}
+                      onClick={() => bulkAssign.mutate({ complaintIds: Array.from(checked), officerId: bulkOfficer!.id })}
+                    >Assign</Button>
+                    <Select value={bulkStatus} onValueChange={(v) => setBulkStatus(v as (typeof STATUSES)[number])}>
+                      <SelectTrigger className="w-40 h-8"><SelectValue /></SelectTrigger>
+                      <SelectContent>{STATUSES.map((st) => <SelectItem key={st} value={st}>{st.replaceAll("_", " ")}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Button
+                      size="sm" variant="secondary"
+                      disabled={bulkStatusMut.isPending}
+                      onClick={() => bulkStatusMut.mutate({ complaintIds: Array.from(checked), status: bulkStatus })}
+                    >Set status</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setChecked(new Set())}>Clear</Button>
+                  </div>
+                )}
+
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-8">
+                        <Checkbox
+                          aria-label="Select all on page"
+                          checked={pageRows.length > 0 && pageRows.every((c) => checked.has(c.id))}
+                          onCheckedChange={(v) => {
+                            setChecked((prev) => {
+                              const next = new Set(prev);
+                              if (v) pageRows.forEach((c) => next.add(c.id));
+                              else pageRows.forEach((c) => next.delete(c.id));
+                              return next;
+                            });
+                          }}
+                        />
+                      </TableHead>
                       <TableHead>Reference</TableHead>
                       <TableHead>Subject</TableHead>
                       <TableHead>Status</TableHead>
@@ -154,8 +298,21 @@ export default function ComplaintTriage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {((queue.data as any)?.data ?? []).map((c: any) => (
+                    {pageRows.map((c: any) => (
                       <TableRow key={c.id} className={`cursor-pointer ${selected === c.id ? "bg-primary/10" : ""}`} onClick={() => setSelected(c.id)}>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            aria-label={`Select ${c.reference_code}`}
+                            checked={checked.has(c.id)}
+                            onCheckedChange={(v) => {
+                              setChecked((prev) => {
+                                const next = new Set(prev);
+                                if (v) next.add(c.id); else next.delete(c.id);
+                                return next;
+                              });
+                            }}
+                          />
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{c.reference_code}</TableCell>
                         <TableCell className="max-w-[240px] truncate">{c.subject}</TableCell>
                         <TableCell><Badge variant="outline" className={STATUS_COLORS[c.status] ?? ""}>{String(c.status).replaceAll("_", " ")}</Badge></TableCell>
@@ -164,8 +321,8 @@ export default function ComplaintTriage() {
                         </TableCell>
                       </TableRow>
                     ))}
-                    {((queue.data as any)?.data ?? []).length === 0 && (
-                      <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Queue is empty.</TableCell></TableRow>
+                    {pageRows.length === 0 && (
+                      <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Queue is empty.</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>
@@ -219,6 +376,116 @@ export default function ComplaintTriage() {
                       </div>
                     )}
 
+                    {/* Similar decided-case precedents (round 12 W6, roadmap §4.3) */}
+                    <SimilarPrecedentsPanel
+                      caseType="complaint"
+                      complaintId={det.id}
+                      title="Similar precedents"
+                    />
+
+                    {/* ── AI assistance (round 12 W7) ───────────────────── */}
+                    <div className="border-t pt-3 space-y-3">
+                      <NextBestActionCard
+                        entityType="complaint"
+                        entityId={det.id}
+                        onAction={(action) => {
+                          const st = NBA_STATUS_FOR[action];
+                          if (st) setNextStatus(st);
+                          toast.info(`Status picker set to '${st ?? action}' — review and Apply`);
+                        }}
+                      />
+
+                      {(() => {
+                        const sg: any = triageSuggestion.data?.suggestion;
+                        return (
+                          <div className="rounded-md border p-3 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="font-medium flex items-center gap-2">
+                                Auto-triage
+                                {sg?.status === "pending" && (
+                                  <Badge variant="outline" className="bg-cyan-500/20 text-cyan-300 border-cyan-500/40">Suggested</Badge>
+                                )}
+                                {sg && sg.status !== "pending" && (
+                                  <Badge variant="outline" className="bg-muted text-muted-foreground border-border">{sg.status}</Badge>
+                                )}
+                              </p>
+                              <Button size="sm" variant="secondary" disabled={runTriage.isPending} onClick={() => runTriage.mutate({ complaintId: det.id })}>
+                                {runTriage.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
+                                {sg ? "Re-run" : "Suggest"}
+                              </Button>
+                            </div>
+                            {sg?.status === "pending" && (
+                              <>
+                                <p className="text-xs text-muted-foreground">
+                                  Category <span className="text-foreground font-medium">{sg.category}</span> · severity{" "}
+                                  <span className="text-foreground font-medium">{sg.severity}</span> · team{" "}
+                                  <span className="text-foreground font-medium">{String(sg.suggested_team).replaceAll("_", " ")}</span> · confidence{" "}
+                                  {Number(sg.confidence).toFixed(2)}
+                                </p>
+                                {!editMode ? (
+                                  <div className="flex gap-2">
+                                    <Button size="sm" disabled={decideTriage.isPending} onClick={() => decideTriage.mutate({ suggestionId: sg.id, action: "accepted" })}>Confirm</Button>
+                                    <Button
+                                      size="sm" variant="outline"
+                                      onClick={() => { setEditMode(true); setEditCategory(sg.category); setEditSeverity(sg.severity); setEditOfficer(null); }}
+                                    >Edit</Button>
+                                    <Button size="sm" variant="ghost" className="text-red-400" disabled={decideTriage.isPending} onClick={() => decideTriage.mutate({ suggestionId: sg.id, action: "rejected" })}>Reject</Button>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2 border-t pt-2">
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <Label>Category</Label>
+                                        <Select value={editCategory} onValueChange={setEditCategory}>
+                                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                          <SelectContent>{TRIAGE_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c.replaceAll("_", " ")}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div>
+                                        <Label>Severity</Label>
+                                        <Select value={editSeverity} onValueChange={setEditSeverity}>
+                                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                          <SelectContent>{TRIAGE_SEVERITIES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <Label>Assign to officer (edit target)</Label>
+                                      <OfficerPicker value={editOfficer} onChange={setEditOfficer} placeholder="Search officers…" />
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <Button
+                                        size="sm"
+                                        disabled={decideTriage.isPending || (assign.isPending && !!editOfficer)}
+                                        onClick={async () => {
+                                          if (editOfficer) {
+                                            try { await assign.mutateAsync({ id: det.id, officerId: editOfficer.id }); } catch { return; }
+                                          }
+                                          decideTriage.mutate({
+                                            suggestionId: sg.id,
+                                            action: "edited",
+                                            finalValue: { category: editCategory, severity: editSeverity, suggestedTeam: editOfficer?.label ?? sg.suggested_team },
+                                          });
+                                        }}
+                                      >Save edited decision</Button>
+                                      <Button size="sm" variant="ghost" onClick={() => setEditMode(false)}>Cancel</Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            {!sg && (
+                              <p className="text-xs text-muted-foreground">No suggestion yet — run auto-triage to classify this complaint (low-confidence results stay in the manual queue).</p>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      <Button variant="outline" className="w-full" onClick={() => setDraftOpen(true)}>
+                        <Sparkles className="h-4 w-4 mr-2" /> Draft with AI — acknowledgement letter
+                      </Button>
+                    </div>
+
                     <div className="border-t pt-3 space-y-3">
                       <div className="flex gap-2 items-end">
                         <div className="flex-1">
@@ -236,27 +503,29 @@ export default function ComplaintTriage() {
                       <Textarea value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} placeholder="Resolution notes (optional)" rows={2} />
                       <div className="flex gap-2 items-end">
                         <div className="flex-1">
-                          <Label htmlFor="ct-officer">Assign officer (user id)</Label>
-                          <Input id="ct-officer" type="number" value={assignOfficer} onChange={(e) => setAssignOfficer(e.target.value)} />
+                          <Label>Assign officer</Label>
+                          <OfficerPicker value={assignOfficer} onChange={setAssignOfficer} placeholder="Search officers…" />
                         </div>
-                        <Button variant="secondary" disabled={assign.isPending || !assignOfficer} onClick={() => assign.mutate({ id: det.id, officerId: Number(assignOfficer) })}>Assign</Button>
+                        <Button variant="secondary" disabled={assign.isPending || !assignOfficer} onClick={() => assignOfficer && assign.mutate({ id: det.id, officerId: assignOfficer.id })}>Assign</Button>
                       </div>
                       <div className="flex gap-2 items-end">
                         <div className="flex-1">
-                          <Label htmlFor="ct-case">Link enforcement case (id)</Label>
-                          <Input id="ct-case" type="number" value={caseId} onChange={(e) => setCaseId(e.target.value)} />
+                          <Label>Link enforcement case</Label>
+                          <CasePicker value={selectedCase} onChange={setSelectedCase} placeholder="Search cases…" />
                         </div>
-                        <Button variant="secondary" disabled={linkToCase.isPending || !caseId} onClick={() => linkToCase.mutate({ id: det.id, enforcementCaseId: Number(caseId) })}>Link</Button>
+                        <Button variant="secondary" disabled={linkToCase.isPending || !selectedCase} onClick={() => selectedCase && linkToCase.mutate({ id: det.id, enforcementCaseId: selectedCase.id })}>Link</Button>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="ct-merge">Merge duplicate (complaint id into this one)</Label>
-                        <div className="flex gap-2">
-                          <Input id="ct-merge" type="number" value={mergeId} onChange={(e) => setMergeId(e.target.value)} placeholder="duplicate id" />
+                        <Label>Merge duplicate (selected complaint merges into this one)</Label>
+                        <div className="flex gap-2 items-end">
+                          <div className="flex-1">
+                            <DuplicateComplaintPicker value={mergeTarget} onChange={setMergeTarget} excludeId={det.id} placeholder="Search duplicate…" />
+                          </div>
                           <Input value={mergeReason} onChange={(e) => setMergeReason(e.target.value)} placeholder="reason (min 5 chars)" className="flex-1" />
                           <Button
                             variant="outline"
-                            disabled={merge.isPending || !mergeId || mergeReason.trim().length < 5}
-                            onClick={() => merge.mutate({ canonicalId: det.id, duplicateId: Number(mergeId), reason: mergeReason.trim() })}
+                            disabled={merge.isPending || !mergeTarget || mergeReason.trim().length < 5}
+                            onClick={() => mergeTarget && merge.mutate({ canonicalId: det.id, duplicateId: mergeTarget.id, reason: mergeReason.trim() })}
                           >Merge</Button>
                         </div>
                       </div>
@@ -395,6 +664,13 @@ export default function ComplaintTriage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <CopilotDraftModal
+        open={draftOpen}
+        onOpenChange={setDraftOpen}
+        template="complaint_acknowledgment"
+        entityId={selected}
+      />
     </div>
   );
 }

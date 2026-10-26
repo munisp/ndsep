@@ -1,3 +1,4 @@
+import { desc, sql } from "drizzle-orm";
 import {
   bigint,
   bigserial,
@@ -15,6 +16,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 
@@ -3705,3 +3707,150 @@ export const watchdogHeartbeats = pgTable("watchdog_heartbeats", {
   details: jsonb("details"),
 });
 export type WatchdogHeartbeatRow = typeof watchdogHeartbeats.$inferSelect;
+
+// ─── Round 12: decision_feedback (0127) — AI suggestion acceptance log ───────
+
+export const decisionFeedback = pgTable(
+  "decision_feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    predictionId: uuid("prediction_id").notNull(),
+    surface: text("surface").notNull(),
+    modelVersion: text("model_version"),
+    suggestion: jsonb("suggestion").notNull(),
+    actorId: uuid("actor_id").notNull(),
+    action: text("action").notNull(),
+    editDistance: numeric("edit_distance"),
+    finalValue: jsonb("final_value"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    surfaceCreatedIdx: index("idx_decision_feedback_surface_created").on(t.surface, t.createdAt),
+    predictionIdx: index("idx_decision_feedback_prediction").on(t.predictionId),
+  }),
+);
+export type DecisionFeedback = typeof decisionFeedback.$inferSelect;
+export type InsertDecisionFeedback = typeof decisionFeedback.$inferInsert;
+
+// ─── Round 12: saved_views (0130) — per-user saved filter sets ───────────────
+
+export const savedViews = pgTable(
+  "saved_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    surface: text("surface").notNull(),
+    name: text("name").notNull(),
+    filters: jsonb("filters").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userSurfaceNameUniq: uniqueIndex("idx_saved_views_user_surface_name").on(t.userId, t.surface, t.name),
+    userSurfaceIdx: index("idx_saved_views_user_surface").on(t.userId, t.surface),
+  }),
+);
+export type SavedView = typeof savedViews.$inferSelect;
+export type InsertSavedView = typeof savedViews.$inferInsert;
+
+// ─── Round 12: kpi_snapshots (0131) — productivity KPI baselines ─────────────
+
+export const kpiSnapshots = pgTable(
+  "kpi_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    metric: text("metric").notNull(),
+    value: numeric("value").notNull(),
+    dimensions: jsonb("dimensions").notNull().default({}),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    metricTimeIdx: index("idx_kpi_snapshots_metric_time").on(t.metric, desc(t.capturedAt)),
+    capturedAtIdx: index("idx_kpi_snapshots_captured_at").on(desc(t.capturedAt)),
+  }),
+);
+export type KpiSnapshot = typeof kpiSnapshots.$inferSelect;
+export type NewKpiSnapshot = typeof kpiSnapshots.$inferInsert;
+
+// ─── Round 12: learned_risk_weights (0137) + penalty_calibration_audit (0138) ─
+
+export const learnedRiskWeights = pgTable(
+  "learned_risk_weights",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    version: text("version").notNull(),
+    weights: jsonb("weights").notNull(),
+    trainedAt: timestamp("trained_at", { withTimezone: true }).notNull(),
+    sampleSize: integer("sample_size").notNull(),
+    metrics: jsonb("metrics").notNull().default({}),
+    active: boolean("active").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    activeUniq: uniqueIndex("idx_learned_risk_weights_active").on(t.active).where(sql`${t.active}`),
+    trainedAtIdx: index("idx_learned_risk_weights_trained_at").on(desc(t.trainedAt)),
+  }),
+);
+export type LearnedRiskWeights = typeof learnedRiskWeights.$inferSelect;
+export type InsertLearnedRiskWeights = typeof learnedRiskWeights.$inferInsert;
+
+export const penaltyCalibrationAudit = pgTable(
+  "penalty_calibration_audit",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    predictionId: uuid("prediction_id").notNull(),
+    modelVersion: text("model_version"),
+    penaltyBand: text("penalty_band").notNull(),
+    violationType: text("violation_type").notNull().default("unknown"),
+    orgSize: text("org_size").notNull().default("unknown"),
+    legalBasisSection: text("legal_basis_section").notNull().default("unknown"),
+    orgHash: text("org_hash"),
+    upholdProbability: numeric("uphold_probability"),
+    similarMedianNgn: numeric("similar_median_ngn"),
+    computedAmountNgn: numeric("computed_amount_ngn").notNull(),
+    degraded: boolean("degraded").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    predictionIdx: index("idx_penalty_calibration_audit_prediction").on(t.predictionId),
+    createdIdx: index("idx_penalty_calibration_audit_created").on(desc(t.createdAt)),
+  }),
+);
+export type PenaltyCalibrationAudit = typeof penaltyCalibrationAudit.$inferSelect;
+export type InsertPenaltyCalibrationAudit = typeof penaltyCalibrationAudit.$inferInsert;
+
+// ─── Round 12: autonomy_tiers (0139) + autonomy_actions (0140) ───────────────
+
+export const autonomyTiers = pgTable("autonomy_tiers", {
+  surface: text("surface").primaryKey(),
+  tier: integer("tier").notNull().default(1),
+  acceptanceRate: numeric("acceptance_rate"),
+  suggestionCount: integer("suggestion_count"),
+  promotedAt: timestamp("promoted_at", { withTimezone: true }),
+  demotedAt: timestamp("demoted_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type AutonomyTier = typeof autonomyTiers.$inferSelect;
+export type InsertAutonomyTier = typeof autonomyTiers.$inferInsert;
+
+export const autonomyActions = pgTable(
+  "autonomy_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    surface: text("surface").notNull(),
+    actionType: text("action_type").notNull(),
+    payload: jsonb("payload").notNull(),
+    undoDeadline: timestamp("undo_deadline", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("pending_undo"),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    undoneBy: text("undone_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    pendingDueIdx: index("idx_autonomy_actions_pending_due").on(t.undoDeadline).where(sql`${t.status} = 'pending_undo'`),
+    surfaceIdx: index("idx_autonomy_actions_surface").on(t.surface, desc(t.createdAt)),
+    statusIdx: index("idx_autonomy_actions_status").on(t.status, desc(t.createdAt)),
+  }),
+);
+export type AutonomyAction = typeof autonomyActions.$inferSelect;
+export type InsertAutonomyAction = typeof autonomyActions.$inferInsert;

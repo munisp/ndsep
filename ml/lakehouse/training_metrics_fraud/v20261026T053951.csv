@@ -1,0 +1,2 @@
+model,recorded_at,accuracy,precision,recall,f1,roc_auc
+fraud,2026-10-26T05:39:51.591327Z,0.95,0.0,0.0,0.0,0.4276315789473684

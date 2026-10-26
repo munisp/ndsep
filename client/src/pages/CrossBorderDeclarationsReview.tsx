@@ -10,7 +10,194 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Globe2, Loader2, Radar, RefreshCw } from "lucide-react";
+import { OrgIdentityPrefill } from "@/components/OrgIdentityPrefill";
+import { FormCopilotInput } from "@/components/FormCopilotInput";
+import { Globe2, Loader2, Radar, RefreshCw, Send } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+
+const LEGAL_BASES = ["adequacy_decision", "bcr", "scc", "derogation", "explicit_consent", "contract_performance", "vital_interests", "none_claimed"] as const;
+const SUBJECT_COUNT_BANDS = ["band_0_100", "band_101_1000", "band_1001_10000", "band_10001_100000", "band_100000_plus"] as const;
+const VOLUME_BANDS = ["vol_small", "vol_medium", "vol_large", "vol_very_large"] as const;
+
+/** Cross-border transfer declaration form (crossBorderDeclarations.submit) with registry identity prefill. */
+function NewDeclarationForm({ onSubmitted }: { onSubmitted: () => void }) {
+  const [form, setForm] = useState({
+    organizationId: "", orgLabel: "",
+    declaration_type: "annual" as "annual" | "on_change",
+    period_start: "", period_end: "", destination_country: "",
+    legal_basis: "adequacy_decision" as (typeof LEGAL_BASES)[number],
+    data_categories: "", subject_count_band: "band_0_100" as (typeof SUBJECT_COUNT_BANDS)[number],
+    volume_band: "vol_small" as (typeof VOLUME_BANDS)[number], volume_estimate_gb: "",
+    processors: "", declares_no_transfers: false,
+  });
+  const set = (k: keyof typeof form, v: any) => setForm((f) => ({ ...f, [k]: v }));
+  const { data: orgs = [] } = trpc.organizations.list.useQuery({ limit: 200 });
+
+  const submit = trpc.crossBorderDeclarations.submit.useMutation({
+    onSuccess: (res: any) => {
+      const findings = res?.validation?.findings?.length ?? 0;
+      toast.success(`Declaration submitted${findings ? ` — ${findings} validation finding(s) raised` : ""}`);
+      onSubmitted();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleSubmit = () => {
+    const orgId = Number(form.organizationId);
+    if (!Number.isInteger(orgId) || orgId <= 0) { toast.error("Select the declaring organisation (use the registry lookup to pre-fill)"); return; }
+    if (!form.period_start || !form.period_end) { toast.error("Declaration period is required"); return; }
+    if (!form.destination_country.trim()) { toast.error("Destination country is required"); return; }
+    const processors = form.processors
+      .split("\n").map((l) => l.trim()).filter(Boolean)
+      .map((l) => {
+        const [name, country, role] = l.split(",").map((p) => p.trim());
+        return name && country ? { name, country, role: (role === "sub_processor" ? "sub_processor" : "processor") as "processor" | "sub_processor" } : null;
+      })
+      .filter((x): x is { name: string; country: string; role: "processor" | "sub_processor" } => x !== null);
+    submit.mutate({
+      organization_id: orgId,
+      declaration_type: form.declaration_type,
+      period_start: form.period_start,
+      period_end: form.period_end,
+      destination_country: form.destination_country.trim(),
+      legal_basis: form.legal_basis,
+      data_categories: form.data_categories.split(",").map((s) => s.trim()).filter(Boolean),
+      subject_count_band: form.subject_count_band,
+      volume_band: form.volume_band,
+      volume_estimate_gb: form.volume_estimate_gb ? Number(form.volume_estimate_gb) : undefined,
+      processors,
+      declares_no_transfers: form.declares_no_transfers,
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">New transfer declaration</CardTitle>
+        <CardDescription>
+          Annual / on-change declaration under NDPA 2023 ss.41-43. Look up the declaring organisation once by
+          registration reference — the organisation identity is resolved instead of re-typed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <OrgIdentityPrefill
+          idPrefix="cbd-decl"
+          onResolved={(id) => {
+            setForm((f) => ({
+              ...f,
+              organizationId: id.orgId != null ? String(id.orgId) : f.organizationId,
+              orgLabel: id.name ?? f.orgLabel,
+            }));
+          }}
+        />
+        {/* Form copilot (round 12 W7): natural-language prefill — never auto-submits. */}
+        <FormCopilotInput
+          form="cross_border_declaration"
+          onPrefill={(fields, _conf) => {
+            const processorLines = (arr: unknown) =>
+              Array.isArray(arr)
+                ? (arr as Array<{ name?: string; country?: string; role?: string }>)
+                    .map((p) => [p?.name, p?.country, p?.role].filter(Boolean).join(", "))
+                    .filter(Boolean)
+                    .join("\n")
+                : "";
+            setForm((f) => ({
+              ...f,
+              organizationId: typeof fields.organization_id === "number" ? String(fields.organization_id) : f.organizationId,
+              declaration_type: typeof fields.declaration_type === "string" ? (fields.declaration_type as typeof f.declaration_type) : f.declaration_type,
+              period_start: typeof fields.period_start === "string" ? fields.period_start : f.period_start,
+              period_end: typeof fields.period_end === "string" ? fields.period_end : f.period_end,
+              destination_country: typeof fields.destination_country === "string" ? fields.destination_country : f.destination_country,
+              legal_basis: typeof fields.legal_basis === "string" ? (fields.legal_basis as typeof f.legal_basis) : f.legal_basis,
+              data_categories: Array.isArray(fields.data_categories) ? (fields.data_categories as string[]).join(", ") : f.data_categories,
+              subject_count_band: typeof fields.subject_count_band === "string" ? (fields.subject_count_band as typeof f.subject_count_band) : f.subject_count_band,
+              volume_band: typeof fields.volume_band === "string" ? (fields.volume_band as typeof f.volume_band) : f.volume_band,
+              volume_estimate_gb: typeof fields.volume_estimate_gb === "number" ? String(fields.volume_estimate_gb) : f.volume_estimate_gb,
+              processors: processorLines(fields.processors) || f.processors,
+              declares_no_transfers: typeof fields.declares_no_transfers === "boolean" ? fields.declares_no_transfers : f.declares_no_transfers,
+            }));
+          }}
+        />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <Label>Organisation *</Label>
+            <Select value={form.organizationId} onValueChange={(v) => set("organizationId", v)}>
+              <SelectTrigger><SelectValue placeholder={form.orgLabel || "Select organisation"} /></SelectTrigger>
+              <SelectContent>
+                {(orgs as any[]).map((o: any) => <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Declaration type</Label>
+            <Select value={form.declaration_type} onValueChange={(v) => set("declaration_type", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="annual">Annual</SelectItem>
+                <SelectItem value="on_change">On change</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Destination country *</Label>
+            <Input value={form.destination_country} onChange={(e) => set("destination_country", e.target.value)} placeholder="e.g. Ireland" />
+          </div>
+          <div>
+            <Label>Period start *</Label>
+            <Input type="date" value={form.period_start} onChange={(e) => set("period_start", e.target.value)} />
+          </div>
+          <div>
+            <Label>Period end *</Label>
+            <Input type="date" value={form.period_end} onChange={(e) => set("period_end", e.target.value)} />
+          </div>
+          <div>
+            <Label>Legal basis</Label>
+            <Select value={form.legal_basis} onValueChange={(v) => set("legal_basis", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{LEGAL_BASES.map((b) => <SelectItem key={b} value={b}>{b.replaceAll("_", " ")}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Subject count band</Label>
+            <Select value={form.subject_count_band} onValueChange={(v) => set("subject_count_band", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{SUBJECT_COUNT_BANDS.map((b) => <SelectItem key={b} value={b}>{b.replace("band_", "").replaceAll("_", "–")}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Volume band</Label>
+            <Select value={form.volume_band} onValueChange={(v) => set("volume_band", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{VOLUME_BANDS.map((b) => <SelectItem key={b} value={b}>{b.replace("vol_", "").replaceAll("_", " ")}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Volume estimate (GB, optional)</Label>
+            <Input type="number" min={0} value={form.volume_estimate_gb} onChange={(e) => set("volume_estimate_gb", e.target.value)} />
+          </div>
+          <div className="md:col-span-2">
+            <Label>Data categories (comma-separated)</Label>
+            <Input value={form.data_categories} onChange={(e) => set("data_categories", e.target.value)} placeholder="identifiers, financial, behavioural" />
+          </div>
+          <div className="flex items-end gap-2 pb-1">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={form.declares_no_transfers} onChange={(e) => set("declares_no_transfers", e.target.checked)} />
+              Declares no transfers in period
+            </label>
+          </div>
+          <div className="md:col-span-3">
+            <Label>Processors (one per line: Name, Country, role)</Label>
+            <Textarea rows={2} value={form.processors} onChange={(e) => set("processors", e.target.value)} placeholder={"ExampleCloud Ltd, Ireland, processor"} />
+          </div>
+        </div>
+        <Button onClick={handleSubmit} disabled={submit.isPending}>
+          {submit.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+          Submit declaration
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 const COMPLIANCE_COLORS: Record<string, string> = {
   compliant: "bg-green-500/20 text-green-300 border-green-500/40",
@@ -87,10 +274,15 @@ export default function CrossBorderDeclarationsReview() {
       <Tabs defaultValue="declarations">
         <TabsList>
           <TabsTrigger value="declarations">Declarations</TabsTrigger>
+          <TabsTrigger value="new">New declaration</TabsTrigger>
           <TabsTrigger value="findings">Findings</TabsTrigger>
           <TabsTrigger value="scc">SCC registrations</TabsTrigger>
           <TabsTrigger value="risk">Destination risk</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="new" className="mt-4">
+          <NewDeclarationForm onSubmitted={refresh} />
+        </TabsContent>
 
         <TabsContent value="declarations" className="mt-4">
           <Card>

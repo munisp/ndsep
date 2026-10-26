@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Newspaper, RefreshCw, Siren } from "lucide-react";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -60,6 +61,31 @@ export default function AdverseMediaReview() {
     onError: (err) => toast.error(err.message),
   });
 
+  // ── Bulk review (round 12 W2) ────────────────────────────────────────────
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [bulkNote, setBulkNote] = useState("");
+  const bulkConfirm = trpc.bulkOps.bulkConfirmAdverseMedia.useMutation({
+    onSuccess: (r: any) => {
+      toast.success(`Bulk confirm: ${r.succeeded}/${r.total} confirmed (${r.signals_promoted} signal(s) promoted)${r.failed.length ? ` — ${r.failed.length} skipped` : ""}`);
+      setChecked(new Set()); refresh();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const bulkReject = trpc.bulkOps.bulkRejectAdverseMedia.useMutation({
+    onSuccess: (r: any) => {
+      toast.success(`Bulk reject: ${r.succeeded}/${r.total} rejected${r.failed.length ? ` — ${r.failed.length} skipped` : ""}`);
+      setChecked(new Set()); setBulkNote(""); refresh();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const queueItems: any[] = (queue.data as any[]) ?? [];
+  const toggle = (id: number, v: boolean) => setChecked((prev) => {
+    const next = new Set(prev);
+    if (v) next.add(id); else next.delete(id);
+    return next;
+  });
+
   // Manual ingest
   const [ingest, setIngest] = useState({ source_id: "", title: "", url: "", summary: "", published_at: "" });
   const ingestItem = trpc.adverseMedia.ingestManualItem.useMutation({
@@ -105,10 +131,52 @@ export default function AdverseMediaReview() {
             </div>
           </div>
 
-          {((queue.data as any[]) ?? []).map((item: any) => (
+          {reviewStatus === "pending" && queueItems.length > 0 && (
+            <div className="flex items-center gap-3 flex-wrap rounded-md border px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  aria-label="Select all items"
+                  checked={queueItems.length > 0 && queueItems.every((i) => checked.has(i.id))}
+                  onCheckedChange={(v) => setChecked(v ? new Set(queueItems.map((i) => i.id)) : new Set())}
+                />
+                Select all ({queueItems.length})
+              </label>
+              {checked.size > 0 && (
+                <>
+                  <span className="text-sm font-medium">{checked.size} selected</span>
+                  <Button
+                    size="sm"
+                    disabled={bulkConfirm.isPending || bulkReject.isPending}
+                    onClick={() => bulkConfirm.mutate({ itemIds: Array.from(checked), note: bulkNote.trim() || undefined })}
+                  >Confirm selected</Button>
+                  <Input
+                    value={bulkNote}
+                    onChange={(e) => setBulkNote(e.target.value)}
+                    placeholder="Review note (required to reject, min 3 chars)"
+                    className="w-64 h-8"
+                  />
+                  <Button
+                    size="sm" variant="destructive"
+                    disabled={bulkReject.isPending || bulkConfirm.isPending || bulkNote.trim().length < 3}
+                    onClick={() => bulkReject.mutate({ itemIds: Array.from(checked), note: bulkNote.trim() })}
+                  >Reject selected</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setChecked(new Set())}>Clear</Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {queueItems.map((item: any) => (
             <Card key={item.id}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2 flex-wrap">
+                  {reviewStatus === "pending" && (
+                    <Checkbox
+                      aria-label={`Select item ${item.id}`}
+                      checked={checked.has(item.id)}
+                      onCheckedChange={(v) => toggle(item.id, Boolean(v))}
+                    />
+                  )}
                   <Badge variant="outline" className={SEV_COLORS[item.severity] ?? ""}>{item.severity}</Badge>
                   {item.url ? (
                     <a href={item.url} target="_blank" rel="noreferrer" className="hover:underline">{item.title}</a>
@@ -174,7 +242,7 @@ export default function AdverseMediaReview() {
               </CardContent>
             </Card>
           ))}
-          {((queue.data as any[]) ?? []).length === 0 && (
+          {queueItems.length === 0 && (
             <p className="text-sm text-muted-foreground">No {reviewStatus} items{sevFilter ? ` at ${sevFilter} severity` : ""}.</p>
           )}
         </TabsContent>

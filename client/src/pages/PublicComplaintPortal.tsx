@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { FileText, Loader2, Paperclip, Search, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { OrgIdentityPrefill } from "@/components/OrgIdentityPrefill";
 
 const CATEGORIES = [
   { value: "consent", label: "Consent violation" },
@@ -152,8 +153,20 @@ function SubmitTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">The organisation you are complaining about</CardTitle>
+          <CardDescription>If the organisation is registered with the NDPC, look it up once — the identity fields fill in automatically.</CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <CardContent className="space-y-4">
+          <OrgIdentityPrefill
+            idPrefix="pc-controller"
+            label="Controller identity lookup (RC/BN number or NDPC reference)"
+            onResolved={(identity) => {
+              if (identity.name) setControllerName((v) => v || identity.name!);
+              const ref = identity.registrationRef ?? identity.cacNumber ?? identity.rcNumber;
+              if (ref) setControllerRef((v) => v || ref);
+              if (identity.state) setState((v) => v || identity.state!);
+            }}
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="pc-org">Organisation name</Label>
             <Input id="pc-org" value={controllerName} onChange={(e) => setControllerName(e.target.value)} placeholder="e.g. Acme Bank PLC" maxLength={256} />
@@ -169,6 +182,7 @@ function SubmitTab() {
           <div>
             <Label htmlFor="pc-lga">LGA (optional)</Label>
             <Input id="pc-lga" value={lga} onChange={(e) => setLga(e.target.value)} maxLength={128} />
+          </div>
           </div>
         </CardContent>
       </Card>

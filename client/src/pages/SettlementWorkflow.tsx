@@ -11,7 +11,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Handshake, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { SimilarPrecedentsPanel } from "@/components/SimilarPrecedentsPanel";
+import { SettlementRecommendationCard } from "@/components/SettlementRecommendationCard";
+import { CopilotDraftModal } from "@/components/CopilotDraftModal";
+import { NextBestActionCard } from "@/components/NextBestActionCard";
+import { Handshake, Loader2, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 
 const STATUSES = ["proposal", "counter", "agreement", "approval", "active", "fulfilled", "defaulted", "void"] as const;
 const STATUS_COLORS: Record<string, string> = {
@@ -181,6 +185,9 @@ export default function SettlementWorkflow() {
     onError: (err) => toast.error(err.message),
   });
 
+  // ── Copilot drafting (round 12 W7) ───────────────────────────────────────
+  const [draftOpen, setDraftOpen] = useState(false);
+
   const s: any = detail.data?.settlement;
   const terms: any[] = detail.data?.terms ?? [];
   const instalments: any[] = detail.data?.instalments ?? [];
@@ -226,6 +233,12 @@ export default function SettlementWorkflow() {
             </div>
           </div>
           <TermsEditor value={propTerms} onChange={setPropTerms} />
+          {/* Learned fulfillment score + precedent-based adjustments (round 12 W8, roadmap P2).
+              Advisory only — accept/edit/reject flows to decision_feedback (surface='settlement_terms'). */}
+          <SettlementRecommendationCard
+            terms={toTermsPayload(propTerms)}
+            queryText={`Settlement proposal: NGN ${propTerms.monetaryAmount || 0}, ${propTerms.instalments.length} instalments, ${propTerms.obligations.split("\n").filter((s) => s.trim()).length} obligations`}
+          />
           <Button
             disabled={propose.isPending || !propCase.trim() || propTerms.monetaryAmount === ""}
             onClick={() => propose.mutate({
@@ -286,6 +299,15 @@ export default function SettlementWorkflow() {
               <p className="text-sm text-muted-foreground">Select a settlement to manage its lifecycle.</p>
             ) : (
               <>
+                {/* Next-best-action guidance (round 12 W7, roadmap §6) */}
+                <NextBestActionCard
+                  entityType="settlement"
+                  entityId={s.id}
+                  onAction={(action) => {
+                    if (action === "await_or_counter" || action === "decide_counter") setShowCounter(true);
+                    else toast.info(`Next step: ${action} — use the lifecycle buttons below`);
+                  }}
+                />
                 <div className="flex flex-wrap gap-2">
                   {["proposal", "counter"].includes(s.status) && (
                     <>
@@ -299,6 +321,9 @@ export default function SettlementWorkflow() {
                   {s.status === "approval" && (
                     <Button size="sm" onClick={() => approve.mutate({ settlementId: s.id, reason: approveReason })} disabled={approve.isPending}>Approve (activate)</Button>
                   )}
+                  <Button size="sm" variant="secondary" onClick={() => setDraftOpen(true)}>
+                    <Sparkles className="h-4 w-4 mr-1" /> Draft with AI — term proposal
+                  </Button>
                 </div>
 
                 {showCounter && (
@@ -311,6 +336,15 @@ export default function SettlementWorkflow() {
                       onClick={() => counter.mutate({ settlementId: s.id, terms: toTermsPayload(counterTerms) })}
                     >Submit counter</Button>
                   </div>
+                )}
+
+                {/* Similar precedents at the proposal/counter stage (round 12 W6, roadmap §4.3) */}
+                {["proposal", "counter"].includes(s.status) && (
+                  <SimilarPrecedentsPanel
+                    caseType="settlement"
+                    queryText={`Settlement negotiation on enforcement case ${s.case_ref}. Original amount ${s.original_amount ?? "unknown"} NGN; reduction requested ${s.reduction_amount ?? 0} NGN.`}
+                    title="Similar precedents"
+                  />
                 )}
 
                 {s.status === "approval" && (
@@ -447,6 +481,13 @@ export default function SettlementWorkflow() {
           </CardContent>
         </Card>
       </div>
+
+      <CopilotDraftModal
+        open={draftOpen}
+        onOpenChange={setDraftOpen}
+        template="settlement_terms"
+        entityId={selected}
+      />
 
       {/* Ledger reconciliation queue */}
       <Card>

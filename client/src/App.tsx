@@ -218,6 +218,10 @@ const NationalIDVerification = lazy(() => import("@/pages/NationalIDVerification
 const CrossAgencySharing = lazy(() => import("@/pages/CrossAgencySharing"));
 const PrivacyImpactAssessment = lazy(() => import("@/pages/PrivacyImpactAssessment"));
 const FinePayments = lazy(() => import("@/pages/FinePayments"));
+// Round-12 W3 — consolidated surfaces + revenue verification console
+const DpcoOnboarding = lazy(() => import("@/pages/DpcoOnboarding"));
+const DpiaWorkspace = lazy(() => import("@/pages/DpiaWorkspace"));
+const RevenueVerification = lazy(() => import("@/pages/RevenueVerification"));
 const Phase13ConsentRecords = lazy(() => import("@/pages/Phase13ConsentRecords"));
 const Phase13DpoRegistry = lazy(() => import("@/pages/Phase13DpoRegistry"));
 const Phase13NotificationCenter = lazy(() => import("@/pages/Phase13NotificationCenter"));
@@ -256,6 +260,8 @@ const InsiderThreat = lazy(() => import("@/pages/InsiderThreat"));
 // Round-8/9 feature surfaces
 const PublicComplaintPortal = lazy(() => import("@/pages/PublicComplaintPortal"));
 const ComplaintTriage = lazy(() => import("@/pages/ComplaintTriage"));
+// Round-12 W9 — graduated autonomy governance (roadmap §7)
+const AutonomyGovernance = lazy(() => import("@/pages/AutonomyGovernance"));
 const DataSovereigntyDashboard = lazy(() => import("@/pages/DataSovereigntyDashboard"));
 const SupervisionRisk = lazy(() => import("@/pages/SupervisionRisk"));
 const TribunalBundleViewer = lazy(() => import("@/pages/TribunalBundleViewer"));
@@ -268,6 +274,7 @@ const CrossBorderDeclarationsReview = lazy(() => import("@/pages/CrossBorderDecl
 const EnforcementAnalytics = lazy(() => import("@/pages/EnforcementAnalytics"));
 const ComplianceScanning = lazy(() => import("@/pages/ComplianceScanning"));
 const UssdIntakeQueue = lazy(() => import("@/pages/UssdIntakeQueue"));
+const ProductivityKpis = lazy(() => import("@/pages/ProductivityKpis"));
 const InternationalCooperation = lazy(() => import("@/pages/InternationalCooperation"));
 const TranslatedDsarPortal = lazy(() => import("@/components/i18n/TranslatedDsarPortal"));
 const TranslatedWhistleblowerIntake = lazy(() => import("@/components/i18n/TranslatedWhistleblowerIntake"));
@@ -503,6 +510,10 @@ function Router() {
         <Route path="/cross-agency" component={CrossAgencySharing} />
         <Route path="/pia" component={PrivacyImpactAssessment} />
         <Route path="/ndpa-fines" component={FinePayments} />
+        {/* Round-12 W3 — consolidated DPCO/DPIA surfaces + revenue verification console */}
+        <Route path="/dpco/onboarding" component={DpcoOnboarding} />
+        <Route path="/dpia/workspace" component={DpiaWorkspace} />
+        <Route path="/revenue-verification" component={RevenueVerification} />
         {/* Phase 13 — Consent, DPO, Notifications, Penalty, Public Registry, Risk, Residency, Rate Limit, Bulk DSAR, Whistleblower, Cross-Border, Reporting */}
         <Route path="/consent-records" component={Phase13ConsentRecords} />
         <Route path="/p13/dpo-registry" component={Phase13DpoRegistry} />
@@ -558,6 +569,8 @@ function Router() {
         <Route path="/registry" component={TranslatedPublicComplianceRegistry} />
         {/* Round-8/9 staff surfaces — complaints, sovereignty, supervision, tribunal, settlements, publications, adverse media, AI oversight, cross-border, enforcement analytics */}
         <Route path="/complaint-triage" component={ComplaintTriage} />
+        {/* Round-12 W9 — graduated autonomy governance dashboard (roadmap §7) */}
+        <Route path="/autonomy-governance" component={AutonomyGovernance} />
         <Route path="/data-sovereignty" component={DataSovereigntyDashboard} />
         <Route path="/supervision-risk" component={SupervisionRisk} />
         <Route path="/tribunal-bundles" component={TribunalBundleViewer} />
@@ -569,6 +582,7 @@ function Router() {
         <Route path="/enforcement-analytics" component={EnforcementAnalytics} />
         <Route path="/compliance-scanning" component={ComplianceScanning} />
         <Route path="/ussd-intake" component={UssdIntakeQueue} />
+        <Route path="/productivity-kpis" component={ProductivityKpis} />
         <Route path="/international-cooperation" component={InternationalCooperation} />
         {/* Catch-all — must be last */}
         <Route component={NotFound} />

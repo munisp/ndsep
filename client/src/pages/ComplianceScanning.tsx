@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { RefreshCw, ScanSearch } from "lucide-react";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -60,6 +61,32 @@ export default function ComplianceScanning() {
   const referFinding = trpc.complianceScanning.referFindingToEnforcement.useMutation({
     onSuccess: () => { toast.success("Finding referred to enforcement"); setReferFor(null); setReferNotes(""); findings.refetch(); },
     onError: (err) => toast.error(err.message),
+  });
+
+  // ── Bulk finding actions (round 12 W2) ───────────────────────────────────
+  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState<"acknowledged" | "resolved" | "dismissed">("acknowledged");
+  const [suppressReason, setSuppressReason] = useState("");
+  const bulkSetStatus = trpc.bulkOps.bulkSetFindingStatus.useMutation({
+    onSuccess: (r: any) => {
+      toast.success(`Bulk status: ${r.succeeded}/${r.total} updated${r.failed.length ? ` — ${r.failed.length} skipped (already closed)` : ""}`);
+      setChecked(new Set()); findings.refetch(); overview.refetch();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const bulkSuppress = trpc.bulkOps.bulkSuppressFindings.useMutation({
+    onSuccess: (r: any) => {
+      toast.success(`Suppression requested for ${r.succeeded}/${r.total} finding(s) — a second officer must approve each request${r.failed.length ? ` — ${r.failed.length} skipped` : ""}`);
+      setChecked(new Set()); setSuppressReason(""); findings.refetch(); suppressions.refetch(); overview.refetch();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const findingRows: any[] = (findings.data as any[]) ?? [];
+  const toggleFinding = (id: number, v: boolean) => setChecked((prev) => {
+    const next = new Set(prev);
+    if (v) next.add(id); else next.delete(id);
+    return next;
   });
 
   const ov: any = overview.data ?? {};
@@ -214,16 +241,64 @@ export default function ComplianceScanning() {
           <Card>
             <CardHeader><CardTitle className="text-lg">Findings ({findingStatus})</CardTitle></CardHeader>
             <CardContent className="space-y-3">
+              {findingRows.length > 0 && (
+                <div className="flex items-center gap-3 flex-wrap rounded-md border px-3 py-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      aria-label="Select all findings"
+                      checked={findingRows.every((f) => checked.has(f.id))}
+                      onCheckedChange={(v) => setChecked(v ? new Set(findingRows.map((f) => f.id)) : new Set())}
+                    />
+                    Select all ({findingRows.length})
+                  </label>
+                  {checked.size > 0 && (
+                    <>
+                      <span className="text-sm font-medium">{checked.size} selected</span>
+                      <Select value={bulkStatus} onValueChange={(v) => setBulkStatus(v as "acknowledged" | "resolved" | "dismissed")}>
+                        <SelectTrigger className="w-40 h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {["acknowledged", "resolved", "dismissed"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        size="sm" variant="secondary"
+                        disabled={bulkSetStatus.isPending || bulkSuppress.isPending}
+                        onClick={() => bulkSetStatus.mutate({ findingIds: Array.from(checked), status: bulkStatus })}
+                      >Set status</Button>
+                      <Input
+                        value={suppressReason}
+                        onChange={(e) => setSuppressReason(e.target.value)}
+                        placeholder="Suppression reason (min 20 chars)"
+                        className="w-64 h-8"
+                      />
+                      <Button
+                        size="sm" variant="outline"
+                        disabled={bulkSuppress.isPending || bulkSetStatus.isPending || suppressReason.trim().length < 20}
+                        onClick={() => bulkSuppress.mutate({ findingIds: Array.from(checked), reason: suppressReason.trim() })}
+                      >Request suppression</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setChecked(new Set())}>Clear</Button>
+                    </>
+                  )}
+                </div>
+              )}
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-8" />
                     <TableHead>Type</TableHead><TableHead>Severity</TableHead><TableHead>Target</TableHead>
                     <TableHead>URL</TableHead><TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {((findings.data as any[]) ?? []).map((f: any) => (
+                  {findingRows.map((f: any) => (
                     <TableRow key={f.id}>
+                      <TableCell>
+                        <Checkbox
+                          aria-label={`Select finding ${f.id}`}
+                          checked={checked.has(f.id)}
+                          onCheckedChange={(v) => toggleFinding(f.id, Boolean(v))}
+                        />
+                      </TableCell>
                       <TableCell className="text-sm">{String(f.finding_type).replaceAll("_", " ")}</TableCell>
                       <TableCell><Badge variant="outline" className={SEV_COLORS[f.severity] ?? ""}>{f.severity}</Badge></TableCell>
                       <TableCell className="text-sm">{f.controller_name ?? `#${f.target_id}`}</TableCell>
@@ -240,8 +315,8 @@ export default function ComplianceScanning() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {((findings.data as any[]) ?? []).length === 0 && (
-                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">No findings with this status.</TableCell></TableRow>
+                  {findingRows.length === 0 && (
+                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No findings with this status.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>

@@ -20,6 +20,7 @@ import { logger } from "../logger";
 import { emitMutationEvent } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import { appendLedger } from "../antiwipe/ledger";
+import { scheduleScanRun } from "../services/scheduledSweeps";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -292,25 +293,31 @@ export const complianceScanningRouter = router({
 
   // ─── Scan scheduling ─────────────────────────────────────────────────────
   /** Schedule a run immediately (default) or at a future time. Cron-style
-   *  recurring scans are derived by the worker from target scan_interval_hours. */
+   *  recurring scans are derived by the worker from target scan_interval_hours,
+   *  and the durable round12-compliance-scan-sweep Temporal schedule (hourly)
+   *  enqueues due targets — this mutation remains as the operator override.
+   *  Business logic lives in services/scheduledSweeps.scheduleScanRun so the
+   *  scheduled and manual paths cannot drift. */
   scheduleScan: adminProcedure
     .input(z.object({
       target_id: z.number().int().positive(),
       run_at: z.string().datetime({ offset: true }).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const target = await exec(`SELECT id, enabled FROM scan_targets WHERE id = $1`, [input.target_id]);
-      if (!target[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Scan target not found" });
-      if (!target[0].enabled) throw new TRPCError({ code: "CONFLICT", message: "Target is disabled" });
-      const [row] = await exec(
-        `INSERT INTO scan_runs (target_id, trigger_type, scheduled_at, created_by)
-         VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4) RETURNING *`,
-        [input.target_id, input.run_at ? "scheduled" : "manual", input.run_at ?? null,
-         ctx.user.name ?? String(ctx.user.id)]
-      );
-      await logAudit("scan_scheduled", "scan_runs", row.id, String(ctx.user.id), {
-        target_id: input.target_id, scheduled_at: row.scheduled_at,
-      });
+      let row: any;
+      try {
+        row = await scheduleScanRun({
+          targetId: input.target_id,
+          runAt: input.run_at ?? null,
+          createdBy: ctx.user.name ?? String(ctx.user.id),
+        });
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "NOT_FOUND" || code === "CONFLICT") {
+          throw new TRPCError({ code, message: err instanceof Error ? err.message : String(err) });
+        }
+        throw err;
+      }
       fireAndForget("complianceScanning.scheduleScan");
       return row;
     }),

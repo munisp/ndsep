@@ -59,6 +59,68 @@ SEED = 42
 # fine-tuning: real labels are scarcer and more informative.
 REAL_CASE_WEIGHT = 3.0
 
+# Officer verdicts on fraud_alerts (ml/validation/verdict_ingest.py, dataset
+# 'verdict_cases') override the raw fraud_flagged heuristic: they outrank it
+# (weight 2.0) but stay below externally adjudicated real cases (3.0), so a
+# single verdict never dominates a batch.
+VERDICT_CASE_WEIGHT = 2.0
+
+
+def _verdict_labels_enabled() -> bool:
+    return os.environ.get("VERDICT_LABELS_ENABLED", "1").lower() \
+        not in ("0", "false", "no")
+
+
+def _maybe_ingest_verdicts() -> None:
+    """Incrementally ingest new fraud_alerts verdicts (fail-open).
+
+    Called at the top of the fraud branch, BEFORE the batch is assembled, so
+    freshly-resolved verdicts are merged in the same cycle. Training must
+    never hard-fail because verdicts are absent or the DB is down.
+    """
+    if not _verdict_labels_enabled():
+        return
+    try:
+        from ml.validation.verdict_ingest import ingest_verdicts
+        ingest_verdicts()
+    except Exception as e:
+        print(f"[fine_tune] WARNING: verdict ingest failed ({e}) — "
+              "continuing without new verdict labels")
+
+
+def _merge_verdict_cases(tx: pd.DataFrame) -> pd.DataFrame:
+    """Merge officer-verdict-labeled cases into a training batch.
+
+    Mirrors _merge_real_cases: sample_weight VERDICT_CASE_WEIGHT for verdict
+    rows, existing weight (real cases stay at 3.0) otherwise. No-op when the
+    flag is off or no verdicts have been ingested yet.
+    """
+    if not _verdict_labels_enabled():
+        return tx
+    if "sample_weight" not in tx.columns:
+        tx = tx.copy()
+        tx["sample_weight"] = 1.0
+    try:
+        from ml.validation.verdict_ingest import load_verdict_cases
+        verdicts = load_verdict_cases()
+    except Exception as e:
+        print(f"[fine_tune] WARNING: verdict-case load skipped: {e}")
+        return tx
+    if verdicts is None or not len(verdicts):
+        return tx
+    keep = [c for c in ["timestamp", "is_fraud", *FRAUD_FEATURES]
+            if c in verdicts.columns]
+    verdicts = verdicts[keep].copy()
+    verdicts["sample_weight"] = VERDICT_CASE_WEIGHT
+    for col in ["timestamp", "is_fraud", *FRAUD_FEATURES]:
+        if col not in tx.columns:
+            tx[col] = np.nan
+    merged = pd.concat([tx[["timestamp", "is_fraud", *FRAUD_FEATURES,
+                            "sample_weight"]], verdicts], ignore_index=True)
+    print(f"[fine_tune] merged {len(verdicts)} officer-verdict fraud cases "
+          f"(weight={VERDICT_CASE_WEIGHT}x) into the training batch")
+    return merged
+
 
 def _merge_real_cases(tx: pd.DataFrame) -> pd.DataFrame:
     """Merge ingested real fraud cases into a training batch.
@@ -446,10 +508,13 @@ def get_new_batch(model: str, data_dir: str, batch_seed: int) -> tuple[dict | No
             return {"credit_features": db_df,
                     "synthetic_fallback": False}, "postgres:compliance_tables"
     elif model == "fraud":
+        # Ingest newly-resolved officer verdicts FIRST, so they are merged
+        # into this same batch (fail-open; see _maybe_ingest_verdicts).
+        _maybe_ingest_verdicts()
         res = fetch_fraud_from_db()
         if res is not None:
             df, wm = res
-            return {"transactions": _merge_real_cases(df),
+            return {"transactions": _merge_verdict_cases(_merge_real_cases(df)),
                     "synthetic_fallback": False,
                     "_watermark": ("nip_transactions", wm)}, "postgres:nip_transactions"
     elif model == "gnn":
@@ -473,7 +538,8 @@ def get_new_batch(model: str, data_dir: str, batch_seed: int) -> tuple[dict | No
             if os.path.exists(os.path.join(tmp_dir, f"{name}.parquet")) \
             else pd.read_csv(os.path.join(tmp_dir, f"{name}.csv"))
     if model == "fraud" and "transactions" in out:
-        out["transactions"] = _merge_real_cases(out["transactions"])
+        out["transactions"] = _merge_verdict_cases(
+            _merge_real_cases(out["transactions"]))
     return out, f"synthetic_batch_seed_{batch_seed}"
 
 

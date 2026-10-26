@@ -22,14 +22,12 @@ import { emitMutationEvent } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import { COMPLAINT_CATEGORIES } from "../services/complaintLogic";
 import {
-  recomputeDailyCounts,
-  updateBaselines,
-  detectSurges,
   computeWeeklyDigest,
   surgeConfig,
   CONTROLLER_KEY_SQL,
 } from "../services/complaintSurge";
 import { rollingZScore, poissonChangepoint } from "../services/complaintSurgeMath";
+import { runComplaintSurgeSweep } from "../services/scheduledSweeps";
 
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
   const pool = getPool();
@@ -242,6 +240,13 @@ export const complaintAnalyticsRouter = router({
     }),
 
   // ─── Detection run + digest ────────────────────────────────────────────────
+  /**
+   * Operator override for the durable round12-complaint-surge-sweep Temporal
+   * schedule (every 15 min) — the schedule calls the SAME shared service
+   * function (services/scheduledSweeps.runComplaintSurgeSweep), so the
+   * scheduled and manual paths cannot drift. Surge alerts land in the
+   * surge_alerts queue either way.
+   */
   runSurgeDetection: adminProcedure
     .input(z.object({
       zscoreThreshold: z.number().min(1).max(10).optional(),
@@ -251,20 +256,17 @@ export const complaintAnalyticsRouter = router({
       fullHistory: z.boolean().default(false),
     }).optional())
     .mutation(async ({ input, ctx }) => {
-      const cfg = {
-        ...surgeConfig(),
-        ...(input?.zscoreThreshold != null ? { zscoreThreshold: input.zscoreThreshold } : {}),
-        ...(input?.changepointProb != null ? { changepointProb: input.changepointProb } : {}),
-        ...(input?.baselineDays != null ? { baselineDays: input.baselineDays } : {}),
-      };
-      const counts = await recomputeDailyCounts(undefined, undefined, { fullHistory: input?.fullHistory ?? false });
-      const baselines = await updateBaselines(cfg);
-      const detection = await detectSurges(cfg);
-      await logAudit("surge_detection_run", null, String(ctx.user.id), {
-        config: cfg, counted: counts, baselines, alertsRaised: detection.alerts.length,
-      });
+      const result = await runComplaintSurgeSweep(
+        {
+          zscoreThreshold: input?.zscoreThreshold,
+          changepointProb: input?.changepointProb,
+          baselineDays: input?.baselineDays,
+          fullHistory: input?.fullHistory ?? false,
+        },
+        String(ctx.user.id),
+      );
       fireAndForget("complaintAnalytics.runSurgeDetection");
-      return { config: cfg, counted: counts, baselines, checked: detection.checked, alerts: detection.alerts };
+      return result;
     }),
 
   weeklyDigest: adminProcedure

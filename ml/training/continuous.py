@@ -120,6 +120,109 @@ def _emit_failure_alert(model: str, error: str) -> None:
         print(f"[continuous] alert emission failed: {e}")
 
 
+def _produce_ab_outcomes() -> None:
+    """Append fresh fraud-verdict ground truth to running A/B experiments.
+
+    Fail-open by design: outcome production must never block a training
+    cycle (the next cycle retries from the unchanged watermark).
+    """
+    try:
+        from ml.lakehouse import ab_outcomes_producer
+        ab_outcomes_producer.produce_experiment_outcomes()
+    except Exception as e:
+        print(f"[continuous] A/B outcomes producer skipped: {e}")
+
+
+# --------------------------------------------------------------------------- #
+# Weekly wave-8 trainers (round 12, roadmap P2)
+# --------------------------------------------------------------------------- #
+# Advisory-model retraining rides the same cycle but on a WEEKLY cadence
+# (168h), tracked by a small state file. Fail-open per trainer: a failure is
+# logged as a warning and never blocks or fails the core fraud/credit/gnn
+# cycle; the trainer simply retries on the next cycle (its timestamp only
+# advances on success).
+WEEKLY_TRAINER_INTERVAL_HOURS = 168.0
+WEEKLY_TRAINERS = [
+    # (name, module, entrypoint)
+    ("settlement_recommender", "ml.models.settlement_recommender",
+     "train_from_lakehouse"),
+    ("penalty_calibration", "ml.models.penalty_calibration",
+     "train_from_lakehouse"),
+    ("risk_weight_learner", "ml.models.risk_weight_learner",
+     "train_from_db"),
+]
+_WEEKLY_STATE_PATH = os.path.join(TRAINING_RUNS_DIR,
+                                  "_weekly_trainers_state.json")
+
+
+def _weekly_state() -> dict:
+    try:
+        with open(_WEEKLY_STATE_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _write_weekly_state(state: dict) -> None:
+    try:
+        os.makedirs(TRAINING_RUNS_DIR, exist_ok=True)
+        with open(_WEEKLY_STATE_PATH, "w") as f:
+            json.dump(state, f, indent=1)
+    except Exception as e:
+        print(f"[continuous] weekly trainer state write skipped: {e}")
+
+
+def _run_weekly_trainers(now: datetime | None = None) -> list[dict]:
+    """Run due wave-8 advisory trainers (weekly cadence, fail-open)."""
+    now = now or datetime.utcnow()
+    state = _weekly_state()
+    results = []
+    for name, module_name, entrypoint in WEEKLY_TRAINERS:
+        last_raw = state.get(name)
+        due = True
+        if last_raw:
+            try:
+                last = datetime.strptime(last_raw, "%Y-%m-%dT%H:%M:%SZ")
+                due = (now - last).total_seconds() >= \
+                    WEEKLY_TRAINER_INTERVAL_HOURS * 3600
+            except ValueError:
+                due = True
+        if not due:
+            continue
+        rec = {"model": name, "cycle_at": now.isoformat() + "Z",
+               "action": "weekly_trainer", "status": "ok", "reason": None}
+        try:
+            import importlib
+            mod = importlib.import_module(module_name)
+            artifact = getattr(mod, entrypoint)()
+            # Any clean run (artifact or not) advances the weekly timestamp;
+            # only exceptions retry on the next cycle.
+            state[name] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if artifact is None:
+                rec["status"] = "skipped"
+                rec["reason"] = "trainer returned no artifact (no data)"
+                print(f"[continuous] weekly trainer {name}: no artifact "
+                      f"({rec['reason']})")
+            else:
+                rec["reason"] = "trained"
+                print(f"[continuous] weekly trainer {name}: artifact trained")
+        except Exception as e:
+            # Fail-open: warn, do not fail the cycle, do not advance the
+            # weekly timestamp (retry next cycle).
+            rec["status"] = "failed"
+            rec["reason"] = f"{type(e).__name__}: {e}"
+            print(f"[continuous] WARNING: weekly trainer {name} failed "
+                  f"(fail-open): {e}")
+            traceback.print_exc()
+        results.append(rec)
+        try:
+            _record_run(rec)
+        except Exception:
+            pass
+    _write_weekly_state(state)
+    return results
+
+
 # --------------------------------------------------------------------------- #
 # One cycle
 # --------------------------------------------------------------------------- #
@@ -129,6 +232,10 @@ def run_cycle(models: list[str], force: bool, max_staleness_hours: float,
               weights_dir: str = WEIGHTS_DIR) -> list[dict]:
     records = []
     failed = False
+    _produce_ab_outcomes()
+    # Weekly advisory-model trainers (wave 8): settlement recommender,
+    # penalty calibration, learned risk weights. Fail-open per trainer.
+    _run_weekly_trainers()
     for model in models:
         rec = {"model": model, "cycle_at": datetime.utcnow().isoformat() + "Z",
                "action": "skipped", "reason": None, "version": None,

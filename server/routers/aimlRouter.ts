@@ -23,6 +23,7 @@ import { emitComplianceEvent, opensearchIndex, lakehouseIngest, daprPublish, flu
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
 import { autoDecryptRows } from "../encryptionMiddleware";
 import { logger } from "../logger";
+import { mintPrediction } from "./decisionFeedback";
 
 // ── Helper: raw SQL query ─────────────────────────────────────────────────────
 async function exec(query: string, params: unknown[] = []): Promise<any[]> {
@@ -368,7 +369,7 @@ export const ollamaRouter = router({
       orgId: z.string().optional(),
       useRAG: z.boolean().default(true),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       let context = "";
 
       // Retrieve relevant context from Qdrant if RAG is enabled
@@ -404,9 +405,17 @@ ${context ? `\nRelevant context from compliance documents:\n${context}` : ""}`;
       if (!answer) {
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Authoritative compliance inference returned no response" });
       }
+      // Decision-feedback instrumentation (roadmap §4.1): mint a predictionId
+      // so the UI can log accept/edit/reject via decisionFeedback.record.
+      const predictionId = await mintPrediction({
+        surface: "compliance_qa",
+        suggestion: { answer, ragContextUsed: !!context },
+        actorId: ctx.user.id,
+      });
       return {
         answer,
         question: input.question,
+        predictionId,
         rag_context_used: !!context,
         context_snippets: context ? context.split("\n\n").length : 0,
       };

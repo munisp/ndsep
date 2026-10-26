@@ -16,6 +16,19 @@ import { router, protectedProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { logger } from "../logger";
 import { emitMutationEvent, EVENTS } from "../middlewareIntegration";
+import { mintPrediction } from "./decisionFeedback";
+
+/**
+ * Attach a decision-feedback predictionId (roadmap §4.1) to an AI response.
+ * The suggestion payload passed here must NOT contain raw data-subject
+ * identifiers (HMAC-pseudonymize first — see decisionFeedback.ts header).
+ */
+function withPredictionId(result: unknown, predictionId: string): Record<string, unknown> {
+  if (result !== null && typeof result === "object" && !Array.isArray(result)) {
+    return { ...(result as Record<string, unknown>), predictionId };
+  }
+  return { result: result ?? null, predictionId };
+}
 
 const AI_URL = process.env.AI_COMPLIANCE_URL ?? "http://localhost:8155";
 const AUDIT_URL = process.env.AUDIT_CHAIN_URL ?? "http://localhost:8165";
@@ -46,10 +59,15 @@ export const platformIntelligenceRouter = router({
   // ── AI Compliance Engine ────────────────────────────────────────────────
   aiComplianceQuery: protectedProcedure
     .input(z.object({ question: z.string().min(1), orgContext: z.record(z.string(), z.unknown()).optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const result = await serviceFetch(AI_URL, "/api/v1/compliance/query", "POST", { question: input.question, org_context: input.orgContext });
       emitMutationEvent(EVENTS.PLATFORM_AI_QUERY, { questionLength: input.question.length }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return result;
+      const predictionId = await mintPrediction({
+        surface: "compliance_query",
+        suggestion: result ?? { unavailable: true },
+        actorId: ctx.user.id,
+      });
+      return withPredictionId(result, predictionId);
     }),
 
   aiGenerateDPIA: protectedProcedure
@@ -58,7 +76,7 @@ export const platformIntelligenceRouter = router({
       dataSubjects: z.array(z.string()), purpose: z.string(), legalBasis: z.string(),
       crossBorder: z.boolean().default(false), automatedDecision: z.boolean().default(false),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const result = await serviceFetch(AI_URL, "/api/v1/compliance/dpia/generate", "POST", {
         org_name: input.orgName, processing_activity: input.processingActivity,
         data_categories: input.dataCategories, data_subjects: input.dataSubjects,
@@ -66,7 +84,12 @@ export const platformIntelligenceRouter = router({
         cross_border: input.crossBorder, automated_decision: input.automatedDecision,
       });
       emitMutationEvent(EVENTS.PLATFORM_AI_DPIA, { orgName: input.orgName, processingActivity: input.processingActivity }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return result;
+      const predictionId = await mintPrediction({
+        surface: "dpiagen",
+        suggestion: result ?? { unavailable: true },
+        actorId: ctx.user.id,
+      });
+      return withPredictionId(result, predictionId);
     }),
 
   aiGapAnalysis: protectedProcedure
@@ -75,7 +98,7 @@ export const platformIntelligenceRouter = router({
       dataCategories: z.array(z.string()), hasDpo: z.boolean(), hasBreachPlan: z.boolean(),
       hasConsentMechanism: z.boolean(), hasDpia: z.boolean(), crossBorderTransfers: z.boolean(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const result = await serviceFetch(AI_URL, "/api/v1/compliance/gap-analysis", "POST", {
         org_name: input.orgName, sector: input.sector, current_policies: input.currentPolicies,
         data_categories: input.dataCategories, has_dpo: input.hasDpo, has_breach_plan: input.hasBreachPlan,
@@ -83,7 +106,12 @@ export const platformIntelligenceRouter = router({
         cross_border_transfers: input.crossBorderTransfers,
       });
       emitMutationEvent(EVENTS.PLATFORM_AI_GAP_ANALYSIS, { orgName: input.orgName, sector: input.sector }).catch((e: unknown) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "fire-and-forget failed"));
-      return result;
+      const predictionId = await mintPrediction({
+        surface: "gap_analysis",
+        suggestion: result ?? { unavailable: true },
+        actorId: ctx.user.id,
+      });
+      return withPredictionId(result, predictionId);
     }),
 
   aiImpactAnalysis: protectedProcedure

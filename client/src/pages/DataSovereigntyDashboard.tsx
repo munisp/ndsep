@@ -11,7 +11,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CalendarClock, Globe2, Loader2, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { OrgIdentityPrefill } from "@/components/OrgIdentityPrefill";
+import { FormCopilotInput } from "@/components/FormCopilotInput";
+import { CalendarClock, Globe2, Loader2, RefreshCw, Send, ShieldAlert, ShieldCheck } from "lucide-react";
 
 const TIERS = ["sovereign_ready", "on_track", "at_risk", "critical", "non_compliant"] as const;
 const TIER_COLORS: Record<string, string> = {
@@ -26,6 +28,235 @@ const VIOLATION_TYPES = [
   "key_custody_foreign", "backup_foreign", "admin_access_foreign", "attestation_expired", "manual",
 ] as const;
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
+const ENTITY_TYPES = ["psp", "fintech", "bank", "switch", "mmo", "pssp", "ptsp", "super_agent", "other"] as const;
+
+/** Parse "City, CC" lines into location objects (ISO alpha-2 country). */
+function parseLocations(text: string): { name?: string; city?: string; country: string }[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(",").map((p) => p.trim());
+      const country = (parts[parts.length - 1] ?? "").toUpperCase();
+      const city = parts.length > 1 ? parts.slice(0, -1).join(", ") : undefined;
+      if (country.length !== 2) return null;
+      return city !== undefined ? { city, country } : { country };
+    })
+    .filter((x): x is { city?: string; country: string } => x !== null);
+}
+
+/** Parse "Name, CC, service" lines into subprocessor entries. */
+function parseSubprocessors(text: string): { name: string; country: string; service?: string }[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, country, service] = line.split(",").map((p) => p.trim());
+      if (!(name && country && country.length === 2)) return null;
+      const cc = country.toUpperCase();
+      return service ? { name, country: cc, service } : { name, country: cc };
+    })
+    .filter((x): x is { name: string; country: string; service?: string } => x !== null);
+}
+
+/** Hosting declaration form (dataSovereignty.submitDeclaration) with registry identity prefill. */
+function HostingDeclarationForm({ onSubmitted }: { onSubmitted: () => void }) {
+  const [form, setForm] = useState({
+    entity_ref: "", entity_name: "", entity_type: "fintech" as (typeof ENTITY_TYPES)[number],
+    in_scope: true, primary_dc_name: "", primary_dc_city: "", primary_dc_country: "NG",
+    cloud_provider: "", cloud_regions: "", backup_locations: "", dr_locations: "",
+    admin_access_locations: "", key_country: "NG", custody_model: "", hsm_provider: "", subprocessors: "",
+  });
+  const set = (k: keyof typeof form, v: any) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = trpc.dataSovereignty.submitDeclaration.useMutation({
+    onSuccess: () => {
+      toast.success("Hosting declaration submitted");
+      onSubmitted();
+      setForm((f) => ({ ...f, entity_ref: "", entity_name: "" }));
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleSubmit = () => {
+    if (form.entity_ref.trim().length < 2 || form.entity_name.trim().length < 2) {
+      toast.error("Entity reference and entity name are required (use the registry lookup to pre-fill)");
+      return;
+    }
+    submit.mutate({
+      entity_ref: form.entity_ref.trim(),
+      entity_name: form.entity_name.trim(),
+      entity_type: form.entity_type,
+      in_scope: form.in_scope,
+      primary_dc_name: form.primary_dc_name || undefined,
+      primary_dc_city: form.primary_dc_city || undefined,
+      primary_dc_country: form.primary_dc_country ? form.primary_dc_country.toUpperCase() : undefined,
+      cloud_provider: form.cloud_provider || undefined,
+      cloud_regions: form.cloud_regions.split(",").map((s) => s.trim()).filter(Boolean),
+      backup_locations: parseLocations(form.backup_locations),
+      dr_locations: parseLocations(form.dr_locations),
+      admin_access_locations: parseLocations(form.admin_access_locations),
+      encryption_key_custody: form.key_country.length === 2
+        ? { country: form.key_country.toUpperCase(), hsm_provider: form.hsm_provider || undefined, custody_model: (form.custody_model || undefined) as any }
+        : undefined,
+      subprocessors: parseSubprocessors(form.subprocessors),
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Submit hosting declaration</CardTitle>
+        <CardDescription>
+          Self-declared hosting posture for an in-scope entity. Look up the entity once by registration
+          reference — identity fields pre-fill instead of being re-typed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <OrgIdentityPrefill
+          idPrefix="hosting-decl"
+          onResolved={(id) => {
+            setForm((f) => ({
+              ...f,
+              entity_ref: f.entity_ref || id.registrationRef || id.cacNumber || id.rcNumber || (id.orgId != null ? `org:${id.orgId}` : ""),
+              entity_name: f.entity_name || id.name || "",
+            }));
+          }}
+        />
+        {/* Form copilot (round 12 W7): natural-language prefill — never auto-submits. */}
+        <FormCopilotInput
+          form="hosting_declaration"
+          onPrefill={(fields, _conf) => {
+            const locLines = (arr: unknown) =>
+              Array.isArray(arr)
+                ? (arr as Array<{ city?: string; country?: string }>)
+                    .map((l) => [l?.city, l?.country].filter(Boolean).join(", "))
+                    .filter(Boolean)
+                    .join("\n")
+                : "";
+            const subLines = (arr: unknown) =>
+              Array.isArray(arr)
+                ? (arr as Array<{ name?: string; country?: string; service?: string }>)
+                    .map((p) => [p?.name, p?.country, p?.service].filter(Boolean).join(", "))
+                    .filter(Boolean)
+                    .join("\n")
+                : "";
+            const custody = (fields.encryption_key_custody ?? {}) as { country?: string; hsm_provider?: string; custody_model?: string };
+            setForm((f) => ({
+              ...f,
+              entity_ref: typeof fields.entity_ref === "string" ? fields.entity_ref : f.entity_ref,
+              entity_name: typeof fields.entity_name === "string" ? fields.entity_name : f.entity_name,
+              entity_type: typeof fields.entity_type === "string" ? (fields.entity_type as typeof f.entity_type) : f.entity_type,
+              in_scope: typeof fields.in_scope === "boolean" ? fields.in_scope : f.in_scope,
+              primary_dc_name: typeof fields.primary_dc_name === "string" ? fields.primary_dc_name : f.primary_dc_name,
+              primary_dc_city: typeof fields.primary_dc_city === "string" ? fields.primary_dc_city : f.primary_dc_city,
+              primary_dc_country: typeof fields.primary_dc_country === "string" ? fields.primary_dc_country : f.primary_dc_country,
+              cloud_provider: typeof fields.cloud_provider === "string" ? fields.cloud_provider : f.cloud_provider,
+              cloud_regions: Array.isArray(fields.cloud_regions) ? (fields.cloud_regions as string[]).join(", ") : f.cloud_regions,
+              backup_locations: locLines(fields.backup_locations) || f.backup_locations,
+              dr_locations: locLines(fields.dr_locations) || f.dr_locations,
+              admin_access_locations: locLines(fields.admin_access_locations) || f.admin_access_locations,
+              key_country: typeof custody.country === "string" ? custody.country : f.key_country,
+              custody_model: typeof custody.custody_model === "string" ? custody.custody_model : f.custody_model,
+              hsm_provider: typeof custody.hsm_provider === "string" ? custody.hsm_provider : f.hsm_provider,
+              subprocessors: subLines(fields.subprocessors) || f.subprocessors,
+            }));
+          }}
+        />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <Label>Entity reference *</Label>
+            <Input value={form.entity_ref} onChange={(e) => set("entity_ref", e.target.value)} placeholder="RC number / org ref" className="font-mono" />
+          </div>
+          <div>
+            <Label>Entity name *</Label>
+            <Input value={form.entity_name} onChange={(e) => set("entity_name", e.target.value)} />
+          </div>
+          <div>
+            <Label>Entity type</Label>
+            <Select value={form.entity_type} onValueChange={(v) => set("entity_type", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{ENTITY_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Primary DC name</Label>
+            <Input value={form.primary_dc_name} onChange={(e) => set("primary_dc_name", e.target.value)} />
+          </div>
+          <div>
+            <Label>Primary DC city</Label>
+            <Input value={form.primary_dc_city} onChange={(e) => set("primary_dc_city", e.target.value)} />
+          </div>
+          <div>
+            <Label>Primary DC country (ISO-2)</Label>
+            <Input value={form.primary_dc_country} maxLength={2} onChange={(e) => set("primary_dc_country", e.target.value.toUpperCase())} />
+          </div>
+          <div>
+            <Label>Cloud provider</Label>
+            <Input value={form.cloud_provider} onChange={(e) => set("cloud_provider", e.target.value)} />
+          </div>
+          <div className="md:col-span-2">
+            <Label>Cloud regions (comma-separated)</Label>
+            <Input value={form.cloud_regions} onChange={(e) => set("cloud_regions", e.target.value)} placeholder="eu-west-1, af-south-1" />
+          </div>
+          <div>
+            <Label>Key custody country (ISO-2)</Label>
+            <Input value={form.key_country} maxLength={2} onChange={(e) => set("key_country", e.target.value.toUpperCase())} />
+          </div>
+          <div>
+            <Label>Custody model</Label>
+            <Select value={form.custody_model || "unset"} onValueChange={(v) => set("custody_model", v === "unset" ? "" : v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unset">—</SelectItem>
+                {["own_hsm", "cloud_kms", "byok", "hyok"].map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>HSM / KMS provider</Label>
+            <Input value={form.hsm_provider} onChange={(e) => set("hsm_provider", e.target.value)} />
+          </div>
+          <div>
+            <Label>In scope for localisation</Label>
+            <Select value={form.in_scope ? "yes" : "no"} onValueChange={(v) => set("in_scope", v === "yes")}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="yes">In scope</SelectItem>
+                <SelectItem value="no">Out of scope</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label>Backup locations (one per line: City, CC)</Label>
+            <Textarea rows={2} value={form.backup_locations} onChange={(e) => set("backup_locations", e.target.value)} placeholder={"Lagos, NG"} />
+          </div>
+          <div>
+            <Label>DR locations (one per line: City, CC)</Label>
+            <Textarea rows={2} value={form.dr_locations} onChange={(e) => set("dr_locations", e.target.value)} placeholder={"Lagos, NG"} />
+          </div>
+          <div>
+            <Label>Admin access locations (one per line: City, CC)</Label>
+            <Textarea rows={2} value={form.admin_access_locations} onChange={(e) => set("admin_access_locations", e.target.value)} placeholder={"Abuja, NG"} />
+          </div>
+          <div>
+            <Label>Subprocessors (one per line: Name, CC, service)</Label>
+            <Textarea rows={2} value={form.subprocessors} onChange={(e) => set("subprocessors", e.target.value)} placeholder={"ExampleCloud Ltd, IE, hosting"} />
+          </div>
+        </div>
+        <Button onClick={handleSubmit} disabled={submit.isPending}>
+          {submit.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+          Submit declaration
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 const VSTATUS_COLORS: Record<string, string> = {
   detected: "bg-red-500/20 text-red-300 border-red-500/40",
   acknowledged: "bg-yellow-500/20 text-yellow-300 border-yellow-500/40",
@@ -140,7 +371,12 @@ export default function DataSovereigntyDashboard() {
           <TabsTrigger value="heatmap">Sector heat map</TabsTrigger>
           <TabsTrigger value="register">Score register</TabsTrigger>
           <TabsTrigger value="violations">Violations</TabsTrigger>
+          <TabsTrigger value="declare">Submit declaration</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="declare" className="space-y-4 mt-4">
+          <HostingDeclarationForm onSubmitted={() => utils.dataSovereignty.invalidate()} />
+        </TabsContent>
 
         <TabsContent value="heatmap" className="space-y-4 mt-4">
           <Card>

@@ -8,3 +8,12 @@ export {
   whistleblower_token_expiry,
   foia_overdue_sweep,
 } from "./round9Jobs";
+export {
+  compliance_scan_sweep,
+  settlement_default_detection,
+  fine_reconciliation_batch,
+  complaint_surge_sweep,
+  duplicate_merge_sweep,
+  false_finding_sweep,
+  autonomy_execute_due,
+} from "./round12Jobs";

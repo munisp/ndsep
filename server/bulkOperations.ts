@@ -29,7 +29,17 @@ export type BulkOperationType =
   | "assign_dpco"
   | "update_status"
   | "send_notification"
-  | "export_data";
+  | "export_data"
+  // Round-12 W2 queue bulk actions (server/routers/bulkOps.ts). None of these
+  // touch fines, settlements or publications, so dual_control_requests is
+  // never involved; scan-finding suppression keeps its own dual control by
+  // creating pending scan_suppressions requests instead of mutating findings.
+  | "complaint_assign_officer"
+  | "complaint_set_status"
+  | "scan_finding_set_status"
+  | "scan_finding_suppress_request"
+  | "adverse_media_confirm"
+  | "adverse_media_reject";
 
 const BULK_OPS_TABLE = `
 CREATE TABLE IF NOT EXISTS bulk_operations (

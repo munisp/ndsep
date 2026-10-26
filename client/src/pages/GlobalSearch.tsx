@@ -2,7 +2,10 @@ import { useState, useCallback } from "react";
 import DOMPurify from "dompurify";
 import { trpc } from "@/lib/trpc";
 import { Input } from "@/components/ui/input";
-import { Search, Building2, AlertTriangle, FileText, Shield, User, ArrowRight, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
+import { Search, Building2, AlertTriangle, FileText, Shield, User, ArrowRight, Loader2, Bookmark, Trash2 } from "lucide-react";
 import { useLocation } from "wouter";
 import { useDebouncedCallback } from "use-debounce";
 
@@ -60,6 +63,25 @@ export default function GlobalSearch() {
     { enabled: debouncedQuery.length >= 2 }
   );
 
+  // ── Saved views (round 12 W2) — save the current query, re-apply later ──
+  const SEARCH_SURFACE = "global_search";
+  const savedViews = trpc.savedViews.list.useQuery({ surface: SEARCH_SURFACE });
+  const [viewName, setViewName] = useState("");
+  const [appliedViewId, setAppliedViewId] = useState<string>("");
+  const saveView = trpc.savedViews.create.useMutation({
+    onSuccess: () => { toast.success("Search view saved"); setViewName(""); savedViews.refetch(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const deleteView = trpc.savedViews.remove.useMutation({
+    onSuccess: () => { toast.success("View deleted"); savedViews.refetch(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const applyView = (view: any) => {
+    const q = String((view?.filters as any)?.query ?? "");
+    setQuery(q);
+    setDebouncedQuery(q);
+  };
+
   const grouped = (results as any[] ?? []).reduce((acc: Record<string, any[]>, r: any) => {
     if (!acc[r.type]) acc[r.type] = [];
     acc[r.type].push(r);
@@ -89,6 +111,31 @@ export default function GlobalSearch() {
           {isLoading && (
             <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-blue-400" />
           )}
+        </div>
+
+        {/* Saved search views */}
+        <div className="flex items-center gap-2 flex-wrap mb-6">
+          <Bookmark className="w-4 h-4 text-muted-foreground" />
+          <Select value={appliedViewId} onValueChange={(id) => { setAppliedViewId(id); const v = ((savedViews.data as any[]) ?? []).find((x: any) => x.id === id); if (v) applyView(v); }}>
+            <SelectTrigger className="w-56 h-9"><SelectValue placeholder="Apply saved view…" /></SelectTrigger>
+            <SelectContent>
+              {((savedViews.data as any[]) ?? []).map((v: any) => (
+                <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {appliedViewId && (
+            <Button size="sm" variant="ghost" className="h-9 px-2 text-muted-foreground" title="Delete this view" disabled={deleteView.isPending}
+              onClick={() => { deleteView.mutate({ id: appliedViewId }); setAppliedViewId(""); }}>
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          <Input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="Name this search…" className="w-44 h-9" />
+          <Button
+            size="sm" variant="outline" className="h-9"
+            disabled={saveView.isPending || viewName.trim().length < 1 || query.trim().length < 2}
+            onClick={() => saveView.mutate({ surface: SEARCH_SURFACE, name: viewName.trim(), filters: { query: query.trim() } })}
+          >Save current search</Button>
         </div>
 
         {debouncedQuery.length >= 2 && !isLoading && (results as any[] ?? []).length === 0 && (

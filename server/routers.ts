@@ -292,6 +292,20 @@ import { settlementWorkflowRouter } from "./routers/settlementWorkflow";
 import { supervisionRiskRouter } from "./routers/supervisionRisk";
 import { tribunalBundleRouter } from "./routers/tribunalBundle";
 import { ussdChannelRouter } from "./routers/ussdChannel";
+import { decisionFeedbackRouter } from "./routers/decisionFeedback";
+import { bulkOpsRouter } from "./routers/bulkOps";
+import { savedViewsRouter } from "./routers/savedViews";
+import { orgIdentityRouter } from "./routers/orgIdentity";
+import { kpiDashboardRouter } from "./routers/kpiDashboard";
+import { searchExtendedRouter } from "./routers/search";
+import { casePrecedentsRouter } from "./routers/casePrecedents";
+import { autoTriageRouter } from "./routers/autoTriage";
+import { copilotDraftRouter } from "./routers/copilotDraft";
+import { formCopilotRouter } from "./routers/formCopilot";
+import { nextBestActionRouter } from "./routers/nextBestAction";
+import { settlementRecommenderRouter } from "./routers/settlementRecommender";
+import { penaltyCalibrationRouter } from "./routers/penaltyCalibration";
+import { autonomyGovernanceRouter } from "./routers/autonomyGovernance";
 import { antiwipeRouter } from "./antiwipe";
 import { getIntelSummary, getCrossplatformCorrelations, getNocThreatFeed, enrichBankingWithMaritime, enrichComplianceWithSiem } from "./intelAggregator";
 import { logger } from "./logger";
@@ -363,6 +377,21 @@ export const appRouter = router({
   supervisionRisk: supervisionRiskRouter,
   tribunalBundle: tribunalBundleRouter,
   ussdChannel: ussdChannelRouter,
+  // ── Round-12 waves (migrations 0127-0140) ──
+  decisionFeedback: decisionFeedbackRouter,
+  bulkOps: bulkOpsRouter,
+  savedViews: savedViewsRouter,
+  orgIdentity: orgIdentityRouter,
+  kpiDashboard: kpiDashboardRouter,
+  searchExtended: searchExtendedRouter,
+  casePrecedents: casePrecedentsRouter,
+  autoTriage: autoTriageRouter,
+  copilotDraft: copilotDraftRouter,
+  formCopilot: formCopilotRouter,
+  nextBestAction: nextBestActionRouter,
+  settlementRecommender: settlementRecommenderRouter,
+  penaltyCalibration: penaltyCalibrationRouter,
+  autonomyGovernance: autonomyGovernanceRouter,
   // ── FEAT-E (round-9, migrations 0112-0116) ──
   adverseMedia: adverseMediaRouter,
   aiRuntimeOversight: aiRuntimeOversightRouter,
