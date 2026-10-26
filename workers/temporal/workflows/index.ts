@@ -17,3 +17,9 @@ export {
   false_finding_sweep,
   autonomy_execute_due,
 } from "./round12Jobs";
+export {
+  hosting_verification_sweep,
+  infrastructure_risk_sweep,
+  telegram_watch_poll,
+  osiris_intel_poll,
+} from "./round13Jobs";

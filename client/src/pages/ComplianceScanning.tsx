@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RefreshCw, ScanSearch } from "lucide-react";
+import { InfraPosturePanel } from "@/components/InfraPosturePanel";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const SEV_COLORS: Record<string, string> = {
@@ -332,6 +333,12 @@ export default function ComplianceScanning() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Round 13 W3: OSIRIS RECON infra posture (additive; findings also
+            appear in the Findings tab as type infra_posture). */}
+        <TabsContent value="posture" className="mt-4">
+          <InfraPosturePanel />
         </TabsContent>
 
         <TabsContent value="suppressions" className="mt-4">

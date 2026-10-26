@@ -186,8 +186,31 @@ function render(vars) {
     }
     lines.push("");
   }
+  for (const block of STATIC_BLOCKS) {
+    lines.push(...block, "");
+  }
   return lines.join("\n");
 }
+
+/**
+ * Static commented-only blocks appended after the scanned groups. These
+ * carry deployment ALTERNATIVES (commented out, so they never set a value)
+ * that the scanner cannot infer from code — e.g. the self-hosted OSIRIS
+ * sidecar override (round 13 W6). Keep every line commented.
+ */
+const STATIC_BLOCKS = [
+  [
+    "# ─── Self-hosted OSIRIS sidecar (optional, round 13 W6) ─────────────",
+    "# Run OSIRIS alongside NDSEP instead of the hosted API",
+    "# (infra/osiris/docker-compose.osiris.yml, docs/infra-osiris.md):",
+    "#   docker compose -f infra/osiris/docker-compose.osiris.yml up -d",
+    "# Then override the scanned defaults above with:",
+    "# OSIRIS_URL=http://osiris:3000",
+    "# OSIRIS_SELF_HOSTED=true",
+    "# OSIRIS_PORT=3000",
+    "# Generate the shared scanner key with: openssl rand -hex 32",
+  ],
+];
 
 const vars = collect();
 const output = render(vars);

@@ -324,6 +324,150 @@
         ],
         "created_at": "2026-10-26T07:38:38.546632Z",
         "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T151726",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T151726.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:26.954609Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T151730",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T151730.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:30.584924Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T151750",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T151750.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:50.261976Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T151753",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T151753.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:53.279983Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T152046",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T152046.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:20:46.419099Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T152049",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T152049.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:20:49.828439Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T152246",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T152246.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:22:46.219041Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_fraud",
+        "snapshot_id": "v20261026T152249",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_fraud/v20261026T152249.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:22:49.293073Z",
+        "meta": {}
       }
     ],
     "training_metrics_credit": [
@@ -560,6 +704,78 @@
         ],
         "created_at": "2026-10-26T07:38:38.643250Z",
         "meta": {}
+      },
+      {
+        "dataset": "training_metrics_credit",
+        "snapshot_id": "v20261026T151730",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_credit/v20261026T151730.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:30.674519Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_credit",
+        "snapshot_id": "v20261026T151753",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_credit/v20261026T151753.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:53.346053Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_credit",
+        "snapshot_id": "v20261026T152049",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_credit/v20261026T152049.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:20:49.911496Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_credit",
+        "snapshot_id": "v20261026T152249",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_credit/v20261026T152249.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:22:49.371825Z",
+        "meta": {}
       }
     ],
     "training_metrics_gnn": [
@@ -759,6 +975,78 @@
           "roc_auc"
         ],
         "created_at": "2026-10-26T07:38:38.780904Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_gnn",
+        "snapshot_id": "v20261026T151730",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_gnn/v20261026T151730.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:30.792783Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_gnn",
+        "snapshot_id": "v20261026T151753",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_gnn/v20261026T151753.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:17:53.423382Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_gnn",
+        "snapshot_id": "v20261026T152049",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_gnn/v20261026T152049.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:20:50.004303Z",
+        "meta": {}
+      },
+      {
+        "dataset": "training_metrics_gnn",
+        "snapshot_id": "v20261026T152249",
+        "path": "/mnt/agents/ndsep-r12/ml/lakehouse/training_metrics_gnn/v20261026T152249.csv",
+        "format": "csv",
+        "rows": 1,
+        "columns": [
+          "model",
+          "recorded_at",
+          "accuracy",
+          "precision",
+          "recall",
+          "f1",
+          "roc_auc"
+        ],
+        "created_at": "2026-10-26T15:22:49.446283Z",
         "meta": {}
       }
     ],

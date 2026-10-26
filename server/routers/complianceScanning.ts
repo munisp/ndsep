@@ -75,6 +75,9 @@ const FINDING_TYPES = [
   "pre_consent_tracker", "missing_consent_banner", "cookie_before_consent",
   "dark_pattern_preticked", "dark_pattern_asymmetric_choice",
   "dark_pattern_forced_account", "tracker_detected", "fetch_error",
+  // round 13 W3: OSIRIS RECON infra posture findings (migration 0144 widens
+  // the scan_findings CHECK); same statuses + suppression workflow.
+  "infra_posture",
 ] as const;
 const FINDING_STATUSES = ["open", "acknowledged", "suppressed", "referred", "resolved", "dismissed"] as const;
 const TRACKER_CATEGORIES = [
@@ -717,6 +720,53 @@ export const complianceScanningRouter = router({
       await logAudit("tracker_signature_toggled", "tracker_signatures", input.id, String(ctx.user.id), { active: input.active });
       fireAndForget("complianceScanning.setTrackerSignatureActive");
       return row;
+    }),
+
+  // ─── Infra posture (round 13 W3 — OSIRIS RECON port/CVE/SSL) ─────────────
+  /**
+   * Run an infrastructure posture scan for one target: OSIRIS RECON
+   * port/service/CVE/SSL checks via services/infraPostureScan. Findings are
+   * written into scan_findings with finding_type='infra_posture' (same
+   * statuses/suppression workflow as crawler findings); every attempt —
+   * including fail-closed scanner outages — is recorded in
+   * infra_posture_runs.
+   */
+  runInfraPostureScan: adminProcedure
+    .input(z.object({ target_id: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
+      const rows = await exec(`SELECT * FROM scan_targets WHERE id = $1`, [input.target_id]);
+      const target = rows[0];
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Scan target not found" });
+      const { scanTargetPosture } = await import("../services/infraPostureScan");
+      const outcome = await scanTargetPosture(
+        { id: target.id, base_url: target.base_url, controller_name: target.controller_name, organization_id: target.organization_id },
+        { createdBy: ctx.user.name ?? String(ctx.user.id) },
+      );
+      await logAudit("infra_posture_scan_run", "infra_posture_runs", outcome.postureRunId, String(ctx.user.id), {
+        target_id: input.target_id, scanner_available: outcome.scannerAvailable,
+        severity: outcome.severity, findings: outcome.findingsCount,
+      });
+      fireAndForget("complianceScanning.runInfraPostureScan");
+      return outcome;
+    }),
+
+  /** Posture sweep history for a target (bookkeeping rows). */
+  listInfraPostureRuns: protectedProcedure
+    .input(z.object({
+      target_id: z.number().int().positive().optional(),
+      limit: z.number().int().min(1).max(500).default(100),
+    }).optional())
+    .query(async ({ input }) => {
+      const params: unknown[] = [];
+      let where = "";
+      if (input?.target_id) { params.push(input.target_id); where = `WHERE r.target_id = $1`; }
+      params.push(input?.limit ?? 100);
+      return exec(
+        `SELECT r.*, t.controller_name, t.base_url
+           FROM infra_posture_runs r JOIN scan_targets t ON t.id = r.target_id
+           ${where} ORDER BY r.created_at DESC LIMIT $${params.length}`,
+        params
+      );
     }),
 
   /** Dashboard rollup: finding counts by severity/status per target. */

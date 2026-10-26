@@ -17,6 +17,7 @@ import {
   Trash2, Plus
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { RansomTraceCard } from "@/components/RansomTraceCard";
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string; icon: React.ComponentType<any> }> = {
   open:                   { label: "Open",                  color: "text-red-400",    bg: "border-red-500/40 bg-red-950/20",    icon: AlertTriangle },
@@ -101,7 +102,7 @@ export default function EnforcementCases() {
   const [nitdaConfirmRef, setNitdaConfirmRef] = useState("");
   const [nitdaConfirmSummary, setNitdaConfirmSummary] = useState("");
   const [nitdaTargetCase, setNitdaTargetCase] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<"update" | "history">("update");
+  const [activeTab, setActiveTab] = useState<"update" | "history" | "wallet">("update");
   const { data: timeline, isLoading: timelineLoading } = trpc.enforcementCases.timeline.useQuery(
     { caseId: selected?.id ?? 0 },
     { enabled: !!selected && activeTab === "history" }
@@ -405,7 +406,7 @@ export default function EnforcementCases() {
 
               {/* Tabs */}
               <div className="flex gap-1 border-b border-border/40">
-                {(["update", "history"] as const).map(tab => (
+                {(["update", "history", "wallet"] as const).map(tab => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -417,7 +418,9 @@ export default function EnforcementCases() {
                   >
                     {tab === "update"
                       ? <span className="flex items-center gap-1"><Gavel className="h-3 w-3" /> Update</span>
-                      : <span className="flex items-center gap-1"><History className="h-3 w-3" /> Case History</span>}
+                      : tab === "history"
+                        ? <span className="flex items-center gap-1"><History className="h-3 w-3" /> Case History</span>
+                        : <span className="flex items-center gap-1"><History className="h-3 w-3" /> Wallet Trace</span>}
                   </button>
                 ))}
               </div>
@@ -458,6 +461,11 @@ export default function EnforcementCases() {
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Round 13 W3: crypto ransom wallet tracing attached to this case (additive). */}
+              {activeTab === "wallet" && (
+                <RansomTraceCard caseId={selected.id} caseReference={selected.case_reference} />
               )}
 
               {activeTab === "update" && <><div className="space-y-1.5">

@@ -1,0 +1,51 @@
+# NDSEP ↔ OSIRIS self-hosted sidecar — Docker Compose
+# ===================================================================
+# Run OSIRIS (https://github.com/simplifaisoul/osiris) alongside NDSEP
+# instead of consuming the hosted API at https://osirisai.live:
+#
+#   docker compose -f infra/osiris/docker-compose.osiris.yml up -d
+#
+# Then point NDSEP at the sidecar (see .env.example self-hosted block):
+#
+#   OSIRIS_URL=http://osiris:3000
+#   OSIRIS_SELF_HOSTED=true
+#   OSIRIS_SCANNER_KEY=<openssl rand -hex 32>   # must match SCANNER_KEY below
+#
+# NDSEP degrades gracefully when OSIRIS is down — see docs/infra-osiris.md
+# for the exact degradation list. Running the sidecar removes the external
+# network dependency and keeps OSINT queries inside your perimeter (data
+# sovereignty friendly).
+#
+# NOTE: the image runs NDSEP-side as an unprivileged consumer; if the
+# upstream image supports it, prefer a non-root container user (e.g.
+# `user: "10001:10001"` once the upstream image ships a non-root user).
+# Do NOT add a root override here to paper over upstream issues.
+
+version: "3.9"
+
+networks:
+  ndsep-net:
+    external: true
+    name: ndsep-ndsep-net
+
+services:
+  osiris:
+    image: ghcr.io/simplifaisoul/osiris:latest
+    container_name: ndsep-osiris
+    networks: [ndsep-net]
+    restart: unless-stopped
+    ports:
+      - "${OSIRIS_PORT:-3000}:3000"
+    environment:
+      # Scanner API auth — NDSEP sends this as X-Scanner-Key
+      # (server/osirisClient.ts, server/osiris/*Client.ts).
+      # Generate with: openssl rand -hex 32
+      SCANNER_URL: ${SCANNER_URL:-http://osiris:3000}
+      SCANNER_KEY: ${OSIRIS_SCANNER_KEY:?OSIRIS_SCANNER_KEY must be set (openssl rand -hex 32)}
+      PORT: "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health >/dev/null 2>&1 || curl -fsS http://127.0.0.1:3000/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

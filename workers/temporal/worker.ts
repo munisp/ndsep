@@ -129,12 +129,36 @@ export async function startTemporalWorker(): Promise<void> {
     logger.warn({ err: error instanceof Error ? error.message : String(error) }, "[Temporal] Round-12 schedule registration deferred (non-production)");
   }
 
-  const [accreditationActivities, breachActivities, dsarActivities, round9Activities, round12Activities] = await Promise.all([
+  // ── Round-13 durable schedules (cron) ────────────────────────────────────
+  // hosting verification sweep (daily), infrastructure risk sweep (30min),
+  // telegram-watch + osiris-intel worker polls (15min, fail-closed HTTP).
+  // Same registration semantics as round 9/12: explicit SKIP when Temporal is
+  // unconfigured; the worker refuses to start in production when any
+  // registration fails (fail closed).
+  try {
+    const { registerRound13Schedules } = await import("../../server/services/round13Schedules");
+    const result = await registerRound13Schedules();
+    logger.info(
+      { registered: result.registered, skipped: result.skipped, failed: result.failed },
+      "[Temporal] Round-13 schedule registration complete"
+    );
+    if (result.failed.length > 0 && process.env.NODE_ENV === "production") {
+      throw new Error(
+        `[Temporal] Round-13 schedule registration failed for: ${result.failed.map((f) => f.workflowId).join(", ")} — refusing to start worker without durable schedules (fail closed)`
+      );
+    }
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") throw error;
+    logger.warn({ err: error instanceof Error ? error.message : String(error) }, "[Temporal] Round-13 schedule registration deferred (non-production)");
+  }
+
+  const [accreditationActivities, breachActivities, dsarActivities, round9Activities, round12Activities, round13Activities] = await Promise.all([
     import("./activities/accreditation"),
     import("./activities/breachNotification"),
     import("./activities/dsarFulfillment"),
     import("./activities/round9Jobs"),
     import("./activities/round12Jobs"),
+    import("./activities/round13Jobs"),
   ]);
   const workflowsPath = require.resolve("./workflows");
   const workers = await Promise.all([
@@ -146,8 +170,11 @@ export async function startTemporalWorker(): Promise<void> {
     // foia_overdue_sweep; round 12: compliance_scan_sweep,
     // settlement_default_detection, fine_reconciliation_batch,
     // complaint_surge_sweep; wave-9 autonomy: duplicate_merge_sweep (6h),
-    // false_finding_sweep (6h), autonomy_execute_due (15min)).
-    Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.main, connection, namespace: TEMPORAL_NAMESPACE, activities: { ...round9Activities, ...round12Activities } }),
+    // false_finding_sweep (6h), autonomy_execute_due (15min);
+    // round 13: hosting_verification_sweep (daily),
+    // infrastructure_risk_sweep (30min), telegram_watch_poll (15min),
+    // osiris_intel_poll (15min)).
+    Worker.create({ workflowsPath, taskQueue: temporalConfig.taskQueues.main, connection, namespace: TEMPORAL_NAMESPACE, activities: { ...round9Activities, ...round12Activities, ...round13Activities } }),
   ]);
 
   logger.info(

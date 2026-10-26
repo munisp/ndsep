@@ -4,6 +4,7 @@ import {
   bigserial,
   boolean,
   date,
+  doublePrecision,
   index,
   integer,
   inet,
@@ -15,6 +16,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -3854,3 +3856,282 @@ export const autonomyActions = pgTable(
 );
 export type AutonomyAction = typeof autonomyActions.$inferSelect;
 export type InsertAutonomyAction = typeof autonomyActions.$inferInsert;
+
+// ─── Round 13: telegram_watch (0141) — OSIRIS Telegram breach early-warning ──
+// NOTE: adverse_media_items has no Drizzle def (round-9 used raw SQL), so
+// adverseMediaItemId is a plain integer; the FK exists at the DB level.
+
+export const telegramWatchStatusEnum = ["pending", "confirmed", "rejected"] as const;
+export type TelegramWatchStatus = (typeof telegramWatchStatusEnum)[number];
+
+export const telegramWatchItems = pgTable(
+  "telegram_watch_items",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    postId: text("post_id").notNull(),
+    channel: text("channel").notNull(),
+    postTs: timestamp("post_ts", { withTimezone: true }),
+    postUrl: text("post_url"),
+    textRedacted: text("text_redacted").notNull(),
+    geo: jsonb("geo").$type<{ lat: number; lng: number; place: string | null } | null>(),
+    classifier: jsonb("classifier").$type<Record<string, unknown>>().notNull().default({}),
+    severity: varchar("severity", { length: 16 }).notNull().default("medium"),
+    adverseMediaItemId: integer("adverse_media_item_id"),
+    status: varchar("status", { length: 16 }).$type<TelegramWatchStatus>().notNull().default("pending"),
+    reviewedBy: varchar("reviewed_by", { length: 256 }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewNote: text("review_note"),
+    predictionId: uuid("prediction_id").notNull().defaultRandom(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    channelPostUnique: unique("telegram_watch_items_channel_post_id_key").on(t.channel, t.postId),
+  }),
+);
+export type TelegramWatchItem = typeof telegramWatchItems.$inferSelect;
+
+export const breachLagSignals = pgTable(
+  "breach_lag_signals",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    signalType: varchar("signal_type", { length: 48 }).notNull().default("breach_notification_overdue"),
+    organizationId: integer("organization_id").notNull().references(() => organizations.id),
+    telegramWatchItemId: integer("telegram_watch_item_id").notNull().references(() => telegramWatchItems.id),
+    postTs: timestamp("post_ts", { withTimezone: true }).notNull(),
+    notificationDeadline: timestamp("notification_deadline", { withTimezone: true }).notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("open"),
+    acknowledgedBy: varchar("acknowledged_by", { length: 256 }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    orgItemUnique: unique("breach_lag_signals_organization_id_telegram_watch_item_id_key")
+      .on(t.organizationId, t.telegramWatchItemId),
+  }),
+);
+export type BreachLagSignal = typeof breachLagSignals.$inferSelect;
+
+export const telegramWatchWatermarks = pgTable("telegram_watch_watermarks", {
+  channel: text("channel").primaryKey(),
+  lastPostId: text("last_post_id"),
+  lastPostTs: timestamp("last_post_ts", { withTimezone: true }),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }).notNull().defaultNow(),
+  stats: jsonb("stats").$type<Record<string, unknown>>().notNull().default({}),
+});
+export type TelegramWatchWatermark = typeof telegramWatchWatermarks.$inferSelect;
+
+// ─── Round 13: hosting verification (0142) ──────────────────────────────────
+
+export const HOST_VERDICTS = ["in_nigeria", "outside_nigeria", "unverified"] as const;
+export type HostVerdict = (typeof HOST_VERDICTS)[number];
+
+export const DECLARATION_VERDICTS = ["compliant", "violation", "unverified"] as const;
+export type DeclarationVerdict = (typeof DECLARATION_VERDICTS)[number];
+
+export const hostingVerificationRuns = pgTable(
+  "hosting_verification_runs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    declarationId: bigint("declaration_id", { mode: "number" }).notNull(),
+    entityRef: text("entity_ref").notNull(),
+    verdict: text("verdict").$type<DeclarationVerdict>().notNull(),
+    trigger: text("trigger").$type<"manual" | "scheduled">().notNull().default("manual"),
+    hostCount: integer("host_count").notNull().default(0),
+    inNigeriaCount: integer("in_nigeria_count").notNull().default(0),
+    outsideNigeriaCount: integer("outside_nigeria_count").notNull().default(0),
+    unverifiedCount: integer("unverified_count").notNull().default(0),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    predictionId: uuid("prediction_id"),
+    checkedBy: text("checked_by").notNull().default("system"),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    declarationIdx: index("idx_hv_runs_declaration").on(t.declarationId, t.checkedAt),
+    verdictIdx: index("idx_hv_runs_verdict").on(t.verdict, t.checkedAt),
+    entityIdx: index("idx_hv_runs_entity").on(t.entityRef, t.checkedAt),
+  }),
+);
+export type HostingVerificationRun = typeof hostingVerificationRuns.$inferSelect;
+
+export const hostingVerificationHosts = pgTable(
+  "hosting_verification_hosts",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    runId: bigint("run_id", { mode: "number" }).notNull(),
+    declarationId: bigint("declaration_id", { mode: "number" }).notNull(),
+    host: text("host").notNull(),
+    hostKind: text("host_kind").$type<"domain" | "ip">().notNull(),
+    resolvedIps: jsonb("resolved_ips").$type<string[]>().notNull().default([]),
+    verdict: text("verdict").$type<HostVerdict>().notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    runIdx: index("idx_hv_hosts_run").on(t.runId),
+    verdictIdx: index("idx_hv_hosts_verdict").on(t.verdict, t.checkedAt),
+    declarationIdx: index("idx_hv_hosts_declaration").on(t.declarationId, t.checkedAt),
+  }),
+);
+export type HostingVerificationHost = typeof hostingVerificationHosts.$inferSelect;
+
+// ─── Round 13: infra_posture_runs (0144) + ransom_traces (0145) ─────────────
+
+export const infraPostureRuns = pgTable(
+  "infra_posture_runs",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    targetId: bigint("target_id", { mode: "number" }).notNull(), // REFERENCES scan_targets(id) ON DELETE CASCADE
+    scanRunId: bigint("scan_run_id", { mode: "number" }),        // REFERENCES scan_runs(id) ON DELETE SET NULL
+    host: text("host").notNull(),
+    scannerAvailable: boolean("scanner_available").notNull(),
+    scannerKeyPresent: boolean("scanner_key_present").notNull(),
+    findingsCount: integer("findings_count").notNull().default(0),
+    durationMs: integer("duration_ms"),
+    error: text("error"),
+    result: jsonb("result").notNull().default({}),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    targetIdx: index("idx_infra_posture_runs_target").on(t.targetId, t.createdAt),
+  }),
+);
+export type InfraPostureRun = typeof infraPostureRuns.$inferSelect;
+
+export const ransomTraces = pgTable(
+  "ransom_traces",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    caseId: integer("case_id"), // REFERENCES enforcement_cases(id) ON DELETE SET NULL
+    address: text("address").notNull(),
+    chain: text("chain").notNull().default("unknown"),
+    ofacSanctioned: boolean("ofac_sanctioned").notNull().default(false),
+    status: text("status", { enum: ["ok", "unavailable"] }).notNull().default("ok"),
+    result: jsonb("result").notNull().default({}),
+    tracedBy: text("traced_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    caseIdx: index("idx_ransom_traces_case").on(t.caseId, t.createdAt),
+    addressIdx: index("idx_ransom_traces_address").on(t.address, t.createdAt),
+  }),
+);
+export type RansomTrace = typeof ransomTraces.$inferSelect;
+
+// ─── Round 13: osiris_intel_watermarks (0146) ───────────────────────────────
+
+export const osirisIntelSourceKeys = ["osiris_gdelt", "osiris_news"] as const;
+export type OsirisIntelSourceKey = (typeof osirisIntelSourceKeys)[number];
+
+export const osirisIntelWatermarks = pgTable("osiris_intel_watermarks", {
+  source: text("source").primaryKey(),
+  lastSeenId: text("last_seen_id"),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }).notNull().defaultNow(),
+  stats: jsonb("stats").$type<Record<string, unknown>>().notNull().default({}),
+});
+export type OsirisIntelWatermark = typeof osirisIntelWatermarks.$inferSelect;
+
+// ─── Round 13: transfer_risk_forecasts (0147) ───────────────────────────────
+
+export const FORECAST_RISK_LEVELS = ["critical", "high", "elevated", "none"] as const;
+export type ForecastRiskLevel = (typeof FORECAST_RISK_LEVELS)[number];
+
+export const transferRiskForecasts = pgTable(
+  "transfer_risk_forecasts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    countryIso: text("country_iso").notNull(),
+    staticRisk: text("static_risk").$type<ForecastRiskLevel>().notNull(),
+    forecastProbability: doublePrecision("forecast_probability"),
+    blendedLevel: text("blended_level").$type<ForecastRiskLevel>().notNull(),
+    rationale: text("rationale").notNull().default(""),
+    sources: jsonb("sources").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    modelKeyPresent: boolean("model_key_present").notNull().default(false),
+    predictionId: uuid("prediction_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    countryLatestIdx: index("idx_transfer_risk_forecasts_country_latest").on(t.countryIso, t.createdAt),
+    createdIdx: index("idx_transfer_risk_forecasts_created").on(t.createdAt),
+  }),
+);
+export type TransferRiskForecastRow = typeof transferRiskForecasts.$inferSelect;
+
+// ─── Round 13: infrastructure risk (0148) ───────────────────────────────────
+
+export const cableLandingPoints = pgTable(
+  "cable_landing_points",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    cableSystem: text("cable_system").notNull(),
+    name: text("name").notNull(),
+    city: text("city"),
+    country: text("country").notNull().default("NG"),
+    latitude: doublePrecision("latitude").notNull(),
+    longitude: doublePrecision("longitude").notNull(),
+    provenance: text("provenance").notNull(),
+    note: text("note"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    cableSystemNameUniq: uniqueIndex("cable_landing_points_cable_system_name_key").on(t.cableSystem, t.name),
+  }),
+);
+export type CableLandingPoint = typeof cableLandingPoints.$inferSelect;
+
+export const availabilityRiskEvents = pgTable(
+  "availability_risk_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    declarationId: bigint("declaration_id", { mode: "number" }).notNull(), // REFERENCES hosting_declarations(id) ON DELETE CASCADE
+    locationName: text("location_name").notNull(),
+    latitude: doublePrecision("latitude").notNull(),
+    longitude: doublePrecision("longitude").notNull(),
+    eventType: text("event_type", { enum: ["earthquake", "fire", "severe_weather"] }).notNull(),
+    eventRef: text("event_ref").notNull(),
+    magnitude: numeric("magnitude"),
+    severity: text("severity"),
+    distanceKm: numeric("distance_km").notNull(),
+    assessedAt: timestamp("assessed_at", { withTimezone: true }).notNull().defaultNow(),
+    status: text("status", { enum: ["open", "acknowledged", "closed"] }).notNull().default("open"),
+    acknowledgedBy: text("acknowledged_by"),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  },
+  (t) => ({
+    dedupUniq: uniqueIndex("availability_risk_events_dedup_key").on(t.declarationId, t.locationName, t.eventType, t.eventRef),
+    statusIdx: index("idx_availability_risk_events_status").on(t.status, t.assessedAt),
+    declarationIdx: index("idx_availability_risk_events_declaration").on(t.declarationId, t.assessedAt),
+  }),
+);
+export type AvailabilityRiskEvent = typeof availabilityRiskEvents.$inferSelect;
+
+export const cableWatchAlerts = pgTable(
+  "cable_watch_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cablePointId: bigint("cable_point_id", { mode: "number" }).notNull(), // REFERENCES cable_landing_points(id) ON DELETE CASCADE
+    cablePointName: text("cable_point_name").notNull(),
+    cableSystem: text("cable_system").notNull(),
+    vesselMmsi: text("vessel_mmsi").notNull(),
+    vesselName: text("vessel_name"),
+    latitude: doublePrecision("latitude").notNull(),
+    longitude: doublePrecision("longitude").notNull(),
+    speedKnots: numeric("speed_knots"),
+    vesselStatus: text("vessel_status"),
+    distanceKm: numeric("distance_km").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    status: text("status", { enum: ["open", "acknowledged", "closed"] }).notNull().default("open"),
+    acknowledgedBy: text("acknowledged_by"),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  },
+  (t) => ({
+    dedupUniq: uniqueIndex("cable_watch_alerts_dedup_key").on(t.cablePointId, t.vesselMmsi),
+    statusIdx: index("idx_cable_watch_alerts_status").on(t.status, t.lastSeenAt),
+    pointIdx: index("idx_cable_watch_alerts_point").on(t.cablePointId, t.lastSeenAt),
+  }),
+);
+export type CableWatchAlert = typeof cableWatchAlerts.$inferSelect;

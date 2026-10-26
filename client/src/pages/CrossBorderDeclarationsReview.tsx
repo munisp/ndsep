@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { OrgIdentityPrefill } from "@/components/OrgIdentityPrefill";
 import { FormCopilotInput } from "@/components/FormCopilotInput";
+import { TransferForecastBadge } from "@/components/TransferForecastBadge";
 import { Globe2, Loader2, Radar, RefreshCw, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -305,6 +306,7 @@ export default function CrossBorderDeclarationsReview() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>#</TableHead><TableHead>Organisation</TableHead><TableHead>Destination</TableHead>
+                    <TableHead>Risk forecast</TableHead>
                     <TableHead>Status</TableHead><TableHead>Compliance</TableHead><TableHead>Submitted</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -314,13 +316,21 @@ export default function CrossBorderDeclarationsReview() {
                       <TableCell className="font-mono">{d.id}</TableCell>
                       <TableCell>{d.org_name ?? `Org #${d.organization_id}`}</TableCell>
                       <TableCell>{d.destination_country ?? d.country ?? "—"}</TableCell>
+                      {/* Round-13 P1.6: blended OI forecast chip. ISO via the
+                          same two-letter prefix heuristic the server falls
+                          back to (destination_risk_register wins server-side). */}
+                      <TableCell>
+                        {/^[A-Za-z]{2}/.test(String(d.destination_country ?? d.country ?? "")) ? (
+                          <TransferForecastBadge iso={String(d.destination_country ?? d.country).slice(0, 2).toUpperCase()} />
+                        ) : "—"}
+                      </TableCell>
                       <TableCell><Badge variant="outline">{String(d.status).replaceAll("_", " ")}</Badge></TableCell>
                       <TableCell><Badge variant="outline" className={COMPLIANCE_COLORS[d.compliance_status] ?? ""}>{String(d.compliance_status ?? "—").replaceAll("_", " ")}</Badge></TableCell>
                       <TableCell className="text-sm text-muted-foreground">{d.submitted_at ?? d.created_at ? new Date(d.submitted_at ?? d.created_at).toLocaleDateString() : "—"}</TableCell>
                     </TableRow>
                   ))}
                   {(((declarations.data as any)?.data ?? (declarations.data as any[])) ?? []).length === 0 && (
-                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No declarations match.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">No declarations match.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -427,7 +437,7 @@ export default function CrossBorderDeclarationsReview() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Country</TableHead><TableHead>ISO</TableHead><TableHead>Adequacy</TableHead><TableHead className="text-right">Risk score</TableHead><TableHead>Notes</TableHead>
+                    <TableHead>Country</TableHead><TableHead>ISO</TableHead><TableHead>Adequacy</TableHead><TableHead className="text-right">Risk score</TableHead><TableHead>Forecast</TableHead><TableHead>Notes</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -437,11 +447,17 @@ export default function CrossBorderDeclarationsReview() {
                       <TableCell className="font-mono text-sm">{r.iso_code ?? "—"}</TableCell>
                       <TableCell><Badge variant="outline" className={ADEQUACY_COLORS[r.adequacy_status] ?? ""}>{String(r.adequacy_status ?? "—").replaceAll("_", " ")}</Badge></TableCell>
                       <TableCell className="text-right font-mono">{r.risk_score ?? "—"}</TableCell>
+                      {/* Round-13 P1.6: blended OI forecast for the registered ISO */}
+                      <TableCell>
+                        {typeof r.iso_code === "string" && /^[A-Za-z]{2}$/.test(r.iso_code) ? (
+                          <TransferForecastBadge iso={r.iso_code.toUpperCase()} />
+                        ) : "—"}
+                      </TableCell>
                       <TableCell className="max-w-[260px] truncate text-sm text-muted-foreground">{r.notes ?? "—"}</TableCell>
                     </TableRow>
                   ))}
                   {(((destRisk.data as any)?.rows ?? (destRisk.data as any[])) ?? []).length === 0 && (
-                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">No destination risk entries.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No destination risk entries.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>

@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Newspaper, RefreshCw, Siren } from "lucide-react";
+import TelegramWatchPanel from "@/components/TelegramWatchPanel";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const SEV_COLORS: Record<string, string> = {
@@ -79,7 +80,19 @@ export default function AdverseMediaReview() {
     onError: (err: any) => toast.error(err.message),
   });
 
-  const queueItems: any[] = (queue.data as any[]) ?? [];
+  // ── Source filter chips (round 13 W4) — slice the queue by origin. ──────
+  // Client-side filter over the already-fetched queue page (reviewQueue
+  // carries s.source_key); known OSIRIS feeds are pinned, any other source
+  // keys present in the data are appended.
+  const PINNED_SOURCE_KEYS = ["osiris_telegram", "osiris_gdelt", "osiris_news"];
+  const [srcFilter, setSrcFilter] = useState<string>("");
+  const allQueueItems: any[] = (queue.data as any[]) ?? [];
+  const sourceKeys = Array.from(new Set([
+    ...PINNED_SOURCE_KEYS,
+    ...allQueueItems.map((i) => i.source_key).filter(Boolean),
+  ]));
+  const queueItems = srcFilter ? allQueueItems.filter((i) => i.source_key === srcFilter) : allQueueItems;
+
   const toggle = (id: number, v: boolean) => setChecked((prev) => {
     const next = new Set(prev);
     if (v) next.add(id); else next.delete(id);
@@ -105,6 +118,7 @@ export default function AdverseMediaReview() {
         <TabsList>
           <TabsTrigger value="queue">Review queue</TabsTrigger>
           <TabsTrigger value="signals">Supervision signals</TabsTrigger>
+          <TabsTrigger value="telegram">Telegram watch</TabsTrigger>
           <TabsTrigger value="ingest">Manual ingest</TabsTrigger>
         </TabsList>
 
@@ -129,6 +143,23 @@ export default function AdverseMediaReview() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="flex gap-1.5 flex-wrap items-center" aria-label="Source filter">
+            <span className="text-xs text-muted-foreground mr-1">Source:</span>
+            <Badge
+              variant={srcFilter === "" ? "default" : "outline"}
+              className="cursor-pointer"
+              onClick={() => setSrcFilter("")}
+            >All</Badge>
+            {sourceKeys.map((k) => (
+              <Badge
+                key={k}
+                variant={srcFilter === k ? "default" : "outline"}
+                className="cursor-pointer"
+                onClick={() => setSrcFilter(srcFilter === k ? "" : k)}
+              >{k}</Badge>
+            ))}
           </div>
 
           {reviewStatus === "pending" && queueItems.length > 0 && (
@@ -283,6 +314,10 @@ export default function AdverseMediaReview() {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="telegram" className="mt-4">
+          <TelegramWatchPanel />
         </TabsContent>
 
         <TabsContent value="ingest" className="mt-4">

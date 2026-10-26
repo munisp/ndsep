@@ -306,6 +306,12 @@ import { nextBestActionRouter } from "./routers/nextBestAction";
 import { settlementRecommenderRouter } from "./routers/settlementRecommender";
 import { penaltyCalibrationRouter } from "./routers/penaltyCalibration";
 import { autonomyGovernanceRouter } from "./routers/autonomyGovernance";
+import { telegramWatchRouter } from "./routers/telegramWatch";
+import { hostingVerificationRouter } from "./routers/hostingVerification";
+import { ransomTraceRouter } from "./routers/ransomTrace";
+import { osirisIntelFeedRouter } from "./routers/osirisIntelFeed";
+import { transferForecastRouter } from "./routers/transferForecast";
+import { infrastructureRiskRouter } from "./routers/infrastructureRisk";
 import { antiwipeRouter } from "./antiwipe";
 import { getIntelSummary, getCrossplatformCorrelations, getNocThreatFeed, enrichBankingWithMaritime, enrichComplianceWithSiem } from "./intelAggregator";
 import { logger } from "./logger";
@@ -392,6 +398,13 @@ export const appRouter = router({
   settlementRecommender: settlementRecommenderRouter,
   penaltyCalibration: penaltyCalibrationRouter,
   autonomyGovernance: autonomyGovernanceRouter,
+  // ── Round-13 waves (migrations 0141-0148) ──
+  telegramWatch: telegramWatchRouter,
+  hostingVerification: hostingVerificationRouter,
+  ransomTrace: ransomTraceRouter,
+  osirisIntelFeed: osirisIntelFeedRouter,
+  transferForecast: transferForecastRouter,
+  infrastructureRisk: infrastructureRiskRouter,
   // ── FEAT-E (round-9, migrations 0112-0116) ──
   adverseMedia: adverseMediaRouter,
   aiRuntimeOversight: aiRuntimeOversightRouter,

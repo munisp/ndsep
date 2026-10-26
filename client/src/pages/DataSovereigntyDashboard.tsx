@@ -13,6 +13,8 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { OrgIdentityPrefill } from "@/components/OrgIdentityPrefill";
 import { FormCopilotInput } from "@/components/FormCopilotInput";
+import { HostingVerificationBadge } from "@/components/HostingVerificationBadge";
+import { InfrastructureRiskPanel } from "@/components/InfrastructureRiskPanel";
 import { CalendarClock, Globe2, Loader2, RefreshCw, Send, ShieldAlert, ShieldCheck } from "lucide-react";
 
 const TIERS = ["sovereign_ready", "on_track", "at_risk", "critical", "non_compliant"] as const;
@@ -265,6 +267,161 @@ const VSTATUS_COLORS: Record<string, string> = {
   dismissed: "bg-muted text-muted-foreground border-border",
 };
 
+/**
+ * Round-13 P0.2 — hosting-declaration verification queue (OSIRIS RECON).
+ * Violations first; per-declaration badge opens the evidence popover.
+ * hostingVerificationRouter is mounted in server/routers.ts (Round-13
+ * integration) — calls are fully typed.
+ */
+function HostingVerificationQueue() {
+  const hv = trpc.hostingVerification;
+  const [statusFilter, setStatusFilter] = useState<"" | "compliant" | "violation" | "unverified">("");
+  const queue = hv.listVerdicts.useQuery(
+    statusFilter ? { status: statusFilter } : undefined,
+    { retry: 1 }
+  );
+  const stats = hv.stats.useQuery(undefined, { retry: 1 });
+  const [rejectFor, setRejectFor] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  const refresh = () => { queue.refetch(); stats.refetch(); };
+  const verifyNow = hv.verifyNow.useMutation({
+    onSuccess: (res: any) => { toast.success(`Verification ${res.verdict}`); refresh(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const confirmFlag = hv.confirmFlag.useMutation({
+    onSuccess: () => { toast.success("Violation flag confirmed"); refresh(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+  const rejectFlag = hv.rejectFlag.useMutation({
+    onSuccess: () => { toast.success("Flag rejected (false positive)"); setRejectFor(null); setRejectReason(""); refresh(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const s: any = stats.data ?? {};
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card><CardHeader className="pb-2"><CardDescription>Verified (latest)</CardDescription>
+          <CardTitle className="text-2xl font-mono">{s.declarations_verified ?? "—"}</CardTitle></CardHeader>
+          <CardContent className="text-xs text-muted-foreground">{s.never_verified ?? 0} never verified</CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Compliant</CardDescription>
+          <CardTitle className="text-2xl font-mono text-green-400">{s.compliant ?? "—"}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Violations</CardDescription>
+          <CardTitle className="text-2xl font-mono text-red-400">{s.violation ?? "—"}</CardTitle></CardHeader>
+          <CardContent className="text-xs text-muted-foreground">{s.violations_24h ?? 0} in last 24h</CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>Unverified (fail-closed)</CardDescription>
+          <CardTitle className="text-2xl font-mono text-yellow-400">{s.unverified ?? "—"}</CardTitle></CardHeader>
+          <CardContent className="text-xs text-muted-foreground">{s.runs_24h ?? 0} runs in 24h</CardContent></Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Verification queue</CardTitle>
+          <CardDescription>
+            Latest evidence-based verdict per declaration (OSIRIS RECON vs verified NG prefixes/ASNs), violations first.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label>Verdict filter</Label>
+            <Select value={statusFilter || "all"} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v as "compliant" | "violation" | "unverified")}>
+              <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All verdicts</SelectItem>
+                <SelectItem value="violation">Violations</SelectItem>
+                <SelectItem value="unverified">Unverified</SelectItem>
+                <SelectItem value="compliant">Compliant</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {queue.data?.note && <p className="text-sm text-yellow-400">{queue.data.note}</p>}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Entity</TableHead>
+                <TableHead>Verdict</TableHead>
+                <TableHead className="text-right">Hosts</TableHead>
+                <TableHead>Checked</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(queue.data?.rows ?? []).map((r: any) => (
+                <TableRow key={r.run_id}>
+                  <TableCell>
+                    <div className="font-medium">{r.entity_name ?? r.entity_ref}</div>
+                    <div className="text-xs text-muted-foreground font-mono">{r.entity_ref}</div>
+                  </TableCell>
+                  <TableCell>
+                    <HostingVerificationBadge declarationId={r.declaration_id} onChanged={refresh} />
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {r.in_nigeria_count} NG / {r.outside_nigeria_count} foreign / {r.unverified_count} ?
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {r.checked_at ? new Date(r.checked_at).toLocaleString() : "—"}
+                  </TableCell>
+                  <TableCell className="text-right space-x-1">
+                    <Button
+                      size="sm" variant="outline"
+                      disabled={verifyNow.isPending}
+                      onClick={() => verifyNow.mutate({ declarationId: r.declaration_id })}
+                    >
+                      Verify now
+                    </Button>
+                    {r.verdict === "violation" && !(r.evidence?.human_review) && (
+                      <>
+                        <Button
+                          size="sm" variant="outline" className="text-red-400"
+                          disabled={confirmFlag.isPending}
+                          onClick={() => confirmFlag.mutate({ runId: r.run_id })}
+                        >
+                          Confirm flag
+                        </Button>
+                        <Button
+                          size="sm" variant="ghost"
+                          onClick={() => { setRejectFor(r.run_id); setRejectReason(""); }}
+                        >
+                          Reject flag
+                        </Button>
+                      </>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {(queue.data?.rows ?? []).length === 0 && (
+                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">
+                  No verification runs yet. Use “Verify now” on a declaration or wait for the scheduled sweep.
+                </TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+
+          {rejectFor != null && (
+            <div className="border border-yellow-500/40 rounded-lg p-4 space-y-3">
+              <h3 className="font-medium text-yellow-400">Reject violation flag for run #{rejectFor} (false positive)</h3>
+              <Label htmlFor="hv-reject-reason">Reason (min 3 chars)</Label>
+              <Textarea id="hv-reject-reason" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  disabled={rejectFlag.isPending || rejectReason.trim().length < 3}
+                  onClick={() => rejectFlag.mutate({ runId: rejectFor, reason: rejectReason.trim() })}
+                >
+                  Reject flag
+                </Button>
+                <Button variant="ghost" onClick={() => setRejectFor(null)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function DataSovereigntyDashboard() {
   const utils = trpc.useUtils();
   const countdown = trpc.dataSovereignty.deadlineCountdown.useQuery();
@@ -372,7 +529,17 @@ export default function DataSovereigntyDashboard() {
           <TabsTrigger value="register">Score register</TabsTrigger>
           <TabsTrigger value="violations">Violations</TabsTrigger>
           <TabsTrigger value="declare">Submit declaration</TabsTrigger>
+          <TabsTrigger value="verification">Hosting verification</TabsTrigger>
+          <TabsTrigger value="infrastructure">Infrastructure risk</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="infrastructure" className="space-y-4 mt-4">
+          <InfrastructureRiskPanel />
+        </TabsContent>
+
+        <TabsContent value="verification" className="space-y-4 mt-4">
+          <HostingVerificationQueue />
+        </TabsContent>
 
         <TabsContent value="declare" className="space-y-4 mt-4">
           <HostingDeclarationForm onSubmitted={() => utils.dataSovereignty.invalidate()} />

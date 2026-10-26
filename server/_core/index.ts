@@ -1482,6 +1482,16 @@ async function startServer() {
   if (process.env.NODE_ENV !== "test") {
     startHealthMonitor();
     startKafkaConsumer().catch((e) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[KafkaConsumer] Startup deferred"));
+    // OSIRIS SSE intel stream (Round-13 P1.7) — streaming is an optimization,
+    // not critical path: default ON (OSIRIS_SSE_ENABLED=false disables), and
+    // any startup failure is logged as a warning and never blocks boot.
+    if ((process.env.OSIRIS_SSE_ENABLED ?? "true") !== "false") {
+      import("../osiris/sseSubscriber")
+        .then((m) => { m.startOsirisStream(); logger.info("[OsirisSSE] Intel stream subscriber started"); })
+        .catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, "[OsirisSSE] Stream startup failed (non-fatal; polling fallback remains)"));
+    } else {
+      logger.info("[OsirisSSE] Disabled via OSIRIS_SSE_ENABLED=false");
+    }
     // Initialize production gap resolution modules (G9-G24)
     import("../productionGaps").then(m => m.initializeProductionGaps()).catch((e) => logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[ProductionGaps] Init deferred"));
     setTimeout(() => startAllWorkers(), 3000);
@@ -1554,6 +1564,13 @@ async function startServer() {
       await stopKafkaConsumer();
       logger.info("[Shutdown] Kafka producer + consumer disconnected");
     } catch (e) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Shutdown] Kafka disconnect skipped"); }
+
+    // 3b. Stop the OSIRIS SSE intel stream subscriber (Round-13 P1.7)
+    try {
+      const { stopOsirisStream } = await import("../osiris/sseSubscriber");
+      stopOsirisStream();
+      logger.info("[Shutdown] OSIRIS SSE stream stopped");
+    } catch (e) { logger.debug({ err: e instanceof Error ? e.message : String(e) }, "[Shutdown] OSIRIS SSE stop skipped"); }
 
     // 4. Close read replica pool
     await closeReadReplica();

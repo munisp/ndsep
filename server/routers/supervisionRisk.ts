@@ -10,6 +10,11 @@
  *   filing_delinquency   overdue CAR/registration filings   (car_filings)
  *   data_volume_class    declared data-volume class         (organizations)
  *
+ * Round 13 W3 additionally persists an `infra_posture` input (OSIRIS RECON
+ * port/CVE/SSL posture, normalized 0..1, source='infra_posture' in
+ * source_tables) on each risk_score_inputs row. It is an observed signal
+ * only — it is NOT a weighted scoring factor.
+ *
  * Optional source tables are probed with to_regclass and, when absent or
  * unreadable, contribute 0 — the probe result is persisted per sweep in
  * risk_score_inputs.source_tables so the score is always explainable. The
@@ -44,6 +49,10 @@ import {
   type DataVolumeClass,
 } from "../services/supervisionRiskScoring";
 import { getActiveWeights } from "../services/riskWeights";
+import {
+  infraPostureWeightedByOrg,
+  normalizePostureSignal,
+} from "../services/infraPostureScan";
 
 // Re-exported so existing consumers/tests can import the pure scoring API
 // from either this router or server/services/supervisionRiskScoring.
@@ -141,6 +150,13 @@ async function columnExists(table: string, column: string): Promise<boolean> {
 export interface CollectedInputs {
   raw: RawRiskInputs;
   sourceTables: Record<string, boolean>;
+  /**
+   * Round 13 W3: OSIRIS RECON infra-posture signal (0..1, already
+   * normalized). Persisted as an extra risk_score_inputs row entry with
+   * source='infra_posture' — deliberately NOT a scoring factor: the weight
+   * vector (RISK_FACTOR_KEYS) and every other signal are unchanged.
+   */
+  infraPosture: { signal: number; available: boolean };
 }
 
 /**
@@ -250,9 +266,24 @@ export async function collectRiskInputs(orgId: number): Promise<CollectedInputs>
     sourceTables.organizations_data_volume_class = false;
   }
 
+  // Infra posture (round 13 W3, optional): severity-weighted open
+  // infra_posture findings via scan_targets, normalized to 0..1. Defensive —
+  // unavailable source contributes 0 and source_tables records false.
+  let infraPosture = { signal: 0, available: false };
+  try {
+    const postureWeighted = await infraPostureWeightedByOrg([orgId]);
+    if (postureWeighted != null) {
+      infraPosture = { signal: normalizePostureSignal(postureWeighted.get(orgId) ?? 0), available: true };
+    }
+  } catch {
+    infraPosture = { signal: 0, available: false };
+  }
+  sourceTables.infra_posture = infraPosture.available;
+
   return {
     raw: { complaintVolume, complaintSurge, scanFindingsWeighted, priorSanctions, filingDelinquencyDays, dataVolumeClass },
     sourceTables,
+    infraPosture,
   };
 }
 
@@ -266,6 +297,7 @@ export async function collectRiskInputsBatch(orgIds: number[]): Promise<Map<numb
   const empty = (): CollectedInputs => ({
     raw: { complaintVolume: 0, complaintSurge: false, scanFindingsWeighted: 0, priorSanctions: 0, filingDelinquencyDays: 0, dataVolumeClass: "medium" },
     sourceTables: {},
+    infraPosture: { signal: 0, available: false },
   });
   for (const id of orgIds) out.set(id, empty());
 
@@ -350,6 +382,21 @@ export async function collectRiskInputsBatch(orgIds: number[]): Promise<Map<numb
         if (c && (v === "low" || v === "medium" || v === "high" || v === "very_high")) c.raw.dataVolumeClass = v;
       }
     }
+  }
+
+  // infra_posture (grouped, round 13 W3 — one query for the whole sweep)
+  try {
+    const postureWeighted = await infraPostureWeightedByOrg(orgIds);
+    out.forEach((c) => { c.sourceTables.infra_posture = postureWeighted != null; });
+    if (postureWeighted != null) {
+      out.forEach((c) => { c.infraPosture.available = true; });
+      postureWeighted.forEach((w, orgId) => {
+        const c = out.get(orgId);
+        if (c) c.infraPosture.signal = normalizePostureSignal(w);
+      });
+    }
+  } catch {
+    out.forEach((c) => { c.sourceTables.infra_posture = false; });
   }
   return out;
 }
@@ -451,7 +498,12 @@ export const supervisionRiskRouter = router({
       const [inputsRow] = await exec(
         `INSERT INTO risk_score_inputs (org_id, inputs, normalized, source_tables, collected_at)
          VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
-        [input.orgId, JSON.stringify(collected.raw), JSON.stringify(normalized), JSON.stringify(sourceTablesPayload)],
+        [input.orgId,
+         // round 13 W3: infra_posture persisted as an extra input (source
+         // 'infra_posture' in source_tables); not a weighted scoring factor.
+         JSON.stringify({ ...collected.raw, infra_posture: collected.infraPosture.signal }),
+         JSON.stringify({ ...normalized, infra_posture: collected.infraPosture.signal }),
+         JSON.stringify(sourceTablesPayload)],
       );
       const [scoreRow] = await exec(
         `INSERT INTO risk_scores (org_id, inputs_id, score, band, weights, explanation, computed_by, computed_at)
@@ -487,7 +539,10 @@ export const supervisionRiskRouter = router({
         const [inputsRow] = await exec(
           `INSERT INTO risk_score_inputs (org_id, inputs, normalized, source_tables, collected_at)
            VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
-          [org.id, JSON.stringify(collected.raw), JSON.stringify(normalized), JSON.stringify(sourceTablesPayload)],
+          [org.id,
+           JSON.stringify({ ...collected.raw, infra_posture: collected.infraPosture.signal }),
+           JSON.stringify({ ...normalized, infra_posture: collected.infraPosture.signal }),
+           JSON.stringify(sourceTablesPayload)],
         );
         await exec(
           `INSERT INTO risk_scores (org_id, inputs_id, score, band, weights, explanation, computed_by, computed_at)
