@@ -7,7 +7,7 @@ import { trpc } from "../api/trpc";
 
 export default function OrganizationDetailScreen({ route, navigation }: any) {
   const { orgId } = route.params;
-  const { data: org, isLoading } = trpc.organizations.get.useQuery({ id: orgId });
+  const { data: org, isLoading } = trpc.organizations.byId.useQuery({ id: orgId });
   const { data: violations } = trpc.compliance.violations.useQuery({ organizationId: orgId, limit: 10 });
   const { data: penalties } = trpc.financial.penalties.useQuery({ organizationId: orgId, limit: 10 });
   const { data: assets } = trpc.assets.list.useQuery({ organizationId: orgId, limit: 20 });

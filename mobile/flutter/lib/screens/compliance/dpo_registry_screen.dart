@@ -17,8 +17,10 @@ class _DpoRegistryScreenState extends State<DpoRegistryScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final data = await ApiService.instance.get('/api/trpc/dpoAppointments.list');
-      setState(() { _appointments = data['result']?['data'] ?? []; _loading = false; });
+      // Real path: dpoAppointments.list -> {data, total} (snake_case rows)
+      final res = await ApiService().query<Map<String, dynamic>>(
+        'dpoAppointments.list', {'page': 1, 'limit': 50}, (j) => j as Map<String, dynamic>);
+      setState(() { _appointments = (res['data'] as List?) ?? []; _loading = false; });
     } catch (e) {
       setState(() => _loading = false);
     }
@@ -42,9 +44,9 @@ class _DpoRegistryScreenState extends State<DpoRegistryScreen> {
                         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         child: ListTile(
                           leading: const CircleAvatar(child: Icon(Icons.person)),
-                          title: Text(dpo['dpoName'] ?? 'Unknown'),
-                          subtitle: Text(dpo['email'] ?? ''),
-                          trailing: Text(dpo['status'] ?? ''),
+                          title: Text(dpo['dpo_name']?.toString() ?? 'Unknown'),
+                          subtitle: Text('${dpo['dpo_email'] ?? ''}${dpo['org_name'] != null ? ' • ${dpo['org_name']}' : ''}'),
+                          trailing: Text(dpo['credential_status']?.toString() ?? ''),
                         ),
                       );
                     },

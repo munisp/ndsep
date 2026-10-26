@@ -103,12 +103,12 @@ class _DpcoPortalScreenState extends State<DpcoPortalScreen> {
           final data = snapshot.requireData;
           final stats = data.stats;
           final functions = <_DpcoFunction>[
-            _DpcoFunction('DPCO Registry', 'Licensed organisations', Icons.business, _api.listDpcoOrganisations),
-            _DpcoFunction('Client Portfolio', 'Engagement clients', Icons.people, _api.listDpcoClients),
-            _DpcoFunction('Audit Workspace', 'Compliance audit engagements', Icons.assignment, _api.listDpcoAuditEngagements),
-            _DpcoFunction('Verification Statements', 'Compliance verification records', Icons.verified, _api.listDpcoVerificationStatements),
-            _DpcoFunction('Training Sessions', 'DPCO training records', Icons.school, _api.listDpcoTrainingSessions),
-            _DpcoFunction('Policy Drafts', 'Data protection policy work', Icons.description, _api.listDpcoPolicyDrafts),
+            _DpcoFunction('DPCO Registry', 'Licensed organisations', Icons.business, () => _api.listDpcoOrganisations()),
+            _DpcoFunction('Client Portfolio', 'Engagement clients', Icons.people, () => _api.listDpcoClients()),
+            _DpcoFunction('Audit Workspace', 'Compliance audit engagements', Icons.assignment, () => _api.listDpcoAuditEngagements()),
+            _DpcoFunction('Verification Statements', 'Compliance verification records', Icons.verified, () => _api.listDpcoVerificationStatements()),
+            _DpcoFunction('Training Sessions', 'DPCO training records', Icons.school, () => _api.listDpcoTrainingSessions()),
+            _DpcoFunction('Policy Drafts', 'Data protection policy work', Icons.description, () => _api.listDpcoPolicyDrafts()),
           ];
 
           return RefreshIndicator(

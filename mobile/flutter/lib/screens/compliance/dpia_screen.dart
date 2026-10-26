@@ -17,8 +17,10 @@ class _DpiaScreenState extends State<DpiaScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final data = await ApiService.instance.get('/api/trpc/dpiaAssessments.list');
-      setState(() { _assessments = data['result']?['data'] ?? []; _loading = false; });
+      // Real path: dpia.list (the dpiaAssessments.* namespace is not mounted)
+      final data = await ApiService().query<List<dynamic>>(
+        'dpia.list', {'limit': 50}, (j) => j as List<dynamic>);
+      setState(() { _assessments = data; _loading = false; });
     } catch (e) {
       setState(() => _loading = false);
     }
@@ -38,13 +40,16 @@ class _DpiaScreenState extends State<DpiaScreen> {
                     itemCount: _assessments.length,
                     itemBuilder: (context, index) {
                       final a = _assessments[index];
+                      // dpia.list returns raw SQL rows (snake_case)
+                      final risk = a['dpia_risk_level']?.toString() ?? a['riskLevel']?.toString() ?? 'Unknown';
+                      final status = a['dpia_status']?.toString() ?? a['status']?.toString() ?? '';
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         child: ListTile(
                           leading: const Icon(Icons.assessment),
                           title: Text(a['title'] ?? 'Unnamed'),
-                          subtitle: Text('Risk: ${a['riskLevel'] ?? 'Unknown'} - ${a['status'] ?? ''}'),
-                          trailing: Chip(label: Text(a['status'] ?? '')),
+                          subtitle: Text('Risk: $risk - $status'),
+                          trailing: Chip(label: Text(status)),
                         ),
                       );
                     },

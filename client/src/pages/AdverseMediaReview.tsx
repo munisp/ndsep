@@ -14,6 +14,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Newspaper, RefreshCw, Siren } from "lucide-react";
 import TelegramWatchPanel from "@/components/TelegramWatchPanel";
+import OsirisFeedStatusCard from "@/components/OsirisFeedStatusCard";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const SEV_COLORS: Record<string, string> = {
@@ -113,6 +114,9 @@ export default function AdverseMediaReview() {
         <h1 className="text-2xl font-bold flex items-center gap-2"><Newspaper className="h-6 w-6" /> Adverse Media Review</h1>
         <Button variant="ghost" size="sm" onClick={refresh}><RefreshCw className="h-4 w-4" /></Button>
       </div>
+
+      {/* Round-16 W4 — OSIRIS intel feed status strip (additive) */}
+      <OsirisFeedStatusCard />
 
       <Tabs defaultValue="queue">
         <TabsList>

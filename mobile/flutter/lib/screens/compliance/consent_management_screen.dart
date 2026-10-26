@@ -13,6 +13,10 @@ class _ConsentManagementScreenState extends State<ConsentManagementScreen> {
   bool _loading = true;
   String? _error;
 
+  static const _lawfulBases = [
+    'consent', 'contract', 'legal_obligation', 'vital_interests', 'public_task', 'legitimate_interests',
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -22,8 +26,10 @@ class _ConsentManagementScreenState extends State<ConsentManagementScreen> {
   Future<void> _loadRecords() async {
     try {
       setState(() { _loading = true; _error = null; });
-      final data = await ApiService.instance.get('/api/trpc/consentRecords.list');
-      setState(() { _records = data['result']?['data'] ?? []; _loading = false; });
+      // Real path: consentRecords.list -> {data, total} (snake_case rows)
+      final res = await ApiService().query<Map<String, dynamic>>(
+        'consentRecords.list', {'page': 1, 'limit': 50}, (j) => j as Map<String, dynamic>);
+      setState(() { _records = (res['data'] as List?) ?? []; _loading = false; });
     } catch (e) {
       setState(() { _error = e.toString(); _loading = false; });
     }
@@ -45,17 +51,18 @@ class _ConsentManagementScreenState extends State<ConsentManagementScreen> {
                   child: ListView.builder(
                     itemCount: _records.length,
                     itemBuilder: (context, index) {
-                      final record = _records[index];
+                      final record = _records[index] as Map;
+                      final status = record['consent_status']?.toString() ?? '';
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         child: ListTile(
                           leading: Icon(
-                            record['status'] == 'active' ? Icons.check_circle : Icons.cancel,
-                            color: record['status'] == 'active' ? Colors.green : Colors.red,
+                            status == 'active' ? Icons.check_circle : Icons.cancel,
+                            color: status == 'active' ? Colors.green : Colors.red,
                           ),
-                          title: Text(record['purpose'] ?? 'Unknown Purpose'),
-                          subtitle: Text('${record['dataSubject'] ?? ''} - ${record['status'] ?? ''}'),
-                          trailing: Text(record['expiresAt']?.toString().substring(0, 10) ?? ''),
+                          title: Text(record['purpose']?.toString() ?? 'Unknown Purpose'),
+                          subtitle: Text('${record['data_subject_name'] ?? ''} • ${record['lawful_basis'] ?? ''} • $status'),
+                          trailing: Text(record['expires_at']?.toString().substring(0, 10) ?? ''),
                         ),
                       );
                     },
@@ -71,26 +78,61 @@ class _ConsentManagementScreenState extends State<ConsentManagementScreen> {
   void _showCreateDialog() {
     final purposeCtrl = TextEditingController();
     final subjectCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final orgIdCtrl = TextEditingController();
+    String lawfulBasis = 'consent';
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('New Consent Record'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: subjectCtrl, decoration: const InputDecoration(labelText: 'Data Subject')),
+        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: orgIdCtrl, keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Organization ID')),
+          const SizedBox(height: 8),
+          TextField(controller: subjectCtrl, decoration: const InputDecoration(labelText: 'Data Subject Name')),
+          const SizedBox(height: 8),
+          TextField(controller: emailCtrl, keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'Data Subject Email')),
           const SizedBox(height: 8),
           TextField(controller: purposeCtrl, decoration: const InputDecoration(labelText: 'Purpose')),
-        ]),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: lawfulBasis,
+            decoration: const InputDecoration(labelText: 'Lawful Basis'),
+            items: _lawfulBases.map((b) => DropdownMenuItem(value: b, child: Text(b.replaceAll('_', ' ')))).toList(),
+            onChanged: (v) => lawfulBasis = v ?? 'consent',
+          ),
+        ])),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
+              final orgId = int.tryParse(orgIdCtrl.text);
+              if (orgId == null || subjectCtrl.text.trim().isEmpty ||
+                  !emailCtrl.text.contains('@') || purposeCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Org ID, name, valid email and purpose are required')),
+                );
+                return;
+              }
               Navigator.pop(context);
-              await ApiService.instance.post('/api/trpc/consentRecords.create', {
-                'dataSubject': subjectCtrl.text,
-                'purpose': purposeCtrl.text,
-              });
-              _loadRecords();
+              try {
+                // Real path: consentRecords.create {organizationId, dataSubjectName,
+                // dataSubjectEmail, purpose, lawfulBasis}
+                await ApiService().mutate<Map<String, dynamic>>('consentRecords.create', {
+                  'organizationId': orgId,
+                  'dataSubjectName': subjectCtrl.text.trim(),
+                  'dataSubjectEmail': emailCtrl.text.trim(),
+                  'purpose': purposeCtrl.text.trim(),
+                  'lawfulBasis': lawfulBasis,
+                }, (j) => j as Map<String, dynamic>);
+                _loadRecords();
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              }
             },
             child: const Text('Create'),
           ),

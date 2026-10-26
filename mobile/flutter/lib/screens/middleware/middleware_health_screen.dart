@@ -17,7 +17,9 @@ class _MiddlewareHealthScreenState extends State<MiddlewareHealthScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final data = await ApiService.instance.get('/api/middleware/health');
+      // Real path: orchestration.middlewareHealth (tRPC)
+      final data = await ApiService().query<Map<String, dynamic>>(
+        'orchestration.middlewareHealth', null, (j) => j as Map<String, dynamic>);
       setState(() { _health = data; _loading = false; });
     } catch (e) {
       setState(() => _loading = false);

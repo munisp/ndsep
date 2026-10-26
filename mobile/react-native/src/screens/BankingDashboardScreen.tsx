@@ -14,8 +14,8 @@ interface Institution {
 }
 
 export default function BankingDashboardScreen({ navigation }: any) {
-  const statsQuery = trpc.bankingServices.institutionStats.useQuery();
-  const institutionsQuery = trpc.bankingServices.listInstitutions.useQuery({ page: 1, limit: 10 });
+  const statsQuery = trpc.banking.institutions.institutionStats.useQuery();
+  const institutionsQuery = trpc.banking.institutions.listInstitutions.useQuery({ page: 1, limit: 10 });
 
   const stats = statsQuery.data ?? { total: 0, licensed: 0, suspended: 0, avgCompliance: 0 };
 

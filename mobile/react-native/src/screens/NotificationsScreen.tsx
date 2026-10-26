@@ -11,6 +11,10 @@ export default function NotificationsScreen() {
   const markReadMutation = trpc.notifications.markRead.useMutation({
     onSuccess: () => utils.notifications.list.invalidate(),
   });
+  // notifications.markRead takes {id} only; "mark all" is a separate procedure.
+  const markAllReadMutation = trpc.notifications.markAllRead.useMutation({
+    onSuccess: () => utils.notifications.list.invalidate(),
+  });
 
   const TYPE_COLORS: Record<string, string> = {
     penalty: "#ef4444", alert: "#f97316", compliance: "#22c55e",
@@ -22,7 +26,7 @@ export default function NotificationsScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Notifications</Text>
         {(notifications ?? []).some((n: any) => !n.readAt) && (
-          <TouchableOpacity onPress={() => markReadMutation.mutate({ all: true })}>
+          <TouchableOpacity onPress={() => markAllReadMutation.mutate()}>
             <Text style={styles.markAll}>Mark all read</Text>
           </TouchableOpacity>
         )}

@@ -129,16 +129,16 @@ void main() {
     });
 
     test('mutation URL is constructed correctly', () {
-      const procedure = 'financial.issuePenalty';
+      const procedure = 'financial.createPenalty';
       final uri = Uri.parse('$baseUrl/api/trpc/$procedure?batch=1');
-      expect(uri.path, '/api/trpc/financial.issuePenalty');
+      expect(uri.path, '/api/trpc/financial.createPenalty');
       expect(uri.queryParameters['batch'], '1');
     });
 
     test('nested procedure path is preserved', () {
-      const procedure = 'banking.kyc.submit';
+      const procedure = 'banking.kyc.create';
       final uri = Uri.parse('$baseUrl/api/trpc/$procedure?batch=1');
-      expect(uri.path, '/api/trpc/banking.kyc.submit');
+      expect(uri.path, '/api/trpc/banking.kyc.create');
     });
   });
 
@@ -149,20 +149,23 @@ void main() {
     final canonicalProcedures = {
       'auth': ['auth.me', 'auth.logout'],
       'dashboard': ['dashboard.stats'],
-      'organizations': ['organizations.list', 'organizations.create'],
-      'banking_kyc': ['banking.kyc.list', 'banking.kyc.submit'],
-      'banking_aml': ['banking.aml.list', 'banking.aml.flag'],
+      'organizations': ['organizations.list', 'organizations.byId'],
+      'banking_kyc': ['banking.kyc.list', 'banking.kyc.create'],
+      'banking_aml': ['banking.aml.list', 'banking.aml.create'],
       'siem': ['siem.alerts', 'siem.resolveAlert'],
-      'audit': ['auditLogs.list'],
+      'audit': ['siem.auditLogs'],
       'enforcement': ['enforcementCases.list', 'enforcementCases.create'],
-      'financial': ['financial.penalties', 'financial.issuePenalty'],
+      'financial': ['financial.penalties', 'financial.createPenalty'],
       'calendar': ['complianceCalendar.events', 'complianceCalendar.upcomingDeadlines', 'complianceCalendar.listCustom', 'complianceCalendar.createEvent'],
       'portal': ['portal.myOrg', 'portal.listOrgUsers', 'portal.addOrgUser'],
       'monitoring': ['monitoring.stats', 'monitoring.slaBreaches'],
       'workers': ['workers.status'],
       'tia': ['tia.list', 'tia.create'],
-      'remediation': ['remediation.list', 'remediation.create'],
-      'leaderboard': ['complianceLeaderboard.list'],
+      'remediation': ['remediation.list', 'remediation.create', 'remediation.update'],
+      'complaints': ['publicComplaints.list', 'publicComplaints.get', 'publicComplaints.stats', 'publicComplaints.trackComplaint'],
+      'sovereignty': ['hostingVerification.listVerdicts', 'hostingVerification.declarationVerdict', 'hostingVerification.stats', 'dataSovereignty.scoreRegister', 'dataSovereignty.sectorHeatMap'],
+      'settlement': ['settlementWorkflow.listSettlements', 'settlementWorkflow.getSettlement'],
+      'leaderboard': ['leaderboard.list'],
     };
 
     for (final entry in canonicalProcedures.entries) {

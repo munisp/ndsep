@@ -15,7 +15,7 @@ export default function TiaAssessmentsScreen() {
   const [form, setForm] = useState({ organizationId: "", transferDestination: "", dataCategories: "", legalBasis: "", riskLevel: "medium" });
 
   const utils = trpc.useUtils();
-  const { data: assessments = [], isLoading, refetch } = trpc.tia.list.useQuery({ limit: 50 });
+  const { data: assessments = [], isLoading, refetch } = trpc.tia.list.useQuery({});
 
   const createMutation = trpc.tia.create.useMutation({
     onSuccess: () => {
@@ -94,7 +94,7 @@ export default function TiaAssessmentsScreen() {
               <TouchableOpacity style={styles.cancelButton} onPress={() => setShowCreateModal(false)}><Text style={styles.cancelButtonText}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.submitButton, createMutation.isPending && { opacity: 0.6 }]} onPress={() => {
                 if (!form.organizationId || !form.transferDestination) { Alert.alert("Validation", "Organization ID and Transfer Destination are required"); return; }
-                createMutation.mutate({ organizationId: Number(form.organizationId), transferDestination: form.transferDestination, dataCategories: form.dataCategories, legalBasis: form.legalBasis, riskLevel: form.riskLevel as any });
+                createMutation.mutate({ organizationId: Number(form.organizationId), destinationCountry: form.transferDestination, dataCategories: form.dataCategories ? form.dataCategories.split(",").map((s: string) => s.trim()).filter(Boolean) : undefined, legalBasis: form.legalBasis, riskLevel: form.riskLevel as any });
               }} disabled={createMutation.isPending}>
                 <Text style={styles.submitButtonText}>{createMutation.isPending ? "Creating..." : "Create TIA"}</Text>
               </TouchableOpacity>

@@ -7,7 +7,7 @@ import { trpc } from "../api/trpc";
 
 export default function AuditLogScreen() {
   const [search, setSearch] = useState("");
-  const { data: logs, isLoading } = trpc.auditLogs.list.useQuery({ limit: 100 });
+  const { data: logs, isLoading } = trpc.siem.auditLogs.useQuery({ limit: 100 });
 
   const filtered = (logs ?? []).filter((l: any) =>
     !search || l.action?.toLowerCase().includes(search.toLowerCase()) ||

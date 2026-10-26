@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, RefreshControl, StyleSheet, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// breachIncidents.list returns raw SQL rows (snake_case) in {data, total}
 interface BreachIncident {
   id: number;
   title: string;
-  severity: string;
-  status: string;
-  affectedRecords: number;
-  createdAt: string;
+  breach_incident_severity: string;
+  breach_incident_status: string;
+  affected_individuals_count: number;
+  detected_at: string;
   description?: string;
+  org_name?: string;
 }
 
 const API_BASE = __DEV__ ? 'http://10.0.2.2:3000' : '';
@@ -22,9 +25,13 @@ export default function BreachIncidentsScreen() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API_BASE}/api/trpc/breachIncidents.list`);
+      const token = await AsyncStorage.getItem('ndsep_session_token');
+      const input = encodeURIComponent(JSON.stringify({ json: { page: 1, limit: 50 } }));
+      const res = await fetch(`${API_BASE}/api/trpc/breachIncidents.list?input=${input}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const json = await res.json();
-      setIncidents(json?.result?.data ?? []);
+      setIncidents(json?.result?.data?.json?.data ?? []);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -46,11 +53,11 @@ export default function BreachIncidentsScreen() {
 
   const renderItem = ({ item }: { item: BreachIncident }) => (
     <TouchableOpacity style={styles.card} onPress={() => Alert.alert(item.title, item.description ?? 'No details')}>
-      <View style={[styles.severityDot, { backgroundColor: severityColor(item.severity) }]} />
+      <View style={[styles.severityDot, { backgroundColor: severityColor(item.breach_incident_severity) }]} />
       <View style={styles.cardContent}>
         <Text style={styles.cardTitle}>{item.title}</Text>
-        <Text style={styles.cardSubtitle}>{item.status} - {item.createdAt?.substring(0, 10)}</Text>
-        <Text style={styles.affectedText}>Affected: {item.affectedRecords ?? 0} records</Text>
+        <Text style={styles.cardSubtitle}>{item.breach_incident_status} - {item.detected_at?.substring(0, 10)}</Text>
+        <Text style={styles.affectedText}>Affected: {item.affected_individuals_count ?? 0} individuals</Text>
       </View>
     </TouchableOpacity>
   );

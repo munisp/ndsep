@@ -95,14 +95,14 @@ class _BankingDashboardScreenState extends State<BankingDashboardScreen> {
           final data = snapshot.requireData;
           final stats = data.stats;
           final actions = <_BankingAction>[
-            _BankingAction('KYC Management', _api.listKycRecords),
-            _BankingAction('AML Cases', _api.listAmlCases),
-            _BankingAction('SWIFT Transactions', _api.listSwiftMessages),
-            _BankingAction('Fraud Alerts', _api.listFraudAlerts),
-            _BankingAction('CBN Reports', _api.listCbnReports),
-            _BankingAction('Correspondent Banks', _api.listCorrespondentBanks),
-            _BankingAction('Watchlist Screening', _api.listBankingWatchlist),
-            _BankingAction('Payments Monitor', _api.listBankingPayments),
+            _BankingAction('KYC Management', () => _api.listKycRecords()),
+            _BankingAction('AML Cases', () => _api.listAmlCases()),
+            _BankingAction('SWIFT Transactions', () => _api.listSwiftMessages()),
+            _BankingAction('Fraud Alerts', () => _api.listFraudAlerts()),
+            _BankingAction('CBN Reports', () => _api.listCbnReports()),
+            _BankingAction('Correspondent Banks', () => _api.listCorrespondentBanks()),
+            _BankingAction('Watchlist Screening', () => _api.listBankingWatchlist()),
+            _BankingAction('Payments Monitor', () => _api.listBankingPayments()),
           ];
 
           return RefreshIndicator(

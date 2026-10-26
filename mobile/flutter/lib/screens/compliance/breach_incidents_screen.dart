@@ -22,8 +22,10 @@ class _BreachIncidentsScreenState extends State<BreachIncidentsScreen> {
   Future<void> _loadIncidents() async {
     try {
       setState(() { _loading = true; _error = null; });
-      final data = await ApiService.instance.get('/api/trpc/breachIncidents.list');
-      setState(() { _incidents = data['result']?['data'] ?? []; _loading = false; });
+      // Real path: breachIncidents.list -> {data, total} (snake_case rows)
+      final res = await ApiService().query<Map<String, dynamic>>(
+        'breachIncidents.list', {'page': 1, 'limit': 50}, (j) => j as Map<String, dynamic>);
+      setState(() { _incidents = (res['data'] as List?) ?? []; _loading = false; });
     } catch (e) {
       setState(() { _error = e.toString(); _loading = false; });
     }
@@ -62,24 +64,28 @@ class _BreachIncidentsScreenState extends State<BreachIncidentsScreen> {
                       child: ListView.builder(
                         itemCount: _incidents.length,
                         itemBuilder: (context, index) {
-                          final incident = _incidents[index];
+                          final incident = _incidents[index] as Map;
+                          final severity = incident['breach_incident_severity']?.toString() ?? 'low';
+                          final status = incident['breach_incident_status']?.toString() ?? 'unknown';
+                          final detectedAt = incident['detected_at']?.toString() ?? '';
                           return Card(
                             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             child: ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: _severityColor(incident['severity'] ?? 'low'),
+                                backgroundColor: _severityColor(severity),
                                 child: Text(
-                                  (incident['severity'] ?? 'L')[0].toUpperCase(),
+                                  severity[0].toUpperCase(),
                                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                                 ),
                               ),
-                              title: Text(incident['title'] ?? 'Unnamed Incident'),
+                              title: Text(incident['title']?.toString() ?? 'Unnamed Incident'),
                               subtitle: Text(
-                                '${incident['status'] ?? 'Unknown'} - ${incident['createdAt']?.toString().substring(0, 10) ?? ''}',
+                                '${incident['org_name'] ?? 'Org #${incident['organization_id'] ?? '?'}'} • $status'
+                                '${detectedAt.length >= 10 ? ' • ${detectedAt.substring(0, 10)}' : ''}',
                               ),
                               trailing: Chip(
-                                label: Text(incident['status'] ?? '', style: const TextStyle(fontSize: 10)),
-                                backgroundColor: incident['status'] == 'resolved' ? Colors.green.shade100 : Colors.red.shade100,
+                                label: Text(status, style: const TextStyle(fontSize: 10)),
+                                backgroundColor: (status == 'resolved' || status == 'closed') ? Colors.green.shade100 : Colors.red.shade100,
                               ),
                               onTap: () => _showIncidentDetail(incident),
                             ),
@@ -94,7 +100,8 @@ class _BreachIncidentsScreenState extends State<BreachIncidentsScreen> {
     );
   }
 
-  void _showIncidentDetail(dynamic incident) {
+  void _showIncidentDetail(Map incident) {
+    final hours = incident['hours_remaining'];
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -104,14 +111,17 @@ class _BreachIncidentsScreenState extends State<BreachIncidentsScreen> {
           controller: scrollController,
           padding: const EdgeInsets.all(16),
           children: [
-            Text(incident['title'] ?? '', style: Theme.of(context).textTheme.headlineSmall),
+            Text(incident['title']?.toString() ?? '', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
-            _detailRow('Severity', incident['severity'] ?? 'Unknown'),
-            _detailRow('Status', incident['status'] ?? 'Unknown'),
-            _detailRow('Affected Records', '${incident['affectedRecords'] ?? 0}'),
-            _detailRow('Reported At', incident['createdAt']?.toString().substring(0, 19) ?? ''),
+            _detailRow('Severity', incident['breach_incident_severity']?.toString() ?? 'Unknown'),
+            _detailRow('Status', incident['breach_incident_status']?.toString() ?? 'Unknown'),
+            _detailRow('Organisation', incident['org_name']?.toString() ?? '—'),
+            _detailRow('Affected Individuals', '${incident['affected_individuals_count'] ?? 0}'),
+            _detailRow('Detected At', incident['detected_at']?.toString() ?? ''),
+            if (hours != null)
+              _detailRow('NDPC 72h Deadline', '${double.tryParse(hours.toString())?.toStringAsFixed(1) ?? hours}h remaining'),
             const Divider(),
-            Text(incident['description'] ?? 'No description available'),
+            Text(incident['description']?.toString() ?? 'No description available'),
           ],
         ),
       ),
@@ -129,6 +139,7 @@ class _BreachIncidentsScreenState extends State<BreachIncidentsScreen> {
   void _showCreateDialog() {
     final titleCtrl = TextEditingController();
     final descCtrl = TextEditingController();
+    final orgIdCtrl = TextEditingController();
     String severity = 'medium';
 
     showDialog(
@@ -136,6 +147,9 @@ class _BreachIncidentsScreenState extends State<BreachIncidentsScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Report Breach Incident'),
         content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: orgIdCtrl, keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Organization ID')),
+          const SizedBox(height: 8),
           TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title')),
           const SizedBox(height: 8),
           TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Description'), maxLines: 3),
@@ -151,13 +165,28 @@ class _BreachIncidentsScreenState extends State<BreachIncidentsScreen> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
+              final orgId = int.tryParse(orgIdCtrl.text);
+              if (orgId == null || titleCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Organization ID and Title are required')),
+                );
+                return;
+              }
               Navigator.pop(context);
-              await ApiService.instance.post('/api/trpc/breachIncidents.create', {
-                'title': titleCtrl.text,
-                'description': descCtrl.text,
-                'severity': severity,
-              });
-              _loadIncidents();
+              try {
+                // Real path: breachIncidents.create {organizationId, title, description, severity}
+                await ApiService().mutate<Map<String, dynamic>>('breachIncidents.create', {
+                  'organizationId': orgId,
+                  'title': titleCtrl.text.trim(),
+                  if (descCtrl.text.trim().isNotEmpty) 'description': descCtrl.text.trim(),
+                  'severity': severity,
+                }, (j) => j as Map<String, dynamic>);
+                _loadIncidents();
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              }
             },
             child: const Text('Report'),
           ),

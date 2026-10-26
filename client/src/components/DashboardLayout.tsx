@@ -35,7 +35,7 @@ import {
   Heart, Zap as ZapIcon, HeartPulse, FlaskConical, AlertCircle, Clock, UserCog, MonitorDot,
   Calculator, CalendarDays, HeartHandshake, Mail, Brain,
   Workflow, Share2, FileSearch, Eye, Microscope,
-  MapPin, ArrowRightLeft, Star, Ship, Plane, Skull, Flame
+  MapPin, ArrowRightLeft, Star, Ship, Plane, Skull, Flame, MonitorCheck, Library
 } from "lucide-react";
 import { useRbac, getRoleBadgeColor, getRoleLabel } from "@/hooks/useRbac";
 import { CSSProperties, useEffect, useRef, useState, useCallback, useMemo } from "react";
@@ -169,6 +169,10 @@ const menuSections: MenuSection[] = [
       { icon: BrainCircuit, label: "AI Risk Engine", path: "/ai-risk-engine" },
       { icon: Brain, label: "AI Ethics Board", path: "/ai-ethics" },
       { icon: BrainCircuit, label: "AI Gov. Scoring", path: "/ai-governance-scoring" },
+      { icon: Cpu, label: "ML Ops Console", path: "/ml-ops" },
+      // Round-16 W1 — regulatory intelligence surfaces
+      { icon: MonitorCheck, label: "Policy Monitor", path: "/policy-monitor" },
+      { icon: Library, label: "Reg Intel", path: "/reg-intel" },
     ],
   },
   {
@@ -230,6 +234,8 @@ const menuSections: MenuSection[] = [
       { icon: Globe, label: "TIA Assessments", path: "/tia" },
       { icon: Wrench, label: "Remediation", path: "/remediation" },
       { icon: Network, label: "Asset Graph", path: "/asset-graph" },
+      // Round-16 W1 — cross-regulator reconciliation
+      { icon: Scale, label: "Regulator Reconciliation", path: "/regulator-reconciliation" },
     ],
   },
   {
@@ -249,6 +255,10 @@ const menuSections: MenuSection[] = [
       { icon: Microscope, label: "Compliance Gap", path: "/compliance-gap" },
       { icon: ShieldAlert, label: "Vendor Risk", path: "/vendor-risk" },
       { icon: Eye, label: "Whistleblower", path: "/whistleblower" },
+      // Round-16 W2
+      { icon: GitBranch, label: "Consent Propagation", path: "/consent-propagation" },
+      { icon: MessageSquare, label: "WB Secure Channel", path: "/whistleblower-channel" },
+      { icon: Fingerprint, label: "NIN Identity", path: "/nin-identity" },
       { icon: Landmark, label: "Reg Sandbox", path: "/regulatory-sandbox" },
       { icon: Fingerprint, label: "National ID Verify", path: "/national-id" },
       { icon: Share2, label: "Cross-Agency Sharing", path: "/cross-agency" },
@@ -272,6 +282,11 @@ const menuSections: MenuSection[] = [
       { icon: Mail, label: "Email Digest Settings", path: "/email-digest" },
       { icon: Wand2, label: "Changelog Admin", path: "/admin/changelog" },
       { icon: Clock, label: "SLA Timers", path: "/sla-timers" },
+      { icon: Workflow, label: "Automation Rules", path: "/automation-rules" },
+      // Round-16 W3 — operator consoles
+      { icon: ShieldCheck, label: "Antiwipe Console", path: "/antiwipe-console" },
+      { icon: Gauge, label: "Production Readiness", path: "/production-readiness" },
+      { icon: Workflow, label: "Workflows Console", path: "/workflows" },
     ],
   },
 ];

@@ -22,13 +22,13 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
 
   // Create form state
   final _orgIdCtrl = TextEditingController();
-  final _titleCtrl = TextEditingController();
+  final _actionTypeCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
-  final _dueDateCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
   String _priority = 'medium';
   bool _creating = false;
 
-  static const _statuses = ['open', 'in_progress', 'completed', 'overdue'];
+  static const _statuses = ['pending', 'in_progress', 'completed', 'overdue', 'cancelled'];
   static const _priorities = ['low', 'medium', 'high', 'critical'];
 
   static const _priorityColors = {
@@ -39,10 +39,11 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
   };
 
   static const _statusColors = {
-    'open': Color(0xFF3b82f6),
+    'pending': Color(0xFF3b82f6),
     'in_progress': Color(0xFFf59e0b),
     'completed': Color(0xFF22c55e),
     'overdue': Color(0xFFef4444),
+    'cancelled': Color(0xFF6b7280),
   };
 
   @override
@@ -54,9 +55,9 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
   @override
   void dispose() {
     _orgIdCtrl.dispose();
-    _titleCtrl.dispose();
+    _actionTypeCtrl.dispose();
     _descCtrl.dispose();
-    _dueDateCtrl.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
 
@@ -71,23 +72,30 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
   }
 
   Future<void> _create() async {
-    if (_orgIdCtrl.text.isEmpty || _titleCtrl.text.isEmpty) {
+    if (_orgIdCtrl.text.isEmpty || _actionTypeCtrl.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Organization ID and Title are required')),
+        const SnackBar(content: Text('Organization ID and Action Type are required')),
+      );
+      return;
+    }
+    final orgId = int.tryParse(_orgIdCtrl.text);
+    if (orgId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Organization ID must be a number')),
       );
       return;
     }
     setState(() => _creating = true);
     try {
       await _api.createRemediationWorkflow(
-        organizationId: int.parse(_orgIdCtrl.text),
-        title: _titleCtrl.text,
+        organizationId: orgId,
+        actionType: _actionTypeCtrl.text.trim(),
         description: _descCtrl.text.isEmpty ? null : _descCtrl.text,
         priority: _priority,
-        dueDate: _dueDateCtrl.text.isEmpty ? null : _dueDateCtrl.text,
+        notes: _notesCtrl.text.isEmpty ? null : _notesCtrl.text,
       );
       setState(() { _showCreateModal = false; _creating = false; });
-      _orgIdCtrl.clear(); _titleCtrl.clear(); _descCtrl.clear(); _dueDateCtrl.clear();
+      _orgIdCtrl.clear(); _actionTypeCtrl.clear(); _descCtrl.clear(); _notesCtrl.clear();
       _priority = 'medium';
       _load();
     } catch (e) {
@@ -192,7 +200,7 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
                               itemBuilder: (context, index) {
                                 final wf = _workflows[index] as Map<String, dynamic>;
                                 final priority = wf['priority'] as String? ?? 'medium';
-                                final status = wf['status'] as String? ?? 'open';
+                                final status = wf['status'] as String? ?? 'pending';
                                 return Container(
                                   margin: const EdgeInsets.only(bottom: 10),
                                   padding: const EdgeInsets.all(14),
@@ -216,7 +224,7 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
-                                              wf['title'] as String? ?? 'Untitled',
+                                              wf['actionType'] as String? ?? 'Untitled',
                                               style: const TextStyle(
                                                 color: Color(0xFFF9FAFB),
                                                 fontSize: 15,
@@ -249,12 +257,12 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
                                           Text(
-                                            'Org #${wf['organizationId']}',
+                                            'Org #${wf['orgId'] ?? wf['organizationId'] ?? '?'}',
                                             style: TextStyle(color: Colors.grey[500], fontSize: 11),
                                           ),
-                                          if (wf['dueDate'] != null)
+                                          if (wf['deadline'] != null)
                                             Text(
-                                              'Due: ${wf['dueDate']}',
+                                              'Due: ${wf['deadline'].toString().substring(0, 10)}',
                                               style: const TextStyle(color: Color(0xFFf59e0b), fontSize: 11),
                                             ),
                                         ],
@@ -312,9 +320,9 @@ class _RemediationWorkflowsScreenState extends State<RemediationWorkflowsScreen>
                     ),
                     const SizedBox(height: 16),
                     _buildInput(_orgIdCtrl, 'Organization ID', keyboardType: TextInputType.number),
-                    _buildInput(_titleCtrl, 'Title'),
+                    _buildInput(_actionTypeCtrl, 'Action Type (e.g. patch, revoke_access, policy_update)'),
                     _buildInput(_descCtrl, 'Description', maxLines: 3),
-                    _buildInput(_dueDateCtrl, 'Due Date (YYYY-MM-DD)'),
+                    _buildInput(_notesCtrl, 'Notes (optional)'),
                     const Text('Priority', style: TextStyle(color: Color(0xFF9ca3af), fontSize: 12)),
                     const SizedBox(height: 8),
                     Row(

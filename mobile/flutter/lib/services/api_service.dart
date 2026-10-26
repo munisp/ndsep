@@ -88,15 +88,17 @@ class ApiService {
   Future<List<dynamic>> listOrganizations({int limit = 100}) =>
       query('organizations.list', {'limit': limit}, (j) => j as List<dynamic>);
 
+  /// Real path: organizations.byId (organizations.get does not exist)
   Future<Map<String, dynamic>> getOrganization(int id) =>
-      query('organizations.get', {'id': id}, (j) => j as Map<String, dynamic>);
+      query('organizations.byId', {'id': id}, (j) => j as Map<String, dynamic>);
 
   // ─── Compliance ──────────────────────────────────────────────────────────────
+  /// Real path: compliance.violations accepts {limit, severity} only
+  /// (organizationId is not a server input; org admins are filtered server-side)
   Future<List<dynamic>> listViolations({int limit = 50, String? severity, int? organizationId}) =>
       query('compliance.violations', {
         'limit': limit,
         if (severity != null) 'severity': severity,
-        if (organizationId != null) 'organizationId': organizationId,
       }, (j) => j as List<dynamic>);
 
   Future<void> resolveViolation(int id) =>
@@ -108,11 +110,9 @@ class ApiService {
       query('enforcementCases.list', {'limit': limit}, (j) => j as List<dynamic>);
 
   // ─── Financial ───────────────────────────────────────────────────────────────
+  /// financial.penalties accepts {limit} only
   Future<List<dynamic>> listPenalties({int limit = 50, int? organizationId}) =>
-      query('financial.penalties', {
-        'limit': limit,
-        if (organizationId != null) 'organizationId': organizationId,
-      }, (j) => j as List<dynamic>);
+      query('financial.penalties', {'limit': limit}, (j) => j as List<dynamic>);
 
   /// Issue penalty via orchestration workflow (orchestration.issuePenalty)
   Future<Map<String, dynamic>> issuePenalty({
@@ -166,26 +166,33 @@ class ApiService {
       query('siem.alerts', {'limit': limit, 'resolved': resolved}, (j) => j as List<dynamic>);
 
   /// Correct path: siem.resolveAlert (not security.resolveAlert)
+  /// Real input key: siem.resolveAlert takes {alertId} (not {id})
   Future<void> resolveAlert(int id) =>
-      mutate('siem.resolveAlert', {'id': id}, (_) => null);
+      mutate('siem.resolveAlert', {'alertId': id}, (_) => null);
 
   // ─── Assets ──────────────────────────────────────────────────────────────────
+  /// Real input key: assets.list takes {orgId, limit} (not organizationId)
   Future<List<dynamic>> listAssets({int limit = 100, int? organizationId}) =>
       query('assets.list', {
         'limit': limit,
-        if (organizationId != null) 'organizationId': organizationId,
+        if (organizationId != null) 'orgId': organizationId,
       }, (j) => j as List<dynamic>);
 
   // ─── Citizen Rights ──────────────────────────────────────────────────────────
-  Future<List<dynamic>> listCitizenRequests({int limit = 50}) =>
-      query('citizenRights.list', {'limit': limit}, (j) => j as List<dynamic>);
+  /// citizenRights.list accepts {status, requestType} only (no limit server-side)
+  Future<List<dynamic>> listCitizenRequests({int limit = 50, String? status, String? requestType}) =>
+      query('citizenRights.list', {
+        if (status != null) 'status': status,
+        if (requestType != null) 'requestType': requestType,
+      }, (j) => j as List<dynamic>);
 
+  /// Real path: citizenRights.submit (citizenRights.create does not exist)
   Future<Map<String, dynamic>> createCitizenRequest({
     required String requestType,
     required String description,
     required String citizenName,
     required String citizenEmail,
-  }) => mutate('citizenRights.create', {
+  }) => mutate('citizenRights.submit', {
         'requestType': requestType,
         'description': description,
         'citizenName': citizenName,
@@ -193,16 +200,23 @@ class ApiService {
       }, (j) => j as Map<String, dynamic>);
 
   // ─── Audit ───────────────────────────────────────────────────────────────────
-  /// Correct path: auditLogs.list (not audit.list)
+  /// Canonical path: siem.auditLogs (the duplicate top-level `auditLogs` mount was
+  /// unmounted in Round-16 integration; siem.auditLogs accepts {limit, search, action}).
   Future<List<dynamic>> listAuditLogs({int limit = 100}) =>
-      query('auditLogs.list', {'limit': limit}, (j) => j as List<dynamic>);
+      query('siem.auditLogs', {'limit': limit}, (j) => j as List<dynamic>);
 
   // ─── Notifications ───────────────────────────────────────────────────────────
   Future<List<dynamic>> listNotifications({int limit = 50}) =>
       query('notifications.list', {'limit': limit}, (j) => j as List<dynamic>);
 
-  Future<void> markNotificationRead({int? id, bool all = false}) =>
-      mutate('notifications.markRead', {if (id != null) 'id': id, 'all': all}, (_) => null);
+  /// notifications.markRead takes {id} only; the "mark all" path is
+  /// notifications.markAllRead (no input).
+  Future<void> markNotificationRead({int? id, bool all = false}) {
+    if (all || id == null) {
+      return mutate('notifications.markAllRead', {}, (_) => null);
+    }
+    return mutate('notifications.markRead', {'id': id}, (_) => null);
+  }
 
   // ─── Portal ──────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getMyOrgPortal() =>
@@ -226,43 +240,51 @@ class ApiService {
       mutate('reports.schedule', {'reportType': reportType, 'frequency': frequency, 'recipients': recipients}, (j) => j as Map<String, dynamic>);
 
   // ─── TIA Assessments ─────────────────────────────────────────────────────────
+  /// tia.list accepts {orgId} only (no limit server-side)
   Future<List<dynamic>> listTiaAssessments({int limit = 50}) =>
-      query('tia.list', {'limit': limit}, (j) => j as List<dynamic>);
+      query('tia.list', {}, (j) => j as List<dynamic>);
 
+  /// Real input: tia.create takes {organizationId, destinationCountry,
+  /// legalBasis (required), dataCategories: string[], riskLevel}
   Future<Map<String, dynamic>> createTiaAssessment({
     required int organizationId,
-    required String transferDestination,
-    String? dataCategories,
-    String? legalBasis,
+    required String destinationCountry,
+    List<String>? dataCategories,
+    required String legalBasis,
     String riskLevel = 'medium',
   }) => mutate('tia.create', {
         'organizationId': organizationId,
-        'transferDestination': transferDestination,
+        'destinationCountry': destinationCountry,
         if (dataCategories != null) 'dataCategories': dataCategories,
-        if (legalBasis != null) 'legalBasis': legalBasis,
+        'legalBasis': legalBasis,
         'riskLevel': riskLevel,
       }, (j) => j as Map<String, dynamic>);
 
   // ─── Remediation ─────────────────────────────────────────────────────────────
+  /// remediation.list accepts {orgId, status} only (no limit server-side)
   Future<List<dynamic>> listRemediationWorkflows({int limit = 100, String? status}) =>
-      query('remediation.list', {'limit': limit, if (status != null) 'status': status}, (j) => j as List<dynamic>);
+      query('remediation.list', {if (status != null) 'status': status}, (j) => j as List<dynamic>);
 
+  /// Real input: remediation.create takes {orgId, actionType, priority,
+  /// description, notes} (title/dueDate are not server inputs)
   Future<Map<String, dynamic>> createRemediationWorkflow({
     required int organizationId,
-    required String title,
+    required String actionType,
     String? description,
     String priority = 'medium',
-    String? dueDate,
+    String? notes,
   }) => mutate('remediation.create', {
-        'organizationId': organizationId,
-        'title': title,
+        'orgId': organizationId,
+        'actionType': actionType,
         if (description != null) 'description': description,
         'priority': priority,
-        if (dueDate != null) 'dueDate': dueDate,
+        if (notes != null) 'notes': notes,
       }, (j) => j as Map<String, dynamic>);
 
+  /// Real path: remediation.update with status 'completed'
+  /// (remediation.complete does not exist)
   Future<void> completeRemediationWorkflow(int id) =>
-      mutate('remediation.complete', {'id': id}, (_) => null);
+      mutate('remediation.update', {'id': id, 'status': 'completed'}, (_) => null);
 
   // ─── DPCO Operations ─────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getDpcoDashboardStats() =>
@@ -300,14 +322,15 @@ class ApiService {
         if (bankId != null) 'bankId': bankId,
       }, _records);
 
+  /// Real path: banking.kyc.create (banking.kyc.submit does not exist)
   Future<Map<String, dynamic>> submitKyc({
     required int bankId,
     required String subjectType,
     required String fullName,
     required String bvn,
-    required String nationality,
+    String nationality = 'Nigerian',
     String? dateOfBirth,
-  }) => mutate('banking.kyc.submit', {
+  }) => mutate('banking.kyc.create', {
         'bankId': bankId,
         'subjectType': subjectType,
         'fullName': fullName,
@@ -319,8 +342,10 @@ class ApiService {
   Future<List<dynamic>> listBankingWatchlist({int limit = 50}) =>
       query('banking.watchlist.list', {'limit': limit}, _records);
 
+  /// Real path: banking.payments.listNip (banking.payments.list does not exist;
+  /// the payments router exposes listNip/listRtgs/paymentStats)
   Future<List<dynamic>> listBankingPayments({int limit = 50}) =>
-      query('banking.payments.list', {'limit': limit}, _records);
+      query('banking.payments.listNip', {'limit': limit}, _records);
 
   Future<List<dynamic>> listSwiftMessages({int limit = 50}) =>
       query('banking.swift.list', {'limit': limit}, _records);
@@ -406,4 +431,85 @@ class ApiService {
         'reminderDays': reminderDays,
         if (notes != null) 'notes': notes,
       }, (j) => j as Map<String, dynamic>);
+
+  // ─── Public Complaints (NDPA s.46) ───────────────────────────────────────────
+  /// Staff triage queue. Returns {data, total, page, limit}.
+  Future<Map<String, dynamic>> listComplaints({String? status, String? category, String? search, bool slaBreachedOnly = false, bool unassignedOnly = false, int page = 1, int limit = 20}) =>
+      query('publicComplaints.list', {
+        if (status != null) 'status': status,
+        if (category != null) 'category': category,
+        if (search != null && search.isNotEmpty) 'search': search,
+        'slaBreachedOnly': slaBreachedOnly,
+        'unassignedOnly': unassignedOnly,
+        'page': page,
+        'limit': limit,
+      }, (j) => j as Map<String, dynamic>);
+
+  /// Complaint detail incl. status timeline (events), attachments, merges.
+  Future<Map<String, dynamic>> getComplaint(int id) =>
+      query('publicComplaints.get', {'id': id}, (j) => j as Map<String, dynamic>);
+
+  Future<Map<String, dynamic>> getComplaintStats() =>
+      query('publicComplaints.stats', null, (j) => j as Map<String, dynamic>);
+
+  /// Public reference-code tracking (publicProcedure, rate-limited server-side).
+  Future<Map<String, dynamic>> trackComplaint({required String referenceCode, String? complainantEmail}) =>
+      query('publicComplaints.trackComplaint', {
+        'referenceCode': referenceCode,
+        if (complainantEmail != null && complainantEmail.isNotEmpty) 'complainantEmail': complainantEmail,
+      }, (j) => j as Map<String, dynamic>);
+
+  // ─── Enforcement case detail ─────────────────────────────────────────────────
+  Future<List<dynamic>> getEnforcementCaseTimeline(int caseId) =>
+      query('enforcementCases.timeline', {'caseId': caseId}, (j) => j as List<dynamic>);
+
+  Future<Map<String, dynamic>> getEnforcementOpenCount() =>
+      query('enforcementCases.openCount', null, (j) => j as Map<String, dynamic>);
+
+  // ─── Settlement workflow ─────────────────────────────────────────────────────
+  /// Returns {rows}.
+  Future<List<dynamic>> listSettlements({String? status, String? caseRef, int limit = 50}) =>
+      query('settlementWorkflow.listSettlements', {
+        if (status != null) 'status': status,
+        if (caseRef != null && caseRef.isNotEmpty) 'caseRef': caseRef,
+        'limit': limit,
+      }, _records);
+
+  /// Returns {settlement, terms, approvals, instalments}.
+  Future<Map<String, dynamic>> getSettlement(int settlementId) =>
+      query('settlementWorkflow.getSettlement', {'settlementId': settlementId}, (j) => j as Map<String, dynamic>);
+
+  // ─── Data Sovereignty / Hosting verification ─────────────────────────────────
+  /// Verification queue: latest run per declaration. Returns {rows, note}.
+  Future<List<dynamic>> listHostingVerdicts({String? status, int limit = 200}) =>
+      query('hostingVerification.listVerdicts', {
+        if (status != null) 'status': status,
+        'limit': limit,
+      }, _records);
+
+  /// Latest verdict + per-host evidence for one declaration.
+  /// Returns {run, hosts, note}.
+  Future<Map<String, dynamic>> getDeclarationVerdict(int declarationId) =>
+      query('hostingVerification.declarationVerdict', {'declarationId': declarationId}, (j) => j as Map<String, dynamic>);
+
+  Future<Map<String, dynamic>> getHostingVerificationStats() =>
+      query('hostingVerification.stats', null, (j) => j as Map<String, dynamic>);
+
+  /// Hosting declarations register. Returns {rows, note}.
+  Future<List<dynamic>> listHostingDeclarations({String? status, int limit = 200}) =>
+      query('dataSovereignty.listDeclarations', {
+        if (status != null) 'status': status,
+        'limit': limit,
+      }, _records);
+
+  /// Latest sovereignty score per entity, worst first. Returns {rows, note}.
+  Future<List<dynamic>> getSovereigntyScoreRegister({String? tier, int limit = 200}) =>
+      query('dataSovereignty.scoreRegister', {
+        if (tier != null) 'tier': tier,
+        'limit': limit,
+      }, _records);
+
+  /// Sector heat map rows (avg score, at-risk counts per entity_type).
+  Future<List<dynamic>> getSovereigntySectorHeatMap() =>
+      query('dataSovereignty.sectorHeatMap', null, _records);
 }

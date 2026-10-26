@@ -16,9 +16,9 @@ export default function CitizenRightsScreen() {
   const [form, setForm] = useState({ type: "access" as string, description: "", citizenName: "", citizenEmail: "" });
   const utils = trpc.useUtils();
 
-  const { data: requests, isLoading } = trpc.citizenRights.list.useQuery({ limit: 50 });
+  const { data: requests, isLoading } = trpc.citizenRights.list.useQuery({});
 
-  const createMutation = trpc.citizenRights.create.useMutation({
+  const createMutation = trpc.citizenRights.submit.useMutation({
     onSuccess: () => {
       setShowModal(false);
       setForm({ type: "access", description: "", citizenName: "", citizenEmail: "" });

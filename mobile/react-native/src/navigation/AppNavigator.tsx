@@ -37,6 +37,12 @@ import TiaAssessmentsScreen from "../screens/TiaAssessmentsScreen";
 // Screens — Enforcement & Finance
 import FinancialEnforcementScreen from "../screens/FinancialEnforcementScreen";
 import RemediationWorkflowsScreen from "../screens/RemediationWorkflowsScreen";
+import EnforcementCaseDetailScreen from "../screens/EnforcementCaseDetailScreen";
+import SettlementsScreen from "../screens/SettlementsScreen";
+
+// Screens — Sovereignty & Public
+import ComplaintsScreen from "../screens/ComplaintsScreen";
+import DataSovereigntyScreen from "../screens/DataSovereigntyScreen";
 
 // Screens — Operations & Intelligence
 import BankingDashboardScreen from "../screens/BankingDashboardScreen";
@@ -100,7 +106,12 @@ function DrawerNav() {
 
       {/* Enforcement & Finance */}
       <Drawer.Screen name="FinancialEnforcement" component={FinancialEnforcementScreen} options={{ title: "Financial Enforcement" }} />
+      <Drawer.Screen name="Settlements" component={SettlementsScreen} options={{ title: "Settlements" }} />
       <Drawer.Screen name="Remediation" component={RemediationWorkflowsScreen} options={{ title: "Remediation Workflows" }} />
+
+      {/* Sovereignty & Public */}
+      <Drawer.Screen name="Complaints" component={ComplaintsScreen} options={{ title: "Public Complaints" }} />
+      <Drawer.Screen name="DataSovereignty" component={DataSovereigntyScreen} options={{ title: "Data Sovereignty" }} />
 
       {/* Operations & Intelligence */}
       <Drawer.Screen name="AssetRegistry" component={AssetRegistryScreen} options={{ title: "Asset Registry" }} />
@@ -124,6 +135,7 @@ export default function AppNavigator({ isAuthenticated }: { isAuthenticated: boo
             <Stack.Screen name="Main" component={DrawerNav} />
             <Stack.Screen name="OrganizationDetail" component={OrganizationDetailScreen} />
             <Stack.Screen name="PenaltyDetail" component={PenaltyDetailScreen} />
+            <Stack.Screen name="EnforcementCaseDetail" component={EnforcementCaseDetailScreen} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

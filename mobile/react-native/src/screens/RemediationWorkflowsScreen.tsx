@@ -16,7 +16,7 @@ export default function RemediationWorkflowsScreen() {
   const [form, setForm] = useState({ organizationId: "", title: "", description: "", priority: "medium", dueDate: "" });
 
   const utils = trpc.useUtils();
-  const { data: workflows = [], isLoading, refetch } = trpc.remediation.list.useQuery({ status: statusFilter, limit: 100 });
+  const { data: workflows = [], isLoading, refetch } = trpc.remediation.list.useQuery({ status: statusFilter });
 
   const createMutation = trpc.remediation.create.useMutation({
     onSuccess: () => {
@@ -28,7 +28,7 @@ export default function RemediationWorkflowsScreen() {
     onError: (err) => Alert.alert("Error", err.message),
   });
 
-  const completeMutation = trpc.remediation.complete.useMutation({
+  const completeMutation = trpc.remediation.update.useMutation({
     onSuccess: () => { utils.remediation.list.invalidate(); Alert.alert("Completed", "Remediation marked as complete"); },
     onError: (err) => Alert.alert("Error", err.message),
   });
@@ -50,7 +50,7 @@ export default function RemediationWorkflowsScreen() {
       {item.status !== "completed" && (
         <TouchableOpacity
           style={styles.completeButton}
-          onPress={() => completeMutation.mutate({ id: item.id })}
+          onPress={() => completeMutation.mutate({ id: item.id, status: "completed" })}
           disabled={completeMutation.isPending}
         >
           <Text style={styles.completeButtonText}>✓ Mark Complete</Text>
@@ -120,7 +120,7 @@ export default function RemediationWorkflowsScreen() {
               <TouchableOpacity style={styles.cancelButton} onPress={() => setShowCreateModal(false)}><Text style={styles.cancelButtonText}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.submitButton, createMutation.isPending && { opacity: 0.6 }]} onPress={() => {
                 if (!form.organizationId || !form.title) { Alert.alert("Validation", "Organization ID and Title are required"); return; }
-                createMutation.mutate({ organizationId: Number(form.organizationId), title: form.title, description: form.description, priority: form.priority as any, dueDate: form.dueDate || undefined });
+                createMutation.mutate({ orgId: Number(form.organizationId), actionType: form.title, description: form.description || undefined, priority: form.priority as any, notes: form.dueDate ? `Due: ${form.dueDate}` : undefined });
               }} disabled={createMutation.isPending}>
                 <Text style={styles.submitButtonText}>{createMutation.isPending ? "Creating..." : "Create Workflow"}</Text>
               </TouchableOpacity>

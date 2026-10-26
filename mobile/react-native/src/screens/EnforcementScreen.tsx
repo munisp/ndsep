@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { trpc } from "../api/trpc";
 
-export default function EnforcementScreen() {
+export default function EnforcementScreen({ navigation }: any) {
   const [tab, setTab] = useState<"cases" | "penalties">("cases");
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [issueForm, setIssueForm] = useState({ orgId: "", amount: "", reason: "" });
@@ -19,7 +19,7 @@ export default function EnforcementScreen() {
   const { data: cases, isLoading: casesLoading } = trpc.enforcementCases.list.useQuery({ limit: 50 });
   const { data: penalties, isLoading: penaltiesLoading } = trpc.financial.penalties.useQuery({ limit: 50 });
 
-  const issuePenaltyMutation = trpc.financial.issuePenalty.useMutation({
+  const issuePenaltyMutation = trpc.financial.createPenalty.useMutation({
     onSuccess: () => {
       setShowIssueModal(false);
       setIssueForm({ orgId: "", amount: "", reason: "" });
@@ -29,7 +29,9 @@ export default function EnforcementScreen() {
   });
 
   const STATUS_COLORS: Record<string, string> = {
-    open: "#f59e0b", closed: "#22c55e", pending: "#3b82f6",
+    open: "#f59e0b", under_investigation: "#eab308", notice_issued: "#3b82f6",
+    escalated_to_ndpc: "#a78bfa", escalated_to_nitda: "#a78bfa",
+    settled: "#22c55e", closed: "#22c55e", pending: "#3b82f6",
     paid: "#22c55e", unpaid: "#ef4444", disputed: "#a78bfa",
   };
 
@@ -56,19 +58,19 @@ export default function EnforcementScreen() {
             data={cases ?? []}
             keyExtractor={(item: any) => String(item.id)}
             renderItem={({ item }: { item: any }) => (
-              <View style={styles.card}>
+              <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("EnforcementCaseDetail", { caseId: item.id })}>
                 <View style={styles.cardHeader}>
                   <View style={[styles.badge, { backgroundColor: (STATUS_COLORS[item.status] ?? "#64748b") + "25" }]}>
                     <Text style={[styles.badgeText, { color: STATUS_COLORS[item.status] ?? "#64748b" }]}>
-                      {item.status?.toUpperCase()}
+                      {item.status?.replaceAll("_", " ").toUpperCase()}
                     </Text>
                   </View>
-                  <Text style={styles.caseId}>#{item.id}</Text>
+                  <Text style={styles.caseId}>{item.case_reference}</Text>
                 </View>
-                <Text style={styles.cardTitle}>{item.title ?? item.caseNumber}</Text>
-                <Text style={styles.cardOrg}>{item.organizationName}</Text>
-                <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
-              </View>
+                <Text style={styles.cardTitle}>{item.escalation_reason ?? "Penalty escalation"}</Text>
+                <Text style={styles.cardOrg}>{item.org_name}</Text>
+                <Text style={styles.cardDesc} numberOfLines={2}>{item.penalty_description}</Text>
+              </TouchableOpacity>
             )}
             contentContainerStyle={{ padding: 12 }}
             ListEmptyComponent={<Text style={styles.emptyText}>No enforcement cases.</Text>}
@@ -84,19 +86,20 @@ export default function EnforcementScreen() {
               data={penalties ?? []}
               keyExtractor={(item: any) => String(item.id)}
               renderItem={({ item }: { item: any }) => (
-                <View style={styles.card}>
+                <TouchableOpacity style={styles.card}
+                  onPress={() => navigation.navigate("PenaltyDetail", { penaltyId: item.id, organizationId: item.organizationId, amount: Number(item.amount ?? 0) })}>
                   <View style={styles.cardHeader}>
-                    <View style={[styles.badge, { backgroundColor: (STATUS_COLORS[item.status] ?? "#64748b") + "25" }]}>
-                      <Text style={[styles.badgeText, { color: STATUS_COLORS[item.status] ?? "#64748b" }]}>
-                        {item.status?.toUpperCase()}
+                    <View style={[styles.badge, { backgroundColor: (STATUS_COLORS[item.paymentStatus] ?? "#64748b") + "25" }]}>
+                      <Text style={[styles.badgeText, { color: STATUS_COLORS[item.paymentStatus] ?? "#64748b" }]}>
+                        {item.paymentStatus?.toUpperCase()}
                       </Text>
                     </View>
-                    <Text style={styles.penaltyAmount}>${Number(item.amountUsd ?? 0).toLocaleString()}</Text>
+                    <Text style={styles.penaltyAmount}>{item.currency ?? "NGN"} {Number(item.amount ?? 0).toLocaleString()}</Text>
                   </View>
                   <Text style={styles.cardTitle}>{item.organizationName}</Text>
-                  <Text style={styles.cardDesc} numberOfLines={2}>{item.reason}</Text>
-                  <Text style={styles.cardDate}>{item.issuedAt ? new Date(item.issuedAt).toLocaleDateString() : ""}</Text>
-                </View>
+                  <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
+                  <Text style={styles.cardDate}>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ""}</Text>
+                </TouchableOpacity>
               )}
               contentContainerStyle={{ padding: 12 }}
               ListEmptyComponent={<Text style={styles.emptyText}>No penalties issued.</Text>}
@@ -120,7 +123,7 @@ export default function EnforcementScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Amount (USD)"
+              placeholder="Amount (NGN)"
               placeholderTextColor="#475569"
               value={issueForm.amount}
               onChangeText={v => setIssueForm(f => ({ ...f, amount: v }))}
@@ -142,9 +145,9 @@ export default function EnforcementScreen() {
                 style={styles.submitBtn}
                 onPress={() => issuePenaltyMutation.mutate({
                   organizationId: parseInt(issueForm.orgId),
-                  amountUsd: parseFloat(issueForm.amount),
-                  reason: issueForm.reason,
-                  currency: "USD",
+                  amount: parseFloat(issueForm.amount),
+                  currency: "NGN",
+                  description: issueForm.reason,
                 })}
                 disabled={issuePenaltyMutation.isPending}
               >

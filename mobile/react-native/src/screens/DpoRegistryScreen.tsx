@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE = __DEV__ ? 'http://10.0.2.2:3000' : '';
 
@@ -10,9 +11,14 @@ export default function DpoRegistryScreen() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/trpc/dpoAppointments.list`);
+      // dpoAppointments.list requires an input object and returns {data, total}
+      const token = await AsyncStorage.getItem('ndsep_session_token');
+      const input = encodeURIComponent(JSON.stringify({ json: { page: 1, limit: 50 } }));
+      const res = await fetch(`${API_BASE}/api/trpc/dpoAppointments.list?input=${input}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const json = await res.json();
-      setAppointments(json?.result?.data ?? []);
+      setAppointments(json?.result?.data?.json?.data ?? []);
     } catch {} finally { setLoading(false); }
   }, []);
 
@@ -24,12 +30,12 @@ export default function DpoRegistryScreen() {
       keyExtractor={(item) => String(item.id)}
       renderItem={({ item }) => (
         <View style={styles.card}>
-          <View style={styles.avatar}><Text style={styles.avatarText}>{(item.dpoName ?? 'U')[0]}</Text></View>
+          <View style={styles.avatar}><Text style={styles.avatarText}>{(item.dpo_name ?? 'U')[0]}</Text></View>
           <View style={styles.content}>
-            <Text style={styles.name}>{item.dpoName}</Text>
-            <Text style={styles.email}>{item.email}</Text>
+            <Text style={styles.name}>{item.dpo_name}</Text>
+            <Text style={styles.email}>{item.dpo_email}{item.org_name ? ` · ${item.org_name}` : ''}</Text>
           </View>
-          <Text style={styles.status}>{item.status}</Text>
+          <Text style={styles.status}>{item.credential_status}</Text>
         </View>
       )}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}

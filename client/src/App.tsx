@@ -270,6 +270,9 @@ const PublicationWorkbench = lazy(() => import("@/pages/PublicationWorkbench"));
 const AdverseMediaReview = lazy(() => import("@/pages/AdverseMediaReview"));
 const OpenDataPortal = lazy(() => import("@/pages/OpenDataPortal"));
 const AiRuntimeOversight = lazy(() => import("@/pages/AiRuntimeOversight"));
+// Round-16 W4 — ML/AI ops console + automation rule engines (admin-gated)
+const MlOpsConsole = lazy(() => import("@/pages/MlOpsConsole"));
+const AutomationRules = lazy(() => import("@/pages/AutomationRules"));
 const CrossBorderDeclarationsReview = lazy(() => import("@/pages/CrossBorderDeclarationsReview"));
 const EnforcementAnalytics = lazy(() => import("@/pages/EnforcementAnalytics"));
 const ComplianceScanning = lazy(() => import("@/pages/ComplianceScanning"));
@@ -279,6 +282,18 @@ const InternationalCooperation = lazy(() => import("@/pages/InternationalCoopera
 const TranslatedDsarPortal = lazy(() => import("@/components/i18n/TranslatedDsarPortal"));
 const TranslatedWhistleblowerIntake = lazy(() => import("@/components/i18n/TranslatedWhistleblowerIntake"));
 const TranslatedPublicComplianceRegistry = lazy(() => import("@/components/i18n/TranslatedRegistryHeader"));
+// Round-16 W2 — orphan-backend UIs: consent propagation, whistleblower secure channel, NIN identity
+const ConsentPropagation = lazy(() => import("@/pages/ConsentPropagation"));
+const WhistleblowerChannel = lazy(() => import("@/pages/WhistleblowerChannel"));
+const NinIdentity = lazy(() => import("@/pages/NinIdentity"));
+// Round-16 W3 — operator consoles for antiwipe, production readiness, workflows
+const AntiwipeConsole = lazy(() => import("@/pages/AntiwipeConsole"));
+const ProductionReadiness = lazy(() => import("@/pages/ProductionReadiness"));
+const WorkflowsConsole = lazy(() => import("@/pages/WorkflowsConsole"));
+// Round-16 W1 — policy-change monitor, regulatory-intelligence corpus, cross-regulator reconciliation
+const PolicyMonitor = lazy(() => import("@/pages/PolicyMonitor"));
+const RegIntel = lazy(() => import("@/pages/RegIntel"));
+const RegulatorReconciliation = lazy(() => import("@/pages/RegulatorReconciliation"));
 
 function Router() {
   return (
@@ -578,12 +593,27 @@ function Router() {
         <Route path="/publication-workbench" component={PublicationWorkbench} />
         <Route path="/adverse-media" component={AdverseMediaReview} />
         <Route path="/ai-oversight" component={AiRuntimeOversight} />
+        {/* Round-16 W4 */}
+        <Route path="/ml-ops" component={MlOpsConsole} />
+        <Route path="/automation-rules" component={AutomationRules} />
         <Route path="/cross-border-declarations" component={CrossBorderDeclarationsReview} />
         <Route path="/enforcement-analytics" component={EnforcementAnalytics} />
         <Route path="/compliance-scanning" component={ComplianceScanning} />
         <Route path="/ussd-intake" component={UssdIntakeQueue} />
         <Route path="/productivity-kpis" component={ProductivityKpis} />
         <Route path="/international-cooperation" component={InternationalCooperation} />
+        {/* Round-16 W2 — consent withdrawal propagation console, whistleblower secure channel (officer), NIN identity verification */}
+        <Route path="/consent-propagation" component={ConsentPropagation} />
+        <Route path="/whistleblower-channel" component={WhistleblowerChannel} />
+        <Route path="/nin-identity" component={NinIdentity} />
+        {/* Round-16 W3 — antiwipe integrity console, production readiness gates, workflow operations (admin/staff) */}
+        <Route path="/antiwipe-console" component={AntiwipeConsole} />
+        <Route path="/production-readiness" component={ProductionReadiness} />
+        <Route path="/workflows" component={WorkflowsConsole} />
+        {/* Round-16 W1 — policy-change monitoring console, reg-intel corpus browser, cross-regulator reconciliation (staff/admin) */}
+        <Route path="/policy-monitor" component={PolicyMonitor} />
+        <Route path="/reg-intel" component={RegIntel} />
+        <Route path="/regulator-reconciliation" component={RegulatorReconciliation} />
         {/* Catch-all — must be last */}
         <Route component={NotFound} />
       </Switch>

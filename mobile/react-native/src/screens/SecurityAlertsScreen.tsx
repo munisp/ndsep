@@ -59,7 +59,7 @@ export default function SecurityAlertsScreen() {
               {!item.resolved && (
                 <TouchableOpacity
                   style={styles.resolveBtn}
-                  onPress={() => resolveMutation.mutate({ id: item.id })}
+                  onPress={() => resolveMutation.mutate({ alertId: item.id })}
                   disabled={resolveMutation.isPending}
                 >
                   <Text style={styles.resolveBtnText}>Mark Resolved</Text>

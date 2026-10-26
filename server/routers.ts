@@ -329,23 +329,17 @@ export const appRouter = router({
   sectorBenchmarks: sectorBenchmarkRouter,
   webhooks: webhookRouter,
   search: searchRouter,
-  i18n: i18nRouter,
+  // Round-16 integration (2026-10-27): duplicate enhancement routers unmounted — zero client/mobile refs;
+  // canonical namespaces: i18n→client i18next bundles (client/src/lib/i18n.ts), aiSystems→aiGovernance (same router object above)
   carAutomation: carAutomationRouter,
   openApi: openApiRouter,
-  aiSystems: aiSystemsRouter,
-  auditLogs: auditLogsRouter,
-  compliancePolicies: compliancePoliciesRouter,
-  configSnapshots: configSnapshotsRouter,
-  dataCatalog: dataCatalogRouter,
-  dpcoAuditLogs: dpcoAuditLogsRouter,
-  dpcoPerformanceMetrics: dpcoPerformanceMetricsRouter,
-  enforcementActions: enforcementActionsRouter,
+  // Round-16 integration (2026-10-27): duplicate enhancement routers unmounted — canonical namespaces:
+  // auditLogs→siem.auditLogs, compliancePolicies→compliance.policies, configSnapshots→gitopsConfig,
+  // dataCatalog→catalog, dpcoAuditLogs/dpcoPerformanceMetrics→dpco, enforcementActions→compliance.enforcementActions/enforcementCases,
+  // mlRiskPredictions→aiRiskScoring, penaltyAppeals→financial.appeals/appealsDueProcess,
+  // streamingEvents→streaming, threatIntelligence→siem.threatIntel/osirisIntel
   evidencePackages: evidencePackagesRouter,
-  mlRiskPredictions: mlRiskPredictionsRouter,
-  penaltyAppeals: penaltyAppealsRouter,
   policyTemplates: policyTemplatesRouter,
-  streamingEvents: streamingEventsDbRouter,
-  threatIntelligence: threatIntelligenceRouter,
   osirisIntel: osirisIntelRouter,
   socint: socintRouter,
   phantomTide: phantomTideRouter,
@@ -420,8 +414,8 @@ export const appRouter = router({
       .query(async ({ input }) => enrichBankingWithMaritime(input.entityName)),
     enrichCompliance: protectedProcedure.query(async () => enrichComplianceWithSiem()),
   }),
-  tiaAssessments: tiaAssessmentsRouter,
-  transferImpact: transferImpactRouter,
+  // Round-16 integration (2026-10-27): tiaAssessments + transferImpact (enhancements.ts) unmounted —
+  // duplicates of the canonical `tia` namespace; zero client refs (verified via grep).
   system: systemRouter,
   banking: bankingServicesRouter,
   telecom: telecomRouter,

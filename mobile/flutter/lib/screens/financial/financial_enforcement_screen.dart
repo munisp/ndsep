@@ -106,7 +106,20 @@ class _FinancialEnforcementScreenState extends ConsumerState<FinancialEnforcemen
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6), minimumSize: const Size.fromHeight(44)),
           onPressed: () async {
             try {
-              await ApiService().createPenalty(organizationId: int.parse(_orgIdCtrl.text), amount: _amountCtrl.text, reason: _reasonCtrl.text);
+              final orgId = int.tryParse(_orgIdCtrl.text);
+              final amount = double.tryParse(_amountCtrl.text);
+              if (orgId == null || amount == null || amount <= 0 || _reasonCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Valid Org ID, amount and reason are required')));
+                return;
+              }
+              // Real path: financial.createPenalty {organizationId, amount, currency, description}
+              await ApiService().createPenalty(
+                organizationId: orgId,
+                amount: amount,
+                currency: 'NGN',
+                description: _reasonCtrl.text.trim(),
+              );
               setState(() => _showForm = false);
               ref.invalidate(penaltiesProvider);
               if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Penalty issued')));

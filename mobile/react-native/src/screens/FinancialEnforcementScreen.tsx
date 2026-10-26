@@ -25,12 +25,12 @@ export default function FinancialEnforcementScreen() {
 
   const utils = trpc.useUtils();
 
+  // financial.penalties accepts {limit} only; status filtering is client-side.
   const { data: penalties = [], isLoading, refetch } = trpc.financial.penalties.useQuery({
-    paymentStatus: statusFilter,
     limit: 100,
   });
 
-  const createMutation = trpc.financial.issuePenalty.useMutation({
+  const createMutation = trpc.financial.createPenalty.useMutation({
     onSuccess: () => {
       utils.financial.penalties.invalidate();
       setShowCreateModal(false);
@@ -41,10 +41,11 @@ export default function FinancialEnforcementScreen() {
   });
 
   const filtered = (penalties as any[]).filter((p: any) => {
-    const matchSearch = !search || 
-      String(p.id).includes(search) || 
-      (p.reason ?? "").toLowerCase().includes(search.toLowerCase());
-    return matchSearch;
+    const matchStatus = !statusFilter || p.paymentStatus === statusFilter;
+    const matchSearch = !search ||
+      String(p.id).includes(search) ||
+      String(p.description ?? "").toLowerCase().includes(search.toLowerCase());
+    return matchStatus && matchSearch;
   });
 
   const totalAmount = filtered.reduce((sum: number, p: any) => sum + Number(p.amount ?? 0), 0);
@@ -62,7 +63,7 @@ export default function FinancialEnforcementScreen() {
       <Text style={styles.penaltyAmount}>
         {item.currency ?? "NGN"} {Number(item.amount ?? 0).toLocaleString()}
       </Text>
-      <Text style={styles.penaltyReason} numberOfLines={2}>{item.reason ?? "Compliance violation"}</Text>
+      <Text style={styles.penaltyReason} numberOfLines={2}>{item.description ?? "Compliance violation"}</Text>
       <Text style={styles.penaltyMeta}>
         Org #{item.organizationId} · Due: {item.dueDate ? new Date(item.dueDate).toLocaleDateString() : "N/A"}
       </Text>
@@ -176,10 +177,9 @@ export default function FinancialEnforcementScreen() {
                   }
                   createMutation.mutate({
                     organizationId: Number(newPenalty.organizationId),
-                    amount: newPenalty.amount,
+                    amount: Number(newPenalty.amount),
                     currency: newPenalty.currency,
-                    reason: newPenalty.reason,
-                    violationType: newPenalty.violationType,
+                    description: newPenalty.reason,
                   });
                 }}
                 disabled={createMutation.isPending}

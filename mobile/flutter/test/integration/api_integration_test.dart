@@ -24,7 +24,7 @@ class TestApiClient {
 
   Future<dynamic> query(String procedure, [Map<String, dynamic>? input]) async {
     final inputParam = Uri.encodeComponent(
-      jsonEncode({'0': if (input != null) {'json': input} else {'json': null}}),
+      jsonEncode({'0': (input != null) ? {'json': input} : {'json': null}}),
     );
     final uri = Uri.parse(
       '$baseUrl/api/trpc/$procedure?batch=1&input=$inputParam',
@@ -120,8 +120,8 @@ void main() {
       expect(result, anyOf(isNull, isA<List>()));
     });
 
-    test('auditLogs.list returns null (protected) or list', () async {
-      final result = await client.query('auditLogs.list', {'limit': 5});
+    test('siem.auditLogs returns null (protected) or list', () async {
+      final result = await client.query('siem.auditLogs', {'limit': 5});
       expect(result, anyOf(isNull, isA<List>()));
     });
 
@@ -153,7 +153,7 @@ void main() {
       'organizations.list',
       'banking.kyc.list',
       'siem.alerts',
-      'auditLogs.list',
+      'siem.auditLogs',
       'enforcementCases.list',
       'financial.penalties',
       'portal.myOrg',
@@ -187,14 +187,13 @@ void main() {
           reason: 'KYC submission must require authentication');
     });
 
-    test('financial.issuePenalty rejects unauthenticated request', () async {
+    test('financial.createPenalty rejects unauthenticated request', () async {
       final unauthClient = TestApiClient(baseUrl: apiUrl);
-      final result = await unauthClient.mutate('financial.issuePenalty', {
+      final result = await unauthClient.mutate('financial.createPenalty', {
         'organizationId': 1,
         'amount': 1000000,
         'currency': 'NGN',
-        'reason': 'Test',
-        'violationType': 'data_breach',
+        'description': 'Test',
       });
       expect(result, isNull,
           reason: 'Penalty issuance must require authentication');
@@ -203,8 +202,7 @@ void main() {
     test('siem.resolveAlert rejects unauthenticated request', () async {
       final unauthClient = TestApiClient(baseUrl: apiUrl);
       final result = await unauthClient.mutate('siem.resolveAlert', {
-        'id': 1,
-        'resolution': 'Test resolution',
+        'alertId': 1,
       });
       expect(result, isNull,
           reason: 'Alert resolution must require authentication');
@@ -214,13 +212,14 @@ void main() {
   // ─── Flow 5: CORS headers present ────────────────────────────────────────────
   group('Flow 5 — CORS and security headers', () {
     test('API response includes CORS headers', () async {
-      final response = await http.options(
+      final request = http.Request(
+        'OPTIONS',
         Uri.parse('$apiUrl/api/trpc/auth.me?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D'),
-        headers: {
+      )..headers.addAll({
           'Origin': 'https://app.ndsep.ng',
           'Access-Control-Request-Method': 'GET',
-        },
-      );
+        });
+      final response = await request.send();
       // Either 200 (CORS allowed) or 204 (preflight success)
       expect(response.statusCode, anyOf(200, 204),
           reason: 'CORS preflight should succeed');

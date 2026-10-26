@@ -54,9 +54,9 @@ class _TiaAssessmentsScreenState extends ConsumerState<TiaAssessmentsScreen> {
                         child: Text(status, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600))),
                     ]),
                     const SizedBox(height: 6),
-                    Text('→ ${item['transferDestination'] ?? 'Unknown'}', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                    Text('→ ${item['destinationCountry'] ?? item['transferDestination'] ?? 'Unknown'}', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),
-                    Text(item['dataCategories'] ?? 'N/A', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+                    Text(item['dataCategories'] is List ? (item['dataCategories'] as List).join(', ') : (item['dataCategories']?.toString() ?? 'N/A'), style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
                     const SizedBox(height: 8),
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                       Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: (_riskColors[risk] ?? Colors.grey).withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
@@ -93,7 +93,21 @@ class _TiaAssessmentsScreenState extends ConsumerState<TiaAssessmentsScreen> {
         ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED), minimumSize: const Size.fromHeight(44)),
           onPressed: () async {
             try {
-              await ApiService().createTiaAssessment(organizationId: int.parse(_orgCtrl.text), transferDestination: _destCtrl.text, dataCategories: _catCtrl.text, legalBasis: _basisCtrl.text, riskLevel: _riskLevel);
+              final orgId = int.tryParse(_orgCtrl.text);
+              if (orgId == null || _destCtrl.text.trim().isEmpty || _basisCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Org ID, destination and legal basis are required')));
+                return;
+              }
+              await ApiService().createTiaAssessment(
+                organizationId: orgId,
+                destinationCountry: _destCtrl.text.trim(),
+                dataCategories: _catCtrl.text.trim().isEmpty
+                    ? null
+                    : _catCtrl.text.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList(),
+                legalBasis: _basisCtrl.text.trim(),
+                riskLevel: _riskLevel,
+              );
               setState(() => _showForm = false);
               ref.invalidate(tiaProvider);
               if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('TIA created')));

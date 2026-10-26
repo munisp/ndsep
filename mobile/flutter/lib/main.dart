@@ -33,6 +33,10 @@ import 'screens/middleware/middleware_health_screen.dart';
 import 'screens/reports/regulatory_reports_screen.dart';
 import 'screens/ai/ai_advisor_screen.dart';
 import 'screens/dpco/dpco_portal_screen.dart';
+import 'screens/complaints/complaints_screen.dart';
+import 'screens/sovereignty/data_sovereignty_screen.dart';
+import 'screens/enforcement/enforcement_case_detail_screen.dart';
+import 'screens/enforcement/settlements_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,7 +68,11 @@ class NdsepApp extends StatelessWidget {
             GoRoute(path: '/portal', builder: (_, __) => const PortalScreen()),
             GoRoute(path: '/audit', builder: (_, __) => const AuditLogScreen()),
             GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
-            GoRoute(path: '/penalties/:id', builder: (_, state) => PenaltyDetailScreen(penaltyId: int.parse(state.pathParameters['id']!))),
+            GoRoute(path: '/penalties/:id', builder: (_, state) => PenaltyDetailScreen(
+                  penaltyId: int.parse(state.pathParameters['id']!),
+                  organizationId: int.tryParse(state.uri.queryParameters['orgId'] ?? ''),
+                  amount: double.tryParse(state.uri.queryParameters['amount'] ?? ''),
+                )),
             GoRoute(path: '/leaderboard', builder: (_, __) => const ComplianceLeaderboardScreen()),
             GoRoute(path: '/remediation', builder: (_, __) => const RemediationWorkflowsScreen()),
             // Compliance & Governance
@@ -77,6 +85,11 @@ class NdsepApp extends StatelessWidget {
             GoRoute(path: '/tia', builder: (_, __) => const TiaAssessmentsScreen()),
             // Enforcement & Finance
             GoRoute(path: '/financial', builder: (_, __) => const FinancialEnforcementScreen()),
+            GoRoute(path: '/enforcement/cases/:id', builder: (_, state) => EnforcementCaseDetailScreen(caseId: int.parse(state.pathParameters['id']!))),
+            GoRoute(path: '/settlements', builder: (_, __) => const SettlementsScreen()),
+            // Sovereignty & Public
+            GoRoute(path: '/complaints', builder: (_, __) => const ComplaintsScreen()),
+            GoRoute(path: '/data-sovereignty', builder: (_, __) => const DataSovereigntyScreen()),
             // Operations
             GoRoute(path: '/banking', builder: (_, __) => const BankingDashboardScreen()),
             GoRoute(path: '/middleware', builder: (_, __) => const MiddlewareHealthScreen()),
@@ -248,7 +261,13 @@ class AppDrawer extends StatelessWidget {
               sectionHeader('ENFORCEMENT'),
               navItem('Enforcement', '/enforcement', Icons.gavel_outlined),
               navItem('Financial Enforcement', '/financial', Icons.account_balance_wallet_outlined),
+              navItem('Settlements', '/settlements', Icons.handshake_outlined),
               navItem('Remediation', '/remediation', Icons.build_circle_outlined),
+
+              // Sovereignty & Public
+              sectionHeader('SOVEREIGNTY & PUBLIC'),
+              navItem('Public Complaints', '/complaints', Icons.report_outlined),
+              navItem('Data Sovereignty', '/data-sovereignty', Icons.public_outlined),
 
               // Operations & Intelligence
               sectionHeader('OPERATIONS'),

@@ -6,11 +6,14 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator
 import { trpc } from "../api/trpc";
 
 export default function PenaltyDetailScreen({ route, navigation }: any) {
-  const { penaltyId } = route.params;
+  // organizationId / amount are optional route params passed from the
+  // enforcement penalties list; the receipt payload itself does not carry
+  // the org id required by orchestration.disputePenalty.
+  const { penaltyId, organizationId, amount } = route.params;
   const utils = trpc.useUtils();
   const { data: receipt, isLoading } = trpc.financial.receipt.useQuery({ penaltyId });
 
-  const disputeMutation = trpc.financial.disputePenalty.useMutation({
+  const disputeMutation = trpc.orchestration.disputePenalty.useMutation({
     onSuccess: () => {
       Alert.alert("Dispute Filed", "Your dispute has been submitted for review.");
       utils.financial.receipt.invalidate({ penaltyId });
@@ -34,20 +37,20 @@ export default function PenaltyDetailScreen({ route, navigation }: any) {
       <View style={styles.card}>
         <View style={styles.cardHeader}>
           <Text style={styles.penaltyId}>Penalty #{receipt.id}</Text>
-          <View style={[styles.badge, { backgroundColor: (STATUS_COLORS[receipt.status] ?? "#64748b") + "25" }]}>
-            <Text style={[styles.badgeText, { color: STATUS_COLORS[receipt.status] ?? "#64748b" }]}>
-              {receipt.status?.toUpperCase()}
+          <View style={[styles.badge, { backgroundColor: (STATUS_COLORS[receipt.paymentStatus] ?? "#64748b") + "25" }]}>
+            <Text style={[styles.badgeText, { color: STATUS_COLORS[receipt.paymentStatus] ?? "#64748b" }]}>
+              {receipt.paymentStatus?.toUpperCase()}
             </Text>
           </View>
         </View>
-        <Text style={styles.amount}>${Number(receipt.amountUsd ?? 0).toLocaleString()}</Text>
+        <Text style={styles.amount}>{Number(receipt.amount ?? amount ?? 0).toLocaleString()}</Text>
         <Text style={styles.currency}>{receipt.currency}</Text>
-        <Text style={styles.org}>{receipt.organizationName}</Text>
-        <Text style={styles.reason}>{receipt.reason}</Text>
+        <Text style={styles.org}>{receipt.orgName}</Text>
+        <Text style={styles.reason}>{receipt.description}</Text>
         <View style={styles.divider} />
         <View style={styles.metaRow}>
           <Text style={styles.metaLabel}>Issued</Text>
-          <Text style={styles.metaValue}>{receipt.issuedAt ? new Date(receipt.issuedAt).toLocaleDateString() : "—"}</Text>
+          <Text style={styles.metaValue}>{receipt.createdAt ? new Date(receipt.createdAt).toLocaleDateString() : "—"}</Text>
         </View>
         <View style={styles.metaRow}>
           <Text style={styles.metaLabel}>Due Date</Text>
@@ -59,20 +62,31 @@ export default function PenaltyDetailScreen({ route, navigation }: any) {
             <Text style={[styles.metaValue, { color: "#22c55e" }]}>{new Date(receipt.paidAt).toLocaleDateString()}</Text>
           </View>
         )}
-        {receipt.status === "unpaid" && (
-          <TouchableOpacity
-            style={styles.disputeBtn}
-            onPress={() => Alert.alert(
-              "File Dispute",
-              "Are you sure you want to dispute this penalty?",
-              [
-                { text: "Cancel", style: "cancel" },
-                { text: "File Dispute", onPress: () => disputeMutation.mutate({ id: penaltyId, reason: "Disputed via mobile app" }) },
-              ]
-            )}
-          >
-            <Text style={styles.disputeBtnText}>File Dispute</Text>
-          </TouchableOpacity>
+        {receipt.paymentStatus === "unpaid" && (
+          organizationId ? (
+            <TouchableOpacity
+              style={styles.disputeBtn}
+              onPress={() => Alert.alert(
+                "File Dispute",
+                "Are you sure you want to dispute this penalty?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "File Dispute", onPress: () => disputeMutation.mutate({
+                      penaltyId: String(penaltyId),
+                      orgId: String(organizationId),
+                      amountUsd: Number(receipt.amount ?? amount ?? 0),
+                      disputeRef: `MOBILE-DSP-${penaltyId}-${Date.now()}`,
+                    }) },
+                ]
+              )}
+            >
+              <Text style={styles.disputeBtnText}>File Dispute</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.disputeUnavailable}>
+              Dispute filing is not available here — open this penalty from the Enforcement list.
+            </Text>
+          )
         )}
       </View>
     </ScrollView>
@@ -100,4 +114,5 @@ const styles = StyleSheet.create({
   metaValue: { color: "#f1f5f9", fontSize: 13, fontWeight: "600" },
   disputeBtn: { marginTop: 16, backgroundColor: "#a78bfa20", borderWidth: 1, borderColor: "#a78bfa50", borderRadius: 8, paddingVertical: 12, alignItems: "center" },
   disputeBtnText: { color: "#a78bfa", fontSize: 13, fontWeight: "700" },
+  disputeUnavailable: { marginTop: 16, color: "#64748b", fontSize: 12, textAlign: "center" },
 });

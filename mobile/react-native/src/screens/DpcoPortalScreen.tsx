@@ -4,7 +4,7 @@ import { trpc } from '../api/trpc';
 
 export default function DpcoPortalScreen({ navigation }: any) {
   const statsQuery = trpc.dpco.dashboardStats.useQuery();
-  const engagementsQuery = trpc.dpco.listEngagements.useQuery({ page: 1, limit: 5 });
+  const engagementsQuery = trpc.dpco.listAuditEngagements.useQuery();
 
   const stats = statsQuery.data ?? {};
 

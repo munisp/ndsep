@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, StyleSheet } from 'react-native';
 
+// dpia.list returns raw SQL rows (snake_case)
 interface DpiaAssessment {
   id: number;
   title: string;
-  riskLevel: string;
-  status: string;
+  dpia_risk_level: string;
+  dpia_status: string;
 }
 
 const API_BASE = __DEV__ ? 'http://10.0.2.2:3000' : '';
@@ -17,9 +18,11 @@ export default function DpiaScreen() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/trpc/dpiaAssessments.list`);
+      // Real path: dpia.list (the dpiaAssessments.* namespace is not mounted).
+      // Non-batch tRPC over HTTP returns {result: {data: {json: <payload>}}}.
+      const res = await fetch(`${API_BASE}/api/trpc/dpia.list`);
       const json = await res.json();
-      setAssessments(json?.result?.data ?? []);
+      setAssessments(json?.result?.data?.json ?? []);
     } catch {
     } finally {
       setLoading(false);
@@ -45,10 +48,10 @@ export default function DpiaScreen() {
         <View style={styles.card}>
           <View style={styles.content}>
             <Text style={styles.title}>{item.title}</Text>
-            <Text style={styles.subtitle}>Risk: {item.riskLevel} - {item.status}</Text>
+            <Text style={styles.subtitle}>Risk: {item.dpia_risk_level} - {item.dpia_status}</Text>
           </View>
-          <View style={[styles.badge, { backgroundColor: riskColor(item.riskLevel) }]}>
-            <Text style={styles.badgeText}>{item.riskLevel}</Text>
+          <View style={[styles.badge, { backgroundColor: riskColor(item.dpia_risk_level) }]}>
+            <Text style={styles.badgeText}>{item.dpia_risk_level}</Text>
           </View>
         </View>
       )}
