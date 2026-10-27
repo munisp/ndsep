@@ -294,6 +294,12 @@ const WorkflowsConsole = lazy(() => import("@/pages/WorkflowsConsole"));
 const PolicyMonitor = lazy(() => import("@/pages/PolicyMonitor"));
 const RegIntel = lazy(() => import("@/pages/RegIntel"));
 const RegulatorReconciliation = lazy(() => import("@/pages/RegulatorReconciliation"));
+// R17-W3
+const SovereigntyMap = lazy(() => import("@/pages/SovereigntyMap"));
+// R17-W3
+const KnowledgeGraph = lazy(() => import("@/pages/KnowledgeGraph"));
+// R17-W3
+const LearningLoop = lazy(() => import("@/pages/LearningLoop"));
 
 function Router() {
   return (
@@ -546,6 +552,9 @@ function Router() {
         <Route path="/p13-advanced-analytics" component={Phase13AdvancedAnalytics} />
         <Route path="/p13-article40" component={Phase13Article40} />
         <Route path="/p13-compliance-calendar" component={Phase13ComplianceCalendar} />
+        {/* R17-W3 */}<Route path="/sovereignty-map" component={SovereigntyMap} />
+        {/* R17-W3 */}<Route path="/knowledge-graph" component={KnowledgeGraph} />
+        {/* R17-W3 */}<Route path="/learning-loop" component={LearningLoop} />
         <Route path="/knowledge-graph" component={KnowledgeGraphVisualiser} />
         <Route path="/ai/knowledge-graph" component={KnowledgeGraphVisualiser} />
         <Route path="/rag-advisor" component={RAGAdvisor} />

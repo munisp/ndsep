@@ -286,6 +286,466 @@ Knowledge graph context: ${JSON.stringify(graphStats)}`,
         `${FALKORDB_WORKER_URL}/graph/neighbors?node_id=org:${input.orgId}&relation=SECTOR_PEER`,
       );
     }),
+
+  // ── R17-W3 additive: Postgres-derived graph reads ───────────────────────────
+  // These procedures derive the SAME graph model the FalkorDB worker
+  // materializes (workers/go/cmd/falkordb_kg_worker/main.go buildGraph) directly
+  // from the source PostgreSQL tables (drizzle/schema.ts), so the Knowledge
+  // Graph page works whenever the primary DB is up — even if the FalkorDB
+  // worker is offline. Fail-closed: exec() returns [] on any DB error, so
+  // empty graphs are surfaced honestly, never fabricated.
+
+  /** Node/edge counts by label, derived from the source tables. */
+  dbStats: protectedProcedure.query(async () => {
+    const [orgs] = await exec(`SELECT COUNT(*)::int AS n FROM organizations`);
+    const [policies] = await exec(`SELECT COUNT(*)::int AS n FROM compliance_policies`);
+    const [violations] = await exec(`SELECT COUNT(*)::int AS n FROM compliance_violations`);
+    const [enforcements] = await exec(`SELECT COUNT(*)::int AS n FROM enforcement_actions`);
+    const [sectors] = await exec(
+      `SELECT COUNT(DISTINCT sector)::int AS n FROM organizations WHERE sector IS NOT NULL AND sector <> ''`,
+    );
+    const nodes = {
+      Organization: Number(orgs?.n ?? 0),
+      Policy: Number(policies?.n ?? 0),
+      Violation: Number(violations?.n ?? 0),
+      EnforcementAction: Number(enforcements?.n ?? 0),
+      Sector: Number(sectors?.n ?? 0),
+    };
+    // Edge model (mirrors buildGraph): org→sector BELONGS_TO, org→violation
+    // HAS_VIOLATION, violation→policy VIOLATES_POLICY, enforcement→org
+    // FILED_AGAINST, enforcement→violation FOR_VIOLATION.
+    const [belong] = await exec(
+      `SELECT COUNT(*)::int AS n FROM organizations WHERE sector IS NOT NULL AND sector <> ''`,
+    );
+    const [policyLinked] = await exec(
+      `SELECT COUNT(*)::int AS n FROM compliance_violations WHERE policy_id IS NOT NULL`,
+    );
+    const [peerEdges] = await exec(
+      `SELECT COALESCE(SUM(LEAST(cnt, 5) * (LEAST(cnt, 5) - 1) / 2), 0)::int AS n
+       FROM (SELECT sector, COUNT(*)::int AS cnt FROM organizations
+             WHERE sector IS NOT NULL AND sector <> '' GROUP BY sector) s`,
+    );
+    const edges = {
+      BELONGS_TO: Number(belong?.n ?? 0),
+      HAS_VIOLATION: Number(violations?.n ?? 0),
+      VIOLATES_POLICY: Number(policyLinked?.n ?? 0),
+      FILED_AGAINST: Number(enforcements?.n ?? 0),
+      FOR_VIOLATION: Number(enforcements?.n ?? 0),
+      SECTOR_PEER: Number(peerEdges?.n ?? 0),
+    };
+    return {
+      nodes,
+      edges,
+      nodeTotal: Object.values(nodes).reduce((a, b) => a + b, 0),
+      edgeTotal: Object.values(edges).reduce((a, b) => a + b, 0),
+      source: "postgres" as const,
+    };
+  }),
+
+  /** Full-text-ish entity search across the graph source tables. */
+  searchEntities: protectedProcedure
+    .input(z.object({
+      q: z.string().min(1).max(200),
+      kind: z.enum(["Organization", "Sector", "Violation", "Policy", "EnforcementAction"]).optional(),
+      limit: z.number().int().min(1).max(50).default(12),
+    }))
+    .query(async ({ input }) => {
+      const like = `%${input.q.replace(/[%_]/g, "")}%`;
+      const per = Math.max(1, Math.floor(input.limit / 2));
+      const results: Array<{ id: string; kind: string; name: string; subtitle: string | null }> = [];
+      if (!input.kind || input.kind === "Organization") {
+        const rows = await exec(
+          `SELECT id, name, sector, compliance_status FROM organizations
+           WHERE name ILIKE $1 ORDER BY name LIMIT $2`,
+          [like, per],
+        );
+        for (const r of rows) {
+          results.push({
+            id: `org:${r.id}`, kind: "Organization", name: String(r.name),
+            subtitle: [r.sector, r.compliance_status].filter(Boolean).join(" — ") || null,
+          });
+        }
+      }
+      if (!input.kind || input.kind === "Sector") {
+        const rows = await exec(
+          `SELECT sector AS name, COUNT(*)::int AS orgs FROM organizations
+           WHERE sector IS NOT NULL AND sector <> '' AND sector ILIKE $1
+           GROUP BY sector ORDER BY sector LIMIT $2`,
+          [like, per],
+        );
+        for (const r of rows) {
+          results.push({
+            id: `sector:${r.name}`, kind: "Sector", name: String(r.name),
+            subtitle: `${Number(r.orgs)} organization(s)`,
+          });
+        }
+      }
+      if (!input.kind || input.kind === "Policy") {
+        const rows = await exec(
+          `SELECT id, name, category FROM compliance_policies
+           WHERE name ILIKE $1 ORDER BY name LIMIT $2`,
+          [like, per],
+        );
+        for (const r of rows) {
+          results.push({
+            id: `policy:${r.id}`, kind: "Policy", name: String(r.name),
+            subtitle: r.category ? String(r.category) : null,
+          });
+        }
+      }
+      if (!input.kind || input.kind === "Violation") {
+        const rows = await exec(
+          `SELECT id, title, severity, status FROM compliance_violations
+           WHERE title ILIKE $1 ORDER BY detected_at DESC LIMIT $2`,
+          [like, per],
+        );
+        for (const r of rows) {
+          results.push({
+            id: `violation:${r.id}`, kind: "Violation", name: String(r.title),
+            subtitle: [r.severity, r.status].filter(Boolean).join(" — ") || null,
+          });
+        }
+      }
+      if (!input.kind || input.kind === "EnforcementAction") {
+        const rows = await exec(
+          `SELECT id, action_type, status FROM enforcement_actions
+           WHERE action_type ILIKE $1 ORDER BY created_at DESC LIMIT $2`,
+          [like, per],
+        );
+        for (const r of rows) {
+          results.push({
+            id: `enforcement:${r.id}`, kind: "EnforcementAction",
+            name: `${r.action_type ?? "action"} #${r.id}`,
+            subtitle: r.status ? String(r.status) : null,
+          });
+        }
+      }
+      return { results: results.slice(0, input.limit), source: "postgres" as const };
+    }),
+
+  /** Single entity lookup by graph id ("org:12", "violation:34", ...). */
+  getEntity: protectedProcedure
+    .input(z.object({ id: z.string().min(1).max(300) }))
+    .query(async ({ input }) => {
+      const sep = input.id.indexOf(":");
+      if (sep <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Entity id must be '<kind>:<key>'" });
+      const prefix = input.id.slice(0, sep);
+      const key = input.id.slice(sep + 1);
+      const numKey = /^\d+$/.test(key) ? Number(key) : null;
+      let kind: string;
+      let properties: Record<string, unknown> | null = null;
+      let name = input.id;
+      if (prefix === "org" && numKey !== null) {
+        kind = "Organization";
+        const [r] = await exec(
+          `SELECT id, name, sector, country, city, compliance_score, compliance_status, risk_score, created_at
+           FROM organizations WHERE id = $1`,
+          [numKey],
+        );
+        if (r) { name = String(r.name); properties = r; }
+      } else if (prefix === "sector") {
+        kind = "Sector";
+        const [r] = await exec(
+          `SELECT COUNT(*)::int AS orgs FROM organizations WHERE sector = $1`,
+          [key],
+        );
+        name = key;
+        properties = { name: key, organizations: Number(r?.orgs ?? 0) };
+      } else if (prefix === "violation" && numKey !== null) {
+        kind = "Violation";
+        const [r] = await exec(
+          `SELECT id, organization_id, policy_id, title, description, severity, status,
+                  enforcement_status, detected_at, resolved_at, penalty_amount
+           FROM compliance_violations WHERE id = $1`,
+          [numKey],
+        );
+        if (r) { name = String(r.title); properties = r; }
+      } else if (prefix === "policy" && numKey !== null) {
+        kind = "Policy";
+        const [r] = await exec(
+          `SELECT id, name, description, category, severity, is_active, weight, created_at
+           FROM compliance_policies WHERE id = $1`,
+          [numKey],
+        );
+        if (r) { name = String(r.name); properties = r; }
+      } else if (prefix === "enforcement" && numKey !== null) {
+        kind = "EnforcementAction";
+        const [r] = await exec(
+          `SELECT id, violation_id, organization_id, action_type, status,
+                  notice_issued_at, penalty_imposed_at, penalty_amount, created_at
+           FROM enforcement_actions WHERE id = $1`,
+          [numKey],
+        );
+        if (r) { name = `${r.action_type ?? "action"} #${r.id}`; properties = r; }
+      } else {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown entity id prefix '${prefix}'` });
+      }
+      if (!properties) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `Entity '${input.id}' not found` });
+      }
+      return { id: input.id, kind, name, properties, source: "postgres" as const };
+    }),
+
+  /** Relation vocabulary of the derived graph (mirrors buildGraph contract). */
+  relationTypes: protectedProcedure.query(() => {
+    return {
+      relations: [
+        { relation: "BELONGS_TO", from: "Organization", to: "Sector" },
+        { relation: "HAS_VIOLATION", from: "Organization", to: "Violation" },
+        { relation: "VIOLATES_POLICY", from: "Violation", to: "Policy" },
+        { relation: "FILED_AGAINST", from: "EnforcementAction", to: "Organization" },
+        { relation: "FOR_VIOLATION", from: "EnforcementAction", to: "Violation" },
+        { relation: "SECTOR_PEER", from: "Organization", to: "Organization" },
+      ],
+      source: "postgres" as const,
+    };
+  }),
+
+  /** Dated events for an entity (violations detected/resolved, enforcement steps). */
+  getTimeline: protectedProcedure
+    .input(z.object({
+      entityId: z.string().min(1).max(300),
+      limit: z.number().int().min(1).max(100).default(40),
+    }))
+    .query(async ({ input }) => {
+      const sep = input.entityId.indexOf(":");
+      if (sep <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Entity id must be '<kind>:<key>'" });
+      const prefix = input.entityId.slice(0, sep);
+      const key = input.entityId.slice(sep + 1);
+      const numKey = /^\d+$/.test(key) ? Number(key) : null;
+      const events: Array<{ ts: string; kind: string; label: string; refId: string }> = [];
+      if (numKey !== null && (prefix === "org" || prefix === "violation" || prefix === "enforcement" || prefix === "policy")) {
+        const orgFilter = prefix === "org" ? "v.organization_id = $1"
+          : prefix === "violation" ? "v.id = $1"
+          : prefix === "policy" ? "v.policy_id = $1"
+          : "v.id IN (SELECT violation_id FROM enforcement_actions WHERE id = $1)";
+        const vrows = await exec(
+          `SELECT v.id, v.title, v.severity, v.status, v.detected_at, v.resolved_at
+           FROM compliance_violations v WHERE ${orgFilter}
+           ORDER BY v.detected_at DESC LIMIT $2`,
+          [numKey, input.limit],
+        );
+        for (const r of vrows) {
+          if (r.detected_at) {
+            events.push({ ts: new Date(r.detected_at).toISOString(), kind: "violation_detected", label: `Violation detected: ${r.title} (${r.severity ?? "unknown"})`, refId: `violation:${r.id}` });
+          }
+          if (r.resolved_at) {
+            events.push({ ts: new Date(r.resolved_at).toISOString(), kind: "violation_resolved", label: `Violation resolved: ${r.title}`, refId: `violation:${r.id}` });
+          }
+        }
+        const enfFilter = prefix === "org" ? "e.organization_id = $1"
+          : prefix === "violation" ? "e.violation_id = $1"
+          : prefix === "enforcement" ? "e.id = $1"
+          : "e.violation_id IN (SELECT id FROM compliance_violations WHERE policy_id = $1)";
+        const erows = await exec(
+          `SELECT e.id, e.action_type, e.status, e.created_at, e.notice_issued_at, e.penalty_imposed_at
+           FROM enforcement_actions e WHERE ${enfFilter}
+           ORDER BY e.created_at DESC LIMIT $2`,
+          [numKey, input.limit],
+        );
+        for (const r of erows) {
+          if (r.created_at) events.push({ ts: new Date(r.created_at).toISOString(), kind: "enforcement_opened", label: `Enforcement ${r.action_type ?? "action"} opened (${r.status ?? "pending"})`, refId: `enforcement:${r.id}` });
+          if (r.notice_issued_at) events.push({ ts: new Date(r.notice_issued_at).toISOString(), kind: "notice_issued", label: `Notice issued — ${r.action_type ?? "action"}`, refId: `enforcement:${r.id}` });
+          if (r.penalty_imposed_at) events.push({ ts: new Date(r.penalty_imposed_at).toISOString(), kind: "penalty_imposed", label: `Penalty imposed — ${r.action_type ?? "action"}`, refId: `enforcement:${r.id}` });
+        }
+      }
+      events.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+      return { entityId: input.entityId, events: events.slice(0, input.limit), source: "postgres" as const };
+    }),
+
+  /**
+   * Bounded BFS expansion from a root entity over the derived adjacency.
+   * Used by the Knowledge Graph page canvas + JSON export.
+   */
+  exportSubgraph: protectedProcedure
+    .input(z.object({
+      rootId: z.string().min(1).max(300),
+      depth: z.number().int().min(1).max(2).default(1),
+      limit: z.number().int().min(1).max(200).default(60),
+    }))
+    .query(async ({ input }) => {
+      type Node = { id: string; kind: string; name: string };
+      type Edge = { from: string; to: string; relation: string };
+      const nodes = new Map<string, Node>();
+      const edges: Edge[] = [];
+      const edgeSeen = new Set<string>();
+      let truncated = false;
+
+      const addEdge = (from: string, to: string, relation: string) => {
+        const k = `${from}|${relation}|${to}`;
+        if (edgeSeen.has(k)) return;
+        edgeSeen.add(k);
+        edges.push({ from, to, relation });
+      };
+      const addNode = (n: Node): boolean => {
+        if (nodes.has(n.id)) return true;
+        if (nodes.size >= input.limit) { truncated = true; return false; }
+        nodes.set(n.id, n);
+        return true;
+      };
+
+      // One-hop neighbor expansion for a single node id, straight from the
+      // source tables. Returns neighbor nodes; edges are recorded as a side
+      // effect. Unknown/empty ids expand to nothing (fail-closed).
+      const expand = async (id: string): Promise<Node[]> => {
+        const sep = id.indexOf(":");
+        if (sep <= 0) return [];
+        const prefix = id.slice(0, sep);
+        const key = id.slice(sep + 1);
+        const numKey = /^\d+$/.test(key) ? Number(key) : null;
+        const out: Node[] = [];
+        if (prefix === "org" && numKey !== null) {
+          const [org] = await exec(`SELECT id, name, sector FROM organizations WHERE id = $1`, [numKey]);
+          if (!org) return [];
+          if (org.sector) {
+            const sid = `sector:${org.sector}`;
+            out.push({ id: sid, kind: "Sector", name: String(org.sector) });
+            addEdge(id, sid, "BELONGS_TO");
+          }
+          const vrows = await exec(
+            `SELECT id, title FROM compliance_violations WHERE organization_id = $1 ORDER BY detected_at DESC LIMIT 25`,
+            [numKey],
+          );
+          for (const v of vrows) {
+            out.push({ id: `violation:${v.id}`, kind: "Violation", name: String(v.title) });
+            addEdge(id, `violation:${v.id}`, "HAS_VIOLATION");
+          }
+          const erows = await exec(
+            `SELECT id, action_type FROM enforcement_actions WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 25`,
+            [numKey],
+          );
+          for (const e of erows) {
+            out.push({ id: `enforcement:${e.id}`, kind: "EnforcementAction", name: `${e.action_type ?? "action"} #${e.id}` });
+            addEdge(`enforcement:${e.id}`, id, "FILED_AGAINST");
+          }
+          if (org.sector) {
+            const peers = await exec(
+              `SELECT id, name FROM organizations WHERE sector = $1 AND id <> $2 ORDER BY name LIMIT 5`,
+              [org.sector, numKey],
+            );
+            for (const p of peers) {
+              out.push({ id: `org:${p.id}`, kind: "Organization", name: String(p.name) });
+              addEdge(id, `org:${p.id}`, "SECTOR_PEER");
+            }
+          }
+        } else if (prefix === "sector") {
+          const orgs = await exec(
+            `SELECT id, name FROM organizations WHERE sector = $1 ORDER BY name LIMIT 25`,
+            [key],
+          );
+          for (const o of orgs) {
+            out.push({ id: `org:${o.id}`, kind: "Organization", name: String(o.name) });
+            addEdge(`org:${o.id}`, id, "BELONGS_TO");
+          }
+        } else if (prefix === "violation" && numKey !== null) {
+          const [v] = await exec(
+            `SELECT id, title, organization_id, policy_id FROM compliance_violations WHERE id = $1`,
+            [numKey],
+          );
+          if (!v) return [];
+          const [org] = await exec(`SELECT id, name FROM organizations WHERE id = $1`, [v.organization_id]);
+          if (org) {
+            out.push({ id: `org:${org.id}`, kind: "Organization", name: String(org.name) });
+            addEdge(`org:${org.id}`, id, "HAS_VIOLATION");
+          }
+          if (v.policy_id != null) {
+            const [pol] = await exec(`SELECT id, name FROM compliance_policies WHERE id = $1`, [v.policy_id]);
+            if (pol) {
+              out.push({ id: `policy:${pol.id}`, kind: "Policy", name: String(pol.name) });
+              addEdge(id, `policy:${pol.id}`, "VIOLATES_POLICY");
+            }
+          }
+          const erows = await exec(
+            `SELECT id, action_type FROM enforcement_actions WHERE violation_id = $1 ORDER BY created_at DESC LIMIT 25`,
+            [numKey],
+          );
+          for (const e of erows) {
+            out.push({ id: `enforcement:${e.id}`, kind: "EnforcementAction", name: `${e.action_type ?? "action"} #${e.id}` });
+            addEdge(`enforcement:${e.id}`, id, "FOR_VIOLATION");
+          }
+        } else if (prefix === "policy" && numKey !== null) {
+          const vrows = await exec(
+            `SELECT id, title FROM compliance_violations WHERE policy_id = $1 ORDER BY detected_at DESC LIMIT 25`,
+            [numKey],
+          );
+          for (const v of vrows) {
+            out.push({ id: `violation:${v.id}`, kind: "Violation", name: String(v.title) });
+            addEdge(`violation:${v.id}`, id, "VIOLATES_POLICY");
+          }
+        } else if (prefix === "enforcement" && numKey !== null) {
+          const [e] = await exec(
+            `SELECT id, organization_id, violation_id FROM enforcement_actions WHERE id = $1`,
+            [numKey],
+          );
+          if (!e) return [];
+          const [org] = await exec(`SELECT id, name FROM organizations WHERE id = $1`, [e.organization_id]);
+          if (org) {
+            out.push({ id: `org:${org.id}`, kind: "Organization", name: String(org.name) });
+            addEdge(id, `org:${org.id}`, "FILED_AGAINST");
+          }
+          const [v] = await exec(`SELECT id, title FROM compliance_violations WHERE id = $1`, [e.violation_id]);
+          if (v) {
+            out.push({ id: `violation:${v.id}`, kind: "Violation", name: String(v.title) });
+            addEdge(id, `violation:${v.id}`, "FOR_VIOLATION");
+          }
+        }
+        return out;
+      };
+
+      // Resolve the root node itself (name lookup; fail-closed NOT_FOUND).
+      const sep = input.rootId.indexOf(":");
+      const rootPrefix = sep > 0 ? input.rootId.slice(0, sep) : "";
+      const rootKey = sep > 0 ? input.rootId.slice(sep + 1) : "";
+      const rootNum = /^\d+$/.test(rootKey) ? Number(rootKey) : null;
+      let root: Node | null = null;
+      if (rootPrefix === "org" && rootNum !== null) {
+        const [r] = await exec(`SELECT id, name FROM organizations WHERE id = $1`, [rootNum]);
+        if (r) root = { id: input.rootId, kind: "Organization", name: String(r.name) };
+      } else if (rootPrefix === "sector") {
+        root = { id: input.rootId, kind: "Sector", name: rootKey };
+      } else if (rootPrefix === "violation" && rootNum !== null) {
+        const [r] = await exec(`SELECT id, title FROM compliance_violations WHERE id = $1`, [rootNum]);
+        if (r) root = { id: input.rootId, kind: "Violation", name: String(r.title) };
+      } else if (rootPrefix === "policy" && rootNum !== null) {
+        const [r] = await exec(`SELECT id, name FROM compliance_policies WHERE id = $1`, [rootNum]);
+        if (r) root = { id: input.rootId, kind: "Policy", name: String(r.name) };
+      } else if (rootPrefix === "enforcement" && rootNum !== null) {
+        const [r] = await exec(`SELECT id, action_type FROM enforcement_actions WHERE id = $1`, [rootNum]);
+        if (r) root = { id: input.rootId, kind: "EnforcementAction", name: `${r.action_type ?? "action"} #${r.id}` };
+      }
+      if (!root) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `Root entity '${input.rootId}' not found` });
+      }
+      addNode(root);
+
+      // BFS to requested depth.
+      let frontier: Node[] = [root];
+      for (let d = 0; d < input.depth && frontier.length > 0 && !truncated; d++) {
+        const next: Node[] = [];
+        for (const node of frontier) {
+          if (truncated) break;
+          const neighbors = await expand(node.id);
+          for (const n of neighbors) {
+            if (!nodes.has(n.id)) {
+              if (!addNode(n)) break;
+              next.push(n);
+            }
+          }
+        }
+        frontier = next;
+      }
+      // Drop edges touching nodes that were cut by the node cap.
+      const keptEdges = edges.filter((e) => nodes.has(e.from) && nodes.has(e.to));
+      return {
+        rootId: input.rootId,
+        depth: input.depth,
+        nodes: Array.from(nodes.values()),
+        edges: keptEdges,
+        truncated,
+        source: "postgres" as const,
+        exportedAt: new Date().toISOString(),
+      };
+    }),
 });
 
 // ── Ollama LLM Router ──────────────────────────────────────────────────────────

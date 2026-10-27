@@ -4,7 +4,12 @@
  * Priority order for initial theme:
  *   1. Backend preference (themePrefs.get) — cross-device
  *   2. localStorage — offline fallback
- *   3. "auto" (follows OS preference)
+ *   3. "dark" — the default console theme for new users
+ *
+ * Applied via classes on <html>: "dark" or "light" (mutually exclusive).
+ * The bare :root token set in index.css is already dark, so "dark" mainly
+ * drives Tailwind `dark:` variants while "light" activates the light override
+ * block and `.light`-scoped styles.
  */
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
@@ -36,10 +41,11 @@ function resolve(mode: ThemeMode): ResolvedTheme {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(() => {
-    if (typeof window === "undefined") return "auto";
+    if (typeof window === "undefined") return "dark";
     const stored = localStorage.getItem(STORAGE_KEY) as ThemeMode | null;
     if (stored && CYCLE_ORDER.includes(stored)) return stored;
-    return "auto";
+    // Default new users to the dark console theme (light stays one toggle away)
+    return "dark";
   });
 
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(getSystemTheme);
@@ -56,15 +62,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  // Apply theme class to <html> with transition
+  // Apply theme classes to <html> with transition.
+  // "dark" and "light" are mutually exclusive; index.css keys the light
+  // override block off :root.light and `.light` selectors, while Tailwind
+  // `dark:` utilities key off `.dark`.
   useEffect(() => {
     const root = document.documentElement;
     root.classList.add("theme-transitioning");
-    if (isDark) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
+    root.classList.toggle("dark", isDark);
+    root.classList.toggle("light", !isDark);
     // Remove transition class after animation completes
     const timer = setTimeout(() => root.classList.remove("theme-transitioning"), 300);
     return () => clearTimeout(timer);
@@ -81,7 +87,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!backendPrefs?.theme) return;
     const bt = backendPrefs.theme as ThemeMode;
-    if (CYCLE_ORDER.includes(bt) && bt !== mode) {
+    if (!CYCLE_ORDER.includes(bt)) return;
+    // The server coalesces "no preference row" to "light". When the user has
+    // never made a local choice, don't let that unset default override the
+    // dark console default for new users.
+    const hasLocalChoice =
+      typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY) !== null;
+    if (bt === "light" && !hasLocalChoice) return;
+    if (bt !== mode) {
       setModeState(bt);
       localStorage.setItem(STORAGE_KEY, bt);
     }

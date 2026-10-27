@@ -173,6 +173,12 @@ const menuSections: MenuSection[] = [
       // Round-16 W1 — regulatory intelligence surfaces
       { icon: MonitorCheck, label: "Policy Monitor", path: "/policy-monitor" },
       { icon: Library, label: "Reg Intel", path: "/reg-intel" },
+      // R17-W3
+      { icon: MapPin, label: "Sovereignty Map", path: "/sovereignty-map" },
+      // R17-W3
+      { icon: Network, label: "Knowledge Graph (Live)", path: "/knowledge-graph" },
+      // R17-W3
+      { icon: RefreshCw, label: "Learning Loop", path: "/learning-loop" },
     ],
   },
   {

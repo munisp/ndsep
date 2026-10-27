@@ -178,11 +178,11 @@ export const themePrefsRouter = router({
         );
         const row = rows[0] as any;
         return {
-          theme: (row?.theme as "light" | "dark") ?? "light",
+          theme: (row?.theme as "light" | "dark") ?? "dark",
           lastSeenChangelogVersion: (row?.last_seen_changelog_version as string) ?? null,
         };
       } catch {
-        return { theme: "light" as const, lastSeenChangelogVersion: null };
+        return { theme: "dark" as const, lastSeenChangelogVersion: null };
       }
     }),
 
